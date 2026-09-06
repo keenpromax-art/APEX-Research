@@ -565,10 +565,11 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
   }
 
   // BS-DETECTOR-04: Semantic Template Bleeding
-  // Scan for out-of-sector keywords that indicate template bleed
+  // Scan for out-of-sector keywords that indicate template bleeding
   const SEMANTIC_BLEED_RULES: { sectors: string[]; blocked: string[] }[] = [
     { sectors: ["telecom", "communication", "wireless", "internet", "restaurants"], blocked: ["proprietary silicon", "custom neural engine", "wafer fabrication", "foundry capacity", "us fda", "cgmp", "iso 13485"] },
     { sectors: ["pharma", "health", "biotech", "drug"], blocked: ["spectrum auction", "arpu", "tower tenancy", "dark store", "ride hailing", "proprietary silicon"] },
+    { sectors: ["internet retail", "food delivery", "quick commerce", "hyperlocal", "marketplace", "platform"], blocked: ["copra", "palm oil procurement", "packaged goods", "personal care", "brand recall", "iconic consumer brand", "multi-tier retail distribution", "fmcg", "modern trade", "spectrum auction", "agr dues", "clinical trial phase", "proprietary silicon", "custom neural engine", "wafer fabrication", "foundry capacity", "us fda", "cgmp", "iso 13485"] },
     { sectors: ["consumer", "fmcg", "food", "beverage", "retail"], blocked: ["proprietary silicon", "custom neural engine", "spectrum auction", "agr dues", "clinical trial phase"] },
     { sectors: ["technology", "software", "it services"], blocked: ["us fda", "cgmp", "spectrum auction", "agr dues", "refinery throughput", "crack spread"] },
     { sectors: ["energy", "oil", "gas", "mining"], blocked: ["app store commission", "saas churn", "arr expansion", "dark store", "proprietary silicon"] },
@@ -592,6 +593,7 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
           semanticBleedViolations.push(phrase);
         }
       }
+      break; // First matching rule wins; most specific rules are ordered first
     }
   }
 

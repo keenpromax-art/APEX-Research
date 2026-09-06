@@ -223,6 +223,35 @@ export const CONSUMER_PROFILE: SectorProfile = {
   standardMarginMetric: "EBITDA Margin"
 };
 
+export const INTERNET_RETAIL_PROFILE: SectorProfile = {
+  id: "internet-retail",
+  name: "Internet Retail, Food Delivery & Quick Commerce",
+  allowedKPIs: [
+    "Gross Merchandise Value (GMV)",
+    "Order Volume & Frequency",
+    "Average Order Value (AOV)",
+    "Take Rate / Commission %",
+    "Average Revenue Per User (ARPU)",
+    "Delivery Cost per Order",
+    "Logistics & Fulfillment Intensity",
+    "Food Delivery & Quick Commerce Margin",
+    "Consumer Incentive Spend",
+    "App Active Users / Frequency"
+  ],
+  preferredValuationModels: ["EV_EBITDA", "FCFF_DCF", "MULTIPLES_EV_GMV", "MULTIPLES_PE"],
+  financialMetrics: ["GMV", "Revenue", "Order Fulfillment Cost", "Marketing & Incentive Spend", "EBITDA", "Free Cash Flow"],
+  riskCategories: ["Delivery Partner Supply Scarcity", "Regulation on Gig Worker Benefits", "Quick Commerce Margin Squeeze", "Food Delivery Discount War"],
+  moatDrivers: ["Network effects in order density", "Last-mile logistics efficiency", "Dual food delivery & quick commerce ecosystem"],
+  forbiddenConcepts: [
+    "casa", "nim", "gnpa", "credit cost", "aum", "spectrum auction", "clinical trials", "anda filings",
+    "wafer fab", "refinery throughput", "crack spread", "plant turnaround", "agri commodity",
+    "copra", "palm oil procurement", "packaged goods", "personal care", "brand recall",
+    "iconic consumer brand", "multi-tier retail distribution", "fmcg", "modern trade"
+  ],
+  isFinancialInstitution: false,
+  standardMarginMetric: "Take Rate"
+};
+
 export const RENEWABLE_ENERGY_PROFILE: SectorProfile = {
   id: "renewable-energy",
   name: "Renewable Energy & Equipment",
@@ -534,7 +563,27 @@ export function classifySector(
     return TELECOM_PROFILE;
   }
 
-  // 7. FMCG / Consumer Goods
+  // 7. Internet Retail, Food Delivery & Quick Commerce (platform/marketplace businesses)
+  if (
+    combined.includes("internet retail") ||
+    combined.includes("food delivery") ||
+    combined.includes("quick commerce") ||
+    combined.includes("hyperlocal") ||
+    combined.includes("gmv") ||
+    combined.includes("take rate") ||
+    combined.includes("swiggy") ||
+    combined.includes("zomato") ||
+    combined.includes("delhivery") ||
+    combined.includes("instamart") ||
+    combined.includes("blinkit") ||
+    combined.includes("zepto") ||
+    combined.includes("platform") ||
+    combined.includes("marketplace")
+  ) {
+    return INTERNET_RETAIL_PROFILE;
+  }
+
+  // 8. FMCG / Consumer Goods
   if (
     combined.includes("consumer") ||
     combined.includes("fmcg") ||
