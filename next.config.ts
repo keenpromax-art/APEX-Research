@@ -2,7 +2,7 @@ import type { NextConfig } from "next";
 
 // Next's development bundler uses eval-based source maps; production does not.
 const scriptSource = process.env.NODE_ENV === "production"
-  ? "script-src 'self' 'unsafe-inline'"
+  ? "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'"
   : "script-src 'self' 'unsafe-inline' 'unsafe-eval'";
 
 const nextConfig: NextConfig = {
