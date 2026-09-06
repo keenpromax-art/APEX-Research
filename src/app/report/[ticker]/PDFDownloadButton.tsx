@@ -1,6 +1,8 @@
 "use client";
 import React, { useState } from "react";
 import type { ReportData } from "@/types/report";
+import { allowConcept } from "@/lib/sector-allowlist";
+import { classifySector } from "@/lib/sectors";
 import styles from "./report.module.css";
 
 interface Props {
@@ -63,6 +65,27 @@ export default function PDFDownloadButton({ data }: Props) {
     }
   }
 
+  // Extract leaked concepts from the QA report to allowlist on override
+  const handleForcePublish = () => {
+    const sectorId = classifySector(
+      data.profile.sector,
+      data.profile.industry,
+      data.profile.description
+    ).id;
+    for (const c of data.qaReport?.checks || []) {
+      if (c.status !== "FAIL") continue;
+      // BS-DETECTOR-04 details carry the leaked terms in brackets
+      const m = c.details?.match(/\[([^\]]+)\]/);
+      if (m) {
+        for (const term of m[1].split(",").map((t) => t.trim()).filter(Boolean)) {
+          allowConcept(sectorId, term);
+        }
+      }
+    }
+    // Reload so the gate is re-evaluated on next render
+    window.location.reload();
+  };
+
   return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
       <button
@@ -96,6 +119,15 @@ export default function PDFDownloadButton({ data }: Props) {
         <span style={{ color: "#f87171", fontSize: 11, fontWeight: 500, maxWidth: 340, textAlign: "right" }}>
           Export blocked: Internal financial invariants failed audit {blockedReasons.length > 0 ? `(${blockedReasons.slice(0, 2).join("; ")}${blockedReasons.length > 2 ? ` +${blockedReasons.length - 2} more` : ""})` : ""}.
         </span>
+      )}
+      {isBlocked && (
+        <button
+          className={`btn-secondary ${styles.downloadBtn}`}
+          onClick={handleForcePublish}
+          style={{ fontSize: 12 }}
+        >
+          Force Publish (Override &amp; Remember)
+        </button>
       )}
       {error && <span style={{ color: "#ef4444", fontSize: 12 }}>{error}</span>}
     </div>

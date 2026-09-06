@@ -5,6 +5,7 @@
 // ============================================================
 import type { ReportData, ReportQAResult, QACheckItem } from "@/types/report";
 import { getSectorProfile, classifySector } from "./sectors/index";
+import { getAllowlistedConcepts } from "./sector-allowlist";
 
 const SECTOR_KEYWORD_BLOCKLIST: Record<string, { blocked: string[]; sectorNames: string[] }> = {
   telecom: {
@@ -599,13 +600,18 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
 
   // Dynamic Sector Profile ontology validation
   const secProf = sectorProfile;
+  const allowlisted = secProf ? getAllowlistedConcepts(secProf.id) : [];
   if (secProf && secProf.forbiddenConcepts) {
     for (const fc of secProf.forbiddenConcepts) {
+      if (allowlisted.includes(fc)) continue;
       if (checkBleedMatch(fullNarrative, fc) && !semanticBleedViolations.includes(fc)) {
         semanticBleedViolations.push(fc);
       }
     }
   }
+
+  // Remove any violation whose concept is allowlisted for this sector
+  semanticBleedViolations = semanticBleedViolations.filter((v) => !allowlisted.includes(v));
 
   if (semanticBleedViolations.length > 0) {
     checks.push({
