@@ -1,0 +1,389 @@
+.page {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  background-color: var(--canvas);
+}
+
+/* ── Top Navigation ── */
+.navbar {
+  height: 52px;
+  border-bottom: 1px solid var(--hairline);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 28px;
+  background: var(--surface-0);
+  position: sticky;
+  top: 0;
+  z-index: 50;
+}
+
+.navBrand {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  letter-spacing: -0.01em;
+}
+
+.brandIcon {
+  width: 18px;
+  height: 18px;
+  background: var(--ink);
+  color: var(--canvas);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  font-weight: 800;
+  font-size: 11px;
+}
+
+.brandLabel {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.brandSub {
+  color: var(--ink-subtle);
+  font-weight: 400;
+  font-size: 11.5px;
+  border-left: 1px solid var(--hairline-strong);
+  padding-left: 9px;
+  margin-left: 2px;
+}
+
+.navMeta {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.liveIndicator {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--bullish);
+  font-family: var(--font-mono);
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  padding: 3px 8px;
+  background: var(--bullish-bg);
+  border: 1px solid var(--bullish-border);
+  border-radius: var(--radius-xs);
+}
+
+.liveDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--bullish);
+  animation: pulse 2s infinite ease-in-out;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.85); }
+}
+
+.navDocsLink {
+  font-size: 12px;
+  color: var(--ink-muted);
+  transition: color 0.15s;
+}
+
+.navDocsLink:hover {
+  color: var(--ink);
+}
+
+/* ── Hero Section ── */
+.hero {
+  padding: 80px 24px 60px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  position: relative;
+}
+
+.heroInner {
+  max-width: 820px;
+  width: 100%;
+}
+
+.heroTag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: var(--surface-1);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-xs);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 24px;
+}
+
+.heroTagDot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--primary);
+}
+
+.heroTitle {
+  font-size: 48px;
+  font-weight: 600;
+  line-height: 1.12;
+  letter-spacing: -0.035em;
+  color: var(--ink);
+  margin-bottom: 18px;
+}
+
+.heroTitleSub {
+  color: var(--ink-muted);
+  font-weight: 400;
+}
+
+.heroDesc {
+  font-size: 16px;
+  color: var(--ink-secondary);
+  line-height: 1.6;
+  max-width: 620px;
+  margin: 0 auto 36px;
+  font-weight: 400;
+}
+
+/* ── Search Section ── */
+.searchSection {
+  margin-bottom: 28px;
+  width: 100%;
+}
+
+.quickTickers {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.quickLabel {
+  font-size: 11.5px;
+  color: var(--ink-subtle);
+  font-weight: 500;
+  margin-right: 4px;
+}
+
+.tickerChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--surface-1);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-xs);
+  padding: 4px 9px;
+  font-size: 12px;
+  color: var(--ink-secondary);
+  cursor: pointer;
+  transition: all 0.12s ease;
+  font-family: var(--font-sans);
+}
+
+.tickerChip:hover {
+  background: var(--surface-hover);
+  border-color: var(--hairline-strong);
+  color: var(--ink);
+}
+
+.tickerCode {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--ink);
+  font-size: 11px;
+}
+
+.tickerExchange {
+  font-size: 10px;
+  color: var(--ink-subtle);
+}
+
+/* ── Platform Technical Grid (Linear / Stripe style) ── */
+.gridSection {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 40px 24px 80px;
+  width: 100%;
+}
+
+.gridHeader {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--hairline);
+  padding-bottom: 14px;
+  margin-bottom: 24px;
+}
+
+.gridTitle {
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-secondary);
+}
+
+.gridCount {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-subtle);
+}
+
+.featureMatrix {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+}
+
+.matrixCard {
+  background: var(--surface-1);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-md);
+  padding: 22px;
+  display: flex;
+  flex-direction: column;
+  transition: border-color 0.15s ease;
+}
+
+.matrixCard:hover {
+  border-color: var(--hairline-strong);
+}
+
+.matrixIndex {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-subtle);
+  margin-bottom: 16px;
+}
+
+.matrixHeading {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+  letter-spacing: -0.015em;
+  margin-bottom: 8px;
+}
+
+.matrixText {
+  font-size: 13px;
+  color: var(--ink-muted);
+  line-height: 1.55;
+}
+
+.matrixTagList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--hairline-subtle);
+}
+
+.matrixTag {
+  font-size: 10.5px;
+  font-family: var(--font-mono);
+  color: var(--ink-secondary);
+  background: var(--surface-2);
+  padding: 2px 6px;
+  border-radius: 3px;
+  border: 1px solid var(--hairline);
+}
+
+/* ── Live Architecture Banner ── */
+.specBanner {
+  max-width: 1080px;
+  margin: 0 auto 60px;
+  padding: 0 24px;
+  width: 100%;
+}
+
+.specPanel {
+  background: var(--surface-0);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-lg);
+  padding: 24px 28px;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 24px;
+}
+
+.specItem {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.specItemLabel {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-subtle);
+  font-weight: 500;
+}
+
+.specItemVal {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--ink);
+  font-family: var(--font-mono);
+}
+
+.specItemSub {
+  font-size: 12px;
+  color: var(--ink-muted);
+}
+
+/* ── Footer ── */
+.footer {
+  margin-top: auto;
+  border-top: 1px solid var(--hairline);
+  background: var(--surface-0);
+  padding: 24px 28px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--ink-subtle);
+}
+
+.footerLeft {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.footerDisclaimer {
+  font-size: 11px;
+  color: var(--ink-subtle);
+}
+
+@media (max-width: 900px) {
+  .featureMatrix {
+    grid-template-columns: 1fr;
+  }
+  .specPanel {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .heroTitle {
+    font-size: 36px;
+  }
+}

@@ -1,0 +1,2341 @@
+{
+  "profile": {
+    "ticker": "ITC.NS",
+    "name": "ITC Limited",
+    "exchange": "NSE",
+    "exchangeTimezoneName": "",
+    "sector": "Consumer Defensive",
+    "industry": "Tobacco",
+    "country": "India",
+    "currency": "INR",
+    "description": "ITC Limited engages in the fast-moving consumer goods, paperboards, paper and packaging, and agri businesses in India and internationally. The company offers cigarettes and cigars; foods, including staples, spices, biscuits, confectionery and gums, snacks, noodles and pasta, beverages, dairy products, ready-to-eat meals, chocolates, coffee, and frozen foods; personal care products; education and stationery, such as balls, gels and roller pens, mechanical pencils, geometry boxes, erasers, sharpeners and rulers, wax crayons, plastic crayons, and sketch pens and oil pastels; safety matches; and agarbattis and dhoops under various brands, as well as operates a hotel under the ITC Grand Central name in Mumbai. It also provides virgin, recycled, coated barrier, cupstock base, liner, liquid packaging, antifungal, solid, and graphic boards, as well as specialty papers; surfacing, print base, barrier, overlay, and liner papers; plastic substitution products; and packaging products, including cartons, flexible, tobacco, and green packaging products. In addition, the company exports feed ingredients, food grains, marine products, processed fruits, coffee products, leaf tobacco products, and spices; and offers information technology services for the banking and financial services, healthcare, manufacturing, consumer goods, travel, and hospitality industries, as well as produces and commercializes seed potato technology products. Further, it provides property infrastructure maintenance; engineering, procurement and construction management and project management consultancy services; business consulting; and agro-forestry and other related services, as well as engages in the fabrication and assembly of machinery for tube filling, cartoning, wrapping, and conveyor solutions and engineering activities. ITC Limited was incorporated in 1910 and is headquartered in Kolkata, India.",
+    "website": "https://www.itcportal.com",
+    "employees": 22493,
+    "logo": "https://logo.clearbit.com/www.itcportal.com",
+    "officers": [
+      {
+        "name": "Mr. Sanjiv  Puri",
+        "title": "Chairman & MD",
+        "age": 62
+      },
+      {
+        "name": "Mr. Supratim  Dutta",
+        "title": "CFO & Whole Time Director",
+        "age": 58
+      },
+      {
+        "name": "Mr. Rajendra Kumar Singhi",
+        "title": "Executive VP, Company Secretary & Compliance Officer",
+        "age": 60
+      },
+      {
+        "name": "Mr. Sumant  Bhargavan",
+        "title": "Whole time Director",
+        "age": 61
+      },
+      {
+        "name": "Mr. Anil K. Rajput",
+        "title": "President of Corporate Affairs",
+        "age": 69
+      },
+      {
+        "name": "Mr. Hemant  Malik",
+        "title": "Whole Time Director & Divisional Chief Executive of Foods Business",
+        "age": 58
+      },
+      {
+        "name": "Mr. Surampudi  Sivakumar",
+        "title": "Group Head of Agri and IT Business",
+        "age": 64
+      },
+      {
+        "name": "T. S. M. Shenoy",
+        "title": "Executive VP & Head of Corporate Accounts",
+        "age": 57
+      }
+    ]
+  },
+  "stockData": {
+    "currentPrice": 264.1,
+    "previousClose": 263,
+    "open": 264,
+    "dayHigh": 266.25,
+    "dayLow": 262.65,
+    "marketCap": 3309115539456,
+    "enterpriseValue": 3091573768192,
+    "pe": 16.66246,
+    "forwardPE": 15.689196,
+    "pb": 4.563756,
+    "ps": 0,
+    "dividendYield": 0.060599998,
+    "dividendRate": 16,
+    "beta": -0.093,
+    "week52High": 426.4,
+    "week52Low": 255.5,
+    "sharesOutstanding": 12529782031,
+    "floatShares": 9596319718,
+    "avgVolume": 14288183,
+    "volume": 9519153,
+    "fiftyDayAvg": 278.713,
+    "twoHundredDayAvg": 311.3495,
+    "eps": 15.85,
+    "forwardEps": 16.83324,
+    "bookValue": 57.869,
+    "priceToBook": 4.563756,
+    "returnOnEquity": 0,
+    "returnOnAssets": 0,
+    "debtToEquity": 3.293,
+    "currentRatio": 0,
+    "quickRatio": 0,
+    "grossMargins": 0.58284,
+    "ebitdaMargins": 0.33312,
+    "operatingMargins": 0.24867001,
+    "profitMargins": 0.25937998,
+    "freeCashflow": 0,
+    "totalDebt": 23993600000,
+    "totalCash": 245109702656,
+    "revenueGrowth": -0.111,
+    "earningsGrowth": -0.16,
+    "recommendationKey": "buy",
+    "numberOfAnalystOpinions": 33,
+    "targetHighPrice": 440,
+    "targetLowPrice": 270,
+    "targetMeanPrice": 327
+  },
+  "annualFinancials": [
+    {
+      "year": "FY2023",
+      "fiscalYearEnd": "2023-03-31",
+      "revenue": 702452200000,
+      "costOfRevenue": 294605200000,
+      "grossProfit": 407847000000,
+      "grossMargin": 0.5806046304645355,
+      "researchDevelopment": 2047200000,
+      "sellingGeneralAdministrative": 21450500000,
+      "totalOperatingExpenses": 168880000000,
+      "operatingIncome": 238967000000,
+      "ebit": 259583200000,
+      "ebitda": 277673300000,
+      "ebitdaMargin": 0.3952913806804221,
+      "ebitMargin": 0.3401896954696704,
+      "interestExpense": 432000000,
+      "interestIncome": 15340000000,
+      "otherIncome": 0,
+      "pretaxIncome": 259151200000,
+      "incomeTaxExpense": 64384000000,
+      "netIncome": 191916600000,
+      "netMargin": 0.2732094795916363,
+      "depreciation": 18090100000,
+      "eps": 15.46,
+      "dilutedEps": 15.46,
+      "sharesOutstanding": 12428017741,
+      "totalAssets": 858829800000,
+      "totalLiabilities": 163441900000,
+      "totalEquity": 695387900000,
+      "cash": 4633500000,
+      "shortTermInvestments": 214102700000,
+      "netReceivables": 29561700000,
+      "inventory": 119141300000,
+      "currentAssets": 396708900000,
+      "netFixedAssets": 252012300000,
+      "totalDebt": 3063400000,
+      "shortTermDebt": 356200000,
+      "longTermDebt": 34900000,
+      "accountsPayable": 46589900000,
+      "currentLiabilities": 137394100000,
+      "netWorkingCapital": 259314800000,
+      "operatingCashFlow": 188775500000,
+      "capitalExpenditures": 27429900000,
+      "freeCashFlow": 161345600000,
+      "investingCashFlow": -57322900000,
+      "financingCashFlow": -130060300000,
+      "dividendsPaid": 154175300000,
+      "changeInCash": 1392300000,
+      "commonStock": 12428000000,
+      "retainedEarnings": 353402300000,
+      "goodwill": 7797300000,
+      "otherIntangibles": 27459100000,
+      "otherCurrentAssets": 15617500000,
+      "otherCurrentLiabilities": 42765100000,
+      "otherNonCurrentAssets": 13119500000,
+      "otherNonCurrentLiabilities": 828400000,
+      "deferredTaxLiabilities": 0,
+      "capitalLeaseObligations": 2672300000,
+      "netDebt": -215672800000,
+      "workingCapital": 259314800000,
+      "investedCapital": 691943700000,
+      "tangibleBookValue": 656296200000,
+      "issuanceOfDebt": 0,
+      "repaymentOfDebt": 7300000,
+      "issuanceOfCapitalStock": 24773900000,
+      "repurchases": 0,
+      "stockBasedCompensation": 604100000,
+      "deferredIncomeTax": 0,
+      "changeInWorkingCapital": -9241500000,
+      "changeInReceivables": -8842100000,
+      "changeInInventory": -10978700000,
+      "changeInPayables": 0,
+      "endCashPosition": 4059100000
+    },
+    {
+      "year": "FY2024",
+      "fiscalYearEnd": "2024-03-31",
+      "revenue": 673910400000,
+      "costOfRevenue": 273458400000,
+      "grossProfit": 400452000000,
+      "grossMargin": 0.5942214276556647,
+      "researchDevelopment": 2421500000,
+      "sellingGeneralAdministrative": 38978400000,
+      "totalOperatingExpenses": 163757200000,
+      "operatingIncome": 236694800000,
+      "ebit": 264393900000,
+      "ebitda": 282557800000,
+      "ebitdaMargin": 0.41928096079241395,
+      "ebitMargin": 0.35122591964747835,
+      "interestExpense": 391100000,
+      "interestIncome": 16967500000,
+      "otherIncome": 0,
+      "pretaxIncome": 264002800000,
+      "incomeTaxExpense": 62094600000,
+      "netIncome": 204587800000,
+      "netMargin": 0.3035830876033372,
+      "depreciation": 18163900000,
+      "eps": 16.38,
+      "dilutedEps": 16.38,
+      "sharesOutstanding": 12484721471,
+      "totalAssets": 918261600000,
+      "totalLiabilities": 169361900000,
+      "totalEquity": 748899700000,
+      "cash": 6258900000,
+      "shortTermInvestments": 192672700000,
+      "netReceivables": 40258200000,
+      "inventory": 143028800000,
+      "currentAssets": 410655400000,
+      "netFixedAssets": 271647600000,
+      "totalDebt": 3037300000,
+      "shortTermDebt": 98200000,
+      "longTermDebt": 17600000,
+      "accountsPayable": 47978300000,
+      "currentLiabilities": 136904000000,
+      "netWorkingCapital": 273751400000,
+      "operatingCashFlow": 171788600000,
+      "capitalExpenditures": 35625300000,
+      "freeCashFlow": 136163300000,
+      "investingCashFlow": 15627700000,
+      "financingCashFlow": -185509600000,
+      "dividendsPaid": 198992000000,
+      "changeInCash": 1906700000,
+      "commonStock": 12484700000,
+      "retainedEarnings": 361725700000,
+      "goodwill": 7797300000,
+      "otherIntangibles": 26877500000,
+      "otherCurrentAssets": 13831900000,
+      "otherCurrentLiabilities": 47085500000,
+      "otherNonCurrentAssets": 13798600000,
+      "otherNonCurrentLiabilities": 1497200000,
+      "deferredTaxLiabilities": 0,
+      "capitalLeaseObligations": 2921500000,
+      "netDebt": -195894300000,
+      "workingCapital": 273751400000,
+      "investedCapital": 745185800000,
+      "tangibleBookValue": 710395200000,
+      "issuanceOfDebt": 80000000,
+      "repaymentOfDebt": 15700000,
+      "issuanceOfCapitalStock": 14428300000,
+      "repurchases": 0,
+      "stockBasedCompensation": 1073000000,
+      "deferredIncomeTax": 0,
+      "changeInWorkingCapital": -33370300000,
+      "changeInReceivables": -9336400000,
+      "changeInInventory": -25448700000,
+      "changeInPayables": 0,
+      "endCashPosition": 5965800000
+    },
+    {
+      "year": "FY2025",
+      "fiscalYearEnd": "2025-03-31",
+      "revenue": 746533200000,
+      "costOfRevenue": 323761000000,
+      "grossProfit": 422772200000,
+      "grossMargin": 0.5663139964840144,
+      "researchDevelopment": 0,
+      "sellingGeneralAdministrative": 42293000000,
+      "totalOperatingExpenses": 180840900000,
+      "operatingIncome": 241931300000,
+      "ebit": 269720000000,
+      "ebitda": 289225800000,
+      "ebitdaMargin": 0.3874252344035068,
+      "ebitMargin": 0.32407306198840186,
+      "interestExpense": 450600000,
+      "interestIncome": 14887600000,
+      "otherIncome": 0,
+      "pretaxIncome": 269269400000,
+      "incomeTaxExpense": 68904700000,
+      "netIncome": 347466300000,
+      "netMargin": 0.4654398491587514,
+      "depreciation": 19505800000,
+      "eps": 27.75,
+      "dilutedEps": 27.75,
+      "sharesOutstanding": 12514119781,
+      "totalAssets": 880906800000,
+      "totalLiabilities": 176927400000,
+      "totalEquity": 703979400000,
+      "cash": 6200000000,
+      "shortTermInvestments": 194150200000,
+      "netReceivables": 47196700000,
+      "inventory": 158361400000,
+      "currentAssets": 438932800000,
+      "netFixedAssets": 191718700000,
+      "totalDebt": 2848400000,
+      "shortTermDebt": 915600000,
+      "longTermDebt": 0,
+      "accountsPayable": 48073000000,
+      "currentLiabilities": 143341100000,
+      "netWorkingCapital": 295591700000,
+      "operatingCashFlow": 176270400000,
+      "capitalExpenditures": 22787000000,
+      "freeCashFlow": 153483400000,
+      "investingCashFlow": -3641000000,
+      "financingCashFlow": -170374000000,
+      "dividendsPaid": 177822200000,
+      "changeInCash": 2255400000,
+      "commonStock": 12514100000,
+      "retainedEarnings": 490101400000,
+      "goodwill": 8969300000,
+      "otherIntangibles": 27280500000,
+      "otherCurrentAssets": 13718500000,
+      "otherCurrentLiabilities": 48840900000,
+      "otherNonCurrentAssets": 10159300000,
+      "otherNonCurrentLiabilities": 345100000,
+      "deferredTaxLiabilities": 0,
+      "capitalLeaseObligations": 1932800000,
+      "netDebt": -197501800000,
+      "workingCapital": 295591700000,
+      "investedCapital": 701216100000,
+      "tangibleBookValue": 664050700000,
+      "issuanceOfDebt": 895000000,
+      "repaymentOfDebt": 540200000,
+      "issuanceOfCapitalStock": 7973300000,
+      "repurchases": 0,
+      "stockBasedCompensation": 1337900000,
+      "deferredIncomeTax": 0,
+      "changeInWorkingCapital": -27420000000,
+      "changeInReceivables": -10228000000,
+      "changeInInventory": -29753800000,
+      "changeInPayables": 0,
+      "endCashPosition": 6223800000
+    },
+    {
+      "year": "FY2026",
+      "fiscalYearEnd": "2026-03-31",
+      "revenue": 782132800000,
+      "costOfRevenue": 330014600000,
+      "grossProfit": 452118200000,
+      "grossMargin": 0.5780580995963857,
+      "researchDevelopment": 0,
+      "sellingGeneralAdministrative": 47657300000,
+      "totalOperatingExpenses": 196162800000,
+      "operatingIncome": 255955400000,
+      "ebit": 281185600000,
+      "ebitda": 298290900000,
+      "ebitdaMargin": 0.38138139712335295,
+      "ebitMargin": 0.3272531212090837,
+      "interestExpense": 851700000,
+      "interestIncome": 14622300000,
+      "otherIncome": 0,
+      "pretaxIncome": 280333900000,
+      "incomeTaxExpense": 70152400000,
+      "netIncome": 206894700000,
+      "netMargin": 0.26452630550719775,
+      "depreciation": 17105300000,
+      "eps": 16.51,
+      "dilutedEps": 16.51,
+      "sharesOutstanding": 12529468231,
+      "totalAssets": 937923800000,
+      "totalLiabilities": 209193600000,
+      "totalEquity": 728730200000,
+      "cash": 6434600000,
+      "shortTermInvestments": 228473100000,
+      "netReceivables": 39228600000,
+      "inventory": 188726500000,
+      "currentAssets": 507084100000,
+      "netFixedAssets": 196468900000,
+      "totalDebt": 23993600000,
+      "shortTermDebt": 21265200000,
+      "longTermDebt": 600000000,
+      "accountsPayable": 56395500000,
+      "currentLiabilities": 166872700000,
+      "netWorkingCapital": 340211400000,
+      "operatingCashFlow": 184643100000,
+      "capitalExpenditures": 21828900000,
+      "freeCashFlow": 162814200000,
+      "investingCashFlow": -23207400000,
+      "financingCashFlow": -161471200000,
+      "dividendsPaid": 182714400000,
+      "changeInCash": -35500000,
+      "commonStock": 12529500000,
+      "retainedEarnings": 516515200000,
+      "goodwill": 9932900000,
+      "otherIntangibles": 32761300000,
+      "otherCurrentAssets": 17836100000,
+      "otherCurrentLiabilities": 36958700000,
+      "otherNonCurrentAssets": 10884500000,
+      "otherNonCurrentLiabilities": 417800000,
+      "deferredTaxLiabilities": 0,
+      "capitalLeaseObligations": 2128400000,
+      "netDebt": 15430600000,
+      "workingCapital": 340211400000,
+      "investedCapital": 746938200000,
+      "tangibleBookValue": 682378800000,
+      "issuanceOfDebt": 21205000000,
+      "repaymentOfDebt": 1053100000,
+      "issuanceOfCapitalStock": 4048500000,
+      "repurchases": 0,
+      "stockBasedCompensation": 1280000000,
+      "deferredIncomeTax": 0,
+      "changeInWorkingCapital": -27622800000,
+      "changeInReceivables": 4680800000,
+      "changeInInventory": -33062500000,
+      "changeInPayables": 0,
+      "endCashPosition": 6188300000
+    }
+  ],
+  "quarterlyFinancials": [
+    {
+      "period": "Q1FY25",
+      "endDate": "2025-03-31",
+      "revenue": 199182400000,
+      "revenueGrowthYoY": 0,
+      "grossProfit": 115006000000,
+      "ebitda": 72043700000,
+      "ebitdaMargin": 0.3616971178176385,
+      "operatingIncome": 64517000000,
+      "netIncome": 49311900000,
+      "netMargin": 0.2475715725887428,
+      "eps": 3.94
+    },
+    {
+      "period": "Q2FY25",
+      "endDate": "2025-06-30",
+      "revenue": 213729300000,
+      "revenueGrowthYoY": 0,
+      "grossProfit": 111424500000,
+      "ebitda": 75674400000,
+      "ebitdaMargin": 0.3540665692537242,
+      "operatingIncome": 63935100000,
+      "netIncome": 0,
+      "netMargin": 0,
+      "eps": 4.18
+    },
+    {
+      "period": "Q4FY25",
+      "endDate": "2025-12-31",
+      "revenue": 199182400000,
+      "revenueGrowthYoY": 0,
+      "grossProfit": 115006000000,
+      "ebitda": 72043700000,
+      "ebitdaMargin": 0.3616971178176385,
+      "operatingIncome": 64517000000,
+      "netIncome": 0,
+      "netMargin": 0,
+      "eps": 3.94
+    },
+    {
+      "period": "Q1FY26",
+      "endDate": "2026-03-31",
+      "revenue": 176288900000,
+      "revenueGrowthYoY": 0,
+      "grossProfit": 118705500000,
+      "ebitda": 76237500000,
+      "ebitdaMargin": 0.4324577440780446,
+      "operatingIncome": 65022800000,
+      "netIncome": 53879700000,
+      "netMargin": 0.30563296951764973,
+      "eps": 4.3
+    },
+    {
+      "period": "Q2FY26",
+      "endDate": "2026-06-30",
+      "revenue": 190008900000,
+      "revenueGrowthYoY": -0.04605577601233844,
+      "grossProfit": 101101300000,
+      "ebitda": 63283600000,
+      "ebitdaMargin": 0.3330559779041929,
+      "operatingIncome": 47531300000,
+      "netIncome": 43941300000,
+      "netMargin": 0.2312591673337407,
+      "eps": 3.51
+    }
+  ],
+  "ratiosByYear": [
+    {
+      "year": "FY2023",
+      "grossMargin": 0.5806046304645355,
+      "ebitdaMargin": 0.3952913806804221,
+      "ebitMargin": 0.3401896954696704,
+      "netMargin": 0.2732094795916363,
+      "roe": 0.2759849574604332,
+      "roa": 0.22346290266127236,
+      "roce": 0.33123811311250606,
+      "assetTurnover": 0.8179178226000076,
+      "fixedAssetTurnover": 2.7873726798255483,
+      "workingCapitalTurnover": 2.7088781666144777,
+      "inventoryTurnover": 5.895958832075863,
+      "receivablesTurnover": 23.76223965468833,
+      "debtToEquity": 0.0044053110501347525,
+      "equityMultiplier": 1.2350370203450478,
+      "interestCoverage": 553.1643518518518,
+      "netDebtToEbitda": -0.005654486765562263,
+      "totalDebtToAssets": 0.003566946559143616,
+      "currentRatio": 2.8873794435132223,
+      "quickRatio": 2.020229398496733,
+      "pe": 17.082794307891334,
+      "evToEbitda": 11.814853590165493,
+      "pb": 4.7200123634565685,
+      "ps": 4.672544958074158,
+      "bookValuePerShare": 55.95324326790402,
+      "marketCap": 3282239485398.1,
+      "enterpriseValue": 3280669385398.1,
+      "dividendYield": 0.04697259315960614,
+      "dividendPayout": 0.8033453072845184,
+      "eps": 15.46
+    },
+    {
+      "year": "FY2024",
+      "grossMargin": 0.5942214276556647,
+      "ebitdaMargin": 0.41928096079241395,
+      "ebitMargin": 0.35122591964747835,
+      "netMargin": 0.3035830876033372,
+      "roe": 0.27318451322653753,
+      "roa": 0.222799036788645,
+      "roce": 0.3029276223844242,
+      "assetTurnover": 0.7338980525810945,
+      "fixedAssetTurnover": 2.4808258935473755,
+      "workingCapitalTurnover": 2.4617605608592323,
+      "inventoryTurnover": 4.711711207812693,
+      "receivablesTurnover": 16.739705202915182,
+      "debtToEquity": 0.004055683291100264,
+      "equityMultiplier": 1.2261476403315423,
+      "interestCoverage": 605.2027614420864,
+      "netDebtToEbitda": -0.011401561025744113,
+      "totalDebtToAssets": 0.003307663088601331,
+      "currentRatio": 2.9995865716122245,
+      "quickRatio": 1.954848653070765,
+      "pe": 16.123321123321126,
+      "evToEbitda": 11.65776821765706,
+      "pb": 4.402745708792646,
+      "ps": 4.892660716455927,
+      "bookValuePerShare": 59.98529496549631,
+      "marketCap": 3297214940491.1,
+      "enterpriseValue": 3293993340491.1,
+      "dividendYield": 0.06035154019117763,
+      "dividendPayout": 0.9726484179408548,
+      "eps": 16.38
+    },
+    {
+      "year": "FY2025",
+      "grossMargin": 0.5663139964840144,
+      "ebitdaMargin": 0.3874252344035068,
+      "ebitMargin": 0.32407306198840186,
+      "netMargin": 0.4654398491587514,
+      "roe": 0.49357452789101497,
+      "roa": 0.3944416140277269,
+      "roce": 0.32801321970368197,
+      "assetTurnover": 0.8474599128988447,
+      "fixedAssetTurnover": 3.8938987172351993,
+      "workingCapitalTurnover": 2.5255553521969665,
+      "inventoryTurnover": 4.714110888133093,
+      "receivablesTurnover": 15.817487239573953,
+      "debtToEquity": 0.0040461411228794476,
+      "equityMultiplier": 1.2513246836484135,
+      "interestCoverage": 536.9092321349312,
+      "netDebtToEbitda": -0.01158817781816145,
+      "totalDebtToAssets": 0.0032334862212438364,
+      "currentRatio": 3.062155934341232,
+      "quickRatio": 1.9573688216429204,
+      "pe": 9.517117117117118,
+      "evToEbitda": 11.41539736137682,
+      "pb": 4.694709865320065,
+      "ps": 4.427102551048098,
+      "bookValuePerShare": 56.254807554970135,
+      "marketCap": 3304979034162.1,
+      "enterpriseValue": 3301627434162.1,
+      "dividendYield": 0.05380433526564946,
+      "dividendPayout": 0.5117681916203096,
+      "eps": 27.75
+    },
+    {
+      "year": "FY2026",
+      "grossMargin": 0.5780580995963857,
+      "ebitdaMargin": 0.38138139712335295,
+      "ebitMargin": 0.3272531212090837,
+      "netMargin": 0.26452630550719775,
+      "roe": 0.28391124726270434,
+      "roa": 0.22058796247626938,
+      "roce": 0.3319564682548277,
+      "assetTurnover": 0.8338980202869359,
+      "fixedAssetTurnover": 3.9809496566632174,
+      "workingCapitalTurnover": 2.298961175316289,
+      "inventoryTurnover": 4.144265908603191,
+      "receivablesTurnover": 19.93782087558567,
+      "debtToEquity": 0.03292521704191757,
+      "equityMultiplier": 1.2870659127342328,
+      "interestCoverage": 300.52295409181636,
+      "netDebtToEbitda": 0.05886535593274887,
+      "totalDebtToAssets": 0.02558160908167593,
+      "currentRatio": 3.0387480995992755,
+      "quickRatio": 1.9077871934714306,
+      "pe": 15.996365838885524,
+      "evToEbitda": 11.152172459190341,
+      "pb": 4.540819853228396,
+      "ps": 4.230780961758796,
+      "bookValuePerShare": 58.161303142698394,
+      "marketCap": 3309032559807.1,
+      "enterpriseValue": 3326591559807.1,
+      "dividendYield": 0.055216863750247085,
+      "dividendPayout": 0.8831275039911607,
+      "eps": 16.51
+    }
+  ],
+  "dupontByYear": [
+    {
+      "year": "FY2023",
+      "netProfitMargin": 0.2732094795916363,
+      "assetTurnover": 0.8179178226000076,
+      "equityMultiplier": 1.2350370203450478,
+      "roe": 0.2759849574604332,
+      "roa": 0.22346290266127233
+    },
+    {
+      "year": "FY2024",
+      "netProfitMargin": 0.3035830876033372,
+      "assetTurnover": 0.7338980525810945,
+      "equityMultiplier": 1.2261476403315423,
+      "roe": 0.27318451322653753,
+      "roa": 0.222799036788645
+    },
+    {
+      "year": "FY2025",
+      "netProfitMargin": 0.4654398491587514,
+      "assetTurnover": 0.8474599128988447,
+      "equityMultiplier": 1.2513246836484135,
+      "roe": 0.49357452789101497,
+      "roa": 0.3944416140277269
+    },
+    {
+      "year": "FY2026",
+      "netProfitMargin": 0.26452630550719775,
+      "assetTurnover": 0.8338980202869359,
+      "equityMultiplier": 1.2870659127342328,
+      "roe": 0.2839112472627044,
+      "roa": 0.2205879624762694
+    }
+  ],
+  "dcf": {
+    "status": "valid",
+    "diagnostics": [],
+    "assumptions": {
+      "riskFreeRate": 0.0685,
+      "equityRiskPremium": 0.06,
+      "beta": 0.899,
+      "costOfEquity": 0.1225,
+      "costOfDebtPreTax": 0.08,
+      "marginalTaxRate": 0.25,
+      "costOfDebtPostTax": 0.06,
+      "debtWeight": 0.85,
+      "equityWeight": 0.15,
+      "wacc": 0.1225,
+      "terminalGrowthRate": 0.05,
+      "revenueGrowthRates": [
+        0.15,
+        0.14,
+        0.13,
+        0.12,
+        0.1
+      ],
+      "ebitMargins": [
+        0.25,
+        0.25,
+        0.25,
+        0.25,
+        0.25
+      ]
+    },
+    "projections": [],
+    "sumPvFcff": 0,
+    "terminalYearFcff": 0,
+    "terminalValue": 2832357228108,
+    "pvTerminalValue": 2832357228108,
+    "enterpriseValue": 2832357228108,
+    "lessDebt": 0,
+    "plusCash": 0,
+    "equityValue": 2832357228108,
+    "sharesOutstanding": 12529782031,
+    "intrinsicValue": 226.05,
+    "fairValuePerShare": 226.05,
+    "currentMarketPrice": 264.1,
+    "upsideDownside": -0.1441,
+    "verdict": "SELL"
+  },
+  "shareholding": {
+    "insiderOwnership": 0.2949,
+    "institutionalOwnership": 0.5216,
+    "fiiOwnership": 0.287,
+    "diiOwnership": 0.235,
+    "publicFloat": 0.1835000000000001,
+    "topInstitutions": [
+      {
+        "name": "Life Insurance Corporation of India (LIC)",
+        "percentage": 0.146,
+        "shares": 1829949606,
+        "change": "+0.4%"
+      },
+      {
+        "name": "SBI Mutual Fund / SBI Equity",
+        "percentage": 0.115,
+        "shares": 1437817548,
+        "change": "+1.2%"
+      },
+      {
+        "name": "ICICI Prudential Asset Management",
+        "percentage": 0.094,
+        "shares": 1176396175,
+        "change": "+0.8%"
+      },
+      {
+        "name": "HDFC Mutual Fund / Asset Management",
+        "percentage": 0.078,
+        "shares": 980330146,
+        "change": "-0.3%"
+      },
+      {
+        "name": "Government of Singapore (GIC / Temasek)",
+        "percentage": 0.063,
+        "shares": 784264117,
+        "change": "+0.5%"
+      }
+    ],
+    "topFunds": [
+      {
+        "name": "SBI Nifty 50 ETF / Large Cap Fund",
+        "percentage": 0.083,
+        "shares": 1045685489,
+        "change": "+0.9%"
+      },
+      {
+        "name": "Vanguard Emerging Markets Stock Index Fund",
+        "percentage": 0.073,
+        "shares": 914974803,
+        "change": "+0.3%"
+      },
+      {
+        "name": "iShares Core MSCI Emerging Markets ETF",
+        "percentage": 0.063,
+        "shares": 784264117,
+        "change": "+0.6%"
+      },
+      {
+        "name": "Nippon India ETF Nifty 50 BeES",
+        "percentage": 0.052,
+        "shares": 653553431,
+        "change": "+1.1%"
+      },
+      {
+        "name": "Kotak Flexicap Fund / Kotak Bluechip",
+        "percentage": 0.042,
+        "shares": 522842745,
+        "change": "-0.2%"
+      }
+    ],
+    "insiderHolders": [],
+    "netActivity": {
+      "netInstSharesBuying": "33.05M",
+      "netInstBuyingPercent": "0.51%",
+      "period": "6m",
+      "totalInsiderShares": 3694940160,
+      "buyInfoCount": 0,
+      "sellInfoCount": 0
+    },
+    "provenanceNote": "SEBI (LODR) Regulations / Statutory Shareholding Pattern Disclosures",
+    "categories": [
+      {
+        "category": "Promoter & Promoter Group",
+        "percentage": 0.2949
+      },
+      {
+        "category": "Foreign Portfolio Investors (FII/FPI)",
+        "percentage": 0.287
+      },
+      {
+        "category": "Domestic Institutions (DII/Mutual Funds)",
+        "percentage": 0.235
+      },
+      {
+        "category": "Public Retail & Other Float",
+        "percentage": 0.1835000000000001
+      }
+    ]
+  },
+  "peers": [
+    {
+      "ticker": "HINDUNILVR.NS",
+      "name": "Hindustan Unilever Limited",
+      "marketCap": 4636683534336,
+      "cmp": 1973.4,
+      "pe": 43.86308,
+      "evToEbitda": 30.875,
+      "evToSales": 6.94,
+      "dividendYield": 0.0223,
+      "pb": 9.513295,
+      "roe": 0.21688617212055766,
+      "netMargin": 0.22644,
+      "grossMargin": 0.50369,
+      "ebitdaMargin": 0.22479,
+      "operatingMargin": 0.20725,
+      "debtToEquity": 3.016,
+      "currentRatio": null,
+      "revenueGrowth": 0.05,
+      "currency": "INR"
+    },
+    {
+      "ticker": "NESTLEIND.NS",
+      "name": "Nestlé India Limited",
+      "marketCap": 2719887392768,
+      "cmp": 1410.5,
+      "pe": 71.417725,
+      "evToEbitda": 48.378,
+      "evToSales": 11.113,
+      "dividendYield": 0.0085,
+      "pb": 52.742775,
+      "roe": 0.7385110122274988,
+      "netMargin": 0.15623,
+      "grossMargin": 0.55135,
+      "ebitdaMargin": 0.22972,
+      "operatingMargin": 0.21170999,
+      "debtToEquity": 0.08621000000000001,
+      "currentRatio": null,
+      "revenueGrowth": 0.252,
+      "currency": "INR"
+    },
+    {
+      "ticker": "BRITANNIA.NS",
+      "name": "Britannia Industries Limited",
+      "marketCap": 1228789514240,
+      "cmp": 5101.5,
+      "pe": 47.170597,
+      "evToEbitda": 33.748,
+      "evToSales": 6.289,
+      "dividendYield": 0.0177,
+      "pb": 24.062998,
+      "roe": 0.5101270718753244,
+      "netMargin": 0.13376,
+      "grossMargin": 0.41423,
+      "ebitdaMargin": 0.18634,
+      "operatingMargin": 0.15212,
+      "debtToEquity": 0.26875,
+      "currentRatio": null,
+      "revenueGrowth": 0.082,
+      "currency": "INR"
+    }
+  ],
+  "news": [
+    {
+      "title": "CAM Advises ITC Infotech on Happiest Minds Acquisition | SCC Times",
+      "link": "https://news.google.com/rss/articles/CBMi4AFBVV95cUxNSlZMa09PMGtubm0zMkU2NU5mR2xKcFI5YjV6ZjMtUmZOSm1KMm9oU2ZIZXNGV3gyX3NfdzVZZExneHpua2Z4cGJXcDg2aWlVSlcwcnhzdzBtVEcyeE40UkFQenNZRVpQZXJRWEQyZEdGQ2s0eXhxdzJsQUhHaEFGQmtYWE1fbFFYdzd3anlXSFNmX19pQ0phUEdvQ0ZsSVUtbEpWQmNCTVpKRWhHb0tjdzhoSDVUUGJYQ0F4UHc0VXl6MlRTVV85Tkc5SHAxdURFcklBMEROc0pjSnVGN0VtVw?oc=5",
+      "publishedAt": "2026-09-03T12:05:54.000Z",
+      "publisher": "SCC Online",
+      "summary": "ITC Limited was cited in SCC Online: \"CAM Advises ITC Infotech on Happiest Minds Acquisition | SCC Times\". Evaluated for corporate impact and fundamental earnings transmission."
+    },
+    {
+      "title": "Happiest Minds Technologies announces merger with ITC Infotech to create a scaled, AI First Global Technology Services Enterprise with US$ 1 billion Revenue by FY28 - HappiestMinds",
+      "link": "https://news.google.com/rss/articles/CBMisgJBVV95cUxOVVRWWUtKTWZUdWdUQ2ZmRS1sV0l5YnNSS0NKY1V1bTlYdExUaVBJVXVEWVgyQmdKSWdYWXU2MDZMOHk5ZndFVEowNVFJTFdNZVBRTk1RY0NkaDAyY1BQbXlKUGNqaTN4Z1JSNjRFWWVXTVBPUDVDbFFic3o5WjZhVzZMdDJueTZNbnV2OHZsb3JEVG16WkVHU2loWW50YXhjVTZ2SE14eVlBUl9pZFY4b3pad085ZjREVjBJQzEyS1N3MXhTZDNnUWJaNnNIWmtaR19ETGFUT0dYZTRGaURrNWtQTE9qUW9UR3dadDFibW4yeVpyc192RmdzSXVqSkd2Z3pwaGItM3pvb1A5U0R2ZzczREZNTkE1S0N1LU9SbUZXbDB2M2pYRTMzVXdEVWt3VUE?oc=5",
+      "publishedAt": "2026-08-31T19:15:20.000Z",
+      "publisher": "Happiest Minds",
+      "summary": "ITC Limited was cited in Happiest Minds: \"Happiest Minds Technologies announces merger with ITC Infotech to create a scaled, AI First Global Technology Services Enterprise with US$ 1 billion Revenue by FY28 - HappiestMinds\". Evaluated for corporate impact and fundamental earnings transmission."
+    },
+    {
+      "title": "ITC Ltd. is Rated Hold by MarketsMOJO",
+      "link": "https://news.google.com/rss/articles/CBMinwFBVV95cUxOWXo5RnFzaHFJUXJZWTl0ZGsyZWhFNDdTSFk4Y1VHRV9CeHVLM20ta0lPWUowelVlX0VXLWZENDBNNUtJZXBERmRORGlIb3lRSkx1UlZZS3RDbXQxeTFkcUlWV0dfdkZsM29LS3l0U2FyV19nYVVsQzZKUDQ5U3FzVDhBVjNCcjgtNXROYm9KTFB5RHdnbXdzcWxHdkhieGs?oc=5",
+      "publishedAt": "2026-09-05T23:23:17.000Z",
+      "publisher": "MarketsMojo",
+      "summary": "ITC Limited was cited in MarketsMojo: \"ITC Ltd. is Rated Hold by MarketsMOJO\". Evaluated for corporate impact and fundamental earnings transmission."
+    },
+    {
+      "title": "ITC Q1 preview: Analysts see 10-13% Y-o-Y dip in revenue, PAT",
+      "link": "https://news.google.com/rss/articles/CBMi3gFBVV95cUxQZVBQQUN2dktvalYxdWtqYTFDQnphU29xLVRHd05yYklCTUVtZmcwZjV1Y3NOQmZqb0p6enJsWlA1aWFmaXlXU01xeGpMVGdkR2NWQjlzVVhHSGRXSWpUY3lVQW9BZVhhMlMtaGtUUENRTlpQVVJYNllTX0tvXzRGbG9NazRaYkJfQmFUMjk0N0FXcUJzVjdsM216ckVVRkZhNkNxdy1tSENlY29JWkotUzVQVHg0RHRLdDk3OGZzbC1HSHM0cWNCdFV1SjhadUp4T2N2cV9vM0lxY2pUblHSAeMBQVVfeXFMT0N0S1E5RzBLbjlQX0JwUHZXQnJtaWpXbnJaS0dvdjZvN1ExZDFCRGFOSjNneGNJV2cxVkQ2MkxHeFVid01qNzZhaGtuSm01WHRKejYwVndJTFR1LU10Q2lEZjVhd0hsb3lrWlhYS1dtTmxmSXZ2NDd5LXVQOXRiT0RHbjRYaTRXU2psSzROWFVPZW90VFBrR3gtdVdyMEdRaVR0OHd1ZFE5cEVwTUdidkdlTEF0RmRCSGN0YWxONlZfTGd2LVdhMS12Y2NVNU5LMHkxUHV0dExoVHNlYjNWdnZsQzA?oc=5",
+      "publishedAt": "2026-07-29T07:00:00.000Z",
+      "publisher": "Business Standard",
+      "summary": "ITC Limited was cited in Business Standard: \"ITC Q1 preview: Analysts see 10-13% Y-o-Y dip in revenue, PAT\". Evaluated for corporate impact and fundamental earnings transmission."
+    },
+    {
+      "title": "Closing Bell: Nifty Slips to 24,055, ITC Rallies 4.3% on Price-Hike Buzz",
+      "link": "https://news.google.com/rss/articles/CBMiswFBVV95cUxOZ1VKaWpwZVozZkRaeFFUSk5sQlc1RE9nUXlBNl9YY010djBCQ0pVVzBMNFdYck9GQjlYMVUtaDZNY1l3VG9aTDlVYmY3Vm9wY0sxcnFYTDZsNnRVcWEwRklrTGNCUUM3NUM2dUZNQlREcUItNjJ0cGlfZVlKdlU4UVFPeWRyNXNycDh3azI3UlkwQlA1czFLdGFDTW1XVlZoRHNVcEg1NW9KUUFUM2pIamFNcw?oc=5",
+      "publishedAt": "2026-09-01T13:29:14.000Z",
+      "publisher": "India Infoline",
+      "summary": "ITC Limited was cited in India Infoline: \"Closing Bell: Nifty Slips to 24,055, ITC Rallies 4.3% on Price-Hike Buzz\". Evaluated for corporate impact and fundamental earnings transmission."
+    },
+    {
+      "title": "Upon listing, Happiest Minds-ITC Infotech combo expected to be valued at ₹18,000 crore",
+      "link": "https://news.google.com/rss/articles/CBMi3wFBVV95cUxQWFhxWEt5Z2xFcVdpR2Fyc2VxaERaRXA1aldhVllPWHNBTFVTeGFCdEp5eXNqbTB3ckYwOHBYTFFzWExMTHBSdHU1ZGtQNmNfQThyTHZJeFFwRW12SnFJZG5VajJva0ItWEJQMGhTNFZJZGNlWmF2aXRUbExSWTdNYVk3NVhRWjBwX3JRRGtqWkdpVUJMWkJXVlQzc19vMEtyOHF0cmMtY0Nhb2V5Z2JCZnNldmxhQ1c2bzRBMnFtdDBBN0RYZXhxdjZSckxTc09iMnBUUzVPU3dnMEtqZ1dB0gHmAUFVX3lxTFB3cjFXMEg2RzZoUGVmV3d4RmFUY0Qxb2FqbTNSLWloTWZrelF4YWE2MzRJOC1mUXVQV25tSWlIZTJqX3lkQVpnLXJnaVZ4YnhielB2U29kOWxSN2oxUWNhYU9yZXNnVlRDZXQyVUlBaG5NTnVLeWo1aVdZZ2kxV0FuLWNSVlVtR3ZMWThRMi1PRVd6cl9XVjYzRVlOczNhMkRqamxtMmVsSVRyczBwNFN5ZUlfOXhzVGdfWE1FRzIzcnZqQjUwMXRDbHZXX184YVFWWERUeVZhM1M5b19CdEoxX3A2MGFR?oc=5",
+      "publishedAt": "2026-09-02T06:31:02.000Z",
+      "publisher": "thehindu.com",
+      "summary": "ITC Limited was cited in thehindu.com: \"Upon listing, Happiest Minds-ITC Infotech combo expected to be valued at ₹18,000 crore\". Evaluated for corporate impact and fundamental earnings transmission."
+    },
+    {
+      "title": "Why ITC share price is down today? What's behind the stock plunge? Trigger and data details here",
+      "link": "https://news.google.com/rss/articles/CBMi9gFBVV95cUxQOEY3dG5JTjV4ejZHYThaRUlnZTJQd0oyRlE3RFF2RTJGS0NJLTJ4ZHRxdlh1ZEZEOEVOT2NlMVZmRFdnOUZOWEpHZUdyVzRfZVJEUGM5WTFubTRLclUzZ05ENUMtbUNGY29ySld4QTdvNmFBWVE4ZVNNckFwWW1Rcll6QXRONUd4QlB4QlU4VEdQbG13VXhIQUNFdS1mTUFmM2JXQnFwdWstQ1Bxel91THhXamtJdFdHb1ptaHBReHd6V052ZzBrTzc0MGIwZVdEU3JMdXJLWTE4WTlqNWVNVFp1Z0xsdThkUmM1YTVhSE9fVlZQZUHSAfsBQVVfeXFMT2RGdW95LTloWHZtSDU5WmZjVThuY0NrUFFHaU9qNk11anhfcjcxRTF1WHo0Z201SF9CSEp1dkRzTWFMVGl1bDVIVEp6U3V0WUtjUGU1eFYwMGQyX1VBUExVTzdvNm1OakRJbzBjZ0hXTVAyUDh3emZjVkRyWUdSSDRqMjhCMmZhVlNsS0V3MW1RQ1RyWGp2eXAtUUNDWkFQcnNVQXNPcWhQTWJ0REwxSXkxclNHRGJveHNaNzZzM01GQ2FVRUwtQURmdU9iQzRsV2pLZWF1dkgzMFIxb0l6dUdqSDRFZWNjXzZpdm5lNW1RbHRsMC0xUW5LbVU?oc=5",
+      "publishedAt": "2026-09-01T04:16:37.000Z",
+      "publisher": "Livemint",
+      "summary": "ITC Limited was cited in Livemint: \"Why ITC share price is down today? What's behind the stock plunge? Trigger and data details here\". Evaluated for corporate impact and fundamental earnings transmission."
+    },
+    {
+      "title": "Happiest Minds to merge with ITC Infotech, promoters to sell 22.1% stake for Rs 1,329.72 crore",
+      "link": "https://news.google.com/rss/articles/CBMi2wFBVV95cUxORWw0Yk5VU0ptT3BBMnF4QlZnd1V6eThWVXhTWlhZU0Vnd1JXdzYyRXBsZExfYk0xTjRvcW15ZlVtQ1ItSHZNMTU0YWpqVzFPYUU0MlozeGdoQkdjWXQtc3NaaDNwQWtjbi14VW0wXzMxSHAyNWNOVWI5d29fRzFIU2c3WldPRmI2MmQyR2FiemMwcEh0SmZhM1l1WkhlRFlYRE9tUXdoYkVNb1lacnVpN0t5Q3RqLVg0SHhZV0kzOERKY3VHb2tydjM1SEJKUU1uOUNmNkN6cnNvbE3SAegBQVVfeXFMTW54amhaRXljclMtWF84R0lqRzJ0RjV2WkxBNElzOTVXak9YTWlBNEwzbERtX0N0S0NNcFNvT1dYWGs3NUtrYTNIYi1HenNmd1piVVRxNzRRSE9kVHctS2p1YWdXejBNRkpRN0pWNHZsQnRwMG9kRFRVRnc5Rmdudm1HOU8wZElHTUI5eG9jNHpfcndrOVFRMVRVSm5nRGFqS2NkTEs4eUtnbVlTSG1ERVI3SlprNjN3X3U4TUZKanBRekxOVnZMMTNOQlU2Z0R2ajUyZFVmdV9xSXhYUnQ4dWptRTNfaV9LVA?oc=5",
+      "publishedAt": "2026-08-31T16:53:14.000Z",
+      "publisher": "newindianexpress.com",
+      "summary": "ITC Limited was cited in newindianexpress.com: \"Happiest Minds to merge with ITC Infotech, promoters to sell 22.1% stake for Rs 1,329.72 crore\". Evaluated for corporate impact and fundamental earnings transmission."
+    },
+    {
+      "title": "Happiest Minds, ITC Infotech merge to create $1B AI-first IT firm",
+      "link": "https://news.google.com/rss/articles/CBMivgFBVV95cUxQV013c3h1SzN5NjNkYzVqSlk5ZWhyZ09YdFpJeVpZQnZmc3J0S2tOUlJuLXBDLVpYU2dxMDIyNnd0V3N3ako0dmRGdl9mamxUdjFkOUotSUJzYm1qel85STBIYkNzdFZuM2UtUDNETlRYUy1RdEtONzVBWW9vUXhiOTh6ek1idFpKdU5QRkdMQ0VSdzNvSi01al9DWDhBOFNBNVJpd2ZlY0hyVnFoVXpESHkweFVFb08yS1BLSlFn?oc=5",
+      "publishedAt": "2026-09-03T08:23:43.000Z",
+      "publisher": "scanx.trade",
+      "summary": "ITC Limited was cited in scanx.trade: \"Happiest Minds, ITC Infotech merge to create $1B AI-first IT firm\". Evaluated for corporate impact and fundamental earnings transmission."
+    },
+    {
+      "title": "Happiest Minds announces merger with ITC Infotech",
+      "link": "https://news.google.com/rss/articles/CBMimAFBVV95cUxPZ3RnZXJYaHFqMHBpbXNHaGZOYmNZWlF1dnFBeGs1WWNpQkgyUWZ0THpiTDcyeVRXSGRtVjBRamI5RWc0Y1YzMVFyeVktSTFvekZnc1FPLTkzTnNrQ1hpMzVXTFhxMXNiMDRPSFE4MEFCdzVmWi1yVFlJRUNTcUlXREhKeWhUUzdORVY1d0pRREVmaW5ONkZzUg?oc=5",
+      "publishedAt": "2026-09-01T18:07:40.000Z",
+      "publisher": "Express Computer",
+      "summary": "ITC Limited was cited in Express Computer: \"Happiest Minds announces merger with ITC Infotech\". Evaluated for corporate impact and fundamental earnings transmission."
+    },
+    {
+      "title": "Happiest Minds stock: Buy after 76% fall and ITC Infotech merger?",
+      "link": "https://news.google.com/rss/articles/CBMi5wFBVV95cUxQNElET3ZmWDBRZHJZMjdhYTRxbW1wcmk2cERkYW80QlpzWGZSR1AtZEd4ZTVoTkI1Wll6LUV1WnVVY0FEMC01NTR1X3NKYnQ4Smp0akVBcm5KOFBkT2VGVVIwQmFVeVQ5M3BlanRUN1ZOZVZpMkM2aE1XNl83MFE3QjNLb3M0OEdjUFlLMVhJT05HMUVpYWxWUU14RHNaQTkzN1F4ckxMZ3VxckR6RUZ1MjQyWU9DdDAxQkJTa3VVSmpoQjVIUUhyTzVvSkNuMVc2ZWpJRWF4RzNPcWJGMGZJa0cwNjVadE3SAe4BQVVfeXFMTVpPVWNUaXFRcDBCUGVEeTZ5OTVwTzM3NTFYY0t0M1lfYmZYcklLMENRblN5cmJVREp5Z1lNeXROdGFkMXpwVS1rXzhISVQ4TjB5c3czRXJNWDBWWE1ybVNnaTJYaTEtekNFUEFNcTl3UFBtVHFzT2tTdTlHTURMM0VUNGhlZW9TVTdITmJwVloxR1hyY0FNQ3pyeWc2SXlEVGlpZlN6ZWxwQjlWM01pZVowNm5Td0h0WWN2eUFEWnljQUc0VzdFUVJJbV9DVGQ1cWx0Q2xkTmdDa2xGME9nTEZ0ZDJQOEJMd2JGbUs1dw?oc=5",
+      "publishedAt": "2026-09-05T16:01:41.000Z",
+      "publisher": "BusinessLine",
+      "summary": "ITC Limited was cited in BusinessLine: \"Happiest Minds stock: Buy after 76% fall and ITC Infotech merger?\". Evaluated for corporate impact and fundamental earnings transmission."
+    },
+    {
+      "title": "ITC Limited (ITC.NS) Slips 3.95% to ₹255.5: Support and Resistance in Focus - Adaptive Moving Average",
+      "link": "https://news.google.com/rss/articles/CBMisAFBVV95cUxPRng1dmEzQ0tQV3VwblJfWk1yZlhHN3Y4cm9nSDlwWmt1emY2ZlZQMS1JYU9CZlk3VXNCZk5vTG91NndCLTJqeU5qb0M3NzNRVHljbFQxX0lrazJha0p0bmxpSENRNXNZZ28yVEctUEdXTVdrMEcwSUdxRldoRjlkQ3RDZXE5SGNXa1Y4eE9wc1FLdURPRFg1WlNvYTk3dGFKTEU1S0hTM1Y0Wk93ZmYxOA?oc=5",
+      "publishedAt": "2026-08-31T22:48:20.000Z",
+      "publisher": "siam.in",
+      "summary": "ITC Limited was cited in siam.in: \"ITC Limited (ITC.NS) Slips 3.95% to ₹255.5: Support and Resistance in Focus - Adaptive Moving Average\". Evaluated for corporate impact and fundamental earnings transmission."
+    },
+    {
+      "title": "ITC Infotech To Purchase 22.106% Stake In Happiest Minds For ₹1,330 Crore",
+      "link": "https://news.google.com/rss/articles/CBMirwFBVV95cUxPTzJuNlZTY3BucnBKUEJtOFBkN0ZaMWdCU24tdnB4ckFXbVRzTHU5X0Zpa1R6cUpLVlBNV0tiaTNHVlU5ck9SUlZuZEVfODJ6LVZTR25va1NramRtTFpRZ3I4WENrSl9yRVpaSGpzZzBjd0R3LS1ta0VBSXdiQTdabWt1MThGdXpkdmNrZDhmSlR0YnFPclJCYkQ3U0hLVGxHYm9JcUdTWXZtcUtfM0dV?oc=5",
+      "publishedAt": "2026-08-31T14:30:52.000Z",
+      "publisher": "Sahi",
+      "summary": "ITC Limited was cited in Sahi: \"ITC Infotech To Purchase 22.106% Stake In Happiest Minds For ₹1,330 Crore\". Evaluated for corporate impact and fundamental earnings transmission."
+    },
+    {
+      "title": "ITC Cigarette Segment in Q1: 81% Revenue Jump Fails To Prevent 35% EBIT Slide",
+      "link": "https://news.google.com/rss/articles/CBMiuwFBVV95cUxPNFBVN3hvU1RWQmItZnVQTWc0UVozRG5LVjRIV0dhZzlPSzRwdjdfLTdremFLU2RsMjNKRUlaZEZBREJuaDhSQXhKM2l6Q0p5S1owMUpmaXVzWHI4b0g4NzZtR0RIdlM3NnZzRUVGUUliT2FrX2RfY3d2OWNqV2wtVHg1dkpuNmxyVk9uZURuX2tERU8yY0QyWGlIdjBTR0hQY3B1dnhaRVh1YTBkV3hvb19CcDZxci1iMXJz0gHDAUFVX3lxTE1CTDFJQWFoYWYtZU1Ya245RWtrcExHQ3FjLUNlVnN3QjFnSHotMVVuelZDdmU1WHdSNnJwNzA1Rm52bWRGaFYwTnRaeGRWUFFsWE5PeVNncU1xcHZYeHY5SDBpX1N1NDVZaW9WaU8wQThNWTVLbkVzc1drbTlGUWZ5cFBBMzBXRWtKWXFYU2Q2bThyNWFRUEtjOGlDYVBZa2xQZ3ItY2dScXZCS29ZODgwLV9OLXZfaWNmY01sZHRXeE80RQ?oc=5",
+      "publishedAt": "2026-07-31T07:00:00.000Z",
+      "publisher": "NDTV Profit",
+      "summary": "ITC Limited was cited in NDTV Profit: \"ITC Cigarette Segment in Q1: 81% Revenue Jump Fails To Prevent 35% EBIT Slide\". Evaluated for corporate impact and fundamental earnings transmission."
+    },
+    {
+      "title": "ITC Infotech Acquires Happiest Minds, Forms $1B Tech Giant",
+      "link": "https://news.google.com/rss/articles/CBMirAFBVV95cUxOUXVMekxMeEM5eENDa2xKZ1JncWxIMHg2Z0FqQ3dyR0UwMGpxY2dLOTJncGpMVzJnNEgzQTBsajFyNnpjUEhKV2pwNnJkeDQ3aWlQSDNGM19PdlNyRzBwajV5UzR1VlBEaDJFUVEwRS1Icy1sbENEUDJFUmdvYVhjeUZFRndSNGpBRHU1ZWlvME44anNmY1huLXpCeTJOSXA5RFFaeHNyMTlMTEo50gGyAUFVX3lxTFByZld3ekxhdlZzcFpjNVlua01IN3RkZFJpWkE3UC1ERDEyNkt5NzZqN2VCdHZUY21sQmxVTXRFQzRlaDlFeE91T1Z1UVNRMnNQVkdDSFR3ZUZRUUJoOWhOdE9SQkNnb3VyQ0pSTXZrRkE2SG1SLWFPcEk5bm5sSDY4N3dNcjVHb3h0X2JEVUx6eFVfTGhUTy1sV09taDZDM1FVM0F0cU45WllJc1VYTmpMWUE?oc=5",
+      "publishedAt": "2026-08-31T14:30:17.000Z",
+      "publisher": "Rediff MoneyWiz",
+      "summary": "ITC Limited was cited in Rediff MoneyWiz: \"ITC Infotech Acquires Happiest Minds, Forms $1B Tech Giant\". Evaluated for corporate impact and fundamental earnings transmission."
+    }
+  ],
+  "eventPriceMovements": [
+    {
+      "id": "EPM-1",
+      "headline": "ITC Ltd. is Rated Hold by MarketsMOJO",
+      "publisher": "MarketsMojo",
+      "eventDate": "Sep 6, 2026",
+      "category": "GENERAL_CORPORATE",
+      "categoryLabel": "Corporate Surveillance Disclosure",
+      "summary": "ITC Limited was cited in MarketsMojo: \"ITC Ltd. is Rated Hold by MarketsMOJO\". Evaluated for corporate impact and fundamental earnings transmission.",
+      "preEventPrice": 263,
+      "eventDayPrice": 268,
+      "postEventPrice": 270.89,
+      "immediateReturnPct": 0.019011406844106515,
+      "multiDayReturnPct": 0.030000000000000027,
+      "abnormalReturnPct": 0.023000000000000027,
+      "volumeSpikeMultiplier": 2.2,
+      "verdict": "Absorbed / Neutral",
+      "narrative": {
+        "whatHappened": "On Sep 6, 2026, ITC Limited disclosed material operational progress regarding corporate surveillance disclosure: \"ITC Ltd. is Rated Hold by MarketsMOJO\".",
+        "priceImpact": "The equity reacted with an immediate +1.9% session change on 2.2x baseline trading volume, expanding to a cumulative 5-day drift of +3.0% (+2.3% abnormal return vs. sector benchmark).",
+        "modelImplication": "Confirms operational delivery against baseline thesis; supports underlying revenue compounding trajectory without requiring negative risk premium adjustments in our DCF discount rate."
+      },
+      "priceTrajectory": [
+        {
+          "dayOffset": -5,
+          "label": "T-5",
+          "date": "Sep 1",
+          "price": 259.84,
+          "normalizedPrice": 98.8,
+          "benchmarkNormalizedPrice": 99.5
+        },
+        {
+          "dayOffset": -3,
+          "label": "T-3",
+          "date": "Sep 3",
+          "price": 261.42,
+          "normalizedPrice": 99.4,
+          "benchmarkNormalizedPrice": 99.8
+        },
+        {
+          "dayOffset": -1,
+          "label": "T-1",
+          "date": "Sep 5",
+          "price": 263,
+          "normalizedPrice": 100,
+          "benchmarkNormalizedPrice": 100
+        },
+        {
+          "dayOffset": 0,
+          "label": "T0",
+          "date": "Sep 6",
+          "price": 268,
+          "normalizedPrice": 101.9,
+          "benchmarkNormalizedPrice": 100.2
+        },
+        {
+          "dayOffset": 1,
+          "label": "T+1",
+          "date": "Sep 7",
+          "price": 266.98,
+          "normalizedPrice": 101.51,
+          "benchmarkNormalizedPrice": 100.4
+        },
+        {
+          "dayOffset": 3,
+          "label": "T+3",
+          "date": "Sep 9",
+          "price": 267.28,
+          "normalizedPrice": 101.63,
+          "benchmarkNormalizedPrice": 100.6
+        },
+        {
+          "dayOffset": 5,
+          "label": "T+5",
+          "date": "Sep 11",
+          "price": 270.89,
+          "normalizedPrice": 103,
+          "benchmarkNormalizedPrice": 100.8
+        },
+        {
+          "dayOffset": 10,
+          "label": "T+10",
+          "date": "Sep 16",
+          "price": 270.63,
+          "normalizedPrice": 102.9,
+          "benchmarkNormalizedPrice": 101.1
+        }
+      ]
+    },
+    {
+      "id": "EPM-2",
+      "headline": "CAM Advises ITC Infotech on Happiest Minds Acquisition | SCC Times",
+      "publisher": "SCC Online",
+      "eventDate": "Sep 3, 2026",
+      "category": "STRATEGIC_MA",
+      "categoryLabel": "Strategic Investment & Corporate M&A",
+      "summary": "ITC Limited was cited in SCC Online: \"CAM Advises ITC Infotech on Happiest Minds Acquisition | SCC Times\". Evaluated for corporate impact and fundamental earnings transmission.",
+      "preEventPrice": 265.1,
+      "eventDayPrice": 275.17,
+      "postEventPrice": 279.15,
+      "immediateReturnPct": 0.03798566578649565,
+      "multiDayReturnPct": 0.0529988683515652,
+      "abnormalReturnPct": 0.0419988683515652,
+      "volumeSpikeMultiplier": 2.8,
+      "verdict": "Bullish Inflection",
+      "narrative": {
+        "whatHappened": "On Sep 3, 2026, ITC Limited disclosed material operational progress regarding strategic investment & corporate m&a: \"CAM Advises ITC Infotech on Happiest Minds Acquisition | SCC Times\".",
+        "priceImpact": "The equity reacted with an immediate +3.8% session change on 2.8x baseline trading volume, expanding to a cumulative 5-day drift of +5.3% (+4.2% abnormal return vs. sector benchmark).",
+        "modelImplication": "Confirms operational delivery against baseline thesis; supports underlying revenue compounding trajectory without requiring negative risk premium adjustments in our DCF discount rate."
+      },
+      "priceTrajectory": [
+        {
+          "dayOffset": -5,
+          "label": "T-5",
+          "date": "Aug 29",
+          "price": 267.22,
+          "normalizedPrice": 100.8,
+          "benchmarkNormalizedPrice": 99.5
+        },
+        {
+          "dayOffset": -3,
+          "label": "T-3",
+          "date": "Aug 31",
+          "price": 266.16,
+          "normalizedPrice": 100.4,
+          "benchmarkNormalizedPrice": 99.8
+        },
+        {
+          "dayOffset": -1,
+          "label": "T-1",
+          "date": "Sep 2",
+          "price": 265.1,
+          "normalizedPrice": 100,
+          "benchmarkNormalizedPrice": 100
+        },
+        {
+          "dayOffset": 0,
+          "label": "T0",
+          "date": "Sep 3",
+          "price": 275.17,
+          "normalizedPrice": 103.8,
+          "benchmarkNormalizedPrice": 100.2
+        },
+        {
+          "dayOffset": 1,
+          "label": "T+1",
+          "date": "Sep 4",
+          "price": 275.78,
+          "normalizedPrice": 104.03,
+          "benchmarkNormalizedPrice": 100.4
+        },
+        {
+          "dayOffset": 3,
+          "label": "T+3",
+          "date": "Sep 6",
+          "price": 276.38,
+          "normalizedPrice": 104.26,
+          "benchmarkNormalizedPrice": 100.6
+        },
+        {
+          "dayOffset": 5,
+          "label": "T+5",
+          "date": "Sep 8",
+          "price": 279.15,
+          "normalizedPrice": 105.3,
+          "benchmarkNormalizedPrice": 100.8
+        },
+        {
+          "dayOffset": 10,
+          "label": "T+10",
+          "date": "Sep 13",
+          "price": 279.85,
+          "normalizedPrice": 105.57,
+          "benchmarkNormalizedPrice": 101.1
+        }
+      ]
+    },
+    {
+      "id": "EPM-3",
+      "headline": "Closing Bell: Nifty Slips to 24,055, ITC Rallies 4.3% on Price-Hike Buzz",
+      "publisher": "India Infoline",
+      "eventDate": "Sep 1, 2026",
+      "category": "GENERAL_CORPORATE",
+      "categoryLabel": "Analyst Revision & Institutional Flow",
+      "summary": "ITC Limited was cited in India Infoline: \"Closing Bell: Nifty Slips to 24,055, ITC Rallies 4.3% on Price-Hike Buzz\". Evaluated for corporate impact and fundamental earnings transmission.",
+      "preEventPrice": 260.9,
+      "eventDayPrice": 268.47,
+      "postEventPrice": 271.86,
+      "immediateReturnPct": 0.0290149482560369,
+      "multiDayReturnPct": 0.04200843234955931,
+      "abnormalReturnPct": 0.02700843234955931,
+      "volumeSpikeMultiplier": 3,
+      "verdict": "Bullish Inflection",
+      "narrative": {
+        "whatHappened": "On Sep 1, 2026, ITC Limited disclosed material operational progress regarding analyst revision & institutional flow: \"Closing Bell: Nifty Slips to 24,055, ITC Rallies 4.3% on Price-Hike Buzz\".",
+        "priceImpact": "The equity reacted with an immediate +2.9% session change on 3.0x baseline trading volume, expanding to a cumulative 5-day drift of +4.2% (+2.7% abnormal return vs. sector benchmark).",
+        "modelImplication": "Confirms operational delivery against baseline thesis; supports underlying revenue compounding trajectory without requiring negative risk premium adjustments in our DCF discount rate."
+      },
+      "priceTrajectory": [
+        {
+          "dayOffset": -5,
+          "label": "T-5",
+          "date": "Aug 27",
+          "price": 257.77,
+          "normalizedPrice": 98.8,
+          "benchmarkNormalizedPrice": 99.5
+        },
+        {
+          "dayOffset": -3,
+          "label": "T-3",
+          "date": "Aug 29",
+          "price": 259.33,
+          "normalizedPrice": 99.4,
+          "benchmarkNormalizedPrice": 99.8
+        },
+        {
+          "dayOffset": -1,
+          "label": "T-1",
+          "date": "Aug 31",
+          "price": 260.9,
+          "normalizedPrice": 100,
+          "benchmarkNormalizedPrice": 100
+        },
+        {
+          "dayOffset": 0,
+          "label": "T0",
+          "date": "Sep 1",
+          "price": 268.47,
+          "normalizedPrice": 102.9,
+          "benchmarkNormalizedPrice": 100.2
+        },
+        {
+          "dayOffset": 1,
+          "label": "T+1",
+          "date": "Sep 2",
+          "price": 270.22,
+          "normalizedPrice": 103.57,
+          "benchmarkNormalizedPrice": 100.4
+        },
+        {
+          "dayOffset": 3,
+          "label": "T+3",
+          "date": "Sep 4",
+          "price": 270.68,
+          "normalizedPrice": 103.75,
+          "benchmarkNormalizedPrice": 100.6
+        },
+        {
+          "dayOffset": 5,
+          "label": "T+5",
+          "date": "Sep 6",
+          "price": 271.86,
+          "normalizedPrice": 104.2,
+          "benchmarkNormalizedPrice": 100.8
+        },
+        {
+          "dayOffset": 10,
+          "label": "T+10",
+          "date": "Sep 11",
+          "price": 273.06,
+          "normalizedPrice": 104.66,
+          "benchmarkNormalizedPrice": 101.1
+        }
+      ]
+    },
+    {
+      "id": "EPM-4",
+      "headline": "Why ITC share price is down today? What's behind the stock plunge? Trigger and data details here",
+      "publisher": "Livemint",
+      "eventDate": "Sep 1, 2026",
+      "category": "GENERAL_CORPORATE",
+      "categoryLabel": "Corporate Surveillance Disclosure",
+      "summary": "ITC Limited was cited in Livemint: \"Why ITC share price is down today? What's behind the stock plunge? Trigger and data details here\". Evaluated for corporate impact and fundamental earnings transmission.",
+      "preEventPrice": 260.9,
+      "eventDayPrice": 265.86,
+      "postEventPrice": 268.73,
+      "immediateReturnPct": 0.019011115369873766,
+      "multiDayReturnPct": 0.030011498658490066,
+      "abnormalReturnPct": 0.011011498658490066,
+      "volumeSpikeMultiplier": 2.2,
+      "verdict": "Absorbed / Neutral",
+      "narrative": {
+        "whatHappened": "On Sep 1, 2026, ITC Limited disclosed material operational progress regarding corporate surveillance disclosure: \"Why ITC share price is down today? What's behind the stock plunge? Trigger and data details here\".",
+        "priceImpact": "The equity reacted with an immediate +1.9% session change on 2.2x baseline trading volume, expanding to a cumulative 5-day drift of +3.0% (+1.1% abnormal return vs. sector benchmark).",
+        "modelImplication": "Confirms operational delivery against baseline thesis; supports underlying revenue compounding trajectory without requiring negative risk premium adjustments in our DCF discount rate."
+      },
+      "priceTrajectory": [
+        {
+          "dayOffset": -5,
+          "label": "T-5",
+          "date": "Aug 27",
+          "price": 262.99,
+          "normalizedPrice": 100.8,
+          "benchmarkNormalizedPrice": 99.5
+        },
+        {
+          "dayOffset": -3,
+          "label": "T-3",
+          "date": "Aug 29",
+          "price": 261.94,
+          "normalizedPrice": 100.4,
+          "benchmarkNormalizedPrice": 99.8
+        },
+        {
+          "dayOffset": -1,
+          "label": "T-1",
+          "date": "Aug 31",
+          "price": 260.9,
+          "normalizedPrice": 100,
+          "benchmarkNormalizedPrice": 100
+        },
+        {
+          "dayOffset": 0,
+          "label": "T0",
+          "date": "Sep 1",
+          "price": 265.86,
+          "normalizedPrice": 101.9,
+          "benchmarkNormalizedPrice": 100.2
+        },
+        {
+          "dayOffset": 1,
+          "label": "T+1",
+          "date": "Sep 2",
+          "price": 264.85,
+          "normalizedPrice": 101.51,
+          "benchmarkNormalizedPrice": 100.4
+        },
+        {
+          "dayOffset": 3,
+          "label": "T+3",
+          "date": "Sep 4",
+          "price": 265.15,
+          "normalizedPrice": 101.63,
+          "benchmarkNormalizedPrice": 100.6
+        },
+        {
+          "dayOffset": 5,
+          "label": "T+5",
+          "date": "Sep 6",
+          "price": 268.73,
+          "normalizedPrice": 103,
+          "benchmarkNormalizedPrice": 100.8
+        },
+        {
+          "dayOffset": 10,
+          "label": "T+10",
+          "date": "Sep 11",
+          "price": 268.47,
+          "normalizedPrice": 102.9,
+          "benchmarkNormalizedPrice": 101.1
+        }
+      ]
+    },
+    {
+      "id": "EPM-5",
+      "headline": "(ITC.NS) Slips 3.95% to ₹255.5: Support and Resistance in Focus - Adaptive Moving Average",
+      "publisher": "siam.in",
+      "eventDate": "Sep 1, 2026",
+      "category": "GENERAL_CORPORATE",
+      "categoryLabel": "Corporate Surveillance Disclosure",
+      "summary": "ITC Limited was cited in siam.in: \"ITC Limited (ITC.NS) Slips 3.95% to ₹255.5: Support and Resistance in Focus - Adaptive Moving Average\". Evaluated for corporate impact and fundamental earnings transmission.",
+      "preEventPrice": 260.9,
+      "eventDayPrice": 267.16,
+      "postEventPrice": 270.29,
+      "immediateReturnPct": 0.023993867382138934,
+      "multiDayReturnPct": 0.0359908010732084,
+      "abnormalReturnPct": 0.012990801073208401,
+      "volumeSpikeMultiplier": 2.6,
+      "verdict": "Bullish Inflection",
+      "narrative": {
+        "whatHappened": "On Sep 1, 2026, ITC Limited disclosed material operational progress regarding corporate surveillance disclosure: \"ITC Limited (ITC.NS) Slips 3.95% to ₹255.5: Support and Resistance in Focus - Adaptive Moving Average\".",
+        "priceImpact": "The equity reacted with an immediate +2.4% session change on 2.6x baseline trading volume, expanding to a cumulative 5-day drift of +3.6% (+1.3% abnormal return vs. sector benchmark).",
+        "modelImplication": "Confirms operational delivery against baseline thesis; supports underlying revenue compounding trajectory without requiring negative risk premium adjustments in our DCF discount rate."
+      },
+      "priceTrajectory": [
+        {
+          "dayOffset": -5,
+          "label": "T-5",
+          "date": "Aug 27",
+          "price": 257.77,
+          "normalizedPrice": 98.8,
+          "benchmarkNormalizedPrice": 99.5
+        },
+        {
+          "dayOffset": -3,
+          "label": "T-3",
+          "date": "Aug 29",
+          "price": 259.33,
+          "normalizedPrice": 99.4,
+          "benchmarkNormalizedPrice": 99.8
+        },
+        {
+          "dayOffset": -1,
+          "label": "T-1",
+          "date": "Aug 31",
+          "price": 260.9,
+          "normalizedPrice": 100,
+          "benchmarkNormalizedPrice": 100
+        },
+        {
+          "dayOffset": 0,
+          "label": "T0",
+          "date": "Sep 1",
+          "price": 267.16,
+          "normalizedPrice": 102.4,
+          "benchmarkNormalizedPrice": 100.2
+        },
+        {
+          "dayOffset": 1,
+          "label": "T+1",
+          "date": "Sep 2",
+          "price": 267.54,
+          "normalizedPrice": 102.54,
+          "benchmarkNormalizedPrice": 100.4
+        },
+        {
+          "dayOffset": 3,
+          "label": "T+3",
+          "date": "Sep 4",
+          "price": 267.91,
+          "normalizedPrice": 102.69,
+          "benchmarkNormalizedPrice": 100.6
+        },
+        {
+          "dayOffset": 5,
+          "label": "T+5",
+          "date": "Sep 6",
+          "price": 270.29,
+          "normalizedPrice": 103.6,
+          "benchmarkNormalizedPrice": 100.8
+        },
+        {
+          "dayOffset": 10,
+          "label": "T+10",
+          "date": "Sep 11",
+          "price": 270.76,
+          "normalizedPrice": 103.78,
+          "benchmarkNormalizedPrice": 101.1
+        }
+      ]
+    },
+    {
+      "id": "EPM-6",
+      "headline": "ITC Cigarette Segment in Q1: 81% Revenue Jump Fails To Prevent 35% EBIT Slide",
+      "publisher": "NDTV Profit",
+      "eventDate": "Jul 31, 2026",
+      "category": "EARNINGS",
+      "categoryLabel": "Financial Results / Earnings Execution",
+      "summary": "ITC Limited was cited in NDTV Profit: \"ITC Cigarette Segment in Q1: 81% Revenue Jump Fails To Prevent 35% EBIT Slide\". Evaluated for corporate impact and fundamental earnings transmission.",
+      "preEventPrice": 270.86,
+      "eventDayPrice": 282.78,
+      "postEventPrice": 287.11,
+      "immediateReturnPct": 0.04400797459942396,
+      "multiDayReturnPct": 0.059994092889315453,
+      "abnormalReturnPct": 0.03299409288931546,
+      "volumeSpikeMultiplier": 3.5,
+      "verdict": "Bullish Inflection",
+      "narrative": {
+        "whatHappened": "On Jul 31, 2026, ITC Limited disclosed material operational progress regarding financial results / earnings execution: \"ITC Cigarette Segment in Q1: 81% Revenue Jump Fails To Prevent 35% EBIT Slide\".",
+        "priceImpact": "The equity reacted with an immediate +4.4% session change on 3.5x baseline trading volume, expanding to a cumulative 5-day drift of +6.0% (+3.3% abnormal return vs. sector benchmark).",
+        "modelImplication": "Confirms operational delivery against baseline thesis; supports underlying revenue compounding trajectory without requiring negative risk premium adjustments in our DCF discount rate."
+      },
+      "priceTrajectory": [
+        {
+          "dayOffset": -5,
+          "label": "T-5",
+          "date": "Jul 26",
+          "price": 273.03,
+          "normalizedPrice": 100.8,
+          "benchmarkNormalizedPrice": 99.5
+        },
+        {
+          "dayOffset": -3,
+          "label": "T-3",
+          "date": "Jul 28",
+          "price": 271.94,
+          "normalizedPrice": 100.4,
+          "benchmarkNormalizedPrice": 99.8
+        },
+        {
+          "dayOffset": -1,
+          "label": "T-1",
+          "date": "Jul 30",
+          "price": 270.86,
+          "normalizedPrice": 100,
+          "benchmarkNormalizedPrice": 100
+        },
+        {
+          "dayOffset": 0,
+          "label": "T0",
+          "date": "Jul 31",
+          "price": 282.78,
+          "normalizedPrice": 104.4,
+          "benchmarkNormalizedPrice": 100.2
+        },
+        {
+          "dayOffset": 1,
+          "label": "T+1",
+          "date": "Aug 1",
+          "price": 284.85,
+          "normalizedPrice": 105.16,
+          "benchmarkNormalizedPrice": 100.4
+        },
+        {
+          "dayOffset": 3,
+          "label": "T+3",
+          "date": "Aug 3",
+          "price": 285.56,
+          "normalizedPrice": 105.43,
+          "benchmarkNormalizedPrice": 100.6
+        },
+        {
+          "dayOffset": 5,
+          "label": "T+5",
+          "date": "Aug 5",
+          "price": 287.11,
+          "normalizedPrice": 106,
+          "benchmarkNormalizedPrice": 100.8
+        },
+        {
+          "dayOffset": 10,
+          "label": "T+10",
+          "date": "Aug 10",
+          "price": 288.6,
+          "normalizedPrice": 106.55,
+          "benchmarkNormalizedPrice": 101.1
+        }
+      ]
+    }
+  ],
+  "masterReportFacts": {
+    "reportId": "REP-ITC.NS-MTPH6OEB",
+    "generatedAt": "2026-09-06T07:13:37.283Z",
+    "reportVersion": "2.1.0-ENTERPRISE",
+    "company": {
+      "ticker": "ITC.NS",
+      "name": "ITC Limited",
+      "sector": "Consumer Defensive",
+      "industry": "Tobacco",
+      "currency": "INR",
+      "exchange": "NSE",
+      "country": "India",
+      "description": "ITC Limited engages in the fast-moving consumer goods, paperboards, paper and packaging, and agri businesses in India and internationally. The company offers cigarettes and cigars; foods, including staples, spices, biscuits, confectionery and gums, snacks, noodles and pasta, beverages, dairy products, ready-to-eat meals, chocolates, coffee, and frozen foods; personal care products; education and stationery, such as balls, gels and roller pens, mechanical pencils, geometry boxes, erasers, sharpeners and rulers, wax crayons, plastic crayons, and sketch pens and oil pastels; safety matches; and agarbattis and dhoops under various brands, as well as operates a hotel under the ITC Grand Central name in Mumbai. It also provides virgin, recycled, coated barrier, cupstock base, liner, liquid packaging, antifungal, solid, and graphic boards, as well as specialty papers; surfacing, print base, barrier, overlay, and liner papers; plastic substitution products; and packaging products, including cartons, flexible, tobacco, and green packaging products. In addition, the company exports feed ingredients, food grains, marine products, processed fruits, coffee products, leaf tobacco products, and spices; and offers information technology services for the banking and financial services, healthcare, manufacturing, consumer goods, travel, and hospitality industries, as well as produces and commercializes seed potato technology products. Further, it provides property infrastructure maintenance; engineering, procurement and construction management and project management consultancy services; business consulting; and agro-forestry and other related services, as well as engages in the fabrication and assembly of machinery for tube filling, cartoning, wrapping, and conveyor solutions and engineering activities. ITC Limited was incorporated in 1910 and is headquartered in Kolkata, India.",
+      "reportingScale": "crore"
+    },
+    "market": {
+      "currentPrice": {
+        "value": 264.1,
+        "status": "valid",
+        "unit": "INR",
+        "source": "Yahoo Market Data",
+        "sourceType": "reported"
+      },
+      "sharesOutstanding": {
+        "shares": 12529782031,
+        "status": "valid",
+        "source": "Corporate Filings / Yahoo"
+      },
+      "marketCap": {
+        "value": 3309115434387.1,
+        "status": "valid",
+        "unit": "INR",
+        "source": "Calculated: CMP * Shares",
+        "sourceType": "derived"
+      },
+      "enterpriseValue": {
+        "value": 2832357228108,
+        "status": "valid",
+        "unit": "INR",
+        "source": "DCF Model",
+        "sourceType": "derived"
+      },
+      "beta": {
+        "value": null,
+        "status": "missing",
+        "unit": "x",
+        "source": "Market Regression",
+        "sourceType": "reported"
+      },
+      "week52High": {
+        "value": 426.4,
+        "status": "valid",
+        "unit": "INR",
+        "source": "52-Week Range",
+        "sourceType": "reported"
+      },
+      "week52Low": {
+        "value": 255.5,
+        "status": "valid",
+        "unit": "INR",
+        "source": "52-Week Range",
+        "sourceType": "reported"
+      },
+      "asOfDate": "2026-09-06T07:13:37.282Z"
+    },
+    "financials": {
+      "years": [
+        "FY2023",
+        "FY2024",
+        "FY2025",
+        "FY2026"
+      ],
+      "history": [
+        {
+          "year": "FY2023",
+          "revenue": {
+            "value": 702452200000,
+            "status": "valid",
+            "unit": "INR",
+            "source": "Audited Income Statement",
+            "sourceType": "reported"
+          },
+          "grossProfit": {
+            "value": 407847000000,
+            "status": "valid",
+            "unit": "INR",
+            "source": "Audited Income Statement",
+            "sourceType": "reported"
+          },
+          "ebitda": {
+            "value": 277673300000,
+            "status": "valid",
+            "unit": "INR",
+            "source": "Audited Income Statement",
+            "sourceType": "reported"
+          },
+          "operatingIncome": {
+            "value": 238967000000,
+            "status": "valid",
+            "unit": "INR",
+            "source": "Audited Income Statement",
+            "sourceType": "reported"
+          },
+          "netIncome": {
+            "value": 191916600000,
+            "status": "valid",
+            "unit": "INR",
+            "source": "Audited Income Statement",
+            "sourceType": "reported"
+          },
+          "totalDebt": {
+            "value": 3063400000,
+            "status": "valid",
+            "unit": "INR",
+            "source": "Balance Sheet",
+            "sourceType": "reported"
+          },
+          "cashAndEquivalents": {
+            "value": 4633500000,
+            "status": "valid",
+            "unit": "INR",
+            "source": "Balance Sheet",
+            "sourceType": "reported"
+          },
+          "netDebt": {
+            "value": -215672800000,
+            "status": "valid",
+            "unit": "INR",
+            "source": "Total Debt - Cash",
+            "sourceType": "derived"
+          },
+          "totalAssets": {
+            "value": 858829800000,
+            "status": "valid",
+            "unit": "INR",
+            "source": "Balance Sheet",
+            "sourceType": "reported"
+          },
+          "totalEquity": {
+            "value": 695387900000,
+            "status": "valid",
+            "unit": "INR",
+            "source": "Balance Sheet",
+            "sourceType": "reported"
+          },
+          "operatingCashFlow": {
+            "value": 188775500000,
+            "status": "valid",
+            "unit": "INR",
+            "source": "Cash Flow Statement",
+            "sourceType": "reported"
+          },
+          "capitalExpenditures": {
+            "value": 27429900000,
+            "status": "valid",
+            "unit": "INR",
+            "source": "Cash Flow Statement",
+            "sourceType": "reported"
+          },
+          "freeCashFlow": {
+            "value": 161345600000,
+            "status": "valid",
+            "unit": "INR",
+            "source": "CFO - Capex",
+            "sourceType": "derived"
+          },
+          "eps": {
+            "value": 15.46,
+            "status": "valid",
+            "unit": "INR",
+            "source": "Reported EPS",
+            "sourceType": "reported"
+          }
+        },
+        {
+          "year": "FY2024",
+          "revenue": {
+            "value": 673910400000,
+            "status": "valid",
+            "unit": "INR",
+            "source": "Audited Income Statement",
+            "sourceType": "reported"
+          },
+          "grossProfit": {
+            "value": 400452000000,
+            "status": "valid",
+            "unit": "INR",
+            "source": "Audited Income Statement",
+            "sourceType": "reported"
+          },
+          "ebitda": {
+            "value": 282557800000,
+            "status": "valid",
+            "unit": "INR",
+            "source": "Audited Income Statement",
+            "sourceType": "reported"
+          },
+          "operatingIncome": {
+            "value": 236694800000,
+            "status": "valid",
+            "unit": "INR",
+            "source": "Audited Income Statement",
+            "sourceType": "reported"
+          },
+          "netIncome": {
+            "value": 204587800000,
+            "status": "valid",
+            "unit": "INR",
+            "source": "Audited Income Statement",
+            "sourceType": "reported"
+          },
+          "totalDebt": {
+            "value": 3037300000,
+            "status": "valid",
+            "unit": "INR",
+            "source": "Balance Sheet",
+            "sourceType": "reported"
+          },
+          "cashAndEquivalents": {
+            "value": 6258900000,
+            "status": "valid",
+            "unit": "INR",
+            "source": "Balance Sheet",
+            "sourceType": "reported"
+          },
+          "netDebt": {
+            "value": -195894300000,
+            "status": "valid",
+            "unit": "INR",
+            "source": "Total Debt - Cash",
+            "sourceType": "derived"
+          },
+          "totalAssets": {
+            "value": 918261600000,
+            "status": "valid",
+            "unit": "INR",
+            "source": "Balance Sheet",
+            "sourceType": "reported"
+          },
+          "totalEquity": {
+            "value": 748899700000,
+            "status": "valid",
+            "unit": "INR",
+            "source": "Balance Sheet",
+            "sourceType": "reported"
+          },
+          "operatingCashFlow": {
+            "value": 171788600000,
+            "status": "valid",
+            "unit": "INR",
+            "source": "Cash Flow Statement",
+            "sourceType": "reported"
+          },
+          "capitalExpenditures": {
+            "value": 35625300000,
+            "status": "valid",
+            "unit": "INR",
+            "source": "Cash Flow Statement",
+            "sourceType": "reported"
+          },
+          "freeCashFlow": {
+            "value": 136163300000,
+            "status": "valid",
+            "unit": "INR",
+            "source": "CFO - Capex",
+            "sourceType": "derived"
+          },
+          "eps": {
+            "value": 16.38,
+            "status": "valid",
+            "unit": "INR",
+            "source": "Reported EPS",
+            "sourceType": "reported"
+          }
+        },
+        {
+          "year": "FY2025",
+          "revenue": {
+            "value": 746533200000,
+            "status": "valid",
+            "unit": "INR",
+            "source": "Audited Income Statement",
+            "sourceType": "reported"
+          },
+          "grossProfit": {
+            "value": 422772200000,
+            "status": "valid",
+            "unit": "INR",
+            "source": "Audited Income Statement",
+            "sourceType": "reported"
+          },
+          "ebitda": {
+            "value": 289225800000,
+            "status": "valid",
+            "unit": "INR",
+            "source": "Audited Income Statement",
+            "sourceType": "reported"
+          },
+          "operatingIncome": {
+            "value": 241931300000,
+            "status": "valid",
+            "unit": "INR",
+            "source": "Audited Income Statement",
+            "sourceType": "reported"
+          },
+          "netIncome": {
+            "value": 347466300000,
+            "status": "valid",
+            "unit": "INR",
+            "source": "Audited Income Statement",
+            "sourceType": "reported"
+          },
+          "totalDebt": {
+            "value": 2848400000,
+            "status": "valid",
+            "unit": "INR",
+            "source": "Balance Sheet",
+            "sourceType": "reported"
+          },
+          "cashAndEquivalents": {
+            "value": 6200000000,
+            "status": "valid",
+            "unit": "INR",
+            "source": "Balance Sheet",
+            "sourceType": "reported"
+          },
+          "netDebt": {
+            "value": -197501800000,
+            "status": "valid",
+            "unit": "INR",
+            "source": "Total Debt - Cash",
+            "sourceType": "derived"
+          },
+          "totalAssets": {
+            "value": 880906800000,
+            "status": "valid",
+            "unit": "INR",
+            "source": "Balance Sheet",
+            "sourceType": "reported"
+          },
+          "totalEquity": {
+            "value": 703979400000,
+            "status": "valid",
+            "unit": "INR",
+            "source": "Balance Sheet",
+            "sourceType": "reported"
+          },
+          "operatingCashFlow": {
+            "value": 176270400000,
+            "status": "valid",
+            "unit": "INR",
+            "source": "Cash Flow Statement",
+            "sourceType": "reported"
+          },
+          "capitalExpenditures": {
+            "value": 22787000000,
+            "status": "valid",
+            "unit": "INR",
+            "source": "Cash Flow Statement",
+            "sourceType": "reported"
+          },
+          "freeCashFlow": {
+            "value": 153483400000,
+            "status": "valid",
+            "unit": "INR",
+            "source": "CFO - Capex",
+            "sourceType": "derived"
+          },
+          "eps": {
+            "value": 27.75,
+            "status": "valid",
+            "unit": "INR",
+            "source": "Reported EPS",
+            "sourceType": "reported"
+          }
+        },
+        {
+          "year": "FY2026",
+          "revenue": {
+            "value": 782132800000,
+            "status": "valid",
+            "unit": "INR",
+            "source": "Audited Income Statement",
+            "sourceType": "reported"
+          },
+          "grossProfit": {
+            "value": 452118200000,
+            "status": "valid",
+            "unit": "INR",
+            "source": "Audited Income Statement",
+            "sourceType": "reported"
+          },
+          "ebitda": {
+            "value": 298290900000,
+            "status": "valid",
+            "unit": "INR",
+            "source": "Audited Income Statement",
+            "sourceType": "reported"
+          },
+          "operatingIncome": {
+            "value": 255955400000,
+            "status": "valid",
+            "unit": "INR",
+            "source": "Audited Income Statement",
+            "sourceType": "reported"
+          },
+          "netIncome": {
+            "value": 206894700000,
+            "status": "valid",
+            "unit": "INR",
+            "source": "Audited Income Statement",
+            "sourceType": "reported"
+          },
+          "totalDebt": {
+            "value": 23993600000,
+            "status": "valid",
+            "unit": "INR",
+            "source": "Balance Sheet",
+            "sourceType": "reported"
+          },
+          "cashAndEquivalents": {
+            "value": 6434600000,
+            "status": "valid",
+            "unit": "INR",
+            "source": "Balance Sheet",
+            "sourceType": "reported"
+          },
+          "netDebt": {
+            "value": -210914100000,
+            "status": "valid",
+            "unit": "INR",
+            "source": "Total Debt - Cash",
+            "sourceType": "derived"
+          },
+          "totalAssets": {
+            "value": 937923800000,
+            "status": "valid",
+            "unit": "INR",
+            "source": "Balance Sheet",
+            "sourceType": "reported"
+          },
+          "totalEquity": {
+            "value": 728730200000,
+            "status": "valid",
+            "unit": "INR",
+            "source": "Balance Sheet",
+            "sourceType": "reported"
+          },
+          "operatingCashFlow": {
+            "value": 184643100000,
+            "status": "valid",
+            "unit": "INR",
+            "source": "Cash Flow Statement",
+            "sourceType": "reported"
+          },
+          "capitalExpenditures": {
+            "value": 21828900000,
+            "status": "valid",
+            "unit": "INR",
+            "source": "Cash Flow Statement",
+            "sourceType": "reported"
+          },
+          "freeCashFlow": {
+            "value": 162814200000,
+            "status": "valid",
+            "unit": "INR",
+            "source": "CFO - Capex",
+            "sourceType": "derived"
+          },
+          "eps": {
+            "value": 16.51,
+            "status": "valid",
+            "unit": "INR",
+            "source": "Reported EPS",
+            "sourceType": "reported"
+          }
+        }
+      ],
+      "latestYear": {
+        "year": "FY2026",
+        "revenue": {
+          "value": 782132800000,
+          "status": "valid",
+          "unit": "INR",
+          "source": "Audited Income Statement",
+          "sourceType": "reported"
+        },
+        "grossProfit": {
+          "value": 452118200000,
+          "status": "valid",
+          "unit": "INR",
+          "source": "Audited Income Statement",
+          "sourceType": "reported"
+        },
+        "ebitda": {
+          "value": 298290900000,
+          "status": "valid",
+          "unit": "INR",
+          "source": "Audited Income Statement",
+          "sourceType": "reported"
+        },
+        "operatingIncome": {
+          "value": 255955400000,
+          "status": "valid",
+          "unit": "INR",
+          "source": "Audited Income Statement",
+          "sourceType": "reported"
+        },
+        "netIncome": {
+          "value": 206894700000,
+          "status": "valid",
+          "unit": "INR",
+          "source": "Audited Income Statement",
+          "sourceType": "reported"
+        },
+        "totalDebt": {
+          "value": 23993600000,
+          "status": "valid",
+          "unit": "INR",
+          "source": "Balance Sheet",
+          "sourceType": "reported"
+        },
+        "cashAndEquivalents": {
+          "value": 6434600000,
+          "status": "valid",
+          "unit": "INR",
+          "source": "Balance Sheet",
+          "sourceType": "reported"
+        },
+        "netDebt": {
+          "value": -210914100000,
+          "status": "valid",
+          "unit": "INR",
+          "source": "Total Debt - Cash",
+          "sourceType": "derived"
+        },
+        "totalAssets": {
+          "value": 937923800000,
+          "status": "valid",
+          "unit": "INR",
+          "source": "Balance Sheet",
+          "sourceType": "reported"
+        },
+        "totalEquity": {
+          "value": 728730200000,
+          "status": "valid",
+          "unit": "INR",
+          "source": "Balance Sheet",
+          "sourceType": "reported"
+        },
+        "operatingCashFlow": {
+          "value": 184643100000,
+          "status": "valid",
+          "unit": "INR",
+          "source": "Cash Flow Statement",
+          "sourceType": "reported"
+        },
+        "capitalExpenditures": {
+          "value": 21828900000,
+          "status": "valid",
+          "unit": "INR",
+          "source": "Cash Flow Statement",
+          "sourceType": "reported"
+        },
+        "freeCashFlow": {
+          "value": 162814200000,
+          "status": "valid",
+          "unit": "INR",
+          "source": "CFO - Capex",
+          "sourceType": "derived"
+        },
+        "eps": {
+          "value": 16.51,
+          "status": "valid",
+          "unit": "INR",
+          "source": "Reported EPS",
+          "sourceType": "reported"
+        }
+      }
+    },
+    "ratios": {
+      "pe": {
+        "value": 15.996365838885524,
+        "status": "valid",
+        "unit": "x",
+        "source": "P/E Ratio",
+        "sourceType": "derived"
+      },
+      "pb": {
+        "value": 4.540819853228396,
+        "status": "valid",
+        "unit": "x",
+        "source": "P/B Ratio",
+        "sourceType": "derived"
+      },
+      "evToEbitda": {
+        "value": 11.152172459190341,
+        "status": "valid",
+        "unit": "x",
+        "source": "EV/EBITDA",
+        "sourceType": "derived"
+      },
+      "roe": {
+        "value": 0.28391124726270434,
+        "status": "valid",
+        "unit": "%",
+        "source": "Return on Equity",
+        "sourceType": "derived"
+      },
+      "roce": {
+        "value": 0.3319564682548277,
+        "status": "valid",
+        "unit": "%",
+        "source": "Return on Capital Employed",
+        "sourceType": "derived"
+      },
+      "roa": {
+        "value": 0.22058796247626938,
+        "status": "valid",
+        "unit": "%",
+        "source": "Return on Assets",
+        "sourceType": "derived"
+      },
+      "grossMargin": {
+        "value": 0.5780580995963857,
+        "status": "valid",
+        "unit": "%",
+        "source": "Gross Margin",
+        "sourceType": "derived"
+      },
+      "ebitdaMargin": {
+        "value": 0.38138139712335295,
+        "status": "valid",
+        "unit": "%",
+        "source": "EBITDA Margin",
+        "sourceType": "derived"
+      },
+      "netMargin": {
+        "value": 0.26452630550719775,
+        "status": "valid",
+        "unit": "%",
+        "source": "Net Margin",
+        "sourceType": "derived"
+      },
+      "debtToEquity": {
+        "value": 0.03292521704191757,
+        "status": "valid",
+        "unit": "x",
+        "source": "Debt to Equity",
+        "sourceType": "derived"
+      },
+      "netDebtToEbitda": {
+        "value": 0.05886535593274887,
+        "status": "valid",
+        "unit": "x",
+        "source": "Net Debt to EBITDA",
+        "sourceType": "derived"
+      },
+      "currentRatio": {
+        "value": 3.0387480995992755,
+        "status": "valid",
+        "unit": "x",
+        "source": "Current Ratio",
+        "sourceType": "derived"
+      },
+      "interestCoverage": {
+        "value": 300.52295409181636,
+        "status": "valid",
+        "unit": "x",
+        "source": "Interest Coverage",
+        "sourceType": "derived"
+      }
+    },
+    "dupont": {
+      "year": "FY2026",
+      "netProfitMargin": 0.26452630550719775,
+      "assetTurnover": 0.8338980202869359,
+      "equityMultiplier": 1.2870659127342328,
+      "roe": 0.2839112472627044,
+      "roa": 0.2205879624762694
+    },
+    "valuation": {
+      "model": "PB_RESIDUAL_INCOME",
+      "status": "valid",
+      "fairValue": {
+        "value": 226.05,
+        "status": "valid",
+        "unit": "INR",
+        "source": "Residual Income / Justified P/B Model",
+        "sourceType": "derived"
+      },
+      "upside": {
+        "value": -0.14407421431276035,
+        "status": "valid",
+        "unit": "%",
+        "source": "Modeled Upside vs CMP",
+        "sourceType": "derived"
+      },
+      "wacc": 0.1225,
+      "terminalGrowth": 0.05,
+      "bridge": {
+        "sumPvFcff": 0,
+        "pvTerminalValue": 2832357228108,
+        "enterpriseValue": 2832357228108,
+        "netDebt": 0,
+        "equityValue": 2832357228108,
+        "sharesOutstanding": 12529782031,
+        "fairValuePerShare": 226.05
+      },
+      "assumptions": {
+        "revenueGrowthRates": [
+          0.15,
+          0.14,
+          0.13,
+          0.12,
+          0.1
+        ],
+        "ebitMargins": [
+          0.25,
+          0.25,
+          0.25,
+          0.25,
+          0.25
+        ],
+        "taxRate": 0.25,
+        "wacc": 0.1225,
+        "terminalGrowthRate": 0.05
+      },
+      "diagnostics": []
+    },
+    "scenarios": {
+      "currentPrice": 264.1,
+      "bull": {
+        "name": "bull",
+        "targetPrice": 282.56,
+        "impliedReturn": 0.0699,
+        "probability": 0.25,
+        "description": "Optimistic macro backdrop, accelerated market share gains, and operating margin expansion."
+      },
+      "base": {
+        "name": "base",
+        "targetPrice": 226.05,
+        "impliedReturn": -0.1441,
+        "probability": 0.5,
+        "description": "Base case DCF projection reflecting normalized growth and historical capital efficiency."
+      },
+      "bear": {
+        "name": "bear",
+        "targetPrice": 169.54,
+        "impliedReturn": -0.358,
+        "probability": 0.25,
+        "description": "Downside macroeconomic contraction, margin compression from competitive pricing pressure, or execution delays."
+      },
+      "expectedPrice": 226.05,
+      "weightedReturn": -0.1441,
+      "status": "valid",
+      "diagnostics": []
+    },
+    "peers": {
+      "totalPeers": 3,
+      "validPeers": 3,
+      "peerCoverage": 1,
+      "coverageStatus": "adequate",
+      "peerList": [
+        {
+          "ticker": "HINDUNILVR.NS",
+          "name": "Hindustan Unilever Limited",
+          "marketCap": 4636683534336,
+          "pe": 43.86308,
+          "evToEbitda": 30.875,
+          "roe": 0.21688617212055766
+        },
+        {
+          "ticker": "NESTLEIND.NS",
+          "name": "Nestlé India Limited",
+          "marketCap": 2719887392768,
+          "pe": 71.417725,
+          "evToEbitda": 48.378,
+          "roe": 0.7385110122274988
+        },
+        {
+          "ticker": "BRITANNIA.NS",
+          "name": "Britannia Industries Limited",
+          "marketCap": 1228789514240,
+          "pe": 47.170597,
+          "evToEbitda": 33.748,
+          "roe": 0.5101270718753244
+        }
+      ]
+    },
+    "moat": {
+      "rating": "Wide",
+      "trend": "Stable",
+      "score": 90,
+      "confidence": 0.9,
+      "primarySources": [
+        "Sustained High Return on Capital",
+        "Pricing Power"
+      ],
+      "drivers": [
+        "Consistent economic value addition with historical ROCE (32.4%) exceeding WACC (12.3%) by over 1,000 bps.",
+        "Resilient gross margins (57%–59%) signify strong underlying pricing power and input cost pass-through capability."
+      ],
+      "rationale": "Wide economic moat (stable trend). Consistent economic value addition with historical ROCE (32.4%) exceeding WACC (12.3%) by over 1,000 bps. Resilient gross margins (57%–59%) signify strong underlying pricing power and input cost pass-through capability."
+    },
+    "risks": {
+      "uncertainty": {
+        "rating": "Moderate",
+        "score": 35,
+        "isValuationValid": true,
+        "drivers": [],
+        "rationale": "Moderate operational and valuation uncertainty (Score: 35/100). "
+      },
+      "solvencyRisk": "Low",
+      "primaryRisks": [
+        "Cost of capital sensitivity: 100 bps WACC increase impacts valuation target.",
+        "Competitive industry dynamics and margin cyclicality."
+      ]
+    },
+    "recommendation": {
+      "rating": "SELL",
+      "upside": -0.14407421431276035,
+      "status": "valid",
+      "thresholds": {
+        "buyThreshold": 0.12,
+        "sellThreshold": -0.12
+      },
+      "reasoning": "Modeled fair value yields -14.4% downside below market price (threshold: <-12%)."
+    },
+    "provenance": {
+      "currentPrice": "REPORTED",
+      "sharesOutstanding": "REPORTED",
+      "marketCap": "DERIVED",
+      "enterpriseValue": "DERIVED",
+      "fairValue": "DERIVED",
+      "upside": "DERIVED",
+      "rating": "DERIVED",
+      "wacc": "ASSUMPTION",
+      "terminalGrowth": "ASSUMPTION",
+      "scenarios": "DERIVED",
+      "moat": "DERIVED",
+      "uncertainty": "DERIVED"
+    },
+    "quality": {
+      "score": 100,
+      "historicalCoverage": "High",
+      "peerCoverage": "High",
+      "valuationConfidence": "High",
+      "sourceCompleteness": "High",
+      "issues": []
+    }
+  },
+  "calibration": {
+    "sectorZScore": -1.59,
+    "sectorPercentile": 0.056,
+    "sectorRankLabel": "Bottom 6% (Sector Underperform)",
+    "decile": 10,
+    "sectorAdjustedUpside": -0.2541,
+    "sectorRelativeRating": "SELL",
+    "informationCoefficient": 1,
+    "calibrationConfidence": "High",
+    "diagnostics": []
+  }
+}

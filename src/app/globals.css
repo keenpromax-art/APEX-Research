@@ -1,0 +1,328 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+:root {
+  /* Linear / Stripe / Fintech Inspired Palette (from awesome-design-md) */
+  --canvas: #07080a;
+  --surface-0: #0b0c10;
+  --surface-1: #101217;
+  --surface-2: #15181f;
+  --surface-3: #1a1e27;
+  --surface-hover: #1e222d;
+  --surface-elevated: #222733;
+
+  /* Hairlines & Dividers */
+  --hairline: #1f232c;
+  --hairline-subtle: rgba(255, 255, 255, 0.07);
+  --hairline-strong: #2c3240;
+  --hairline-accent: rgba(94, 106, 210, 0.4);
+
+  /* Typography */
+  --ink: #f4f6f8;
+  --ink-secondary: #c2c7d0;
+  --ink-muted: #828a99;
+  --ink-subtle: #505663;
+
+  /* Institutional Accents */
+  --primary: #5e6ad2;
+  --primary-hover: #717de6;
+  --primary-subtle: rgba(94, 106, 210, 0.12);
+
+  /* Financial Semantics */
+  --bullish: #10b981;
+  --bullish-bg: rgba(16, 185, 129, 0.08);
+  --bullish-border: rgba(16, 185, 129, 0.22);
+
+  --bearish: #f43f5e;
+  --bearish-bg: rgba(244, 63, 94, 0.08);
+  --bearish-border: rgba(244, 63, 94, 0.22);
+
+  --neutral: #f59e0b;
+  --neutral-bg: rgba(245, 158, 11, 0.08);
+  --neutral-border: rgba(245, 158, 11, 0.22);
+
+  --cyan: #06b6d4;
+
+  /* Font Families */
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+  /* Radius (Crisp, technical, non-pill) */
+  --radius-xs: 3px;
+  --radius-sm: 5px;
+  --radius-md: 7px;
+  --radius-lg: 10px;
+  --radius-xl: 14px;
+}
+
+html {
+  font-size: 15px;
+  scroll-behavior: smooth;
+  color-scheme: dark;
+}
+
+body {
+  font-family: var(--font-sans);
+  background-color: var(--canvas);
+  color: var(--ink);
+  line-height: 1.5;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  letter-spacing: -0.01em;
+  background-image: 
+    radial-gradient(ellipse 100% 40% at 50% -10%, rgba(94, 106, 210, 0.06), transparent 70%),
+    linear-gradient(to bottom, transparent 95%, rgba(0,0,0,0.5) 100%);
+  background-attachment: fixed;
+}
+
+/* ── Typography Defaults ── */
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-sans);
+  font-weight: 600;
+  color: var(--ink);
+  letter-spacing: -0.025em;
+  line-height: 1.25;
+}
+
+a {
+  color: var(--ink);
+  text-decoration: none;
+  transition: color 0.15s ease;
+}
+
+a:hover {
+  color: var(--primary-hover);
+}
+
+/* ── Tabular Numerals & Monospace ── */
+.num, [data-num] {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.03em;
+}
+
+/* ── Structural Panel Components (Linear style) ── */
+.panel {
+  background: var(--surface-1);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-lg);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--hairline);
+  background: var(--surface-0);
+  border-top-left-radius: inherit;
+  border-top-right-radius: inherit;
+}
+
+.panel-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.panel-body {
+  padding: 20px;
+}
+
+/* ── Buttons (Linear & Stripe aesthetic) ── */
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: #ffffff;
+  color: #07080a;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 16px;
+  border-radius: var(--radius-sm);
+  border: 1px solid #ffffff;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: #e6e8eb;
+  border-color: #e6e8eb;
+  box-shadow: 0 2px 6px rgba(255, 255, 255, 0.1);
+  text-decoration: none;
+}
+
+.btn-primary:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  background: var(--surface-2);
+  border: 1px solid var(--hairline);
+  color: var(--ink-secondary);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 500;
+  padding: 8px 15px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--ink);
+  border-color: var(--hairline-strong);
+  text-decoration: none;
+}
+
+.btn-secondary:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ── Institutional Badges ── */
+.badge-solid {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: var(--radius-xs);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.badge-buy {
+  background: var(--bullish-bg);
+  color: var(--bullish);
+  border: 1px solid var(--bullish-border);
+}
+
+.badge-sell {
+  background: var(--bearish-bg);
+  color: var(--bearish);
+  border: 1px solid var(--bearish-border);
+}
+
+.badge-hold {
+  background: var(--neutral-bg);
+  color: var(--neutral);
+  border: 1px solid var(--neutral-border);
+}
+
+.badge-neutral {
+  background: var(--surface-2);
+  color: var(--ink-muted);
+  border: 1px solid var(--hairline);
+}
+
+/* ── Financial Tables (Stripe & Koyfin tabular clarity) ── */
+.fin-table-container {
+  width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-md);
+  background: var(--surface-1);
+}
+
+.fin-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  text-align: left;
+}
+
+.fin-table th {
+  padding: 10px 14px;
+  background: var(--surface-0);
+  color: var(--ink-muted);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 1px solid var(--hairline);
+  white-space: nowrap;
+}
+
+.fin-table td {
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--hairline-subtle);
+  color: var(--ink-secondary);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.fin-table th.wrap-cell,
+.fin-table td.wrap-cell {
+  white-space: normal !important;
+  word-break: break-word;
+  overflow-wrap: break-word;
+}
+
+.fin-table tr:hover td {
+  background: var(--surface-hover);
+  color: var(--ink);
+}
+
+.fin-table tr:last-child td {
+  border-bottom: none;
+}
+
+.fin-table .row-header {
+  font-family: var(--font-sans);
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.fin-table .align-right {
+  text-align: right;
+}
+
+/* ── Scrollbars & Selection ── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--canvas);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--hairline-strong);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--ink-subtle);
+}
+
+::selection {
+  background: rgba(94, 106, 210, 0.35);
+  color: #ffffff;
+}

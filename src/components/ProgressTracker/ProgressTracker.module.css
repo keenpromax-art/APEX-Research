@@ -1,0 +1,410 @@
+.container {
+  width: 100%;
+  max-width: 560px;
+  margin: 0 auto;
+  background: var(--surface-1);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+}
+
+.progressBar {
+  width: 100%;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 999px;
+  overflow: hidden;
+  margin-bottom: 12px;
+}
+
+.progressFill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--primary) 0%, #818cf8 100%);
+  border-radius: 999px;
+  transition: width 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: 0 0 12px rgba(94, 106, 210, 0.5);
+}
+
+.progressHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  margin-bottom: 20px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.progressStatus {
+  color: var(--ink-muted);
+  font-family: var(--font-mono);
+  letter-spacing: 0.02em;
+}
+
+.progressPercent {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--primary-light);
+  font-variant-numeric: tabular-nums;
+}
+
+.steps {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.step {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  border: 1px solid transparent;
+  transition: all 0.15s ease;
+}
+
+.stepIndex {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--hairline);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink-faint);
+  flex-shrink: 0;
+  transition: all 0.15s ease;
+}
+
+.stepLabel {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink-muted);
+  flex: 1;
+  transition: color 0.15s;
+}
+
+/* Done state */
+.stepDone {
+  background: rgba(16, 185, 129, 0.04);
+  border-color: rgba(16, 185, 129, 0.15);
+}
+
+.stepDone .stepIndex {
+  background: rgba(16, 185, 129, 0.15);
+  border-color: rgba(16, 185, 129, 0.3);
+  color: var(--bullish);
+}
+
+.stepDone .stepLabel {
+  color: var(--ink-secondary);
+}
+
+.doneTag {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--bullish);
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.25);
+  padding: 2px 6px;
+  border-radius: 3px;
+}
+
+/* Active state */
+.stepActive {
+  background: rgba(94, 106, 210, 0.08);
+  border-color: rgba(94, 106, 210, 0.3);
+}
+
+.stepActive .stepIndex {
+  background: rgba(94, 106, 210, 0.2);
+  border-color: var(--primary);
+  color: #fff;
+}
+
+.stepActive .stepLabel {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.liveTag {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--primary-light);
+  background: rgba(94, 106, 210, 0.15);
+  border: 1px solid rgba(94, 106, 210, 0.35);
+  padding: 2px 6px;
+  border-radius: 3px;
+  animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+/* Pending state */
+.stepPending {
+  opacity: 0.45;
+}
+
+.spinner {
+  display: inline-block;
+  animation: spin 1s linear infinite;
+}
+
+.stepWrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ── AI Council Sub-Progress Checkpoints ── */
+.subProgressContainer {
+  margin: 4px 0 8px 36px;
+  padding: 12px 14px;
+  background: rgba(8, 10, 15, 0.65);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  animation: fadeIn 0.25s ease-out;
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.subProgressHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.subProgressHeaderLeft {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.subProgressPulse {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--primary);
+  box-shadow: 0 0 8px var(--primary);
+  animation: pulse 1.5s infinite;
+}
+
+.subProgressTitle {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--ink-secondary);
+  text-transform: uppercase;
+}
+
+.subProgressBadge {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--primary-light);
+  background: rgba(94, 106, 210, 0.15);
+  border: 1px solid rgba(94, 106, 210, 0.3);
+  padding: 2px 7px;
+  border-radius: 3px;
+  letter-spacing: 0.02em;
+}
+
+.subSteps {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.subStep {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.015);
+  border: 1px solid transparent;
+  transition: all 0.2s ease;
+}
+
+.subStepLeft {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+
+.subStepIndex {
+  width: 20px;
+  height: 20px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--hairline);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--ink-faint);
+  flex-shrink: 0;
+  transition: all 0.2s ease;
+}
+
+.subCheck {
+  color: var(--bullish);
+  font-weight: 800;
+  font-size: 11px;
+}
+
+.subSpinner {
+  display: inline-block;
+  animation: spin 1s linear infinite;
+  color: var(--primary-light);
+  font-size: 11px;
+}
+
+.subStepText {
+  display: flex;
+  flex-direction: column;
+  text-align: left;
+  min-width: 0;
+}
+
+.subStepName {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ink-muted);
+  line-height: 1.25;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.subStepRole {
+  font-size: 10px;
+  color: var(--ink-faint);
+  font-family: var(--font-mono);
+  line-height: 1.2;
+}
+
+/* Done sub-step */
+.subStepDone {
+  background: rgba(16, 185, 129, 0.04);
+  border-color: rgba(16, 185, 129, 0.16);
+}
+
+.subStepDone .subStepIndex {
+  background: rgba(16, 185, 129, 0.15);
+  border-color: rgba(16, 185, 129, 0.35);
+  color: var(--bullish);
+}
+
+.subStepDone .subStepName {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+/* Active sub-step */
+.subStepActive {
+  background: rgba(94, 106, 210, 0.08);
+  border-color: rgba(94, 106, 210, 0.28);
+}
+
+.subStepActive .subStepIndex {
+  background: rgba(94, 106, 210, 0.2);
+  border-color: var(--primary);
+  color: #fff;
+}
+
+.subStepActive .subStepName {
+  color: #fff;
+  font-weight: 600;
+}
+
+/* Pending sub-step */
+.subStepPending {
+  opacity: 0.5;
+}
+
+/* Sub-step Tags */
+.subStepStatus {
+  flex-shrink: 0;
+}
+
+.subStepTag {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 2px 6px;
+  border-radius: 3px;
+  display: inline-block;
+}
+
+.subTagDone {
+  color: var(--bullish);
+  background: rgba(16, 185, 129, 0.12);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.subTagRunning {
+  color: var(--primary-light);
+  background: rgba(94, 106, 210, 0.18);
+  border: 1px solid rgba(94, 106, 210, 0.4);
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+.subTagVerifying {
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.16);
+  border: 1px solid rgba(56, 189, 248, 0.38);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+.subTagPending {
+  color: var(--ink-faint);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.subStepAuditNote {
+  font-size: 9.5px;
+  color: #34d399;
+  font-family: var(--font-mono);
+  margin-top: 2px;
+  line-height: 1.2;
+}

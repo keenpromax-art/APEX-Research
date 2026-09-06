@@ -1,0 +1,53 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Next.js build output
+.next/
+out/
+build/
+dist/
+
+# Cloudflare / OpenNext build
+.open-next/
+.wrangler/
+
+# Environment files (NEVER commit API keys or secrets!)
+.env
+.env*.local
+.env.local
+.env.production.local
+.env.development.local
+.env.test.local
+
+# Debug & Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+ehthumbs.db
+
+# IDE & Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*.sublime-workspace
+
+# TypeScript
+*.tsbuildinfo
+
+# Python artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Generated Test PDFs & Temporary Artifacts
+*.pdf
+tmp/
