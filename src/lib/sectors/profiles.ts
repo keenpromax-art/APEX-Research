@@ -238,7 +238,7 @@ export const INTERNET_RETAIL_PROFILE: SectorProfile = {
     "Consumer Incentive Spend",
     "App Active Users / Frequency"
   ],
-  preferredValuationModels: ["EV_EBITDA", "FCFF_DCF", "MULTIPLES_EV_GMV", "MULTIPLES_PE"],
+  preferredValuationModels: ["EV_EBITDA", "FCFF_DCF", "MULTIPLES_PE"],
   financialMetrics: ["GMV", "Revenue", "Order Fulfillment Cost", "Marketing & Incentive Spend", "EBITDA", "Free Cash Flow"],
   riskCategories: ["Delivery Partner Supply Scarcity", "Regulation on Gig Worker Benefits", "Quick Commerce Margin Squeeze", "Food Delivery Discount War"],
   moatDrivers: ["Network effects in order density", "Last-mile logistics efficiency", "Dual food delivery & quick commerce ecosystem"],
@@ -249,7 +249,7 @@ export const INTERNET_RETAIL_PROFILE: SectorProfile = {
     "iconic consumer brand", "multi-tier retail distribution", "fmcg", "modern trade"
   ],
   isFinancialInstitution: false,
-  standardMarginMetric: "Take Rate"
+  standardMarginMetric: "EBITDA Margin"
 };
 
 export const RENEWABLE_ENERGY_PROFILE: SectorProfile = {
