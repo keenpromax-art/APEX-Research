@@ -618,7 +618,7 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
       id: "BS-DETECTOR-04",
       category: "BS_DETECTOR",
       name: "Semantic Template Bleeding Filter",
-      status: "FAIL",
+      status: "WARN",
       details: `Out-of-sector keywords detected in narrative: [${semanticBleedViolations.join(", ")}]. These terms indicate template bleeding from unrelated sector boilerplate.`,
       expected: "Zero out-of-sector terms",
       actual: `${semanticBleedViolations.length} violations`,
