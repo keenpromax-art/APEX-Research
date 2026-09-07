@@ -80,6 +80,10 @@ export const BLEED_REPLACEMENTS: Record<string, string> = {
 };
 
 export const SEMANTIC_BLEED_RULES: { sectors: string[]; blocked: string[] }[] = [
+  // Internet platforms (Meta etc.) match "communication"/"internet" sector strings:
+  // block carrier + FMCG boilerplate. NOTE: "arpu" is deliberately NOT blocked here —
+  // digital-advertising ARPU (per DAU/MAU) is a legitimate platform KPI.
+  { sectors: ["internet content", "social media", "digital advertising", "interactive media", "family of apps"], blocked: ["spectrum auction", "spectrum", "4g/5g", "tower deployment", "tower tenancy", "telecom towers", "subscriber churn", "agr dues", "copra", "palm oil procurement", "packaged goods", "personal care", "brand recall", "iconic consumer brand", "multi-tier retail distribution", "fmcg", "modern trade", "casa", "nim", "gnpa", "clinical trial", "wafer fab", "refinery throughput", "crack spread", "dark stores", "gross merchandise value"] },
   { sectors: ["telecom", "communication", "wireless", "internet", "restaurants"], blocked: ["proprietary silicon", "custom neural engine", "wafer fabrication", "foundry capacity", "us fda", "cgmp", "iso 13485"] },
   { sectors: ["pharma", "health", "biotech", "drug"], blocked: ["spectrum auction", "arpu", "tower tenancy", "dark store", "dark stores", "ride hailing", "proprietary silicon"] },
   { sectors: ["consumer", "fmcg", "food", "beverage", "retail"], blocked: ["proprietary silicon", "custom neural engine", "spectrum auction", "agr dues", "clinical trial phase"] },
@@ -94,11 +98,12 @@ export const SEMANTIC_BLEED_RULES: { sectors: string[]; blocked: string[] }[] = 
 export function sanitizeSectorBleed<T>(
   data: T,
   sector?: string,
-  industry?: string
+  industry?: string,
+  description?: string
 ): T {
   if (!data) return data;
-  const sectorLower = `${sector || ""} ${industry || ""}`.toLowerCase();
-  const secProf = getSectorProfile(sector || "", industry || "");
+  const sectorLower = `${sector || ""} ${industry || ""} ${description || ""}`.toLowerCase();
+  const secProf = getSectorProfile(sector || "", industry || "", description || "");
 
   const blockedTerms = new Set<string>();
 

@@ -609,7 +609,13 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
 
   // BS-DETECTOR-04: Semantic Template Bleeding
   // Scan for out-of-sector keywords that indicate template bleeding
+  // NOTE: the internet-platform rule MUST come first: "Communication Services /
+  // Internet Content" matches both telecom-ish ("communication") and platform
+  // substrings, and only the first matching rule is evaluated (break below).
+  // "arpu" is deliberately NOT blocked for platforms — digital-advertising ARPU
+  // per DAU/MAU is a legitimate internet-platform KPI.
   const SEMANTIC_BLEED_RULES: { sectors: string[]; blocked: string[] }[] = [
+    { sectors: ["internet content", "social media", "digital advertising", "interactive media", "family of apps"], blocked: ["spectrum auction", "spectrum", "tower deployment", "tower tenancy", "telecom towers", "subscriber churn", "4g/5g", "agr dues", "copra", "palm oil procurement", "packaged goods", "personal care", "brand recall", "iconic consumer brand", "multi-tier retail distribution", "fmcg", "modern trade", "casa", "casa ratio", "nim", "gnpa", "clinical trial", "wafer fab", "wafer fabrication", "foundry capacity", "refinery throughput", "crack spread", "dark stores", "dark store", "gross merchandise value", "proprietary silicon", "custom neural engine", "us fda", "cgmp", "iso 13485"] },
     { sectors: ["telecom", "communication", "wireless", "internet", "restaurants"], blocked: ["proprietary silicon", "custom neural engine", "wafer fabrication", "foundry capacity", "us fda", "cgmp", "iso 13485"] },
     { sectors: ["pharma", "health", "biotech", "drug"], blocked: ["spectrum auction", "arpu", "tower tenancy", "dark store", "ride hailing", "proprietary silicon"] },
     { sectors: ["internet retail", "food delivery", "quick commerce", "hyperlocal", "marketplace", "platform"], blocked: ["copra", "palm oil procurement", "packaged goods", "personal care", "brand recall", "iconic consumer brand", "multi-tier retail distribution", "fmcg", "modern trade", "spectrum auction", "agr dues", "clinical trial phase", "proprietary silicon", "custom neural engine", "wafer fabrication", "foundry capacity", "us fda", "cgmp", "iso 13485"] },

@@ -252,6 +252,44 @@ export const INTERNET_RETAIL_PROFILE: SectorProfile = {
   standardMarginMetric: "EBITDA Margin"
 };
 
+export const INTERNET_PLATFORM_PROFILE: SectorProfile = {
+  id: "internet-platform",
+  name: "Internet Platform, Social Media & Digital Advertising",
+  allowedKPIs: [
+    "Family of Apps Advertising Revenue Growth",
+    "Average Revenue Per User (ARPU) - Digital Advertising",
+    "Daily Active Users (DAU)",
+    "Monthly Active Users (MAU)",
+    "Ad Impressions Growth",
+    "Average Price per Ad Growth",
+    "Operating Margin",
+    "Free Cash Flow Conversion",
+    "Reality Labs Operating Loss",
+    "Data Center & AI Infrastructure Capex Intensity",
+    "Return on Invested Capital (ROIC)"
+  ],
+  preferredValuationModels: ["FCFF_DCF", "EV_EBITDA", "MULTIPLES_PE"],
+  financialMetrics: ["Advertising Revenue", "Reality Labs Revenue", "Reality Labs Operating Loss", "Operating Income", "Data Center & AI Capex", "Operating Cash Flow", "Free Cash Flow"],
+  riskCategories: ["Digital Advertising Spend Cyclicality", "Data Privacy & Antitrust Regulation", "AI Infrastructure Capex Intensity", "Reality Labs Loss Drag"],
+  moatDrivers: ["Global social network effects across Family of Apps", "Proprietary ad targeting data and measurement scale", "Massive AI and data-center infrastructure scale"],
+  forbiddenConcepts: [
+    "casa", "casa ratio", "current account savings account", "net interest margin", "nim",
+    "loan book", "credit cost", "gross non-performing assets", "gnpa", "nnpa",
+    "spectrum auction", "spectrum", "4g/5g", "tower deployment", "tower tenancy",
+    "telecom towers", "telecom tower", "subscriber churn", "agr dues",
+    "copra", "palm oil procurement", "packaged goods", "personal care", "brand recall",
+    "iconic consumer brand", "multi-tier retail distribution", "fmcg", "modern trade",
+    "kirana", "underlying volume growth", "uvg",
+    "wafer fab", "wafer fabrication", "wafer capacity", "semiconductor fab", "foundry capacity", "foundry",
+    "refinery throughput", "refinery margin", "refinery crack", "refinery", "crack spread",
+    "clinical trial", "clinical trials", "fda 483", "us fda", "anda approvals", "anda filings",
+    "cgmp", "dark stores", "dark store", "gross merchandise value", "take rate",
+    "plant turnaround", "plant utilization", "refinery"
+  ],
+  isFinancialInstitution: false,
+  standardMarginMetric: "Operating Margin"
+};
+
 export const RENEWABLE_ENERGY_PROFILE: SectorProfile = {
   id: "renewable-energy",
   name: "Renewable Energy & Equipment",
@@ -554,21 +592,72 @@ export function classifySector(
     return PHARMA_PROFILE;
   }
 
-  // 6. Telecom
+  // 5b. Internet Platform, Social Media & Digital Advertising.
+  // MUST be evaluated BEFORE telecom and consumer FMCG: Communication Services
+  // covers both telecom carriers AND internet platforms, and platform descriptions
+  // legitimately contain the substring "consumer" (e.g. Meta's "consumer hardware"
+  // + Reality Labs). Without this guard, Meta mis-routes to FMCG/telecom templates.
+  const industryLower = `${industry || ""}`.toLowerCase();
+  const isInternetPlatformIndustry =
+    industryLower.includes("internet content") ||
+    industryLower.includes("internet media") ||
+    industryLower.includes("social media") ||
+    industryLower.includes("social network") ||
+    industryLower.includes("online advertising") ||
+    industryLower.includes("digital advertising") ||
+    industryLower.includes("interactive media");
+  const isInternetPlatformSignal =
+    isInternetPlatformIndustry ||
+    combined.includes("family of apps") ||
+    combined.includes("reality labs") ||
+    combined.includes("daily active users") ||
+    combined.includes("monthly active users") ||
+    combined.includes("ad impressions") ||
+    combined.includes("average price per ad") ||
+    combined.includes("meta platforms") ||
+    combined.includes("facebook") ||
+    combined.includes("instagram") ||
+    combined.includes("whatsapp");
+  if (isInternetPlatformSignal) {
+    return INTERNET_PLATFORM_PROFILE;
+  }
+
+  // 6. Telecom (carriers only — never internet content / social / advertising platforms)
   if (
-    combined.includes("telecom") ||
+    !isInternetPlatformSignal &&
+    (combined.includes("telecom") ||
     combined.includes("wireless") ||
-    combined.includes("cellular")
+    combined.includes("cellular") ||
+    combined.includes("telecommunications service"))
   ) {
     return TELECOM_PROFILE;
   }
 
-  // 7. FMCG / Consumer Goods
+  // 7. FMCG / Consumer Goods.
+  // NOTE: bare `includes("consumer")` is intentionally NOT used — it false-positives
+  // on any B2C/platform description mentioning "consumers" or "consumer hardware"
+  // (e.g. Meta, Apple). Require FMCG-specific Grierson phrases instead.
+  const hasTechExclusion =
+    combined.includes("consumer hardware") ||
+    combined.includes("consumer electronics") ||
+    combined.includes("virtual reality") ||
+    combined.includes("augmented reality") ||
+    combined.includes("social media") ||
+    combined.includes("internet content") ||
+    combined.includes("semiconductor") ||
+    combined.includes("software");
   if (
-    combined.includes("consumer") ||
+    !hasTechExclusion &&
+    !isInternetPlatformSignal &&
+    (combined.includes("consumer goods") ||
+    combined.includes("consumer staples") ||
+    combined.includes("consumer products") ||
+    combined.includes("consumer packaged") ||
     combined.includes("fmcg") ||
     combined.includes("personal care") ||
     combined.includes("packaged goods") ||
+    combined.includes("packaged foods") ||
+    combined.includes("household products") ||
     combined.includes("marico") ||
     combined.includes("hindunilvr") ||
     combined.includes("nestle") ||
@@ -579,7 +668,7 @@ export function classifySector(
     combined.includes("puma") ||
     combined.includes("footwear") ||
     combined.includes("apparel") ||
-    combined.includes("sportswear")
+    combined.includes("sportswear"))
   ) {
     return CONSUMER_PROFILE;
   }
@@ -657,8 +746,10 @@ export function validateSectorConcepts(
   const leakedConcepts: string[] = [];
 
   for (const concept of profile.forbiddenConcepts) {
-    // Word boundary match where possible
-    const regex = new RegExp(`\\b${concept}\\b`, "i");
+    // Boundary-safe match (handles phrases with slashes/spaces, e.g. "4g/5g").
+    // Escapes regex metacharacters; bare \b fails on non-word chars.
+    const escaped = concept.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const regex = new RegExp(`(^|[^a-z0-9])${escaped}([^a-z0-9]|$)`, "i");
     if (regex.test(lowerText)) {
       leakedConcepts.push(concept);
     }

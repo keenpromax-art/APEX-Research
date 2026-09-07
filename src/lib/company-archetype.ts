@@ -14,6 +14,7 @@ export type FinancialArchetype =
 export type GICSSector =
   | "platform_gig_economy"     // Food delivery, quick commerce, ride hailing, logistics platforms
   | "telecom"                  // Wireless carriers, telecom towers, fiber networks
+  | "technology_platform"      // Internet platforms, social media, digital advertising (e.g. Meta, Alphabet)
   | "technology_software"      // Enterprise software, SaaS, IT services
   | "technology_hardware"      // Semiconductors, custom silicon, hardware devices
   | "renewables"               // Wind, solar, clean energy infrastructure
@@ -64,6 +65,26 @@ export function classifyArchetype(
   // ── 1. GICS Sector Classification ──────────────────────────────────────
   let sector: GICSSector = "general_industrial";
 
+  // Internet platform / social / digital advertising MUST be evaluated before
+  // telecom: "Communication Services" covers both carriers AND platforms, and
+  // platform descriptions contain "consumer hardware" (Meta Reality Labs).
+  const isInternetPlatform =
+    ind.includes("internet content") ||
+    ind.includes("internet media") ||
+    ind.includes("social media") ||
+    ind.includes("social network") ||
+    ind.includes("online advertising") ||
+    ind.includes("digital advertising") ||
+    ind.includes("interactive media") ||
+    text.includes("family of apps") ||
+    text.includes("reality labs") ||
+    text.includes("daily active users") ||
+    text.includes("monthly active users") ||
+    text.includes("ad impressions") ||
+    text.includes("meta platforms") ||
+    text.includes("facebook") ||
+    (text.includes("instagram") && text.includes("whatsapp"));
+
   if (
     text.includes("swiggy") ||
     text.includes("zomato") ||
@@ -79,18 +100,25 @@ export function classifyArchetype(
     text.includes("online food ordering")
   ) {
     sector = "platform_gig_economy";
+  } else if (isInternetPlatform) {
+    sector = "technology_platform";
   } else if (
-    ind.includes("telecom") ||
-    s.includes("communication") ||
+    !isInternetPlatform &&
+    (ind.includes("telecom") ||
+    ind.includes("wireless") ||
+    ind.includes("telecommunications service") ||
     ticker.includes("IDEA") ||
     ticker.includes("BHARTIARTL") ||
     ticker.includes("TATACOMM") ||
     text.includes("vodafone idea") ||
     text.includes("wireless carrier") ||
     text.includes("cellular") ||
-    text.includes("spectrum") ||
-    text.includes("telecommunications service")
+    text.includes("telecommunications service"))
   ) {
+    // NOTE: bare sector `includes("communication")` is intentionally NOT used —
+    // Communication Services includes internet platforms (Meta, Alphabet) that are
+    // not telecom carriers. Carrier routing requires telecom/wireless industry
+    // language or carrier-specific identifiers.
     sector = "telecom";
   } else if (
     ind.includes("financial data") ||
@@ -194,11 +222,20 @@ export function classifyArchetype(
   ) {
     sector = "consumer_durables";
   } else if (
-    s.includes("consumer") ||
+    !isInternetPlatform &&
+    !text.includes("consumer hardware") &&
+    !text.includes("consumer electronics") &&
+    !text.includes("virtual reality") &&
+    !text.includes("augmented reality") &&
+    (s.includes("consumer staples") ||
+    s.includes("consumer goods") ||
+    ind.includes("consumer goods") ||
+    ind.includes("consumer staples") ||
+    ind.includes("consumer packaged") ||
     ind.includes("beverage") ||
-    ind.includes("food") ||
+    (ind.includes("food") && !ind.includes("food delivery")) ||
     ind.includes("household") ||
-    ind.includes("personal products")
+    ind.includes("personal products"))
   ) {
     sector = "consumer_fmcg";
   }

@@ -355,7 +355,8 @@ export default function ReportClient({ ticker }: Props) {
       const bleedCleanedAiAnalysis = sanitizeSectorBleed(
         aiAnalysis,
         companyData.profile.sector,
-        companyData.profile.industry
+        companyData.profile.industry,
+        companyData.profile.description
       );
 
       // Sanitize AI narrative fields against MasterReportFacts and lock canonical moat

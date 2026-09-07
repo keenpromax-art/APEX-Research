@@ -20,6 +20,7 @@ export type SectorId =
   | "agrochemical"
   | "cement"
   | "internet-retail"
+  | "internet-platform"
   | "general";
 
 export interface SectorProfile {

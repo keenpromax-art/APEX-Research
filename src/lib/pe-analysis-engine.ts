@@ -77,6 +77,10 @@ export function generatePEFirmAnalysis(input: PEAnalysisInput): AIAnalysis {
     companyOverview = `${profile.name} is a major telecommunications services provider delivering mobile voice, high-speed broadband data, enterprise digital connectivity, and IoT services across licensed operational circles. The enterprise maintains extensive cellular tower tenancies, fiber backhaul networks, and a substantial portfolio of licensed spectrum across prime frequency bands.`;
     investmentThesis = `Our research analysis evaluates ${profile.name} through the lens of capital structure recovery, industry tariff discipline, and 4G/5G network densification. The operational thesis focuses on: First, sequential Average Revenue Per User (ARPU) expansion underpinned by industry-wide tariff increases and subscriber migration from legacy 2G to 4G/5G data plans. Second, targeted capital deployment into priority revenue-generating circles to stem subscriber attrition and expand data capacity. Third, government sovereign debt-conversion and moratorium frameworks providing necessary liquidity relief to restructure legacy statutory liabilities and preserve a sustainable triopoly market structure.`;
     investmentConclusion = `We assign ${recAction} stance on ${profile.name} with a calibrated valuation target of ${sym}${fv.toFixed(2)} per share. The investment risk-reward profile is governed by balance sheet deleveraging execution, government regulatory support, and competitive positioning relative to well-capitalized sector peers.`;
+  } else if (sectorType === "technology_platform") {
+    companyOverview = `${profile.name} is a global internet platform operating a Family of Apps (Facebook, Instagram, Messenger, WhatsApp, Threads) alongside Reality Labs augmented/virtual reality hardware and AI assistants. The enterprise monetizes principally through digital advertising, measured by Daily Active Users (DAU), Monthly Active Users (MAU), ad impressions, and Average Revenue Per User (ARPU) on a digital-advertising basis — not telecom subscriber ARPU. Capital deployment is concentrated in data-center and AI infrastructure supporting ad ranking, recommendation, and generative AI workloads.`;
+    investmentThesis = `Our institutional thesis evaluates ${profile.name} through digital-advertising unit economics, not telecom or consumer-packaged-goods metrics. The thesis is anchored by three drivers: First, Family of Apps advertising revenue compounding via combined ad-impression growth and average price-per-ad recovery, reflected in digital-advertising ARPU expansion across DAU/MAU cohorts. Second, operating leverage from AI-driven ad ranking, measurement, and efficiency gains, partly offset by data-center and AI infrastructure capex intensity. Third, disciplined containment of Reality Labs operating losses while preserving optionality in wearables and mixed-reality hardware. All KPIs used are internet-platform metrics as defined above.`;
+    investmentConclusion = `We formulate ${recAction} recommendation on ${profile.name} with an intrinsic fair value target of ${sym}${fv.toFixed(2)} per share (${formatPct(upsidePct)} implied upside), anchored on Family of Apps ad-revenue durability, digital ARPU trajectory, and free-cash-flow conversion net of AI infrastructure capex and Reality Labs investment.`;
   } else if (sectorType === "technology_software") {
     companyOverview = `${profile.name} is a premier enterprise digital solutions and software engineering enterprise delivering cloud architecture, application modernizations, artificial intelligence integration, and managed IT services across global corporate clients.`;
     investmentThesis = `Our institutional thesis highlights ${profile.name}'s deep client domain integration, high recurring contractual revenue visibility, and disciplined delivery pyramid optimization. The business generates robust free cash flow conversion exceeding 80% of EBITDA, deploying capital toward organic talent upskilling, proprietary AI platforms, and consistent capital returns.`;
@@ -172,6 +176,19 @@ export function generatePEFirmAnalysis(input: PEAnalysisInput): AIAnalysis {
       { pillar: "Tower & Fiber Tenancy Matrix", durability: "Narrow (8-10 Yrs)", rationale: "Extensive cell site coverage and fiberized backhaul reaching hundreds of millions of mobile subscribers." },
       { pillar: "Enterprise & IoT Connectivity", durability: "Narrow (5-8 Yrs)", rationale: "Sticky B2B data connections, smart metering partnerships, and cloud trunking contracts." },
       { pillar: "Government Strategic Equity Anchor", durability: "Narrow (5-8 Yrs)", rationale: "Sovereign debt-to-equity conversions and moratorium relief preserving telecom sector triopoly stability." },
+    ];
+  } else if (sectorType === "technology_platform") {
+    moatSources = {
+      switchingCosts: `Social Graph & Advertiser Workflow Embedment: Billions of Daily Active Users with entrenched social graphs, messaging histories, and creator followings face high migration friction. Advertisers embed proprietary campaign data, measurement integrations, and automated bidding playbooks in the platform's ad manager.`,
+      intangibleAssets: `Network Effects & Ad-Targeting Data Scale: Two-sided network effects across Family of Apps compound with a proprietary interest/behavioral graph and scaled conversion-measurement data that improve ad ranking and pricing power.`,
+      costAdvantage: `Data-Center & AI Infrastructure Scale: Hyperscale custom silicon, networking, and data-center footprints amortize AI training and inference costs across massive ad-impression volumes, lowering unit compute cost versus sub-scale rivals.`,
+      moatTrend: `Positive: AI-driven ad ranking, Advantage+ automation, and messaging monetization deepen advertiser ROI while DAU/MAU cohorts continue expanding average revenue per user on a digital-advertising basis.`,
+    };
+    moatPillars = [
+      { pillar: "Family of Apps Network Effects", durability: "Wide (15+ Yrs)", rationale: "Multi-billion DAU/MAU social graphs with messaging and creator ecosystems that sub-scale entrants cannot replicate." },
+      { pillar: "Ad Targeting & Measurement Data", durability: "Wide (12+ Yrs)", rationale: "Proprietary engagement and conversion data improving auction pricing and advertiser return on ad spend." },
+      { pillar: "AI & Data-Center Scale", durability: "Wide (10+ Yrs)", rationale: "Hyperscale AI training/inference and custom infrastructure lowering unit compute cost per ad impression." },
+      { pillar: "Brand & Distribution Ubiquity", durability: "Wide (15+ Yrs)", rationale: "Pre-installed distribution and habitual daily usage sustaining pricing power with advertisers." },
     ];
   } else if (sectorType === "technology_software") {
     moatSources = {
@@ -355,6 +372,15 @@ export function generatePEFirmAnalysis(input: PEAnalysisInput): AIAnalysis {
       { force: "Threat of Substitutes", level: "Very Low", commentary: "Mobile cellular data and voice connectivity are essential utilities with zero technological substitutes for mobile communications." },
       { force: "Competitive Rivalry", level: "High", commentary: "Competitive landscape dominated by two well-capitalized leaders, with pricing rivalry increasingly replaced by network quality and enterprise solutions competition." },
     ];
+  } else if (sectorType === "technology_platform") {
+    industryDynamicsCommentary = `The digital advertising platform industry is a scale-driven oligopoly where a small number of scaled platforms intermediate advertiser demand and user attention. Competition centers on DAU/MAU engagement, ad-impression inventory growth, average price-per-ad realization, and AI-driven ranking/measurement. Data-privacy regulation, antitrust oversight, and AI infrastructure capex intensity are the principal structural constraints — not spectrum licensing, tower tenancies, or packaged-goods distribution.`;
+    fiveForces = [
+      { force: "Threat of New Entrants", level: "Low", commentary: "Replicating multi-billion-user social graphs, advertiser tooling, and hyperscale AI/data-center infrastructure requires prohibitive capital and decade-long cold-start investment." },
+      { force: "Bargaining Power of Buyers", level: "Moderate", commentary: "Large advertisers can shift budgets across platforms, but superior targeting ROI and measurement on scaled platforms sustain pricing power." },
+      { force: "Bargaining Power of Suppliers", level: "Low to Moderate", commentary: "Compute (GPUs), networking, and power are critical inputs; hyperscale procurement and custom silicon mitigate supplier leverage." },
+      { force: "Threat of Substitutes", level: "Moderate", commentary: "Short-form video, search, retail media, and messaging commerce compete for attention and ad budgets without fully substituting social-graph inventory." },
+      { force: "Competitive Rivalry", level: "High", commentary: "Rivalry with scaled peers (search, social video, commerce media) focuses on engagement time, creator ecosystems, and AI ad-performance rather than tariff or distribution competition." },
+    ];
   } else if (sectorType === "technology_software") {
     industryDynamicsCommentary = `The enterprise software and technology services industry is underpinned by global corporate digital transformation budgets, cloud migrations, and enterprise generative AI integration. Organizations that combine deep domain expertise with cost-effective global delivery models continue to expand market share.`;
     fiveForces = [
@@ -405,6 +431,14 @@ export function generatePEFirmAnalysis(input: PEAnalysisInput): AIAnalysis {
       { event: "4G/5G Network Rollout Commissioning in Core Operational Circles", horizon: "12-18 Months", probability: "Medium (65%)", impact: "+8% to +12% Fair Value Upside" },
       { event: "Government Sovereign Relief or Statutory Moratorium Extension", horizon: "12-24 Months", probability: "Medium (55%)", impact: "+12% to +20% Balance Sheet De-risking" },
       { event: "Continued Subscriber Churn to Duopoly 5G Network Leaders", horizon: "Ongoing", probability: "High (70%)", impact: "-6% to -10% Revenue Pressure" },
+    ];
+  } else if (sectorType === "technology_platform") {
+    businessStrategyCommentary = `${profile.name}'s strategic roadmap centers on three pillars: First, growing Family of Apps engagement (DAU/MAU) and ad-impression inventory while improving average price per ad through AI ranking and Advantage+ automation. Second, scaling data-center and AI infrastructure efficiently to support recommendation, ranking, and generative-AI workloads without impairing free-cash-flow conversion. Third, disciplined Reality Labs investment with progressive operating-loss containment alongside wearables optionality.`;
+    catalysts = [
+      { event: "Digital Ad-Pricing Recovery Expanding ARPU (Advertising Basis)", horizon: "6-12 Months", probability: "High (75%)", impact: "+10% to +15% Fair Value Upside" },
+      { event: "AI-Driven Ad Ranking & Measurement Gains Lifting Advertiser ROI", horizon: "6-12 Months", probability: "High (70%)", impact: "+8% to +12% Fair Value Upside" },
+      { event: "Reality Labs Loss Containment & Wearables Traction", horizon: "12-24 Months", probability: "Medium (55%)", impact: "+4% to +8% Fair Value Upside" },
+      { event: "Ad-Spend Downturn or Adverse Privacy/Antitrust Ruling", horizon: "Ongoing", probability: "Medium (45%)", impact: "-8% to -12% Downside Sensitivity" },
     ];
   } else if (sectorType === "nbfc") {
     businessStrategyCommentary = `${profile.name}'s strategic roadmap centers on: First, disciplined geographical diversification into contiguous rural districts, reducing single-state portfolio concentration. Second, digital loan origination and automated cashless collections to improve operating efficiency and lower cost-to-income. Third, expanding direct assignment and securitization transactions to unlock liquidity and maintain robust capital adequacy buffers (CRAR).`;
@@ -492,6 +526,13 @@ export function generatePEFirmAnalysis(input: PEAnalysisInput): AIAnalysis {
       { risk: "Continuous 4G/5G Subscriber Churn to Network Leaders", severity: "High", description: "Delayed 5G network rollout could accelerate premium postpaid and high-ARPU data subscriber churn toward well-capitalized duopoly networks.", mitigation: "Targeted 4G densification in high-density circles and prioritized 5G commercial rollouts in top urban commercial clusters." },
       { risk: "Heavy Capital Expenditure Requirements for Network Parity", severity: "Medium", description: "Substantial capital outlays required for continuous cell tower additions, optical fiber backhaul, and base station equipment.", mitigation: "Sharing passive and active network infrastructure, site tenancy rationalization, and phased vendor financing agreements." },
       { risk: "Regulatory Revisions to Interconnect & Spectrum Usage Charges", severity: "Low", description: "Regulatory interventions by telecom regulatory authorities impacting roaming charges or spectrum license conditions.", mitigation: "Active participation in industry regulatory consultative forums and strict compliance adherence." },
+    ];
+  } else if (sectorType === "technology_platform") {
+    enterpriseRiskCommentary = [
+      { risk: "Digital Ad-Spend Cyclicality", severity: "High", description: "Enterprise advertising budgets contract in macro downturns, compressing ad-impression pricing and digital ARPU even as DAU/MAU engagement holds.", mitigation: "Diversified advertiser base, performance-based formats, and AI-driven ROI improvements sustaining auction density." },
+      { risk: "Data Privacy & Antitrust Regulation", severity: "High", description: "Platform-level privacy changes and competition rulings can impair targeting, measurement, and default-distribution advantages.", mitigation: "First-party data scale, on-device measurement innovation, and proactive regulatory compliance architecture." },
+      { risk: "AI Infrastructure Capex Intensity", severity: "Medium", description: "Hyperscale data-center and accelerator outlays for ranking and generative AI can depress free-cash-flow conversion if monetization lags.", mitigation: "Phased capacity deployment tied to advertiser ROI and inference-efficiency gains from custom silicon." },
+      { risk: "Reality Labs Loss Drag", severity: "Medium", description: "Sustained operating losses in AR/VR hardware and metaverse software dilute consolidated operating margins.", mitigation: "Disciplined annual loss guidance, wearables-led commercialization, and separation of Family of Apps disclosure." },
     ];
   } else if (
     (profile.sector || "").toLowerCase().includes("material") ||
@@ -614,6 +655,42 @@ export function generatePEFirmAnalysis(input: PEAnalysisInput): AIAnalysis {
         paragraphs: [
           `We initiate research coverage on ${profile.name} with ${recAction} and a valuation target of ${sym}${fv.toFixed(2)}. The investment thesis balances substantial financial leverage with strategic national spectrum assets.`,
           `Long-term equity returns remain contingent upon sustained industry-wide tariff compounding, government policy support, and operational cash flow inflection.`,
+        ],
+      },
+    ];
+  } else if (sectorType === "technology_platform") {
+    analystNotes = [
+      {
+        title: "Family of Apps Ad Pricing and ARPU (Advertising Basis) Anchor Earnings Beat",
+        date: "28 Oct 2024",
+        paragraphs: [
+          `${profile.name} reported resilient advertising revenue as ad-impression growth combined with average price-per-ad recovery, expanding digital-advertising ARPU across DAU/MAU cohorts. AI-driven ranking and Advantage+ automation lifted advertiser return on spend.`,
+          `Family of Apps operating margins expanded on disciplined headcount and infrastructure efficiency, partly offset by data-center and AI capex and the ongoing Reality Labs operating loss.`,
+          `We reaffirm our ${recAction} stance with a fair value target of ${sym}${fv.toFixed(2)}, supported by ad-platform scale and free-cash-flow conversion.`,
+        ],
+      },
+      {
+        title: "AI Infrastructure Capex Supports Ranking Gains; Conversion Efficiency in Focus",
+        date: "15 Aug 2024",
+        paragraphs: [
+          `Management's data-center and accelerator roadmap prioritizes ad ranking, recommendation relevance, and generative-AI assistants. Scaling training and inference capacity is the principal capex driver for the advertising platform.`,
+          `Sustained capex discipline tied to measurable advertiser ROI preserves consolidated free-cash-flow conversion across cycles.`,
+        ],
+      },
+      {
+        title: "Reality Labs Loss Containment and Wearables Optionality",
+        date: "18 Jun 2024",
+        paragraphs: [
+          `Reality Labs remains an investment drag with material annual operating losses, partially mitigated by Quest and AI-glasses (wearables) traction. Segment disclosure separation keeps Family of Apps margin structure transparent.`,
+          `Forward equity value remains anchored on Family of Apps ad durability rather than near-term hardware profitability.`,
+        ],
+      },
+      {
+        title: "Initiating Coverage: Scaled Attention Platform with Advertiser Pricing Power",
+        date: "12 Jun 2023",
+        paragraphs: [
+          `We initiate research coverage on ${profile.name} with ${recAction} and an intrinsic fair value target of ${sym}${fv.toFixed(2)} per share. The enterprise commands multi-billion DAU/MAU network effects and proprietary ad-measurement scale.`,
+          `Key debates are ad-spend cyclicality, privacy/antitrust regulation, AI capex intensity, and Reality Labs losses — not telecom tariffs or packaged-goods distribution.`,
         ],
       },
     ];
@@ -857,6 +934,32 @@ export function generatePEFirmAnalysis(input: PEAnalysisInput): AIAnalysis {
         { risk: "Cyclical Demand Deceleration", description: "Macro slowdown across automotive or industrial construction dampening order realizations.", impact: "Medium", mitigation: "Expanding recurring maintenance and higher-margin aftermarket service revenue" },
       ];
     }
+  } else if (sectorType === "technology_platform") {
+    swotStrengths = [
+      "Unmatched Family of Apps scale with multi-billion DAU/MAU cohorts driving durable digital-advertising ARPU and high operating margins.",
+      "Proprietary ad-targeting, ranking, and measurement data compounding advertiser ROI and auction pricing power.",
+      "Net-cash balance sheet with exceptional free-cash-flow conversion funding data-center and AI infrastructure internally.",
+    ];
+    swotWeaknesses = [
+      "Revenue concentration in digital advertising, sensitive to macro ad-spend cycles and auction pricing volatility.",
+      "Sustained Reality Labs operating losses diluting consolidated margins despite Family of Apps strength.",
+      "Elevated AI infrastructure capex intensity pressuring near-term free-cash-flow conversion.",
+    ];
+    swotOpportunities = [
+      "AI-driven ad ranking, creative automation, and messaging commerce expanding ad impressions and average price per ad.",
+      "Growth in video (Reels), business messaging, and wearables opening incremental monetization surfaces.",
+      "Inference-efficiency and custom-silicon gains lowering unit compute cost per ad impression.",
+    ];
+    swotThreats = [
+      "Data-privacy platform shifts and antitrust remedies impairing targeting and distribution advantages.",
+      "Competition for attention and ad budgets from search, short-video, and retail-media platforms.",
+      "Macro ad-spend retrenchment compressing auction density and price realization.",
+    ];
+    keyRisks = [
+      { risk: "Ad-Spend Cyclicality", description: "Macro downturns compress advertiser budgets and average price per ad even as user engagement holds.", impact: "High", mitigation: "Performance-based formats and diversified advertiser breadth sustaining auction density" },
+      { risk: "Privacy & Antitrust Regulation", description: "OS-level privacy changes and competition rulings can degrade targeting, measurement, and distribution.", impact: "High", mitigation: "First-party signal scale and on-device measurement investment" },
+      { risk: "AI Capex & Reality Labs Drag", description: "Data-center buildouts and sustained Reality Labs losses can weigh on consolidated margins and FCF.", impact: "Medium", mitigation: "Phased capex tied to advertiser ROI with explicit Reality Labs loss discipline" },
+    ];
   } else {
     swotStrengths = [
       "Durable institutional economic moat supported by mission-critical customer workflows and high switching costs.",
@@ -901,9 +1004,13 @@ export function generatePEFirmAnalysis(input: PEAnalysisInput): AIAnalysis {
   const managementCommentary = `Executive leadership maintains strict operating discipline, focusing capital deployment on strategic moats, unit-level profitability, and conservative working capital management.`;
   const revenueCommentary = sectorType === "asset_management"
     ? `Revenue realization is anchored by client assets under management (AUM), net fund inflows, organic mandate growth, and technology platform subscription retention.`
+    : sectorType === "technology_platform"
+    ? `Revenue realization is anchored by Family of Apps digital-advertising demand, measured through DAU/MAU engagement, ad-impression inventory growth, and average price-per-ad realization (digital-advertising ARPU).`
     : `Revenue realization is supported by established customer account retention, contract price escalation clauses, and expanding capacity throughput across priority markets.`;
   const ebitdaCommentary = sectorType === "asset_management"
     ? `Operating leverage is driven by scalable investment research, centralized risk analytics, and global distribution infrastructure absorbing incremental client assets with minimal marginal cost.`
+    : sectorType === "technology_platform"
+    ? `EBITDA dynamics reflect Family of Apps operating leverage from AI-driven ad ranking and efficiency gains, partly offset by data-center/AI infrastructure scaling and the sustained Reality Labs operating loss.`
     : `EBITDA trends highlight operating cost containment, with supply chain synergies and fixed-cost absorption counterbalancing localized input expense pressures.`;
   const ebitCommentary = `Operating earnings conversion remains predictable, insulated by measured administrative overhead and disciplined asset depreciation schedules.`;
   const patCommentary = `Net profitability reflects effective treasury management and tax-efficient operating structures, ensuring stable underlying cash flow translation.`;

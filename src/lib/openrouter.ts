@@ -21,6 +21,7 @@ import type {
 } from "@/types/report";
 import { formatPct, formatLargeNum } from "./calculations";
 import { generatePEFirmAnalysis } from "./pe-analysis-engine";
+import { getSectorProfile } from "./sectors/index";
 import {
   SUPPORTED_PROVIDERS,
   CustomKeyConfig,
@@ -39,6 +40,22 @@ const safeFix = (v: unknown, d = 2, fallback = "—"): string => {
   const n = typeof v === "number" ? v : Number(v);
   return isFinite(n) && !isNaN(n) ? n.toFixed(d) : fallback;
 };
+
+// ─────────────────────────────────────────────────────────────
+// Sector guardrail: binds every LLM persona to the authoritative sector
+// template so cross-sector boilerplate (telecom/FMCG/renewables) can never
+// leak into another sector's narrative and trip the publication gate.
+// ─────────────────────────────────────────────────────────────
+function buildSectorGuardrail(profile: CompanyProfile): string {
+  const sec = getSectorProfile(profile.sector, profile.industry, profile.description);
+  const kpis = sec.allowedKPIs.slice(0, 10).join("; ");
+  const forbidden = sec.forbiddenConcepts.slice(0, 20).join(", ") || "none";
+  return `Sector Guardrail (authoritative — violations block publication):
+- Authoritative sector template: ${sec.name} (${sec.id}); Company Sector/Industry: ${profile.sector} / ${profile.industry}.
+- Use ONLY these sector-appropriate KPIs and metrics: ${kpis}.
+- STRICTLY FORBIDDEN terms for this company (never mention in any form): ${forbidden}.
+- Never apply another sector's template (telecom carrier, FMCG, pharma, banking, energy, renewables). Internet platforms must not mention spectrum auctions, tower tenancies, telecom subscriber churn, or packaged-goods distribution. Telecom tariff/subscriber ARPU must not be confused with digital-advertising ARPU per DAU/MAU.`;
+}
 
 interface OpenRouterMessage {
   role: "system" | "user" | "assistant";
@@ -252,32 +269,35 @@ Analytical Directives:
 2. Explain the causal mechanisms behind margin expansion, order backlog execution, and operating leverage.
 3. Contrast the Bull Case scenario against the Bear Case downside triggers with rigorous numerical backing.
 
+${buildSectorGuardrail(profile)}
+Derive ALL SWOT items from the sector guardrail KPIs above — never reuse wind-turbine, O&M-service, steel/copper, or grid-substation examples unless the company is genuinely a renewable-energy manufacturer.
+
 Return a valid JSON object matching this structure EXACTLY:
 {
   "investmentThesis": "3 comprehensive, flowing paragraphs. Paragraph 1: Core investment thesis and multi-year secular growth runway. Paragraph 2: Operating leverage, margin expansion drivers, and unit economics. Paragraph 3: Valuation re-rating runway, intrinsic fair value support, and risk-reward asymmetry.",
   "companyOverview": "2 detailed paragraphs detailing commercial segment composition, proprietary technological advantages, geographic footprint, and competitive uniqueness.",
   "investmentConclusion": "2 paragraphs synthesizing the valuation verdict, price-to-fair-value corridor, margin of safety, and final investment recommendation stance.",
   "swotStrengths": [
-    "1. Structural Market Leadership: Detailed analytical sentence citing revenue, market share, and order backlog scale.",
-    "2. High-Margin Recurring Annuity Cash Flows: Detailed sentence on O&M service margins and recurring cash generation.",
-    "3. Capital Structure Deleveraging & Balance Sheet Fortress: Detailed sentence on net cash/debt position and solvency.",
-    "4. Technological & Manufacturing Scale Barriers: Detailed sentence on proprietary product platforms and localized production."
+    "1. Structural Market Leadership: Detailed analytical sentence citing revenue, market share, and backlog scale specific to the sector guardrail.",
+    "2. High-Margin Recurring Cash Flows: Detailed sentence on the company's actual recurring revenue mechanism per the sector guardrail (never assume O&M annuities unless evidenced).",
+    "3. Capital Structure & Balance Sheet Fortress: Detailed sentence on net cash/debt position and solvency.",
+    "4. Technological & Scale Barriers: Detailed sentence on proprietary platforms and scale advantages specific to the sector guardrail."
   ],
   "swotWeaknesses": [
-    "1. Commodity & Raw Material Price Volatility: Detailed sentence on steel, copper, and freight input sensitivities.",
-    "2. Customer Project Execution & Grid Connectivity Delays: Detailed sentence on commissioning bottlenecks and working capital cycles.",
-    "3. Competitive Tender & Tariff Bidding Pressure: Detailed sentence on pricing competition in reverse auctions.",
+    "1. Input Cost Volatility: Detailed sentence on the sector-relevant input sensitivities per the guardrail (never assume steel/copper unless evidenced).",
+    "2. Execution & Working Capital: Detailed sentence on delivery bottlenecks and cash conversion specific to the business model.",
+    "3. Competitive Pricing Pressure: Detailed sentence on pricing competition in the company's actual end market.",
     "4. Working Capital Days & Receivables Concentration: Detailed sentence on debtor recovery and cash conversion float."
   ],
   "swotOpportunities": [
-    "1. Secular Clean Energy & Corporate Decarbonization Mandates: Detailed sentence on multi-gigawatt procurement auctions.",
-    "2. High-Margin Next-Gen Platform Rollout: Detailed sentence on larger rotor/higher-MW equipment driving unit margin expansion.",
-    "3. Captive Long-Term O&M Fleet Expansion: Detailed sentence on recurring multi-decade service contract compounding."
+    "1. Secular Demand Runway: Detailed sentence on multi-year procurement or adoption drivers specific to the sector guardrail.",
+    "2. High-Margin Platform Rollout: Detailed sentence on next-generation product or monetization expansion per the guardrail.",
+    "3. Recurring Revenue Expansion: Detailed sentence on compounding service, subscription, or advertising-monetization growth where evidenced."
   ],
   "swotThreats": [
-    "1. Macroeconomic Policy & Tariff Framework Shifts: Detailed sentence on regulatory guideline modifications.",
-    "2. Supply Chain Disruptions in Specialized Sub-Components: Detailed sentence on specialized castings and bearing logistics.",
-    "3. Grid Evacuation Infrastructure Bottlenecks: Detailed sentence on inter-state transmission system (ISTS) substation readiness."
+    "1. Policy & Regulatory Shifts: Detailed sentence on the regulations that actually govern this sector per the guardrail.",
+    "2. Supply Chain Disruptions: Detailed sentence on the company's evidenced critical inputs and logistics.",
+    "3. Infrastructure & Capacity Bottlenecks: Detailed sentence on the capacity constraints relevant to this business model (never assume grid/ISTS unless evidenced)."
   ]
 }
 Return ONLY raw JSON, no markdown formatting.`;
@@ -435,27 +455,30 @@ Directives:
 1. Deeply analyze all structural moat sources: Customer Switching Costs, Intangible Assets & Certifications, Cost Advantage via Localization/Scale, and Network/Ecosystem Density.
 2. Determine Moat Trend (Positive, Stable, or Negative) with empirical rationale.
 3. Score each of Porter's Five Forces with explicit strategic defense mechanisms.
+4. Derive every moat pillar, certification, and force commentary from the company's actual sector — never import wind-turbine, SCADA, O&M-fleet, spectrum, tower, CASA, or clinical-trial boilerplate from another sector.
+
+${buildSectorGuardrail(profile)}
 
 Return a valid JSON object matching this structure EXACTLY:
 {
-  "competitiveMoat": "Comprehensive 2-paragraph analysis evaluating total moat width (Narrow/Wide/None), duration of Competitive Advantage Period (CAP), and ROIC defensibility against new capital entrants.",
+  "competitiveMoat": "Comprehensive 2-paragraph analysis evaluating total moat width (Narrow/Wide/None), duration of Competitive Advantage Period (CAP), and ROIC defensibility against new capital entrants — grounded strictly in the sector guardrail.",
   "moatSources": {
-    "switchingCosts": "Detailed paragraph on technical compatibility, post-commissioning O&M contracts (10-20 year terms), proprietary spare parts, SCADA architectures, and customer switching friction.",
-    "intangibleAssets": "Detailed paragraph on brand equity, proprietary engineering platforms, patents, and mandatory statutory certifications (RLMM, MNRE, IECRE, ISO).",
-    "costAdvantage": "Detailed paragraph on vertically integrated manufacturing, scale procurement discounts, localized supply chains, and freight/logistics cost leadership.",
+    "switchingCosts": "Detailed paragraph on the switching friction evidenced in this business model per the sector guardrail (never assume O&M contracts or SCADA unless evidenced).",
+    "intangibleAssets": "Detailed paragraph on brand equity, proprietary platforms, patents, and the certifications that actually apply to this sector per the guardrail.",
+    "costAdvantage": "Detailed paragraph on the scale, procurement, or infrastructure advantages evidenced for this business model.",
     "moatTrend": "Positive"
   },
   "fiveForces": [
-    { "force": "Threat of New Entrants", "level": "Low", "commentary": "Massive capital expenditure requirements, multi-year track record prerequisites for bank financing, and stringent regulatory type certifications create insurmountable barriers." },
-    { "force": "Bargaining Power of Buyers", "level": "Moderate", "commentary": "Consolidated enterprise client base is counterbalanced by tight industry manufacturing capacity, long lead times, and multi-year turnkey service bundling." },
-    { "force": "Bargaining Power of Suppliers", "level": "Moderate", "commentary": "Specialized component suppliers (gearboxes, bearings, generators) are mitigated through dual-sourcing agreements, long-term rate contracts, and strategic in-house sub-assembly." },
-    { "force": "Threat of Substitutes", "level": "Low", "commentary": "Alternative energy sources (solar, hydro, grid storage) complement rather than substitute baseload grid integration, reinforced by sovereign hybrid tender mandates." },
-    { "force": "Competitive Rivalry", "level": "Moderate", "commentary": "Industry consolidation into a disciplined oligopoly limits destructive price competition, focusing market share gains on technological efficiency and execution velocity." }
+    { "force": "Threat of New Entrants", "level": "Low", "commentary": "Detailed sentence on entry barriers specific to this sector per the guardrail." },
+    { "force": "Bargaining Power of Buyers", "level": "Moderate", "commentary": "Detailed sentence on buyer concentration and switching dynamics in this end market." },
+    { "force": "Bargaining Power of Suppliers", "level": "Moderate", "commentary": "Detailed sentence on the critical inputs and supplier structure for this business model." },
+    { "force": "Threat of Substitutes", "level": "Low", "commentary": "Detailed sentence on substitution risk for this product or service." },
+    { "force": "Competitive Rivalry", "level": "Moderate", "commentary": "Detailed sentence on market structure and rivalry in this sector." }
   ],
   "moatPillars": [
-    { "pillar": "Tier-1 Bankability & Type Certification", "durability": "15+ Years", "rationale": "Mandatory lender qualification hurdle that eliminates unproven low-cost entrants." },
-    { "pillar": "Captive High-Margin Service Fleet Annuity", "durability": "10-20 Years", "rationale": "Contractual post-warranty O&M agreements generating recurring high-margin cash conversion." },
-    { "pillar": "Vertically Integrated Production Footprint", "durability": "10-15 Years", "rationale": "Localized blade, nacelle, and tower fabrication delivering structural landed-cost advantages." }
+    { "pillar": "Primary Defensibility Pillar per Sector Guardrail", "durability": "15+ Years", "rationale": "Detailed rationale tied to evidenced barriers, not imported boilerplate." },
+    { "pillar": "Secondary Recurring-Revenue Pillar per Sector Guardrail", "durability": "10-20 Years", "rationale": "Detailed rationale on the company's actual recurring mechanism where evidenced." },
+    { "pillar": "Scale or Cost Pillar per Sector Guardrail", "durability": "10-15 Years", "rationale": "Detailed rationale on evidenced scale or cost advantages." }
   ]
 }
 Return ONLY raw JSON, no markdown formatting.`;
@@ -601,6 +624,9 @@ Financial Solvency Inputs:
 Directives:
 1. Formulate an institutional credit rating profile evaluating default resistance, business risk insulation, and cash cushion.
 2. Formulate 4 prioritized institutional investment risks with explicit causal descriptions and company-specific mitigations.
+3. Derive all risks from the company's actual sector per the guardrail — never use steel/copper/resin, ISTS substation, turbine ASP, or reverse-auction examples unless the company is genuinely a renewable manufacturer.
+
+${buildSectorGuardrail(profile)}
 
 Return a valid JSON object matching this structure EXACTLY:
 {
@@ -611,10 +637,10 @@ Return a valid JSON object matching this structure EXACTLY:
     "stressTesting": "Detailed paragraph evaluating covenant headroom and solvency defensibility under an adverse 30% EBITDA compression scenario."
   },
   "keyRisks": [
-    { "risk": "Supply Chain & Input Commodity Inflation", "description": "Raw material price spikes (steel, copper, resin) could compress gross margins if pass-through clauses experience execution lags.", "impact": "Medium" },
-    { "risk": "Customer Project Delivery & Grid Offtake Delays", "description": "Inter-state transmission system (ISTS) substation delays can postpone revenue recognition and extend working capital cycles.", "impact": "Medium" },
-    { "risk": "Reverse Auction Competitive Tariff Pressure", "description": "Aggressive bidding in sovereign renewable tenders could pressure turbine ASPs without corresponding efficiency gains.", "impact": "Low" },
-    { "risk": "Regulatory & Net Metering Policy Volatility", "description": "Shifts in open-access wheeling charges or captive renewable mandates could alter commercial procurement timelines.", "impact": "Medium" }
+    { "risk": "Sector-Relevant Input Cost Pressure", "description": "Detailed sentence on the input costs that actually affect this business per the sector guardrail.", "impact": "Medium" },
+    { "risk": "Customer Delivery & Execution Risk", "description": "Detailed sentence on the delivery or recognition delays relevant to this business model.", "impact": "Medium" },
+    { "risk": "Competitive Pricing Pressure", "description": "Detailed sentence on pricing competition in the company's actual end market.", "impact": "Low" },
+    { "risk": "Sector Policy & Regulatory Volatility", "description": "Detailed sentence on the regulations that actually govern this sector per the guardrail.", "impact": "Medium" }
   ]
 }
 Return ONLY raw JSON, no markdown formatting.`;
