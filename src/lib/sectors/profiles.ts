@@ -563,7 +563,28 @@ export function classifySector(
     return TELECOM_PROFILE;
   }
 
-  // 7. Internet Retail, Food Delivery & Quick Commerce (platform/marketplace businesses)
+  // 7. FMCG / Consumer Goods
+  if (
+    combined.includes("consumer") ||
+    combined.includes("fmcg") ||
+    combined.includes("personal care") ||
+    combined.includes("packaged goods") ||
+    combined.includes("marico") ||
+    combined.includes("hindunilvr") ||
+    combined.includes("nestle") ||
+    combined.includes("britannia") ||
+    combined.includes("dabur") ||
+    combined.includes("nike") ||
+    combined.includes("adidas") ||
+    combined.includes("puma") ||
+    combined.includes("footwear") ||
+    combined.includes("apparel") ||
+    combined.includes("sportswear")
+  ) {
+    return CONSUMER_PROFILE;
+  }
+
+  // 8. Internet Retail, Food Delivery & Quick Commerce (platform/marketplace businesses)
   if (
     combined.includes("internet retail") ||
     combined.includes("food delivery") ||
@@ -576,26 +597,9 @@ export function classifySector(
     combined.includes("delhivery") ||
     combined.includes("instamart") ||
     combined.includes("blinkit") ||
-    combined.includes("zepto") ||
-    combined.includes("platform") ||
-    combined.includes("marketplace")
+    combined.includes("zepto")
   ) {
     return INTERNET_RETAIL_PROFILE;
-  }
-
-  // 8. FMCG / Consumer Goods
-  if (
-    combined.includes("consumer") ||
-    combined.includes("fmcg") ||
-    combined.includes("personal care") ||
-    combined.includes("packaged goods") ||
-    combined.includes("marico") ||
-    combined.includes("hindunilvr") ||
-    combined.includes("nestle") ||
-    combined.includes("britannia") ||
-    combined.includes("dabur")
-  ) {
-    return CONSUMER_PROFILE;
   }
 
   // 8. Agrochemicals & Crop Protection
