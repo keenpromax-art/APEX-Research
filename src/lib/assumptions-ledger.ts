@@ -51,13 +51,13 @@ export function createAssumptionsLedger({
 
   const sumPvFcff = Number(dcf.sumPvFcff) || 0;
   const pvTerminalValue = Number(dcf.pvTerminalValue) || 0;
-  const enterpriseValue = isBankOrNbfc ? (Number(dcf.enterpriseValue) || Number(dcf.equityValue) || 0) : sumPvFcff + pvTerminalValue;
+  const enterpriseValue = isBankOrNbfc ? (Number(dcf.enterpriseValue) || Number(dcf.equityValue) || 0) : (Number(dcf.enterpriseValue) || (sumPvFcff + pvTerminalValue));
 
   const bsDebt = Number(latestFin?.totalDebt) || ((Number(latestFin?.shortTermDebt) || 0) + (Number(latestFin?.longTermDebt) || 0));
   const bsCash = ((Number(latestFin?.cash) || 0) + (Number(latestFin?.shortTermInvestments) || 0));
   const totalDebt = bsDebt > 0 ? bsDebt : (Number(dcf.totalDebt) || 0);
   const cashAndEquiv = bsCash > 0 ? bsCash : (Number(dcf.cashAndEquiv) || 0);
-  const netDebt = isBankOrNbfc ? 0 : totalDebt - cashAndEquiv;
+  const netDebt = isBankOrNbfc ? 0 : (Number.isFinite(Number(dcf.netDebt)) ? Number(dcf.netDebt) : totalDebt - cashAndEquiv);
 
   let equityValue = 0;
   let fairValue = 0;
@@ -67,7 +67,11 @@ export function createAssumptionsLedger({
     fairValue = Number(dcf.intrinsicValue);
   } else {
     const rawEquityValue = enterpriseValue - netDebt;
-    equityValue = rawEquityValue > 0 ? rawEquityValue : (Number(dcf.equityValue) || (dcf.intrinsicValue ? dcf.intrinsicValue * sharesOutstanding : 0));
+    const dcfEquityValue = Number(dcf.equityValue) || 0;
+    const reconciledEquityValue = Math.abs(rawEquityValue - dcfEquityValue) <= Math.max(1, dcfEquityValue * 0.01)
+      ? dcfEquityValue
+      : rawEquityValue;
+    equityValue = reconciledEquityValue > 0 ? reconciledEquityValue : dcfEquityValue;
     const computedFv = (sharesOutstanding > 0 && equityValue > 0)
       ? Number((equityValue / sharesOutstanding).toFixed(2))
       : (Number(dcf.intrinsicValue) || currentPrice);

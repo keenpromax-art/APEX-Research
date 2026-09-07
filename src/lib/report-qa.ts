@@ -208,6 +208,48 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
     });
   }
 
+  // 3a2. XREF-03: DCF Equity Value Bridge Arithmetic Reconciliation
+  const dcf = data.dcf;
+  if (dcf && dcf.enterpriseValue !== undefined && dcf.netDebt !== undefined) {
+    const dcfEquityBridge = dcf.enterpriseValue - dcf.netDebt;
+    const dcfEquityValue = Number(dcf.equityValue) || 0;
+    const bridgeTol = Math.max(1, dcfEquityValue * 0.01);
+    const bridgeMatches = Math.abs(dcfEquityBridge - dcfEquityValue) <= bridgeTol;
+    checks.push({
+      id: "XREF-03",
+      category: "CROSS_REFERENCE",
+      name: "DCF Equity Value Bridge Arithmetic Reconciled",
+      status: bridgeMatches ? "PASS" : "FAIL",
+      details: bridgeMatches
+        ? `Equity value bridge reconciles: EV (${dcf.enterpriseValue}) - Net Debt (${dcf.netDebt}) = Equity Value (${dcf.equityValue}).`
+        : `FATAL PUBLICATION BLOCK: DCF Equity Value bridge arithmetic broken. EV (${dcf.enterpriseValue}) - Net Debt (${dcf.netDebt}) = ${dcfEquityBridge}, but reported equity value is ${dcf.equityValue}.`,
+      expected: `${dcfEquityBridge}`,
+      actual: `${dcfEquityValue}`,
+    });
+  }
+
+  // 3a3. XREF-04: Balance Sheet to DCF Bridge Variable Linking Reconciled
+  if (dcf && data.annualFinancials && data.annualFinancials.length > 0) {
+    const latestFin = data.annualFinancials[data.annualFinancials.length - 1];
+    const bsDebt = Number(latestFin?.totalDebt) || ((Number(latestFin?.shortTermDebt) || 0) + (Number(latestFin?.longTermDebt) || 0));
+    const bsCash = (Number(latestFin?.cash) || 0) + (Number(latestFin?.shortTermInvestments) || 0);
+    const bsNetDebt = bsDebt - bsCash;
+    const dcfNetDebt = Number(dcf.netDebt);
+    const linkingTol = Math.max(1, Math.abs(bsNetDebt) * 0.05);
+    const linked = Math.abs(bsNetDebt - dcfNetDebt) <= linkingTol;
+    checks.push({
+      id: "XREF-04",
+      category: "CROSS_REFERENCE",
+      name: "Balance Sheet to DCF Bridge Variable Linking Reconciled",
+      status: linked ? "PASS" : "FAIL",
+      details: linked
+        ? `Balance sheet net debt (${bsNetDebt}) links to DCF net debt (${dcfNetDebt}) within tolerance.`
+        : `FATAL PUBLICATION BLOCK: Balance sheet net debt (${bsNetDebt}) does not link to DCF net debt (${dcfNetDebt}). Variables flowing from the balance sheet into the DCF model are disconnected.`,
+      expected: `${bsNetDebt}`,
+      actual: `${dcfNetDebt}`,
+    });
+  }
+
   // 3b. Moat Qualitative Narrative Consistency
   const canonicalMoat = ledger?.moatRating || data.masterReportFacts?.moat.rating;
   const thesisText = (data.aiAnalysis?.investmentThesis || "").toLowerCase();
