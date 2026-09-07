@@ -24,6 +24,7 @@ export type GICSSector =
   | "banking_financials"       // Commercial banks with CASA deposits
   | "pharma_healthcare"        // Pharmaceuticals, generic drugs, formulations
   | "consumer_fmcg"            // Consumer packaged goods, food manufacturing, personal care
+  | "consumer_durables"        // Branded footwear, apparel, accessories, sportswear, luxury goods
   | "auto_manufacturing"       // Automotive OEMs, vehicles, auto components
   | "general_industrial";      // Capital goods, engineering, diversified manufacturing
 
@@ -177,6 +178,21 @@ export function classifyArchetype(
     ind.includes("vehicle")
   ) {
     sector = "auto_manufacturing";
+  } else if (
+    ind.includes("apparel") ||
+    ind.includes("footwear") ||
+    ind.includes("textile") ||
+    ind.includes("garment") ||
+    ind.includes("sportswear") ||
+    ind.includes("luxury") ||
+    ind.includes("accessories") ||
+    ind.includes("leather") ||
+    ticker.includes("NKE") ||
+    ticker.includes("LULU") ||
+    ticker.includes("DECK") ||
+    ticker.includes("CROX")
+  ) {
+    sector = "consumer_durables";
   } else if (
     s.includes("consumer") ||
     ind.includes("beverage") ||

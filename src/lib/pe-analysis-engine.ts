@@ -118,6 +118,10 @@ export function generatePEFirmAnalysis(input: PEAnalysisInput): AIAnalysis {
     companyOverview = `${profile.name} is a leading financial institution delivering retail banking, corporate credit facilities, treasury solutions, and digital lending products across core commercial centers.`;
     investmentThesis = `Our institutional thesis highlights ${profile.name}'s diversified low-cost CASA deposit franchise, disciplined credit risk underwriting, and robust regulatory capital adequacy buffers that support continuous loan book expansion.`;
     investmentConclusion = `We formulate ${recAction} recommendation on ${profile.name} with an intrinsic target of ${sym}${fv.toFixed(2)}, backed by stable net interest margins, prudent asset quality containment, and sustainable Return on Equity (ROE).`;
+  } else if (sectorType === "consumer_durables") {
+    companyOverview = `${profile.name} is a global leader in branded athletic footwear, apparel, equipment, and accessories. The company operates through direct-to-consumer (DTC) digital platforms, owned retail stores, wholesale partners, and a powerful innovation pipeline spanning performance sport, lifestyle, and emerging categories. Its portfolio is anchored by iconic franchises that drive premium pricing and deep consumer loyalty across geographies.`;
+    investmentThesis = `Our consumer durables research thesis evaluates ${profile.name} through three compounding value drivers: First, brand power and innovation flywheel — proprietary technology platforms (Air, Flyknit, React, Dri-FIT) create product differentiation that sustains premium pricing and repeat purchase cycles. Second, DTC acceleration — owned digital and retail channels now drive the majority of revenue, expanding gross margin, consumer data capture, and full-price sell-through. Third, supply-chain resilience and scale — strategic sourcing diversification, vertical integration into key materials, and logistics network optimization protect operating margins against input-cost volatility. Risk factors include: foreign-exchange headwinds, China demand normalization, and wholesale channel rationalization timing.`;
+    investmentConclusion = `We assign ${recAction} recommendation on ${profile.name} with an intrinsic fair value target of ${sym}${fv.toFixed(2)} per share, supported by durable brand equity, DTC margin expansion, and disciplined capital return via dividends and share repurchases.`;
   } else if (sectorType === "consumer_fmcg") {
     companyOverview = `${profile.name} is a premier consumer goods enterprise operating across branded packaged foods, personal care, edible oils, and household essentials. The company maintains an extensive retail distribution network spanning traditional kirana stores, modern trade formats, and fast-growing quick-commerce channels.`;
     investmentThesis = `Our consumer sector research thesis evaluates ${profile.name} through the lens of brand pricing power, raw material procurement cycles (copra, vegetable oils, packaging), and volume-led market share expansion. The thesis is anchored by: First, resilient domestic volume growth across flagship categories driven by rural reach expansion. Second, premiumization across value-added personal care and food portfolios. Third, disciplined advertising and promotion (A&P) reinvestment and automated supply chain efficiencies that safeguard operating margins across commodity cycles.`;
@@ -272,6 +276,19 @@ export function generatePEFirmAnalysis(input: PEAnalysisInput): AIAnalysis {
       { pillar: "Integrated Logistics Infrastructure", durability: "Wide (15+ Yrs)", rationale: "Captive deepwater ports, pipeline networks, and storage terminals minimizing handling costs." },
       { pillar: "Downstream Petrochemical Value-Add", durability: "Narrow (10+ Yrs)", rationale: "Integration into polymers, polyester, and specialty chemicals capturing high derivative margins." },
       { pillar: "Consumer Distribution Reach", durability: "Wide (15+ Yrs)", rationale: "Extensive nationwide retail fuel and consumer touchpoints generating stable demand." },
+    ];
+  } else if (sectorType === "consumer_durables") {
+    moatSources = {
+      switchingCosts: `Brand Friction & Habituation: Iconic franchises and proprietary product IP create deep consumer switching costs; displacing a flagship brand requires years of multi-billion-dollar marketing investment and product parity to overcome habituated purchase behavior.`,
+      intangibleAssets: `Iconic Brand Equity & Innovation IP: Decades of accumulated brand equity, proprietary technology platforms (Air, Flyknit, React), and design IP that sustain premium pricing and repeat-purchase cycles.`,
+      costAdvantage: `Vertical Integration & Scale Procurement: Strategic supplier diversification, vertical integration into key materials, and logistics network optimization protect operating margins against input-cost volatility.`,
+      moatTrend: `Stable: DTC margin expansion and iconic franchise monetization sustain wide-moat economics despite wholesale channel normalization and FX headwinds.`,
+    };
+    moatPillars = [
+      { pillar: "Iconic Brand Franchises", durability: "Wide (20+ Yrs)", rationale: "Multi-decade pricing elasticity and consumer loyalty anchored by flagship product IP." },
+      { pillar: "Proprietary Innovation Pipeline", durability: "Wide (15+ Yrs)", rationale: "Patented technology platforms (Air, Flyknit, React) create product differentiation that sustains premium pricing." },
+      { pillar: "Direct-to-Consumer Margin", durability: "Narrow (8-10 Yrs)", rationale: "Owned digital and retail channels expand gross margin, data capture, and full-price sell-through." },
+      { pillar: "Supply Chain Resilience", durability: "Narrow (7-10 Yrs)", rationale: "Strategic sourcing diversification and vertical integration protect margins against input-cost volatility." },
     ];
   } else {
     moatSources = {
@@ -488,6 +505,13 @@ export function generatePEFirmAnalysis(input: PEAnalysisInput): AIAnalysis {
       { risk: "Channel Inventory Overhang & Generic Price Competition", severity: "Medium", description: "Aggressive low-cost generic technical export volumes from overseas producers can compress agrochemical pricing realizations.", mitigation: "Focus on proprietary patented molecule registrations, complex multi-step custom chemical synthesis (CSM), and strong distributor relationships." },
       { risk: "Regulatory Review of Chemical Molecule Registrations", severity: "Medium", description: "Stricter pesticide registration reviews and phase-outs of legacy active ingredients by environmental and agricultural regulatory authorities.", mitigation: "Accelerated commercial pipeline of next-generation green chemistry, biologicals, and safer formulation alternatives." },
       { risk: "Raw Material & Chemical Intermediate Price Swings", severity: "Low", description: "Spot price swings in key petrochemical building blocks, bromine, and specialty reagents can compress gross margins if unhedged.", mitigation: "Formulaic customer pass-through contracts, strategic intermediate buffer stocks, and multi-vendor procurement agreements." },
+    ];
+  } else if (sectorType === "consumer_durables") {
+    enterpriseRiskCommentary = [
+      { risk: "Foreign-Exchange & China Demand Exposure", severity: "High", description: "Material exposure to Chinese consumer demand, Southeast Asian manufacturing supply chains, and USD-denominated input costs can compress gross margins when CNY weakens or Chinese demand normalizes.", mitigation: "Geographic demand diversification, local-currency pricing power, and strategic supplier diversification across Vietnam, Indonesia, and India." },
+      { risk: "Wholesale Channel Rationalization & DTC Transition Friction", severity: "Medium", description: "Continued wholesale partner consolidation and DTC margin mix shifts can create near-term revenue volatility as inventory channels rebalance.", mitigation: "Controlled DTC ramp, wholesale partner margin protection, and full-price sell-through discipline." },
+      { risk: "Input-Cost & Logistics Inflation", severity: "Medium", description: "Elevated freight rates, raw material (rubber, EVA, synthetic leather) input costs, and wage inflation in manufacturing hubs pressure gross margin.", mitigation: "Formulaic customer pass-through contracts, strategic intermediate buffer stocks, and multi-vendor procurement agreements." },
+      { risk: "Competitive Brand Cycle & Fad Risk", severity: "Low to Medium", description: "Lifestyle and fashion cycles can erode flagship franchise relevance if innovation cadence lags.", mitigation: "Accelerated proprietary technology pipeline (Air, Flyknit, React) and sustained A&P reinvestment protecting brand heat." },
     ];
   } else {
     enterpriseRiskCommentary = [

@@ -152,6 +152,19 @@ export async function GET(request: NextRequest) {
           peerTickers = ["AAPL", "MSFT", "GOOGL", "META"];
         } else if (sec.includes("energy") || ind.includes("oil")) {
           peerTickers = ["XOM", "CVX", "COP", "PSX"];
+        } else if (
+          ind.includes("apparel") ||
+          ind.includes("footwear") ||
+          ind.includes("textile") ||
+          ind.includes("sportswear") ||
+          ind.includes("luxury") ||
+          ind.includes("accessories") ||
+          sym.includes("NKE") ||
+          sym.includes("LULU") ||
+          sym.includes("DECK") ||
+          sym.includes("CROX")
+        ) {
+          peerTickers = ["NKE", "LULU", "DECK", "CROX", "SKX", "HBI"];
         } else {
           peerTickers = ["HON", "GE", "CAT", "UPS"];
         }
