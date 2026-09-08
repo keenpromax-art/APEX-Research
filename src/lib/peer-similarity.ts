@@ -57,6 +57,14 @@ export function scorePeerSimilarity(params: {
   const peerIsHosp = qInd.includes("lodg") || qInd.includes("hotel") || qInd.includes("hospitality");
   const peerIsBank = qSec.includes("bank") || qInd.includes("bank");
   if (subjIsHosp && !peerIsHosp && (peerIsBank || qSec.includes("industrial"))) operatingModel -= 25;
+  // Hardware vs software/services/platform is never similar (the classic contamination)
+  const subjIsHw = subjInd.includes("computer hardware") || subjInd.includes("electronic components") || subjInd.includes("computer peripherals") || subjInd.includes("data storage") || ontologySectorId === "technology-hardware";
+  const peerIsSw = qInd.includes("software") || qInd.includes("it services") || qInd.includes("consulting") || qSec.includes("software");
+  const peerIsPlat = qInd.includes("internet content") || qInd.includes("social media") || qInd.includes("interactive media");
+  if (subjIsHw && (peerIsSw || peerIsPlat)) operatingModel -= 25;
+  const subjIsSw = subjInd.includes("application software") || subjInd.includes("systems software") || ontologySectorId === "technology-software";
+  const peerIsHw = qInd.includes("computer hardware") || qInd.includes("electronic components") || qInd.includes("data storage");
+  if (subjIsSw && peerIsHw) operatingModel -= 25;
   const subjIsRE = subjInd.includes("reit") || subjInd.includes("real estate") || ontologySectorId === "real-estate";
   const peerIsRE = qInd.includes("reit") || qInd.includes("real estate");
   if (subjIsRE && !peerIsRE && peerIsBank) operatingModel -= 20;

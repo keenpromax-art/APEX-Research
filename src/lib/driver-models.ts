@@ -41,6 +41,8 @@ const FADE_SHAPES: Record<string, number[]> = {
   default: [1.0, 0.9, 0.82, 0.74, 0.66],
   hospitality: [1.0, 0.88, 0.76, 0.65, 0.55], // occupancy ramp saturates
   auto: [1.0, 0.85, 0.7, 0.58, 0.48], // cycle-capped
+  "technology-hardware": [1.0, 0.87, 0.74, 0.62, 0.52], // replacement-cycle capped, no SaaS compounding
+  "technology-software": [1.0, 0.92, 0.84, 0.76, 0.68], // sticky NRR compounding, slow fade
   "it-services": [1.0, 0.92, 0.84, 0.76, 0.68], // sticky, slow fade
   telecom: [1.0, 0.9, 0.8, 0.7, 0.6],
   pharma: [1.0, 0.9, 0.8, 0.7, 0.6],
@@ -51,6 +53,8 @@ const FADE_SHAPES: Record<string, number[]> = {
 export const SECTOR_TERMINAL_GROWTH: Record<string, number> = {
   hospitality: 0.035,
   "real-estate": 0.03,
+  "technology-hardware": 0.035, // cyclical device demand — never SaaS perpetuity
+  "technology-software": 0.04,
   auto: 0.035,
   "it-services": 0.04,
   telecom: 0.035,
@@ -100,7 +104,12 @@ export function computeDriverForecast(params: {
   } else if (sectorId === "auto" || operatingArchetype === "auto_manufacturing") {
     ebitMargins = [0.008, 0.014, 0.018, 0.021, 0.023].map((r) => Math.min(inputs.effectiveMargin + r, 0.22));
     driverEquation = "Revenue = Σ(model deliveries × ASP) + parts/services + storage; margin ex-regulatory-credits, cost-down vs price-cuts";
-  } else if (sectorId === "it-services" || operatingArchetype === "technology_software") {
+  } else if (sectorId === "technology-hardware" || operatingArchetype === "technology_hardware") {
+    // Hardware: segment units × ASP × mix; gross margin via mix/component economics;
+    // inventory + channel working capital explicit. No NRR/MSA/consulting compounding.
+    ebitMargins = [0.006, 0.012, 0.017, 0.021, 0.024].map((r) => Math.min(inputs.effectiveMargin + r, 0.28));
+    driverEquation = "Revenue = Σ(segment units × ASP × mix) + services attach; gross margin = mix − component costs (memory/display/silicon); WC = channel + finished-goods inventory − supplier payables";
+  } else if (sectorId === "technology-software" || sectorId === "it-services" || operatingArchetype === "technology_software") {
     ebitMargins = [0.008, 0.014, 0.019, 0.023, 0.026].map((r) => Math.min(inputs.effectiveMargin + r, 0.32));
     driverEquation = "Revenue = billed headcount × utilization × realization + TCV conversion; margin = pricing − wage inflation − attrition drag";
   } else if (sectorId === "internet-platform") {
@@ -124,7 +133,9 @@ export function computeDriverForecast(params: {
   let avgCapexPct = Math.min(0.08, Math.max(0.025, inputs.rawAvgCapexPct || 0.04));
   let avgDeptPct = Math.min(0.06, Math.max(0.02, inputs.rawAvgDeptPct || 0.035));
   let avgNwcChangePct = 0.02;
-  if (sectorId === "hospitality") { avgCapexPct = Math.max(avgCapexPct, 0.06); avgDeptPct = Math.max(avgDeptPct, 0.04); avgNwcChangePct = 0.012; }
+  if (sectorId === "technology-hardware") { avgCapexPct = Math.max(avgCapexPct, 0.05); avgDeptPct = Math.max(avgDeptPct, 0.035); avgNwcChangePct = 0.025; }
+  else if (sectorId === "technology-software") { avgCapexPct = Math.min(avgCapexPct, 0.03); avgNwcChangePct = 0.015; }
+  else if (sectorId === "hospitality") { avgCapexPct = Math.max(avgCapexPct, 0.06); avgDeptPct = Math.max(avgDeptPct, 0.04); avgNwcChangePct = 0.012; }
   else if (sectorId === "real-estate") { avgCapexPct = Math.max(avgCapexPct, 0.045); avgNwcChangePct = 0.008; }
   else if (sectorId === "auto") { avgCapexPct = Math.max(avgCapexPct, 0.06); avgNwcChangePct = 0.018; }
   else if (sectorId === "it-services") { avgCapexPct = Math.min(avgCapexPct, 0.03); avgNwcChangePct = 0.02; }

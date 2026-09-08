@@ -3124,7 +3124,7 @@ const CreditAnalysisPage2 = ({ data }: { data: ReportData }) => {
               Downside Volume &amp; Pricing Stress Sensitivity
             </Text>
             <Text style={{ fontSize: 6.4, color: COLORS.textSecondary, lineHeight: 1.35, textAlign: "justify" }}>
-              Our institutional credit stress test models a severe contraction scenario: a 20% decline in core contract throughput coupled with 300 basis points of gross margin compression. Under these stressed conditions, {data.profile.name} continues to generate positive operating cash flow, sustaining interest coverage comfortably above covenant floors.
+              Illustrative downside screen (model assumption, not a covenant test): a 20% decline in core revenue throughput with 300 basis points of gross margin compression. Whether operating cash flow stays positive and coverage holds depends on undisclosed facility covenants — no compliance claim is made.
             </Text>
           </View>
           <View style={{ flex: 1 }}>
@@ -3137,11 +3137,11 @@ const CreditAnalysisPage2 = ({ data }: { data: ReportData }) => {
                 const latestCol = models[2];
                 const intCov = latestCol.interestExp > 0 && latestCol.operatingIncome > 0
                   ? (latestCol.operatingIncome / latestCol.interestExp).toFixed(1)
-                  : "4.1";
+                  : "N/M";
                 const netLev = latestCol.ebitda > 0
                   ? ((latestCol.shortDebt + latestCol.longDebt - latestCol.cash) / latestCol.ebitda).toFixed(1)
-                  : "0.0";
-                return `Existing banking covenants mandate minimum interest coverage of 2.5x and maximum net debt to EBITDA of 3.5x. With current net leverage at ${netLev}x and interest coverage at ${intCov}x, credit profile remains calibrated against structural covenants and near-term capital requirements.`;
+                  : "N/M";
+                return `Headroom judged against standard thresholds (<3.5x net debt/EBITDA, >4x coverage) for context only: current net leverage ${netLev}x, interest coverage ${intCov}x. Actual facility covenants are undisclosed — no compliance claim is made.`;
               })()}
             </Text>
           </View>
@@ -3872,8 +3872,11 @@ const EventBasedPriceMovementPage = ({ data }: { data: ReportData }) => {
     ? data.eventPriceMovements
     : buildEventPriceMovements(data.news, data.stockData, data.profile);
 
-  const ev1 = events[0];
-  const ev2 = events[1] || events[0];
+  // Featured slots prefer MEASURED sessions; illustrative sketches never headline
+  // the study — they remain ledger-tracked below with explicit labeling.
+  const measuredEvts = events.filter((e) => e.measured);
+  const ev1 = measuredEvts[0] || events[0];
+  const ev2 = measuredEvts[1] || measuredEvts[0] || events[1] || events[0];
 
   // Curate 4 high-impact news items from raw ticker news, recent news analysis, or event movements
   const displayNews = (() => {
@@ -3964,10 +3967,18 @@ const EventBasedPriceMovementPage = ({ data }: { data: ReportData }) => {
               Event Impact Analysis I: {ev1.categoryLabel}
             </Text>
             <Text style={{ fontSize: 5.4, fontFamily: "Helvetica-Bold", color: ev1.measured ? "#15803d" : "#b45309" }}>
-              {ev1.measured ? "● MEASURED SESSIONS" : "○ ILLUSTRATIVE SKETCH"}
+              {ev1.measured ? "● MEASURED SESSIONS" : "○ ILLUSTRATIVE SKETCH — NO CHART"}
             </Text>
           </View>
-          <EventPriceChart event={ev1} width={532} height={104} currencySymbol={sym} />
+          {ev1.measured ? (
+            <EventPriceChart event={ev1} width={532} height={104} currencySymbol={sym} />
+          ) : (
+            <View style={{ borderWidth: 0.5, borderColor: "#d97706", backgroundColor: "#fffbeb", padding: 4, marginBottom: 1 }}>
+              <Text style={{ fontSize: 5.2, color: "#92400e", lineHeight: 1.3 }}>
+                No exchange session coverage around this disclosure date — trajectory chart withheld (stylized sketches are not plotted). See ledger row below; interpret directionally only.
+              </Text>
+            </View>
+          )}
 
           {/* 3-Column Event Impact Decomposition */}
           <View style={{ flexDirection: "row", gap: 6, marginTop: 1 }}>
@@ -4009,10 +4020,18 @@ const EventBasedPriceMovementPage = ({ data }: { data: ReportData }) => {
               Event Impact Analysis II: {ev2.categoryLabel}
             </Text>
             <Text style={{ fontSize: 5.4, fontFamily: "Helvetica-Bold", color: ev2.measured ? "#15803d" : "#b45309" }}>
-              {ev2.measured ? "● MEASURED SESSIONS" : "○ ILLUSTRATIVE SKETCH"}
+              {ev2.measured ? "● MEASURED SESSIONS" : "○ ILLUSTRATIVE SKETCH — NO CHART"}
             </Text>
           </View>
-          <EventPriceChart event={ev2} width={532} height={104} currencySymbol={sym} />
+          {ev2.measured ? (
+            <EventPriceChart event={ev2} width={532} height={104} currencySymbol={sym} />
+          ) : (
+            <View style={{ borderWidth: 0.5, borderColor: "#d97706", backgroundColor: "#fffbeb", padding: 4, marginBottom: 1 }}>
+              <Text style={{ fontSize: 5.2, color: "#92400e", lineHeight: 1.3 }}>
+                No exchange session coverage around this disclosure date — trajectory chart withheld (stylized sketches are not plotted). See ledger row below; interpret directionally only.
+              </Text>
+            </View>
+          )}
 
           {/* 3-Column Event Impact Decomposition */}
           <View style={{ flexDirection: "row", gap: 6, marginTop: 1 }}>
@@ -4068,6 +4087,11 @@ const EventBasedPriceMovementPage = ({ data }: { data: ReportData }) => {
                   <View style={{ backgroundColor: "#e2e8f0", paddingHorizontal: 2.5, paddingVertical: 0.5, borderRadius: 1.5 }}>
                     <Text style={{ fontSize: 4.0, fontFamily: "Helvetica-Bold", color: "#334155" }}>
                       {ev.categoryLabel || ev.category || "DISCLOSURE"}
+                    </Text>
+                  </View>
+                  <View style={{ backgroundColor: ev.measured ? "#dcfce7" : "#fef3c7", paddingHorizontal: 2.5, paddingVertical: 0.5, borderRadius: 1.5 }}>
+                    <Text style={{ fontSize: 4.0, fontFamily: "Helvetica-Bold", color: ev.measured ? "#15803d" : "#b45309" }}>
+                      {ev.measured ? "MEASURED" : "ILLUSTRATIVE"}
                     </Text>
                   </View>
                   {ev.publisher && (

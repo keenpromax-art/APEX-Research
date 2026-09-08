@@ -8,6 +8,8 @@ export type SectorId =
   | "insurance"
   | "ratings-agency"
   | "asset-management"
+  | "technology-hardware"
+  | "technology-software"
   | "it-services"
   | "pharma"
   | "consumer"

@@ -15,6 +15,7 @@ import { computeReverseDCF } from "./valuation/reverse-dcf";
 import type { ArchetypeProfile } from "./company-archetype";
 import type { SectorProfile } from "./sectors/types";
 import { computeDriverForecast } from "./driver-models";
+import { resolveShareCount } from "./financial-provenance";
 
 const safe = (n: number, d = 0) =>
   isFinite(n) && !isNaN(n) ? n : d;
@@ -207,7 +208,15 @@ export function computeWACC(
   const marginalTaxRate = cp.marginalTaxRate;
   const costOfDebtPostTax = costOfDebtPreTax * (1 - marginalTaxRate);
 
-  const totalMktCap = (stockData.currentPrice || 1) * (stockData.sharesOutstanding || fin.sharesOutstanding || 1);
+  // Resolved share base (market-cap cross-checked) so WACC weights agree with the DCF/ledger per-share base.
+  const waccShares = (() => {
+    try {
+      const r = resolveShareCount({ stockData, annualFinancials: annualFinancials && annualFinancials.length > 0 ? annualFinancials : [fin] });
+      if (r.shares > 0) return r.shares;
+    } catch { /* fall through to legacy priority */ }
+    return stockData.sharesOutstanding || fin.sharesOutstanding || 1;
+  })();
+  const totalMktCap = (stockData.currentPrice || 1) * waccShares;
   const totalDebtVal = fin.totalDebt || 0;
   const totalValue = totalMktCap + totalDebtVal;
   const equityWeight = totalValue > 0 ? totalMktCap / totalValue : 0.95;
@@ -440,7 +449,9 @@ export function computeDCF(
     : 0;
   const netDebt = latestDebt - latestCash - financeReceivablesOffset;
   const rawEquityValue = enterpriseValue - netDebt;
-  const sharesOutstanding = stockData.sharesOutstanding || latest.sharesOutstanding || 0;
+  // Priority 2: resolved share base (market-cap cross-checked; partial-class
+  // quote feeds lose) so model and ledger divide by the SAME count.
+  const sharesOutstanding = resolveShareCount({ stockData, annualFinancials }).shares;
 
   const diagnostics: string[] = [];
   if (financeReceivablesOffset > 0) {

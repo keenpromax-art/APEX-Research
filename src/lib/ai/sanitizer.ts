@@ -23,7 +23,45 @@ export interface SanitizerResult {
  * Sector template bleed mappings:
  * Neutralizes out-of-sector concepts with sector-appropriate language.
  */
+export const HARDWARE_SAAS_BLEED = [
+  "net revenue retention", "nrr", "net dollar retention",
+  "master service agreement", "statement of work",
+  "developer ecosystem", "microservices", "container orchestration", "kubernetes",
+  "consulting spend", "discretionary consulting", "deal signing cycles", "deal signing",
+  "total contract value", "annual contract value", "acv",
+  "billable utilization", "blended utilization", "offshore", "onsite effort", "effort mix",
+  "voluntary attrition", "talent pyramid", "delivery pyramid",
+  "time and materials", "managed services contract", "vendor consolidation",
+];
+
 export const BLEED_REPLACEMENTS: Record<string, string> = {
+  "net revenue retention": "repeat-purchase rate",
+  "nrr": "repeat-purchase rate",
+  "net dollar retention": "repeat-purchase rate",
+  "master service agreement": "enterprise supply agreement",
+  "statement of work": "product supply schedule",
+  "developer ecosystem": "developer community",
+  "microservices": "modular firmware architecture",
+  "container orchestration": "device fleet management",
+  "kubernetes": "device fleet management",
+  "consulting spend": "enterprise procurement spend",
+  "discretionary consulting": "discretionary enterprise spend",
+  "deal signing cycles": "enterprise procurement cycles",
+  "deal signing": "enterprise procurement",
+  "total contract value": "contracted order value",
+  "annual contract value": "annualized contract value",
+  "acv": "annualized contract value",
+  "billable utilization": "capacity utilization",
+  "blended utilization": "capacity utilization",
+  "offshore": "outsourced operations",
+  "onsite effort": "field operations",
+  "effort mix": "labor mix",
+  "voluntary attrition": "workforce attrition",
+  "talent pyramid": "workforce structure",
+  "delivery pyramid": "service structure",
+  "time and materials": "fixed-scope supply",
+  "managed services contract": "managed supply agreement",
+  "vendor consolidation": "supplier consolidation",
   "dark stores": "fulfillment micro-hubs",
   "dark store": "fulfillment micro-hub",
   "refinery throughput": "operational throughput",
@@ -87,6 +125,10 @@ export const SEMANTIC_BLEED_RULES: { sectors: string[]; blocked: string[] }[] = 
   { sectors: ["telecom", "communication", "wireless", "internet", "restaurants"], blocked: ["proprietary silicon", "custom neural engine", "wafer fabrication", "foundry capacity", "us fda", "cgmp", "iso 13485"] },
   { sectors: ["pharma", "health", "biotech", "drug"], blocked: ["spectrum auction", "arpu", "tower tenancy", "dark store", "dark stores", "ride hailing", "proprietary silicon"] },
   { sectors: ["technology", "software", "it services"], blocked: ["us fda", "cgmp", "spectrum auction", "agr dues", "refinery throughput", "crack spread"] },
+  // Hardware (devices/components): SaaS/consulting boilerplate is contamination.
+  // Industry-strict via SectorProfile.forbiddenConcepts; this rule is the backstop
+  // for description-matched hardware names.
+  { sectors: ["computer hardware", "electronic components", "computer peripherals", "data storage", "communication equipment"], blocked: [...HARDWARE_SAAS_BLEED, "casa", "nim", "gnpa", "loan book", "spectrum auction", "subscriber churn", "clinical trial", "refinery throughput", "dark stores"] },
   { sectors: ["energy", "oil", "gas", "mining"], blocked: ["app store commission", "saas churn", "arr expansion", "dark store", "dark stores", "proprietary silicon"] },
   // NOTE: consumer and hospitality are NOT listed here — their blocked terms are enforced via SectorProfile.forbiddenConcepts
   // which is industry-strict (classifySector requires industry to be hospitality/consumer). Description mentions like

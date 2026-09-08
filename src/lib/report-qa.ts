@@ -6,12 +6,14 @@
 // QA CONTRACT (block-vs-warn policy — adversarially tested, see
 // scratch/test-publication-gate.ts two-phase fixtures; Priority 4 independent gate):
 //   FAIL (blocks export): primary-data gaps (DATA-01), ontology violations (ONT-01,
-//     HOSP-01), arithmetic breaks (XREF-01/03/04/05, SCEN-01/02, PROB-01, FV-RECOMP-01,
-//     CHAIN-01, BS-01, MODEL-01), identity defects (IDENTITY-01),
+//     HOSP-01, HW-01), arithmetic breaks (XREF-01/03/04/05, SCEN-01/02, PROB-01, FV-RECOMP-01,
+//     CHAIN-01, BS-01, MODEL-01), share/market-cap integrity (SHARE-01),
+//     identity defects (IDENTITY-01),
 //     rating/moat/credit contradictions (RATING-01/02, MOAT-01/02, STEWARD-01,
-//     SEMANTIC-01, CREDIT-01, WACC-01), contamination (BS-DETECTOR-04 ≥1,
+//     SEMANTIC-01, CREDIT-01, WACC-01, VAL-01, COV-01), contamination (BS-DETECTOR-04 ≥1,
 //     SANITIZE-01 ≥1), clone signatures (BS-DETECTOR-05), peer-similarity gate
-//     (PEER-01 threshold), unresolved tokens (PLACEHOLDER-01, CLAIM-01 placeholders),
+//     (PEER-01 threshold), event-study evidence (EVENT-01 empirical-pose),
+//     unresolved tokens (PLACEHOLDER-01, CLAIM-01 placeholders),
 //     missing assumption evidence (ASSUME-01).
 //   WARN (costs score, never blocks): unverified council (BS-DETECTOR-06), margin step-change
 //     (MARGIN-01), loose chain tolerance (CHAIN-01), generic content screens
@@ -26,7 +28,7 @@ import { getSectorProfile, classifySector } from "./sectors/index";
 import { identityIssues } from "./canonical";
 import { getAllowlistedConcepts } from "./sector-allowlist";
 import { buildCompanyOntology, validateOntologyCoverage } from "./company-ontology";
-import { assessProvenance } from "./financial-provenance";
+import { assessProvenance, assessMarketIntegrity, resolveShareCount } from "./financial-provenance";
 import { gatePeerSet, SIMILARITY_THRESHOLD_AVG, SIMILARITY_MIN_QUALIFYING } from "./peer-similarity";
 
 const SECTOR_KEYWORD_BLOCKLIST: Record<string, { blocked: string[]; sectorNames: string[] }> = {
@@ -1619,6 +1621,277 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
     }
   }
 
+  // HW-01: Hardware business-model ontology (adversarial). A Computer Hardware
+  // company analyzed with SaaS/consulting vocabulary (NRR, MSA, developer
+  // ecosystem, microservices, consulting spend, TCV, utilization pyramids) is
+  // the canonical wrong-business-model failure — BLOCK regardless of other passes.
+  {
+    const ontoHw = buildCompanyOntology(data.profile);
+    const isHw = ontoHw.sectorId === "technology-hardware";
+    if (isHw) {
+      const narrativeHw = JSON.stringify({ ...(data.aiAnalysis || {}), ...(data as unknown as { peAnalysis?: unknown }).peAnalysis || {} }).toLowerCase();
+      const saasLeak = [
+        "net revenue retention", "net dollar retention", "developer ecosystem", "microservices",
+        "container orchestration", "kubernetes", "consulting spend", "discretionary consulting",
+        "deal signing", "total contract value", "annual contract value", "billable utilization",
+        "blended utilization", "voluntary attrition", "talent pyramid", "delivery pyramid",
+        "time and materials", "managed services contract", "vendor consolidation",
+        "master service agreement",
+      ].filter((t) => {
+        if (t === "nrr" || t === "acv" || t === "msa" || t === "tcv") return false; // acronyms handled below
+        const esc = t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        return new RegExp(`(^|[^a-z0-9])${esc}([^a-z0-9]|$)`, "i").test(narrativeHw);
+      });
+      // Acronyms need strict boundaries (NRR ≠ "nrr" inside words; TCV/MSA/ACV likewise)
+      for (const ac of ["nrr", "msa", "tcv", "acv"]) {
+        if (new RegExp(`(^|[^a-z0-9])${ac}([^a-z0-9]|$)`, "i").test(narrativeHw) && !saasLeak.includes(ac)) saasLeak.push(ac);
+      }
+      // "offshore"/"onsite effort"/"effort mix" only count in delivery-pyramid context
+      if (/\boffshore\b.{0,40}(utilization|pyramid|delivery|talent)/i.test(narrativeHw) && !saasLeak.includes("offshore")) saasLeak.push("offshore (delivery context)");
+      const hwRequired = ["units", "asp", "product mix", "component", "inventory", "channel", "gross margin"];
+      const hwMissing = hwRequired.filter((t) => {
+        const esc = t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        return !new RegExp(`(^|[^a-z0-9])${esc}([^a-z0-9]|$)`, "i").test(narrativeHw);
+      });
+      if (saasLeak.length > 0) {
+        checks.push({
+          id: "HW-01",
+          category: "BS_DETECTOR",
+          name: "Hardware Ontology Contamination",
+          status: "FAIL",
+          details: `FATAL PUBLICATION BLOCK: hardware narrative contains enterprise-software vocabulary [${saasLeak.slice(0, 6).join(", ")}] — wrong business model applied to a devices/components company.`,
+          expected: "Zero SaaS/consulting concepts",
+          actual: `${saasLeak.length} leak(s)`,
+        });
+      } else if (hwMissing.length >= hwRequired.length - 1) {
+        checks.push({
+          id: "HW-01",
+          category: "BS_DETECTOR",
+          name: "Hardware Ontology Completeness",
+          status: "FAIL",
+          details: `FATAL PUBLICATION BLOCK: hardware narrative evidences none of the required driver concepts [${hwRequired.join(", ")}] — missing ${hwMissing.length}/${hwRequired.length}. Generic template detected.`,
+          expected: "≥2 of: units, ASP, product mix, component, inventory, channel, gross margin",
+          actual: `missing ${hwMissing.length}`,
+        });
+      } else {
+        checks.push({
+          id: "HW-01",
+          category: "BS_DETECTOR",
+          name: "Hardware Ontology Control",
+          status: "PASS",
+          details: `Hardware ontology hard-controlled: driver concepts evidenced, zero SaaS/consulting bleed.`,
+        });
+      }
+    } else {
+      checks.push({
+        id: "HW-01",
+        category: "BS_DETECTOR",
+        name: "Hardware Ontology Control",
+        status: "PASS",
+        details: `Not a hardware-sector company — hardware ontology gate not applicable.`,
+      });
+    }
+  }
+
+  // SHARE-01: share-count / market-cap integrity (independent of the model).
+  // Recomputes price × shares = market cap and quote-vs-statement shares from
+  // PRIMARY inputs. Gross mismatches BLOCK the DCF (per-share math = fantasy).
+  {
+    const mi = assessMarketIntegrity({ stockData: data.stockData, annualFinancials: data.annualFinancials });
+    const blocks = mi.issues.filter((i) => i.severity === "BLOCK");
+    const warns = mi.issues.filter((i) => i.severity === "WARN");
+    if (blocks.length > 0) {
+      checks.push({
+        id: "SHARE-01",
+        category: "BALANCE_SHEET",
+        name: "Share-Count / Market-Cap Integrity",
+        status: "FAIL",
+        details: `FATAL PUBLICATION BLOCK: ${blocks[0].message}`,
+        expected: blocks[0].expected,
+        actual: blocks[0].actual,
+      });
+    } else if (warns.length > 0) {
+      checks.push({
+        id: "SHARE-01",
+        category: "BALANCE_SHEET",
+        name: "Share-Count / Market-Cap Integrity",
+        status: "WARN",
+        details: warns.map((w) => w.message).join("; ").slice(0, 300),
+        expected: warns[0].expected,
+        actual: warns[0].actual,
+      });
+    } else {
+      checks.push({
+        id: "SHARE-01",
+        category: "BALANCE_SHEET",
+        name: "Share-Count / Market-Cap Integrity",
+        status: "PASS",
+        details: `price × shares = market cap reconciles; quote/statement shares agree.`,
+      });
+    }
+  }
+
+  // VAL-01: wrong valuation model for the operating archetype (adversarial).
+  // Financials must use residual-income (FCFF forbidden); hardware must never
+  // use a SaaS/ARR multiple lens; SaaS must never use a units/ASP lens.
+  {
+    const ontoVal = buildCompanyOntology(data.profile);
+    const lens = ((data as unknown as { valuationLens?: string }).valuationLens || (data.masterReportFacts as unknown as { valuationLens?: string } | undefined)?.valuationLens || "") as string;
+    const model = ((data.dcf as unknown as { selectedModel?: string }).selectedModel || "") as string;
+    const isFinVal = ontoVal.isFinancialInstitution;
+    const dcfHasProjections = Array.isArray(data.dcf?.projections) && (data.dcf.projections?.length ?? 0) > 0;
+    if (isFinVal && dcfHasProjections) {
+      checks.push({
+        id: "VAL-01",
+        category: "CROSS_REFERENCE",
+        name: "Valuation Model vs Operating Archetype",
+        status: "FAIL",
+        details: `FATAL PUBLICATION BLOCK: financial institution (${ontoVal.sectorId}) valued with an FCFF projection model — deposits are operating liabilities; residual-income/PB is required.`,
+        expected: "PB_RESIDUAL_INCOME",
+        actual: "FCFF_DCF projections present",
+      });
+    } else if (!isFinVal && !dcfHasProjections && (data.dcf?.status === "valid")) {
+      checks.push({
+        id: "VAL-01",
+        category: "CROSS_REFERENCE",
+        name: "Valuation Model vs Operating Archetype",
+        status: "FAIL",
+        details: `FATAL PUBLICATION BLOCK: operating company (${ontoVal.sectorId}) carries no FCFF projections on a "valid" DCF — valuation has no engine.`,
+        expected: "5Y FCFF projections",
+        actual: "0 projections",
+      });
+    } else if (ontoVal.sectorId === "technology-hardware" && /arr|nrr|rule.of.40/i.test(lens)) {
+      checks.push({
+        id: "VAL-01",
+        category: "CROSS_REFERENCE",
+        name: "Valuation Model vs Operating Archetype",
+        status: "FAIL",
+        details: `FATAL PUBLICATION BLOCK: hardware company valued through a SaaS lens (${lens.slice(0, 80)}) — units/ASP/EV-EBITDA is required.`,
+        expected: "units×ASP lens",
+        actual: lens.slice(0, 60),
+      });
+    } else if (ontoVal.sectorId === "technology-software" && /units.*asp|shipments/i.test(lens)) {
+      checks.push({
+        id: "VAL-01",
+        category: "CROSS_REFERENCE",
+        name: "Valuation Model vs Operating Archetype",
+        status: "FAIL",
+        details: `FATAL PUBLICATION BLOCK: software company valued through a hardware-units lens — ARR/NRR lens is required.`,
+        expected: "ARR lens",
+        actual: lens.slice(0, 60),
+      });
+    } else if (model && ((isFinVal && model !== "PB_RESIDUAL_INCOME") || (!isFinVal && model !== "FCFF_DCF"))) {
+      checks.push({
+        id: "VAL-01",
+        category: "CROSS_REFERENCE",
+        name: "Valuation Model vs Operating Archetype",
+        status: "FAIL",
+        details: `FATAL PUBLICATION BLOCK: model tag ${model} contradicts ${ontoVal.sectorId} archetype.`,
+        expected: isFinVal ? "PB_RESIDUAL_INCOME" : "FCFF_DCF",
+        actual: model,
+      });
+    } else {
+      checks.push({
+        id: "VAL-01",
+        category: "BS_DETECTOR",
+        name: "Valuation Model vs Operating Archetype",
+        status: "PASS",
+        details: `Valuation engine matches operating archetype (${ontoVal.sectorId}${lens ? `; lens: ${lens.slice(0, 60)}` : ""}).`,
+      });
+    }
+  }
+
+  // COV-01: unsupported covenant specifics (adversarial). Facility covenants are
+  // undisclosed in Yahoo filings — any narrative asserting specific covenant
+  // floors/mandates as fact (e.g. "covenants mandate 2.5x/3.5x", "comfortably
+  // above covenant floors") is fabricated and BLOCKS.
+  {
+    const covText = JSON.stringify({
+      c: (data.aiAnalysis as unknown as { creditAnalysisCommentary?: unknown })?.creditAnalysisCommentary || "",
+      s: (data.aiAnalysis as unknown as { capitalAllocationCommentary?: unknown })?.capitalAllocationCommentary || "",
+      t: (data.aiAnalysis as unknown as { investmentThesis?: string })?.investmentThesis || "",
+    }).toLowerCase();
+    const covFabrications: string[] = [];
+    if (/covenants?\s+mandate/i.test(covText)) covFabrications.push("covenant-mandate-as-fact");
+    if (/comfortably\s+above\s+covenant/i.test(covText)) covFabrications.push("comfort-above-undisclosed-floors");
+    if (/covenant\s+floors/i.test(covText) && !/undisclosed/i.test(covText)) covFabrications.push("covenant-floors-as-fact");
+    if (/covenants?\s+preserved/i.test(covText) && !/standard thresholds|illustrative|model assumption/i.test(covText)) covFabrications.push("covenants-preserved-verdict");
+    if (/minimum\s+interest\s+coverage\s+of\s+\d/i.test(covText) && !/standard thresholds|illustrative/i.test(covText)) covFabrications.push("specific-coverage-floor-as-fact");
+    if (covFabrications.length > 0) {
+      checks.push({
+        id: "COV-01",
+        category: "BS_DETECTOR",
+        name: "Covenant Specificity vs Evidence",
+        status: "FAIL",
+        details: `FATAL PUBLICATION BLOCK: narrative asserts undisclosed facility-covenant specifics as fact (${covFabrications.join("; ")}). Covenants are not in filings — conditional/model-assumption language is required.`,
+        expected: "Conditional / undisclosed-covenant language",
+        actual: `${covFabrications.length} fabrication(s)`,
+      });
+    } else {
+      checks.push({
+        id: "COV-01",
+        category: "BS_DETECTOR",
+        name: "Covenant Specificity vs Evidence",
+        status: "PASS",
+        details: `No undisclosed covenant specifics asserted as fact.`,
+      });
+    }
+  }
+
+  // EVENT-01: illustrative trajectories must never pose as an empirical event study.
+  // Measured sessions may carry abnormal-return verdicts; illustrative sketches may
+  // only support directional tracking. An "event study confirms" style claim with
+  // zero measured events BLOCKS; a majority-illustrative set WARNs.
+  {
+    const evts = (data.eventPriceMovements || []) as { measured?: boolean; verdict?: string }[];
+    const measuredCount = evts.filter((e) => e?.measured).length;
+    const illustCount = evts.filter((e) => !e?.measured).length;
+    const evtNarrative = JSON.stringify({ a: data.aiAnalysis || {}, e: (data as unknown as { eventStudyCommentary?: string }).eventStudyCommentary || "" }).toLowerCase();
+    const claimsEmpirical = /empirical event study (confirms|proves|demonstrates)|abnormal alpha (confirms|proves)|event study (confirms|validates)/i.test(evtNarrative);
+    if (evts.length > 0 && measuredCount === 0 && (claimsEmpirical || illustCount > 0)) {
+      // Illustrative-only set: block only when posed as empirical proof; else warn.
+      if (claimsEmpirical) {
+        checks.push({
+          id: "EVENT-01",
+          category: "BS_DETECTOR",
+          name: "Event-Study Evidence Standard",
+          status: "FAIL",
+          details: `FATAL PUBLICATION BLOCK: ${illustCount} illustrative event sketch(es) with zero measured sessions posed as empirical event-study proof. Stylized trajectories are not abnormal-return evidence.`,
+          expected: "Measured sessions for empirical claims",
+          actual: "0 measured",
+        });
+      } else {
+        checks.push({
+          id: "EVENT-01",
+          category: "BS_DETECTOR",
+          name: "Event-Study Evidence Standard",
+          status: "WARN",
+          details: `All ${illustCount} event(s) are illustrative sketches (no session coverage) — directional tracking only, not an empirical event study. Omit or label; do not draw abnormal-return conclusions.`,
+          expected: "Measured sessions preferred",
+          actual: "0 measured",
+        });
+      }
+    } else if (evts.length > 0 && illustCount > measuredCount && measuredCount > 0) {
+      checks.push({
+        id: "EVENT-01",
+        category: "BS_DETECTOR",
+        name: "Event-Study Evidence Standard",
+        status: "WARN",
+        details: `Event set is majority-illustrative (${illustCount} illustrative vs ${measuredCount} measured) — conclusions must rest on measured sessions only.`,
+        expected: "Measured-majority set",
+        actual: `${measuredCount} measured / ${illustCount} illustrative`,
+      });
+    } else {
+      checks.push({
+        id: "EVENT-01",
+        category: "BS_DETECTOR",
+        name: "Event-Study Evidence Standard",
+        status: "PASS",
+        details: evts.length === 0 ? `No event-study claims — nothing to evidence.` : `Event evidence standard met (${measuredCount} measured / ${illustCount} illustrative).`,
+      });
+    }
+  }
+
   // ── Priority 4: independent hard publication gate (data → sector → accounting → model → valuation → peers → narrative → PDF).
   // Each check recomputes from PRIMARY inputs (profile/stockData/annualFinancials),
   // never trusts the ledger/model output it audits. Any critical FAIL blocks export.
@@ -1699,24 +1972,31 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
     }
   }
 
-  // MODEL-01: independent DCF recomputation from primaries (never trusts ledger/model fields).
+  // MODEL-01: independent published-output consistency (never trusts one stage).
+  // Recomputes the PUBLISHED bridges (ledger equity/shares vs ledger fair value;
+  // model EV vs PV parts) and cross-checks the share base against market cap.
   {
     const fins = data.annualFinancials || [];
     const latestM = fins[fins.length - 1];
     const dcfM = data.dcf as unknown as Record<string, number>;
+    const ledM = data.assumptionsLedger as unknown as Record<string, number> | undefined;
     const indepIssues: string[] = [];
     if (latestM && dcfM) {
       const ev = Number(dcfM.enterpriseValue) || 0;
       const sumPv = Number(dcfM.sumPvFcff) || 0;
       const pvTv = Number(dcfM.pvTerminalValue) || 0;
       if (Math.abs(ev - (sumPv + pvTv)) > 1000 && ev > 0) indepIssues.push(`EV≠PV(FCFF)+PV(TV) gap ${(Math.abs(ev - (sumPv + pvTv))).toFixed(0)}`);
-      const eq = Number(dcfM.equityValue) || 0;
-      const nd = Number((data.assumptionsLedger as unknown as Record<string, number> | undefined)?.netDebt ?? dcfM.netDebt) || 0;
-      const isFin = buildCompanyOntology(data.profile).isFinancialInstitution;
-      if (!isFin && ev > 0 && Math.abs(eq - (ev - nd)) > 1000) indepIssues.push(`Equity≠EV−NetDebt gap ${Math.abs(eq - (ev - nd)).toFixed(0)}`);
-      const shares = Number(data.stockData.sharesOutstanding) || Number(latestM.sharesOutstanding) || 0;
-      const fvM = Number((data.assumptionsLedger as unknown as Record<string, number> | undefined)?.fairValue ?? data.targetPrice) || 0;
-      if (shares > 0 && eq > 0 && Math.abs(fvM - eq / shares) > 1.0) indepIssues.push(`FV≠Equity/Shares gap ${Math.abs(fvM - eq / shares).toFixed(2)}`);
+      const ledEq = Number(ledM?.equityValue);
+      const ledSh = Number(ledM?.sharesOutstanding);
+      const ledFv = Number(ledM?.fairValue ?? data.targetPrice) || 0;
+      if (Number.isFinite(ledEq) && Number.isFinite(ledSh) && ledSh > 0 && ledEq > 0 && Math.abs(ledFv - ledEq / ledSh) > 1.0) {
+        indepIssues.push(`ledger FV≠Equity/Shares gap ${Math.abs(ledFv - ledEq / ledSh).toFixed(2)}`);
+      }
+      const mktShares = resolveShareCount({ stockData: data.stockData, annualFinancials: data.annualFinancials });
+      if (mktShares.source !== "none" && Number.isFinite(ledSh) && ledSh > 0) {
+        const drift = Math.abs(ledSh - mktShares.shares) / Math.max(1, mktShares.shares);
+        if (drift > 0.01) indepIssues.push(`ledger shares≠resolved base gap ${(drift * 100).toFixed(1)}%`);
+      }
       const w = Number(dcfM.wacc ?? (data.dcf as unknown as { assumptions?: { wacc?: number } }).assumptions?.wacc) || 0;
       void w;
     } else {

@@ -46,6 +46,8 @@ const REQUIRED_CONCEPTS: Record<string, string[]> = {
   "ratings-agency": ["rating", "subscription", "analytical"],
   "asset-management": ["aum", "net flows", "fee rate"],
   "it-services": ["revenue growth", "ebit margin", "tcv", "attrition", "utilization"],
+  "technology-hardware": ["units", "asp", "product mix", "component", "inventory", "channel", "gross margin"],
+  "technology-software": ["arr", "retention", "tcv", "subscription", "expansion"],
   pharma: ["r&d", "us generics", "anda", "gross margin"],
   consumer: ["volume growth", "gross margin", "distribution", "premiumization"],
   industrial: ["order inflow", "order book", "capacity utilization", "roce"],
@@ -70,6 +72,8 @@ const COMPETITOR_UNIVERSE: Record<string, string[]> = {
   "ratings-agency": ["CRISIL.NS", "ICRA.NS", "CAREERP.NS", "SPGI", "MCO"],
   "asset-management": ["HDFCAMC.NS", "NAM-INDIA.NS", "UTIAMC.NS", "BLK", "TROW"],
   "it-services": ["TCS.NS", "INFY.NS", "HCLTECH.NS", "WIPRO.NS"],
+  "technology-hardware": ["AAPL", "DELL", "HPQ", "HPE", "LOGI", "NTAP"],
+  "technology-software": ["MSFT", "ORCL", "ADBE", "CRM", "INTU"],
   pharma: ["SUNPHARMA.NS", "CIPLA.NS", "DRREDDY.NS", "LUPIN.NS", "JNJ", "PFE"],
   consumer: ["HINDUNILVR.NS", "ITC.NS", "NESTLEIND.NS", "BRITANNIA.NS", "NKE"],
   industrial: ["LT.NS", "SIEMENS.NS", "ABB.NS", "BHEL.NS"],
@@ -96,6 +100,8 @@ function deriveSubSector(sectorId: SectorId, industry: string, archetypeSector: 
   if (sectorId === "real-estate") return "real-estate / REIT & development";
   if (sectorId === "bank") return "banking / commercial & retail";
   if (sectorId === "it-services") return "technology / IT services & consulting";
+  if (sectorId === "technology-hardware") return "technology / hardware, devices & components";
+  if (sectorId === "technology-software") return "technology / enterprise software & SaaS";
   return `${sectorId} / ${(industry || "general").toLowerCase().slice(0, 60)}`;
 }
 
@@ -108,6 +114,8 @@ function deriveSegments(sectorId: SectorId, description: string): string[] {
     return segs;
   }
   if (sectorId === "real-estate") return ["leasing", "development"];
+  if (sectorId === "technology-hardware") return ["devices & endpoints", "components & storage", "services attach (if disclosed)"];
+  if (sectorId === "technology-software") return ["subscription / SaaS", "license", "services"];
   if (sectorId === "auto") return ["vehicles", "parts & services", "energy storage (if disclosed)"];
   if (sectorId === "it-services") return ["services", "consulting & outsourcing"];
   if (sectorId === "bank") return ["net interest income", "fee income"];
@@ -129,7 +137,11 @@ export function buildCompanyOntology(
 
   const revenueDrivers =
     drivers?.revenueDrivers ??
-    (sectorId === "auto"
+    (sectorId === "technology-hardware"
+      ? ["unit shipments by product line", "ASP & product mix", "services attach rate"]
+      : sectorId === "technology-software"
+        ? ["ARR base & seats", "net expansion (NRR)", "new logos & TCV conversion"]
+        : sectorId === "auto"
       ? ["vehicle deliveries (units)", "ASP per vehicle", "mix & pricing"]
       : sectorId === "it-services"
         ? ["billed headcount & utilization", "realization rate", "large-deal TCV conversion"]
@@ -142,11 +154,15 @@ export function buildCompanyOntology(
               : ["volume", "realization / pricing", "mix"]);
   const costDrivers =
     drivers?.costDrivers ??
-    (sectorId === "it-services"
-      ? ["employee cost & wage inflation", "attrition & subcontracting"]
-      : sectorId === "auto"
-        ? ["bill of materials & battery cost", "manufacturing conversion cost"]
-        : ["input costs", "operating leverage"]);
+    (sectorId === "technology-hardware"
+      ? ["component costs (memory/display/silicon)", "manufacturing conversion & warranty"]
+      : sectorId === "technology-software"
+        ? ["sales & marketing CAC", "cloud hosting & support"]
+        : sectorId === "it-services"
+          ? ["employee cost & wage inflation", "attrition & subcontracting"]
+          : sectorId === "auto"
+            ? ["bill of materials & battery cost", "manufacturing conversion cost"]
+            : ["input costs", "operating leverage"]);
   const capexDrivers = drivers?.capexDrivers ?? ["maintenance capex", "growth capex"];
 
   return {

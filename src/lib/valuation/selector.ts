@@ -37,6 +37,8 @@ function resolveValuationLens(sectorId: string, operatingArchetype?: string): { 
     if (op === "hospitality_asset_light") return { lens: "FCFF_DCF on fee annuity + EV/EBITDAR", corroboration: "EV/EBITDAR + fee-EBITDA multiple" };
     return { lens: "FCFF_DCF (RevPAR-driven) + EV/EBITDAR cross-check", corroboration: "EV/EBITDAR + NAV cap-rate" };
   }
+  if (sectorId === "technology-hardware" || op === "technology_hardware") return { lens: "FCFF_DCF (units×ASP×mix) + EV/EBITDA", corroboration: "EV/EBITDA + P/E ex-services" };
+  if (sectorId === "technology-software" || op === "technology_software") return { lens: "FCFF_DCF (ARR×NRR) + EV/Sales", corroboration: "EV/Sales + Rule-of-40" };
   if (sectorId === "real-estate" || op === "real_estate") return { lens: "FCFF_DCF + NAV cap-rate", corroboration: "NAV cap-rate + EV/EBITDA" };
   if (sectorId === "auto" || op === "auto_manufacturing") return { lens: "FCFF_DCF (deliveries×ASP) + EV/EBITDA ex-credits", corroboration: "EV/EBITDA + P/E" };
   if (sectorId === "it-services" || op === "technology_software") return { lens: "FCFF_DCF (utilization×realization) + EV/EBIT", corroboration: "EV/EBIT + PEG" };

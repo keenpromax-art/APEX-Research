@@ -4,7 +4,7 @@
 // operational reality before generating financial templates and narratives.
 // ============================================================
 import type { CompanyProfile, StockData, AnnualFinancials } from "@/types/report";
-import { isInternetPlatformCompany, isHospitalityCompany, isRealEstateCompany } from "./sectors/profiles";
+import { isInternetPlatformCompany, isHospitalityCompany, isRealEstateCompany, isTelecomCarrierCompany, isHardwareCompany, isSoftwareCompany } from "./sectors/profiles";
 
 export type FinancialArchetype =
   | "DISTRESSED"              // High leverage, negative EBITDA/earnings, debt restructuring (e.g. Vodafone Idea)
@@ -100,22 +100,17 @@ export function classifyArchetype(
   } else if (isInternetPlatform) {
     sector = "technology_platform";
   } else if (
-    !isInternetPlatform &&
-    (ind.includes("telecom") ||
-    ind.includes("wireless") ||
-    ind.includes("telecommunications service") ||
+    isTelecomCarrierCompany(profile.sector, profile.industry, profile.description, profile.name) ||
     ticker.includes("IDEA") ||
     ticker.includes("BHARTIARTL") ||
     ticker.includes("TATACOMM") ||
     text.includes("vodafone idea") ||
-    text.includes("wireless carrier") ||
-    text.includes("cellular") ||
-    text.includes("telecommunications service"))
+    text.includes("wireless carrier")
   ) {
-    // NOTE: bare sector `includes("communication")` is intentionally NOT used —
-    // Communication Services includes internet platforms (Meta, Alphabet) that are
-    // not telecom carriers. Carrier routing requires telecom/wireless industry
-    // language or carrier-specific identifiers.
+    // Shared industry-strict predicate (not bare "cellular"/"wireless" description
+    // keywords — those false-positive on hardware makers describing cellular
+    // connectivity, e.g. Apple). NOTE: bare sector `includes("communication")` is
+    // intentionally NOT used — Communication Services includes internet platforms.
     sector = "telecom";
   } else if (
     ind.includes("financial data") ||
@@ -164,6 +159,7 @@ export function classifyArchetype(
   ) {
     sector = "pharma_healthcare";
   } else if (
+    isHardwareCompany(profile.sector, profile.industry, profile.description, profile.name) ||
     ind.includes("semiconductor") ||
     ind.includes("hardware") ||
     name.includes("apple") ||
@@ -176,6 +172,7 @@ export function classifyArchetype(
   ) {
     sector = "technology_hardware";
   } else if (
+    isSoftwareCompany(profile.sector, profile.industry, profile.description, profile.name) ||
     s.includes("tech") ||
     ind.includes("software") ||
     ind.includes("it service") ||

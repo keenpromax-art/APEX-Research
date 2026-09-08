@@ -6,7 +6,7 @@ import { classifyArchetype } from "@/lib/company-archetype";
 import { buildMasterReportFacts } from "@/lib/report-facts";
 import { buildEventPriceMovements } from "@/lib/event-price-engine";
 import { normalizeTicker } from "@/lib/request-validation";
-import { isInternetPlatformCompany, isTelecomCarrierCompany, isHospitalityCompany, isRealEstateCompany } from "@/lib/sectors/profiles";
+import { isInternetPlatformCompany, isTelecomCarrierCompany, isHospitalityCompany, isRealEstateCompany, isHardwareCompany, isSoftwareCompany } from "@/lib/sectors/profiles";
 import { buildCompanyOntology } from "@/lib/company-ontology";
 import { scorePeerSimilarity, gatePeerSet } from "@/lib/peer-similarity";
 
@@ -165,6 +165,9 @@ export async function GET(request: NextRequest) {
           peerTickers = ["BAJFINANCE.NS", "BAJAJFINSV.NS", "CHOLAFIN.NS", "SHRIRAMFIN.NS"];
         } else if (sec.includes("health") || ind.includes("pharma") || ind.includes("drug")) {
           peerTickers = ["SUNPHARMA.NS", "CIPLA.NS", "DRREDDY.NS", "LUPIN.NS"];
+        } else if (isHardwareCompany(companyProfile.sector, companyProfile.industry, companyProfile.description, companyProfile.name) || ind.includes("computer hardware") || ind.includes("electronic components")) {
+          // Listed hardware peers are global — never IT-services names.
+          peerTickers = ["DELL", "HPQ", "HPE", "LOGI"];
         } else if (sec.includes("tech") || ind.includes("software") || ind.includes("information")) {
           peerTickers = ["TCS.NS", "INFY.NS", "HCLTECH.NS", "WIPRO.NS"];
         } else if (sec.includes("energy") || ind.includes("oil") || ind.includes("petro")) {
@@ -206,6 +209,11 @@ export async function GET(request: NextRequest) {
           peerTickers = ["JPM", "BAC", "GS", "MS"];
         } else if (sec.includes("health") || ind.includes("pharma")) {
           peerTickers = ["JNJ", "PFE", "ABBV", "MRK"];
+        } else if (isHardwareCompany(companyProfile.sector, companyProfile.industry, companyProfile.description, companyProfile.name) || ind.includes("computer hardware") || ind.includes("electronic components") || ind.includes("computer peripherals") || ind.includes("data storage")) {
+          // Hardware peers only — never SaaS/platform names (no MSFT/GOOGL/META here).
+          peerTickers = ["DELL", "HPQ", "HPE", "LOGI", "NTAP", "STX"];
+        } else if (isSoftwareCompany(companyProfile.sector, companyProfile.industry, companyProfile.description, companyProfile.name) || ind.includes("application software") || ind.includes("systems software")) {
+          peerTickers = ["MSFT", "ORCL", "ADBE", "CRM", "INTU", "NOW"];
         } else if (sec.includes("tech") || ind.includes("software")) {
           peerTickers = ["AAPL", "MSFT", "GOOGL", "META"];
         } else if (sec.includes("energy") || ind.includes("oil")) {

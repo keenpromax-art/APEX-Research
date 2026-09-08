@@ -136,9 +136,9 @@ export function generatePEFirmAnalysis(input: PEAnalysisInput): AIAnalysis {
     investmentThesis = `Our institutional thesis highlights ${profile.name}'s deep client domain integration, high recurring contractual revenue visibility, and disciplined delivery pyramid optimization. The business generates robust free cash flow conversion exceeding 80% of EBITDA, deploying capital toward organic talent upskilling, proprietary AI platforms, and consistent capital returns.`;
     investmentConclusion = `We formulate ${recAction} recommendation on ${profile.name} with an intrinsic fair value target of ${sym}${fv.toFixed(2)} per share (${formatPct(upsidePct)} implied upside), supported by enterprise digital spending resilience and strong return on invested capital (ROIC).`;
   } else if (sectorType === "technology_hardware") {
-    companyOverview = `${profile.name} is an elite global technology hardware and devices enterprise designing integrated consumer endpoints, proprietary operating architectures, and custom semiconductor components.`;
-    investmentThesis = `Our analysis centers on ${profile.name}'s generational hardware-software ecosystem integration, unmatched brand equity, and active installed device base. Vertical component integration and scale procurement insulate gross margins, generating immense operating cash flows that fund technological R&D while enabling accretive capital returns.`;
-    investmentConclusion = `We formulate ${recAction} recommendation on ${profile.name} with an intrinsic fair value target of ${sym}${fv.toFixed(2)} per share, driven by consumer device replacement cycles and high-margin ecosystem service monetization.`;
+    companyOverview = `${profile.name} is a technology hardware enterprise designing and selling devices, endpoints, and components through retail, carrier, and enterprise channels. Unit economics are measured in segment unit shipments, average selling prices (ASP) and product mix, hardware gross margin net of component costs, channel inventory and sell-through, and services attach on the installed base — SaaS retention, consulting utilization, and contract-value metrics do not apply here.`;
+    investmentThesis = `Our hardware thesis evaluates ${profile.name} on three drivers: First, unit volume resilience through replacement cycles and flagship launch execution across product lines. Second, ASP and product-mix discipline — pro-tier and high-memory configurations defending realization against mid-tier price pressure. Third, hardware gross-margin defense via vertical component integration and scale procurement net of memory/display cost swings, with channel inventory discipline protecting sell-through. Services attach on the installed base provides incremental lifetime revenue.`;
+    investmentConclusion = `We formulate ${recAction} recommendation on ${profile.name} with an intrinsic fair value target of ${sym}${fv.toFixed(2)} per share, driven by units/ASP/mix delivery and component-cost management against the DCF trajectory.`;
   } else if (sectorType === "renewables") {
     companyOverview = `${profile.name} is a premier vertically integrated wind turbine generator (WTG) manufacturer and end-to-end renewable energy operations & maintenance (O&M) service provider across key industrial energy corridors.`;
 
@@ -545,6 +545,15 @@ export function generatePEFirmAnalysis(input: PEAnalysisInput): AIAnalysis {
       { force: "Bargaining Power of Suppliers", level: "Moderate", commentary: "Battery-cell, semiconductor, and lithium supply chains confer leverage, partly offset by vertical integration and multi-sourcing." },
       { force: "Threat of Substitutes", level: "Moderate", commentary: "Hybrids, improved ICE efficiency, and mobility services substitute at the margin; within EVs, models substitute aggressively on price." },
       { force: "Competitive Rivalry", level: "High", commentary: "Global overcapacity and China-led price competition compress industry ASP; share shifts on cost-down execution and model cadence." },
+    ];
+  } else if (sectorType === "technology_hardware") {
+    industryDynamicsCommentary = `The technology hardware industry is a cyclical, replacement-driven manufacturing sector where competition centers on unit volumes, average selling prices (ASP), product mix, and gross-margin defense through component-cost management. Performance is driven by segment shipments, flagship launch execution, channel sell-through and inventory discipline, memory/display/silicon costs, and services attach on the installed base — not SaaS retention, consulting utilization, or contract-value bookings.`;
+    fiveForces = [
+      { force: "Threat of New Entrants", level: "Moderate", commentary: "Capital-intensive tooling, supply-chain scale, and channel access create barriers, but low-cost assemblers contest mid-tier volume segments." },
+      { force: "Bargaining Power of Buyers", level: "Moderate to High", commentary: "Carrier, retail-channel, and enterprise buyers negotiate on volume; transparent device pricing gives buyers leverage on ASP." },
+      { force: "Bargaining Power of Suppliers", level: "Moderate", commentary: "Memory, display, and advanced-silicon suppliers confer leverage in tight markets, partly offset by forward commitments and vertical integration." },
+      { force: "Threat of Substitutes", level: "Moderate", commentary: "Longer holding periods and refurbished devices substitute for new-unit purchases at the margin." },
+      { force: "Competitive Rivalry", level: "High", commentary: "Rivalry centers on launch cadence, pro-tier mix, ASP discipline, and channel inventory management across cycles." },
     ];
   } else if (sectorType === "hospitality" || sectorType === "hospitality_owner_operator" || sectorType === "hospitality_asset_light" || sectorType === "hospitality_reit" || sectorType === "real_estate") {
     const isReit3 = sectorType === "hospitality_reit" || sectorType === "real_estate";
@@ -1172,6 +1181,60 @@ export function generatePEFirmAnalysis(input: PEAnalysisInput): AIAnalysis {
       { risk: "Ad-Spend Cyclicality", description: "Macro downturns compress advertiser budgets and average price per ad even as user engagement holds.", impact: "High", mitigation: "Performance-based formats and diversified advertiser breadth sustaining auction density", horizon: "Ongoing", valuationSensitivity: "Ad-price softness transmits directly into ARPU and fair value" },
       { risk: "Privacy & Antitrust Regulation", description: "OS-level privacy changes and competition rulings can degrade targeting, measurement, and distribution.", impact: "High", mitigation: "First-party signal scale and on-device measurement investment", horizon: "12-24 Months", valuationSensitivity: "Targeting degradation impairs pricing power structurally" },
       { risk: "AI Capex & Reality Labs Drag", description: "Data-center buildouts and sustained Reality Labs losses can weigh on consolidated margins and FCF.", impact: "Medium", mitigation: "Phased capex tied to advertiser ROI with explicit Reality Labs loss discipline", horizon: "12-24 Months", valuationSensitivity: "Capex intensity compresses FCF conversion" },
+    ];
+  } else if (sectorType === "technology_hardware") {
+    // Hardware-native SWOT: units × ASP × mix, component costs, channel inventory.
+    // SaaS/consulting vocabulary (NRR, MSA, utilization pyramids) is forbidden here.
+    swotStrengths = [
+      "Installed-base scale and ecosystem attach supporting replacement-cycle demand and services monetization.",
+      "Custom silicon and vertical integration delivering power, cost, and gross-margin advantage over merchant-component rivals.",
+      "Channel scale and procurement leverage securing component supply and sell-through during shortages.",
+    ];
+    swotWeaknesses = [
+      "Replacement-cycle elongation in mature device categories compressing unit volumes.",
+      "Gross-margin sensitivity to memory, display, and silicon component cost swings.",
+      "Product-concentration risk around flagship launch execution each cycle.",
+    ];
+    swotOpportunities = [
+      "ASP expansion via pro-tier mix shift and higher-memory configurations.",
+      "Services attach growth on the installed base lifting lifetime revenue per device.",
+      "AI-capable device refresh and on-device compute differentiation driving upgrade demand.",
+    ];
+    swotThreats = [
+      "Channel inventory overhang forcing price protection and margin give-back.",
+      "Aggressive low-cost competition compressing mid-tier ASP and share.",
+      "Supply-chain disruption in key components constraining unit output.",
+    ];
+    keyRisks = [
+      { risk: "Replacement-Cycle Elongation", description: "Longer consumer holding periods compressing unit shipments across device lines.", impact: "High", mitigation: "Staggered launch cadence, trade-in programs, and services bundling sustaining upgrade pull" },
+      { risk: "Component Cost Volatility", description: "Memory and display price spikes compressing hardware gross margin without immediate ASP pass-through.", impact: "Medium", mitigation: "Forward component commitments, mix shift to high-margin configurations, and disciplined channel pricing" },
+      { risk: "Channel Inventory Overhang", description: "Excess weeks of channel inventory forcing discounting and sell-through support.", impact: "Medium", mitigation: "Sell-through monitoring, disciplined sell-in, and production flexibility" },
+    ];
+  } else if (sectorType === "technology_software") {
+    swotStrengths = [
+      "Subscription base with net expansion compounding ARR on retained seats.",
+      "Mission-critical workflow embedment sustaining gross retention and pricing power.",
+      "High gross-margin cloud mix funding R&D and go-to-market scale.",
+    ];
+    swotWeaknesses = [
+      "Seat-license sensitivity to enterprise headcount and IT budget scrutiny.",
+      "Sales-cycle elongation on large multi-year enterprise commitments.",
+      "AI-driven seat-model disruption risk requiring packaging evolution.",
+    ];
+    swotOpportunities = [
+      "Per-seat revenue expansion via cross-sell, tier upgrades, and AI add-on monetization.",
+      "Large-deal TCV conversion expanding RPO and multi-year visibility.",
+      "Operating leverage as incremental subscription gross margin drops to FCF.",
+    ];
+    swotThreats = [
+      "Enterprise downsell and churn under budget consolidation.",
+      "Pricing pressure from bundled hyperscaler suites.",
+      "Execution risk on consumption/AI pricing transitions.",
+    ];
+    keyRisks = [
+      { risk: "Enterprise IT Budget Moderation", description: "CIO scrutiny compressing seat growth and expansion timing.", impact: "Medium", mitigation: "Multi-year enterprise agreements with expansion ramps and ROI-anchored renewals" },
+      { risk: "Seat Downsell & Churn", description: "Headcount reductions translating into license contraction.", impact: "Medium", mitigation: "Platform consolidation plays and usage-based tiers retaining workloads" },
+      { risk: "AI Packaging Disruption", description: "Seat-pricing erosion as AI automation reduces per-seat value capture.", impact: "Medium", mitigation: "Outcome- and consumption-linked packaging alongside seat base" },
     ];
   } else {
     swotStrengths = [

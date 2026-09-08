@@ -14,6 +14,7 @@ import type {
 import { classifyArchetype } from "./company-archetype";
 import { computeReverseDCF } from "./valuation/reverse-dcf";
 import { classifySector, isTelecomCarrierCompany } from "./sectors/profiles";
+import { assessMarketIntegrity, resolveShareCount } from "./financial-provenance";
 
 export interface CreateLedgerParams {
   profile: CompanyProfile;
@@ -43,16 +44,22 @@ export function createAssumptionsLedger({
   const revenueMissing = !(Number(latestFin?.revenue) > 0);
   const currentPrice = Number(stockData.currentPrice) > 0 ? Number(stockData.currentPrice) : 0;
 
-  // Shares Outstanding — 0 when missing (forces insufficientInputs, never 1-share synthesis)
+  // Shares Outstanding — resolved by market-cap cross-check (partial-class quote
+  // feeds lose to reconciling statement counts); 0 when missing (forces
+  // insufficientInputs, never 1-share synthesis). DCF carry-through is a last
+  // resort only when neither primary reconciles.
+  const resolvedShares = resolveShareCount({ stockData, annualFinancials });
   const sharesOutstanding =
-    Number(stockData.sharesOutstanding) > 0
-      ? Number(stockData.sharesOutstanding)
-      : Number(latestFin?.sharesOutstanding) > 0
-        ? Number(latestFin.sharesOutstanding)
-        : Number(dcf?.sharesOutstanding) > 0
-          ? Number(dcf.sharesOutstanding)
-          : 0;
+    resolvedShares.shares > 0
+      ? resolvedShares.shares
+      : Number(dcf?.sharesOutstanding) > 0
+        ? Number(dcf.sharesOutstanding)
+        : 0;
 
+  // Priority 2 — hard integrity gate BEFORE any valuation: price×shares=marketCap,
+  // quote-vs-statement shares, and balance-sheet identity must reconcile. A gross
+  // mismatch forces NR (the DCF number would be unit fantasy, not a valuation).
+  const marketIntegrity = assessMarketIntegrity({ stockData, annualFinancials });
   // Input-sufficiency gate (private/unlisted names, empty histories, zero shares):
   // never model a "valid" DCF on shares=1 / price=100 synthesis.
   const insufficientInputs =
@@ -60,14 +67,17 @@ export function createAssumptionsLedger({
     !(sharesOutstanding > 0) ||
     !(currentPrice > 0) ||
     currencyMissing ||
-    revenueMissing;
+    revenueMissing ||
+    marketIntegrity.blocked;
   const estimatedFieldsTotal = annualFinancials.reduce((s, f) => s + (f.estimatesUsed?.length || 0), 0);
   const dataQualityFlags: string[] = [];
   if (annualFinancials.length === 0) dataQualityFlags.push("NO_FINANCIAL_HISTORY");
+  if (resolvedShares.warn) dataQualityFlags.push(`SHARE_SOURCE:${resolvedShares.source.toUpperCase()}`);
   if (priceWasFallback) dataQualityFlags.push("PRICE_FALLBACK_USED");
   if (sharesWasFallback) dataQualityFlags.push("SHARES_FALLBACK_MISSING");
   if (currencyMissing) dataQualityFlags.push("CURRENCY_UNKNOWN");
   if (revenueMissing) dataQualityFlags.push("REVENUE_MISSING");
+  for (const mi of marketIntegrity.issues.filter((i) => i.severity === "BLOCK")) dataQualityFlags.push(`INTEGRITY_BLOCK:${mi.code}`);
   if (estimatedFieldsTotal > 0) dataQualityFlags.push(`ESTIMATED_FINANCIALS:${estimatedFieldsTotal}`);
 
   // 1. DCF Arithmetic Bridge
@@ -128,7 +138,10 @@ export function createAssumptionsLedger({
 
   if (insufficientInputs) {
     rating = "NR";
-    ratingRationale = `Model recommendation: Not Rated (NR) — insufficient inputs (history: ${annualFinancials.length}y, shares: ${sharesOutstanding}, price: ${currentPrice}). No valuation asserted; manual inputs required before modeling.`;
+    const integrityNote = marketIntegrity.blocked
+      ? ` Integrity failure: ${marketIntegrity.issues.filter((i) => i.severity === "BLOCK").map((i) => i.message).join("; ").slice(0, 220)}.`
+      : "";
+    ratingRationale = `Model recommendation: Not Rated (NR) — insufficient inputs (history: ${annualFinancials.length}y, shares: ${sharesOutstanding}, price: ${currentPrice}).${integrityNote} No valuation asserted; manual inputs required before modeling.`;
   } else if (dcf.verdict === "NR" || (dcf as any).confidence === "low" || upsideDownsidePct > 1.50 || upsideDownsidePct < -0.80) {
     rating = "NR";
     ratingRationale = `Model recommendation: Not Rated (NR) — valuation upside/downside (${(upsideDownsidePct * 100).toFixed(1)}%) breaches sanity bounds (±150%) or fails confidence verification. Fundamental model review required.`;

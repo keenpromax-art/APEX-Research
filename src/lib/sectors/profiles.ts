@@ -147,6 +147,87 @@ export const ASSET_MANAGEMENT_PROFILE: SectorProfile = {
   standardMarginMetric: "Operating Margin"
 };
 
+export const HARDWARE_PROFILE: SectorProfile = {
+  id: "technology-hardware",
+  name: "Technology Hardware, Devices & Components",
+  allowedKPIs: [
+    "Unit Shipments / Volumes by Product Line",
+    "Average Selling Price (ASP) & Product Mix",
+    "Gross Margin (Mix & Component-Cost Driven)",
+    "Installed Base & Replacement-Cycle Rate",
+    "Channel Inventory (Weeks / Sell-Through)",
+    "Component Costs (Memory, Display, Silicon)",
+    "Services Attach Rate (Ecosystem Monetization)",
+    "R&D Intensity & Server/AI Infrastructure Capex",
+    "Inventory Days & Working Capital Cycle",
+    "Return on Invested Capital (ROIC)"
+  ],
+  preferredValuationModels: ["FCFF_DCF", "EV_EBITDA", "MULTIPLES_PE"],
+  financialMetrics: ["Product Revenue", "Services Revenue", "Gross Profit", "R&D Expense", "Inventory", "Operating Cash Flow", "Capex"],
+  riskCategories: ["Device Replacement-Cycle Elongation", "Component Cost & Memory Price Volatility", "Channel Inventory Overhang & Sell-Through Shortfall", "Product Concentration & Launch Execution"],
+  moatDrivers: ["Ecosystem switching costs & installed-base lock-in", "Custom silicon & vertical integration cost advantage", "Brand premium & channel scale"],
+  forbiddenConcepts: [
+    "net revenue retention", "nrr", "net dollar retention",
+    "master service agreement", "msa", "statement of work",
+    "developer ecosystem", "microservices", "container orchestration", "kubernetes",
+    "consulting spend", "discretionary consulting", "deal signing cycles",
+    "total contract value", "tcv", "annual contract value", "acv",
+    "billable utilization", "blended utilization", "offshore", "onsite effort", "effort mix",
+    "voluntary attrition", "talent pyramid", "delivery pyramid",
+    "time and materials", "managed services contract", "vendor consolidation",
+    "casa", "nim", "gnpa", "loan book", "credit cost",
+    "arpu", "spectrum auction", "subscriber churn", "tower tenancy",
+    "clinical trial", "refinery throughput", "crack spread", "dark stores"
+  ],
+  requiredConcepts: ["units", "asp", "product mix", "component", "inventory", "channel", "gross margin"],
+  isFinancialInstitution: false,
+  standardMarginMetric: "Operating Margin",
+  driverSpec: {
+    revenueDrivers: ["Unit shipments by product line", "ASP & product mix", "Services attach"],
+    costDrivers: ["Component costs (memory/display/silicon)", "Manufacturing conversion & warranty"],
+    capexDrivers: ["Tooling & manufacturing capacity", "Server/AI infrastructure", "Retail & channel"],
+    nwcDrivers: ["Channel & finished-goods inventory", "Supplier payables & procurement"]
+  },
+  operatingArchetypes: ["hardware_oem", "hardware_components", "hardware_ecosystem"]
+};
+
+export const SOFTWARE_PROFILE: SectorProfile = {
+  id: "technology-software",
+  name: "Enterprise Software & SaaS",
+  allowedKPIs: [
+    "ARR / Subscription Revenue Growth",
+    "Net Revenue Retention (NRR)",
+    "Large Deal Total Contract Value (TCV)",
+    "RPO / Remaining Performance Obligations",
+    "Gross Margin (Cloud & Support Mix)",
+    "Sales & Marketing Efficiency (CAC Payback)",
+    "Dollar-Based Net Expansion Rate",
+    "FCF Margin & Rule-of-40 Score",
+    "Customer Concentration (Top 10)"
+  ],
+  preferredValuationModels: ["FCFF_DCF", "MULTIPLES_PE", "EV_EBITDA"],
+  financialMetrics: ["Subscription Revenue", "License Revenue", "Services Revenue", "R&D Expense", "Deferred Revenue", "Operating Cash Flow"],
+  riskCategories: ["Enterprise IT Budget Cutbacks", "Seat-License Downsell & Churn", "Cloud Cost & Pricing Pressure", "AI Disruption of Seat Models"],
+  moatDrivers: ["Mission-critical workflow embedment & switching costs", "Data network effects & platform ecosystem", "Go-to-market scale & partner channel"],
+  forbiddenConcepts: [
+    "unit shipments", "sell-through", "channel inventory", "weeks of inventory",
+    "wafer fab", "foundry", "refinery throughput", "plant turnaround",
+    "casa", "nim", "gnpa", "loan book",
+    "spectrum auction", "subscriber churn", "tower tenancy",
+    "revpar", "adr", "occupancy", "clinical trial", "dark stores"
+  ],
+  requiredConcepts: ["arr", "retention", "tcv", "subscription", "expansion"],
+  isFinancialInstitution: false,
+  standardMarginMetric: "Operating Margin",
+  driverSpec: {
+    revenueDrivers: ["Seats / ARR base", "Net expansion (NRR)", "New logos & TCV conversion"],
+    costDrivers: ["Sales & marketing CAC", "Cloud hosting & support", "R&D"],
+    capexDrivers: ["Data-center & AI infrastructure", "Capitalized software"],
+    nwcDrivers: ["Deferred revenue (contract liabilities)", "DSO on billings"]
+  },
+  operatingArchetypes: ["saas", "licensed_software", "it_services_hybrid"]
+};
+
 export const IT_SERVICES_PROFILE: SectorProfile = {
   id: "it-services",
   name: "IT Services & Software Consulting",
@@ -624,6 +705,9 @@ export function isTelecomCarrierCompany(
   name?: string
 ): boolean {
   if (isInternetPlatformCompany(sector, industry, description, name)) return false;
+  // Hardware makers describe cellular/wireless connectivity as a device feature
+  // (e.g. Apple iPhone) — they are not carriers.
+  if (isHardwareCompany(sector, industry, description, name)) return false;
   const industryLower = `${industry || ""}`.toLowerCase();
   const sectorLower = `${sector || ""}`.toLowerCase();
   const combined = `${sector || ""} ${industry || ""} ${description || ""} ${name || ""}`.toLowerCase();
@@ -649,6 +733,64 @@ export function isTelecomCarrierCompany(
     industryLower.includes("bank") || industryLower.includes("pharma") || industryLower.includes("software") ||
     industryLower.includes("technology services");
   return !clearlyOther;
+}
+
+/**
+ * Technology HARDWARE only (devices, endpoints, components, storage, peripherals).
+ * Industry-strict: enterprise-software / IT-services descriptions that mention
+ * "hardware" as a client workload (e.g. "software for hardware teams") must NOT
+ * route here. Internet platforms with consumer-hardware side businesses (Meta
+ * Reality Labs) stay platforms — checked first by callers.
+ */
+export function isHardwareCompany(
+  sector?: string,
+  industry?: string,
+  description?: string,
+  name?: string
+): boolean {
+  if (isInternetPlatformCompany(sector, industry, description, name)) return false;
+  const industryLower = `${industry || ""}`.toLowerCase();
+  const sectorLower = `${sector || ""}`.toLowerCase();
+  if (
+    industryLower.includes("computer hardware") ||
+    industryLower.includes("consumer electronics") && !industryLower.includes("software") ||
+    industryLower.includes("electronic components") ||
+    industryLower.includes("computer peripherals") ||
+    industryLower.includes("data storage") ||
+    industryLower.includes("communication equipment") && !industryLower.includes("software")
+  ) return true;
+  if (sectorLower.includes("computer hardware")) return true;
+  const combined = `${sector || ""} ${industry || ""} ${description || ""} ${name || ""}`.toLowerCase();
+  return (
+    combined.includes("computer hardware company") ||
+    combined.includes("devices and components company") ||
+    combined.includes("storage and peripherals")
+  );
+}
+
+/**
+ * Enterprise SOFTWARE / SaaS only. Hardware makers describing embedded firmware
+ * or "software" as a device feature must NOT route here — industry must be
+ * software/application, not hardware/devices.
+ */
+export function isSoftwareCompany(
+  sector?: string,
+  industry?: string,
+  description?: string,
+  name?: string
+): boolean {
+  if (isInternetPlatformCompany(sector, industry, description, name)) return false;
+  if (isHardwareCompany(sector, industry, description, name)) return false;
+  const industryLower = `${industry || ""}`.toLowerCase();
+  const sectorLower = `${sector || ""}`.toLowerCase();
+  if (
+    industryLower.includes("application software") ||
+    industryLower.includes("systems software") ||
+    industryLower.includes("saas") ||
+    (industryLower.includes("software") && industryLower.includes("application"))
+  ) return true;
+  if (sectorLower.includes("application software") || sectorLower.includes("systems software")) return true;
+  return false;
 }
 
 export function isHospitalityCompany(
@@ -789,6 +931,20 @@ export function classifySector(
     (industryLower.includes("financial services") && combined.includes("deposit")))
   ) {
     return BANK_PROFILE;
+  }
+
+  // 2b. Technology Hardware — industry-strict, before IT-services/general.
+  // Computer Hardware makers must never fall to GENERAL (weak forbidden list)
+  // while the archetype routes technology_hardware: that mismatch is what let
+  // enterprise-software boilerplate into hardware reports.
+  if (isHardwareCompany(sector, industry, description)) {
+    return HARDWARE_PROFILE;
+  }
+
+  // 2c. Enterprise Software / SaaS — industry-strict, before IT-services.
+  // Application-software makers must not be analyzed as consulting pyramids.
+  if (isSoftwareCompany(sector, industry, description)) {
+    return SOFTWARE_PROFILE;
   }
 
   // 3. IT Services & Software Consulting — require industry to be IT (client vertical mentions like "serves banking" must not trigger)
