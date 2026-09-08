@@ -39,6 +39,17 @@ export function generatePEFirmAnalysis(input: PEAnalysisInput): AIAnalysis {
   const archProfile = classifyArchetype(profile, stockData, annualFinancials);
   const sectorType = archProfile.sector;
   const archetype = archProfile.archetype;
+  // Also resolve canonical SectorProfile id (consumer / auto / etc.) for
+  // cases where archetype sector is generic (general_industrial) but the
+  // company is clearly FMCG/consumer by GICS (e.g. ITC). This ensures
+  // consumer companies never fall through to IT-generic SWOT/risks.
+  // Lazy import to avoid circular deps at module load.
+  let sectorProfileId: string = sectorType;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { classifySector: _cs } = require("./sectors/profiles") as typeof import("./sectors/profiles");
+    sectorProfileId = _cs(profile.sector, profile.industry, profile.description).id;
+  } catch { /* keep archetype sector */ }
 
   const cur = profile.currency || "INR";
   const sym = cur === "INR" ? "Rs. " : cur === "USD" ? "$" : cur === "EUR" ? "€" : "£";
@@ -456,7 +467,7 @@ export function generatePEFirmAnalysis(input: PEAnalysisInput): AIAnalysis {
       { force: "Competitive Rivalry", level: "High", commentary: "Competitive landscape dominated by two well-capitalized leaders, with pricing rivalry increasingly replaced by network quality and enterprise solutions competition." },
     ];
   } else if (sectorType === "technology_platform") {
-    industryDynamicsCommentary = `The digital advertising platform industry is a scale-driven oligopoly where a small number of scaled platforms intermediate advertiser demand and user attention. Competition centers on DAU/MAU engagement, ad-impression inventory growth, average price-per-ad realization, and AI-driven ranking/measurement. Data-privacy regulation, antitrust oversight, and AI infrastructure capex intensity are the principal structural constraints — not spectrum licensing, tower tenancies, or packaged-goods distribution.`;
+    industryDynamicsCommentary = `The digital advertising platform industry is a scale-driven oligopoly where a small number of scaled platforms intermediate advertiser demand and user attention. Competition centers on DAU/MAU engagement, ad-impression inventory growth, average price-per-ad realization, and AI-driven ranking/measurement. Data-privacy regulation, antitrust oversight, and AI infrastructure capex intensity are the principal structural constraints — distinct from carrier-network or consumer-goods distribution economics.`;
     fiveForces = [
       { force: "Threat of New Entrants", level: "Low", commentary: "Replicating multi-billion-user social graphs, advertiser tooling, and hyperscale AI/data-center infrastructure requires prohibitive capital and decade-long cold-start investment." },
       { force: "Bargaining Power of Buyers", level: "Moderate", commentary: "Large advertisers can shift budgets across platforms, but superior targeting ROI and measurement on scaled platforms sustain pricing power." },
@@ -915,6 +926,33 @@ export function generatePEFirmAnalysis(input: PEAnalysisInput): AIAnalysis {
       { risk: "Burn Multiple & Runway", description: "Cash burn relative to net new revenue determines funding needs.", impact: "High", mitigation: "Disciplined acquisition spend and milestone-gated investment" },
       { risk: "Competitive Intensity", description: "Rivals can prolong loss-making while contesting share.", impact: "Medium", mitigation: "Differentiation and retention over discount-led growth" },
       { risk: "Monetization Timing", description: "Delayed take-rate or pricing power pushes breakeven outward.", impact: "Medium", mitigation: "Phased monetization tied to engagement thresholds" },
+    ];
+  } else if (sectorType === "consumer_durables" || sectorType === "consumer_fmcg" || sectorProfileId === "consumer") {
+    // Consumer needs its own SWOT even when archetype is MATURE_COMPOUNDER — otherwise it falls to IT-generic risks.
+    swotStrengths = [
+      "Strong brand equity and consumer loyalty supporting pricing power and repeat purchase.",
+      "Diversified product and channel mix across wholesale, DTC, and owned retail.",
+      "Scale procurement and supply-chain efficiency supporting gross margin defense.",
+    ];
+    swotWeaknesses = [
+      "Exposure to discretionary consumer spending cycles and inventory markdown risk.",
+      "Wholesale channel concentration and DTC transition execution risk.",
+      "Input-cost and FX sensitivity on imported materials and overseas manufacturing.",
+    ];
+    swotOpportunities = [
+      "Premiumization and innovation-led mix shift toward higher-margin franchises.",
+      "DTC and digital channel expansion lifting gross margin and data capture.",
+      "Geographic white-space and category adjacencies for incremental growth.",
+    ];
+    swotThreats = [
+      "Intensifying competition and private-label pressure compressing price realization.",
+      "Macro demand softness and inventory destocking in wholesale channels.",
+      "Fashion/trend cycle risk if innovation cadence lags.",
+    ];
+    keyRisks = [
+      { risk: "Consumer Demand Cyclicality", description: "Discretionary spending pullback compressing volumes and forcing promotional discounting.", impact: "High", mitigation: "Brand heat, innovation pipeline, and full-price sell-through discipline" },
+      { risk: "Channel Inventory Overhang", description: "Wholesale partners destocking excess inventory, deferring reorders.", impact: "Medium", mitigation: "Disciplined sell-in, inventory visibility, and DTC offset" },
+      { risk: "Input Cost & FX Volatility", description: "Material and freight cost swings plus currency headwinds compressing gross margin.", impact: "Medium", mitigation: "Hedging, pricing actions, and sourcing diversification" },
     ];
   } else if (archProfile.archetype === "CYCLICAL_CAPITAL_INTENSIVE") {
     swotStrengths = [

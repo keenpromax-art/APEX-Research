@@ -136,10 +136,10 @@ export function classifyArchetype(
   } else if (
     ind.includes("asset management") ||
     ind.includes("wealth management") ||
-    text.includes("asset manager") ||
-    text.includes("investment management") ||
-    text.includes("blackrock") ||
-    name.includes("blackrock")
+    ind.includes("investment management") ||
+    name.includes("blackrock") ||
+    text.includes("blackrock amc") ||
+    text.includes("hdfc amc")
   ) {
     sector = "asset_management";
   } else if (
@@ -161,9 +161,12 @@ export function classifyArchetype(
   } else if (
     ind.includes("semiconductor") ||
     ind.includes("hardware") ||
-    text.includes("apple") ||
-    text.includes("nvidia") ||
-    text.includes("intel") ||
+    name.includes("apple") ||
+    ticker.includes("AAPL") ||
+    name.includes("nvidia") ||
+    ticker.includes("NVDA") ||
+    name.includes("intel") ||
+    ticker.includes("INTC") ||
     text.includes("microprocessor")
   ) {
     sector = "technology_hardware";

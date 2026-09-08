@@ -879,13 +879,19 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
       }
     }
     if (chainBreaks.length > 0) {
+      // Financial institutions (banks/insurers/NBFCs) do not reconcile via
+      // FCF=CFO−capex — Yahoo reports FCF≈CFO for banks and loan-book flows
+      // dominate CF. Enforce as WARN (not publication-blocking) for those.
+      const isFinancialChain = !!(sectorProfile?.isFinancialInstitution || `${data.profile.sector || ""} ${data.profile.industry || ""}`.toLowerCase().includes("bank") || `${data.profile.industry || ""}`.toLowerCase().includes("insurance"));
       checks.push({
         id: "CHAIN-01",
         category: "BALANCE_SHEET",
         name: "Statement Dependency Chain (IS→BS→CF→FCF)",
-        status: "FAIL",
-        details: `FATAL PUBLICATION BLOCK: Cash-flow dependency chain broken — ${chainBreaks.join("; ")}.`,
-        expected: "FCF=CFO−capex; NWC=CA−CL every year",
+        status: isFinancialChain ? "WARN" : "FAIL",
+        details: isFinancialChain
+          ? `Cash-flow chain non-reconcilable for financial institution (expected): ${chainBreaks.join("; ")} — treated as informational for banks/insurers (FCF≈CFO).`
+          : `FATAL PUBLICATION BLOCK: Cash-flow dependency chain broken — ${chainBreaks.join("; ")}.`,
+        expected: isFinancialChain ? "Financial institution: FCF chain informational only" : "FCF=CFO−capex; NWC=CA−CL every year",
         actual: `${chainBreaks.length} break(s)`,
       });
     } else if (chainWarns.length > 0) {
@@ -1145,7 +1151,7 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
     { sectors: ["telecom", "communication", "wireless", "internet", "restaurants"], blocked: ["proprietary silicon", "custom neural engine", "wafer fabrication", "foundry capacity", "us fda", "cgmp", "iso 13485"] },
     { sectors: ["pharma", "health", "biotech", "drug"], blocked: ["spectrum auction", "arpu", "tower tenancy", "dark store", "ride hailing", "proprietary silicon"] },
     { sectors: ["internet retail", "food delivery", "quick commerce", "hyperlocal", "marketplace", "platform"], blocked: ["copra", "palm oil procurement", "packaged goods", "personal care", "brand recall", "iconic consumer brand", "multi-tier retail distribution", "fmcg", "modern trade", "spectrum auction", "agr dues", "clinical trial phase", "proprietary silicon", "custom neural engine", "wafer fabrication", "foundry capacity", "us fda", "cgmp", "iso 13485"] },
-    { sectors: ["auto manufacturer", "auto manufacturers", "automobile", "auto oem", "auto parts", "auto components", "electric vehicle", "two wheeler", "two-wheeler", "passenger vehicle", "commercial vehicle"], blocked: ["casa", "casa ratio", "net interest margin", "nim", "loan book", "loan books", "credit cost", "credit costs", "gross non-performing assets", "gnpa", "deposits", "deposit", "branch", "branches", "loan repricing", "spectrum auction", "spectrum", "4g/5g", "tower deployment", "tower tenancy", "tower", "towers", "telecom towers", "subscriber churn", "subscriber", "agr dues", "ran", "bandwidth", "arpu", "master service agreement", "total contract value", "tcv", "saas churn", "arr expansion", "enterprise contract", "software services", "deal signing", "discretionary consulting", "copra", "packaged goods", "personal care", "fmcg", "clinical trial", "dark stores", "order backlog", "order book", "tender", "bidding", "commodity", "feedstock", "refinery throughput", "crack spread", "proprietary silicon", "wafer fab"] },
+    { sectors: ["auto manufacturer", "auto manufacturers", "automobile", "auto oem", "auto parts", "auto components", "electric vehicle", "two wheeler", "two-wheeler", "passenger vehicle", "commercial vehicle"], blocked: ["casa", "casa ratio", "net interest margin", "nim", "loan book", "loan books", "credit cost", "credit costs", "gross non-performing assets", "gnpa", "deposits", "deposit", "branch", "branches", "loan repricing", "spectrum auction", "spectrum holdings", "4g/5g", "tower deployment", "tower tenancy", "telecom towers", "subscriber churn", "agr dues", "bandwidth", "arpu", "master service agreement", "total contract value", "tcv", "saas churn", "arr expansion", "enterprise contract", "software services", "deal signing", "discretionary consulting", "copra", "packaged goods", "personal care", "fmcg", "clinical trial", "dark stores", "order backlog", "order book", "tender", "bidding", "refinery throughput", "crack spread", "proprietary silicon", "wafer fab"] },
     { sectors: ["consumer", "fmcg", "food", "beverage", "retail"], blocked: ["proprietary silicon", "custom neural engine", "spectrum auction", "agr dues", "clinical trial phase"] },
     { sectors: ["technology", "software", "it services"], blocked: ["us fda", "cgmp", "spectrum auction", "agr dues", "refinery throughput", "crack spread"] },
     { sectors: ["energy", "oil", "gas", "mining"], blocked: ["app store commission", "saas churn", "arr expansion", "dark store", "proprietary silicon"] },

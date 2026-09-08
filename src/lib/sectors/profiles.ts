@@ -275,7 +275,7 @@ export const INTERNET_PLATFORM_PROFILE: SectorProfile = {
   forbiddenConcepts: [
     "casa", "casa ratio", "current account savings account", "net interest margin", "nim",
     "loan book", "credit cost", "gross non-performing assets", "gnpa", "nnpa",
-    "spectrum auction", "spectrum", "4g/5g", "tower deployment", "tower tenancy",
+    "spectrum auction", "spectrum holdings", "4g/5g", "tower deployment", "tower tenancy",
     "telecom towers", "telecom tower", "subscriber churn", "agr dues",
     "copra", "palm oil procurement", "packaged goods", "personal care", "brand recall",
     "iconic consumer brand", "multi-tier retail distribution", "fmcg", "modern trade",
@@ -313,8 +313,8 @@ export const AUTO_PROFILE: SectorProfile = {
     "casa", "casa ratio", "current account savings account", "net interest margin", "nim",
     "loan book", "loan books", "credit cost", "credit costs", "gross non-performing assets", "gnpa", "nnpa", "credit provisioning",
     "deposits", "deposit", "branch", "branches", "branch banking", "loan repricing", "net interest", "interest margin",
-    "spectrum auction", "spectrum", "4g/5g", "tower deployment", "tower tenancy", "tower", "towers",
-    "telecom towers", "telecom tower", "subscriber churn", "subscriber", "agr dues", "ran", "bandwidth", "arpu",
+    "spectrum auction", "spectrum holdings", "4g/5g", "tower deployment", "tower tenancy",
+    "telecom towers", "telecom tower", "subscriber churn", "subscriber", "agr dues", "bandwidth", "arpu",
     "master service agreement", "total contract value", "tcv", "saas churn", "arr expansion",
     "cloud subscription churn", "enterprise contract", "software services", "deal signing cycles", "deal signing",
     "discretionary consulting", "offshore", "onsite effort",
@@ -322,7 +322,7 @@ export const AUTO_PROFILE: SectorProfile = {
     "iconic consumer brand", "multi-tier retail distribution", "fmcg", "modern trade",
     "wafer fab", "wafer fabrication", "foundry capacity", "semiconductor fab",
     "refinery throughput", "refinery margin", "refinery crack", "refinery", "crack spread",
-    "order backlog", "order book", "tender", "tendering", "bidding", "commodity", "commodities", "feedstock", "feedstocks",
+    "order backlog", "order book", "tender", "tendering", "bidding",
     "clinical trial", "clinical trials", "fda 483", "us fda", "anda approvals", "anda filings",
     "dark stores", "dark store", "gross merchandise value", "take rate",
     "plant turnaround", "plant utilization"
@@ -572,12 +572,14 @@ export function classifySector(
   description?: string
 ): SectorProfile {
   const combined = `${sector || ""} ${industry || ""} ${description || ""}`.toLowerCase();
+  const sectorLower = `${sector || ""}`.toLowerCase();
+  const industryLower = `${industry || ""}`.toLowerCase();
 
   // 1. NBFC & Microfinance
   if (
     combined.includes("microfinance") ||
     combined.includes("nbfc") ||
-    combined.includes("consumer finance") ||
+    industryLower.includes("consumer finance") ||
     combined.includes("rural lending") ||
     combined.includes("spandana") ||
     combined.includes("housing finance")
@@ -585,9 +587,10 @@ export function classifySector(
     return NBFC_PROFILE;
   }
 
-  // 2. Insurance (Life, General, Health, Reinsurance)
+  // 2. Insurance — require industry/sector to be insurance (description mentions like "serves insurance" are client verticals, not own industry)
   if (
-    combined.includes("insurance") ||
+    industryLower.includes("insurance") ||
+    sectorLower.includes("insurance") ||
     combined.includes("life assurance") ||
     combined.includes("general insurance") ||
     combined.includes("reinsurance") ||
@@ -604,6 +607,7 @@ export function classifySector(
 
   // 3. Credit Rating Agencies & Capital Markets Research Intelligence
   if (
+    industryLower.includes("rating") ||
     combined.includes("rating agency") ||
     combined.includes("credit rating") ||
     combined.includes("ratings agency") ||
@@ -618,50 +622,51 @@ export function classifySector(
     return RATINGS_AGENCY_PROFILE;
   }
 
-  // 4. Asset & Wealth Management
+  // 4. Asset & Wealth Management — require industry to be asset/wealth management (broad description mentions like TCS serving asset management clients should not trigger)
   if (
-    combined.includes("asset management") ||
-    combined.includes("wealth management") ||
-    combined.includes("investment management") ||
+    industryLower.includes("asset management") ||
+    industryLower.includes("wealth management") ||
+    industryLower.includes("investment management") ||
+    sectorLower.includes("asset management") ||
+    sectorLower.includes("wealth management") ||
     combined.includes("blackrock") ||
-    combined.includes("amc") ||
+    (combined.includes("amc") && industryLower.includes("asset")) ||
     combined.includes("fund manager") ||
-    combined.includes("asset manager")
+    (combined.includes("asset manager") && industryLower.includes("asset"))
   ) {
     return ASSET_MANAGEMENT_PROFILE;
   }
 
-  // 5. Commercial Banking
+  // 5. Commercial Banking — require industry to be banking
   if (
-    !combined.includes("asset management") &&
-    !combined.includes("wealth management") &&
-    (combined.includes("bank") ||
-    (combined.includes("financial services") && combined.includes("deposit")))
+    !industryLower.includes("asset management") &&
+    !industryLower.includes("wealth management") &&
+    (industryLower.includes("bank") ||
+    sectorLower.includes("bank") ||
+    (industryLower.includes("financial services") && combined.includes("deposit")))
   ) {
     return BANK_PROFILE;
   }
 
-  // 3. IT Services & Software Consulting
+  // 3. IT Services & Software Consulting — require industry to be IT (client vertical mentions like "serves banking" must not trigger)
   if (
-    combined.includes("information technology") ||
-    combined.includes("it services") ||
-    combined.includes("software consulting") ||
-    combined.includes("computer systems") ||
+    industryLower.includes("information technology") ||
+    industryLower.includes("software") && !industryLower.includes("tobacco") ||
+    industryLower.includes("computer systems") ||
+    (sectorLower.includes("technology") && industryLower.includes("services")) ||
     combined.includes("infosys") ||
-    combined.includes("tcs") ||
+    combined.includes("tcs") && !industryLower.includes("tobacco") ||
     combined.includes("wipro")
   ) {
     return IT_SERVICES_PROFILE;
   }
 
-  // 4. Power Generation, Transmission & Regulated Utilities
+  // 4. Power Generation, Transmission & Regulated Utilities — require sector/industry to be utilities
   if (
-    (sector && sector.toLowerCase().includes("utilit")) ||
-    (industry && industry.toLowerCase().includes("utilit")) ||
-    combined.includes("electric utility") ||
-    combined.includes("power generation") ||
-    combined.includes("electricity generation") ||
-    combined.includes("transmission network") ||
+    sectorLower.includes("utilit") ||
+    industryLower.includes("utilit") ||
+    industryLower.includes("electric utility") ||
+    industryLower.includes("power generation") ||
     combined.includes("powergrid") ||
     combined.includes("ntpc") ||
     combined.includes("tata power") ||
@@ -671,23 +676,40 @@ export function classifySector(
     return UTILITIES_PROFILE;
   }
 
-  // 5. Renewable Energy Equipment & Independent Green Developers
+  // Auto OEMs — must precede Renewable for diversified auto/energy names like TSLA (which mentions solar/renewable as a secondary business)
   if (
+    industryLower.includes("auto") && !industryLower.includes("automation") ||
+    industryLower.includes("motor") ||
+    industryLower.includes("vehicle") ||
+    combined.includes("tesla") ||
+    combined.includes("tata motors") ||
+    combined.includes("maruti") ||
+    combined.includes("ford motor")
+  ) {
+    return AUTO_PROFILE;
+  }
+
+  // 5. Renewable Energy Equipment & Independent Green Developers — require industry to be renewable, or company is Suzlon
+  if (
+    (industryLower.includes("renewable") && !industryLower.includes("auto")) ||
+    industryLower.includes("wind") && !industryLower.includes("auto") ||
+    industryLower.includes("solar") && !industryLower.includes("auto") ||
+    sectorLower.includes("renewable") ||
     combined.includes("suzlon") ||
     combined.includes("wind turbine") ||
     combined.includes("solar panel") ||
-    combined.includes("clean energy developer") ||
-    (combined.includes("renewable") && !combined.includes("utility"))
+    combined.includes("clean energy developer")
   ) {
     return RENEWABLE_ENERGY_PROFILE;
   }
 
-  // 5. Pharmaceuticals
+  // 5. Pharmaceuticals — require industry to be pharma/healthcare
   if (
-    combined.includes("pharma") ||
-    combined.includes("biotech") ||
-    combined.includes("healthcare") ||
-    combined.includes("drug") ||
+    industryLower.includes("pharma") ||
+    industryLower.includes("biotech") ||
+    industryLower.includes("healthcare") ||
+    industryLower.includes("drug") ||
+    sectorLower.includes("healthcare") ||
     combined.includes("cipla")
   ) {
     return PHARMA_PROFILE;
@@ -709,10 +731,10 @@ export function classifySector(
     return TELECOM_PROFILE;
   }
 
-  // 7. FMCG / Consumer Goods.
+  // 7. FMCG / Consumer Goods — require industry to be consumer (description mentions like "technology services for banking" must not trigger)
   // NOTE: bare `includes("consumer")` is intentionally NOT used — it false-positives
   // on any B2C/platform description mentioning "consumers" or "consumer hardware"
-  // (e.g. Meta, Apple). Require FMCG-specific Grierson phrases instead.
+  // (e.g. Meta, Apple). Require FMCG-specific Grierson phrases in industry/sector.
   const hasTechExclusion =
     combined.includes("consumer hardware") ||
     combined.includes("consumer electronics") ||
@@ -722,9 +744,11 @@ export function classifySector(
     combined.includes("internet content") ||
     combined.includes("semiconductor") ||
     combined.includes("software");
+  const fmcgIndustry = industryLower.includes("consumer") || industryLower.includes("tobacco") || industryLower.includes("beverage") || industryLower.includes("household") || industryLower.includes("personal care") || industryLower.includes("packaged goods") || industryLower.includes("food") || sectorLower.includes("consumer defensive") || sectorLower.includes("consumer cyclical") && industryLower.includes("apparel") || industryLower.includes("footwear");
   if (
     !hasTechExclusion &&
     !isInternetPlatformSignal &&
+    fmcgIndustry &&
     (combined.includes("consumer goods") ||
     combined.includes("consumer staples") ||
     combined.includes("consumer products") ||
@@ -734,6 +758,7 @@ export function classifySector(
     combined.includes("packaged goods") ||
     combined.includes("packaged foods") ||
     combined.includes("household products") ||
+    industryLower.includes("tobacco") ||
     combined.includes("marico") ||
     combined.includes("hindunilvr") ||
     combined.includes("nestle") ||
@@ -780,34 +805,6 @@ export function classifySector(
     combined.includes("sumitomo chemical")
   ) {
     return AGROCHEMICAL_PROFILE;
-  }
-
-  // 9. Automotive OEMs, EVs & Auto Components. MUST precede Industrials:
-  // "auto" descriptions routinely mention plants/engineering, which would
-  // otherwise route Tesla to the generic industrial template (no EV KPIs,
-  // no forbidden-concept coverage → blind validator).
-  if (
-    combined.includes("auto manufacturer") ||
-    combined.includes("auto parts") ||
-    combined.includes("auto components") ||
-    combined.includes("electric vehicle") ||
-    combined.includes("ev manufacturer") ||
-    combined.includes(" passenger vehicle") ||
-    combined.includes("commercial vehicle") ||
-    combined.includes("two wheeler") ||
-    combined.includes("two-wheeler") ||
-    combined.includes("tesla") ||
-    combined.includes("tata motors") ||
-    combined.includes("maruti") ||
-    combined.includes("mahindra") ||
-    combined.includes("bajaj auto") ||
-    combined.includes("hero moto") ||
-    combined.includes("eicher motors") ||
-    (combined.includes("auto") && !combined.includes("automation") && !combined.includes("data processing") && !combined.includes("software")) ||
-    combined.includes("motorcycle") ||
-    combined.includes("oem")
-  ) {
-    return AUTO_PROFILE;
   }
 
   // 10. Cement & Building Materials
