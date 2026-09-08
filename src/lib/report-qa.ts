@@ -93,6 +93,42 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
     });
   }
 
+  // 1b. Narrative Stance vs Model Rating (RATING-02). Scans the FULL assembled
+  // narrative for explicit stance declarations contradicting the canonical
+  // rating. Word-boundary patterns only — "buyback"/"household"/"withhold"
+  // never match. This catches SELL-model reports whose thesis argues HOLD, etc.
+  const stanceText = JSON.stringify(data.aiAnalysis || {});
+  const buyStanceRe = /(strong\s+buy|recommends?\s+(?:a\s+)?buy\b|recommended\s+(?:a\s+)?buy\b|recommending\s+(?:a\s+)?buy\b|upgrades?\s+(?:to\s+)?buy\b|upgraded\s+(?:to\s+)?buy\b|initiat(?:e|ed|ing)[^.]{0,60}\bbuy\b|\boverweight\b.{0,30}(?:recommendation|rating|stance)|outperform\b.{0,30}(?:recommendation|rating|stance))/i;
+  const sellStanceRe = /(strong\s+sell|recommends?\s+(?:a\s+)?sell\b|recommended\s+(?:a\s+)?sell\b|recommending\s+(?:a\s+)?sell\b|downgrades?\s+(?:to\s+)?sell\b|downgraded\s+(?:to\s+)?sell\b|initiat(?:e|ed|ing)[^.]{0,60}\bsell\b|\bunderweight\b.{0,30}(?:recommendation|rating|stance)|underperform\b.{0,30}(?:recommendation|rating|stance))/i;
+  const holdStanceRe = /(maintain(?:s|ed|ing)?[^.]{0,40}\bhold\b|reiterat[^.]{0,40}\bhold\b|\bhold\s+(recommendation|rating)\b|neutral\s+(stance|rating|recommendation))/i;
+  const hasBuy = buyStanceRe.test(stanceText);
+  const hasSell = sellStanceRe.test(stanceText);
+  const hasHold = holdStanceRe.test(stanceText);
+  const ratingContradiction =
+    (rating === "SELL" && (hasBuy || hasHold)) ||
+    (rating === "BUY" && (hasSell || hasHold)) ||
+    ((rating === "HOLD" || rating === "NR") && (/(strong\s+buy|strong\s+sell)/i.test(stanceText)));
+  if (ratingContradiction) {
+    const claimed = rating === "SELL" ? (hasBuy ? "BUY" : "HOLD") : rating === "BUY" ? (hasSell ? "SELL" : "HOLD") : "strong directional";
+    checks.push({
+      id: "RATING-02",
+      category: "RATING_CONSISTENCY",
+      name: "Narrative Stance vs Model Rating",
+      status: "FAIL",
+      details: `FATAL PUBLICATION BLOCK: Canonical rating is ${rating}, but narrative declares a ${claimed} stance. One thesis per report — reconcile before publishing.`,
+      expected: rating,
+      actual: `${claimed} language in narrative`,
+    });
+  } else {
+    checks.push({
+      id: "RATING-02",
+      category: "RATING_CONSISTENCY",
+      name: "Narrative Stance vs Model Rating",
+      status: "PASS",
+      details: `No explicit narrative stance contradicts the canonical ${rating} rating.`,
+    });
+  }
+
   // 2. Cross-Reference Check (DCF Bridge Arithmetic)
   const sumPvFcff = Number(data.dcf.sumPvFcff) || 0;
   const pvTv = Number(data.dcf.pvTerminalValue) || 0;
@@ -265,13 +301,20 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
   // authoritative bridge checks (duplicate IDs with conflicting tolerances removed).
   const dcf = data.dcf;
 
-  // 3b. Moat Qualitative Narrative Consistency
+  // 3b. Moat Qualitative Narrative Consistency. Scans the FULL moat surface —
+  // thesis, moat commentary, competitiveMoat, moat sources and pillar rationales.
+  // The old version scanned two fields, so "No moat" conclusions survived next
+  // to ecosystem/switching-cost prose everywhere else.
   const canonicalMoat = ledger?.moatRating || data.masterReportFacts?.moat.rating;
   const thesisText = (data.aiAnalysis?.investmentThesis || "").toLowerCase();
   const moatPageText = ((data.aiAnalysis as any)?.economicMoatCommentary || data.aiAnalysis?.businessStrategyCommentary || "").toLowerCase();
-  const allMoatText = `${thesisText} ${moatPageText}`;
+  const competitiveMoatText = ((data.aiAnalysis as any)?.competitiveMoat || "").toLowerCase();
+  const moatSourcesText = JSON.stringify((data.aiAnalysis as any)?.moatSources || {}).toLowerCase();
+  const moatPillarsText = JSON.stringify((data.aiAnalysis as any)?.moatPillars || []).toLowerCase();
+  const allMoatText = `${thesisText} ${moatPageText} ${competitiveMoatText} ${moatSourcesText} ${moatPillarsText}`;
 
-  if (canonicalMoat === "None" && (allMoatText.includes("wide structural moat") || allMoatText.includes("wide economic moat") || allMoatText.includes("wide moat"))) {
+  const noneMoatHype = ["wide structural moat", "wide economic moat", "wide moat", "strong moat", "durable moat", "formidable moat", "unassailable moat", "expanding moat", "moat is widening"];
+  if (canonicalMoat === "None" && noneMoatHype.some((p) => allMoatText.includes(p))) {
     checks.push({
       id: "MOAT-01",
       category: "CROSS_REFERENCE",
@@ -405,6 +448,46 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
       name: "Capital Stewardship vs Value Creation Alignment",
       status: "PASS",
       details: `Capital allocation stewardship rating conforms with economic spread profile.`,
+    });
+  }
+
+  // GOV-01: Governance Specific-Claim vs Evidence. Officer filings carry names
+  // and titles only — board-independence splits, clawback adoption, chair/CEO
+  // separation, and retention multiples are NEVER evidenced. Any narrative that
+  // asserts them as fact contradicts the report's own evidence limitations.
+  const govText = JSON.stringify({
+    g: (data.aiAnalysis as any)?.governanceCommentary || "",
+    m: (data.aiAnalysis as any)?.managementCommentary || "",
+    c: (data.aiAnalysis as any)?.capitalAllocationCommentary || "",
+  }).toLowerCase();
+  const govUnsupported: string[] = [];
+  const govPatterns: [string, RegExp][] = [
+    ["board-independence percentage", /\b\d+\s*%[^.]{0,60}\bindependent\b/],
+    ["independent majority claim", /independent\s+majority|majority\s+(of\s+)?independent/],
+    ["clawback adoption claim", /clawback[^.]{0,80}(implement|adopt|place|maintain|robust|strict|requires?)/],
+    ["independent-chair-as-fact", /independent\s+chair[^.]{0,60}(provides|ensures|optimal|check|oversight)/],
+    ["retention-multiple claim", /\b[5-9]x\s+base\s+salary|equity\s+retention[^.]{0,40}\d+\s*x/],
+  ];
+  for (const [label, re] of govPatterns) {
+    if (re.test(govText)) govUnsupported.push(label);
+  }
+  if (govUnsupported.length > 0) {
+    checks.push({
+      id: "GOV-01",
+      category: "CROSS_REFERENCE",
+      name: "Governance Claims vs Filed Evidence",
+      status: "WARN",
+      details: `Governance narrative asserts unevidenced specifics (${govUnsupported.join("; ")}), but filings disclose names/titles only. Downgrade to "No assessment" or cite a primary source.`,
+      expected: "No assessment / cited source",
+      actual: `${govUnsupported.length} unsupported claim(s)`,
+    });
+  } else {
+    checks.push({
+      id: "GOV-01",
+      category: "CROSS_REFERENCE",
+      name: "Governance Claims vs Filed Evidence",
+      status: "PASS",
+      details: `No unevidenced governance specifics detected.`,
     });
   }
 
@@ -664,6 +747,7 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
     { sectors: ["telecom", "communication", "wireless", "internet", "restaurants"], blocked: ["proprietary silicon", "custom neural engine", "wafer fabrication", "foundry capacity", "us fda", "cgmp", "iso 13485"] },
     { sectors: ["pharma", "health", "biotech", "drug"], blocked: ["spectrum auction", "arpu", "tower tenancy", "dark store", "ride hailing", "proprietary silicon"] },
     { sectors: ["internet retail", "food delivery", "quick commerce", "hyperlocal", "marketplace", "platform"], blocked: ["copra", "palm oil procurement", "packaged goods", "personal care", "brand recall", "iconic consumer brand", "multi-tier retail distribution", "fmcg", "modern trade", "spectrum auction", "agr dues", "clinical trial phase", "proprietary silicon", "custom neural engine", "wafer fabrication", "foundry capacity", "us fda", "cgmp", "iso 13485"] },
+    { sectors: ["auto manufacturer", "auto manufacturers", "automobile", "auto oem", "auto parts", "auto components", "electric vehicle", "two wheeler", "two-wheeler", "passenger vehicle", "commercial vehicle"], blocked: ["casa", "casa ratio", "nim", "gnpa", "loan book", "credit cost", "spectrum auction", "spectrum", "tower deployment", "subscriber churn", "master service agreement", "total contract value", "saas churn", "enterprise contract", "software services", "deal signing", "discretionary consulting", "copra", "packaged goods", "personal care", "fmcg", "clinical trial", "dark stores", "refinery throughput", "crack spread", "proprietary silicon", "wafer fab"] },
     { sectors: ["consumer", "fmcg", "food", "beverage", "retail"], blocked: ["proprietary silicon", "custom neural engine", "spectrum auction", "agr dues", "clinical trial phase"] },
     { sectors: ["technology", "software", "it services"], blocked: ["us fda", "cgmp", "spectrum auction", "agr dues", "refinery throughput", "crack spread"] },
     { sectors: ["energy", "oil", "gas", "mining"], blocked: ["app store commission", "saas churn", "arr expansion", "dark store", "proprietary silicon"] },
@@ -706,13 +790,23 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
   // Remove any violation whose concept is allowlisted for this sector
   semanticBleedViolations = semanticBleedViolations.filter((v) => !allowlisted.includes(v));
 
-  if (semanticBleedViolations.length > 0) {
+  if (semanticBleedViolations.length >= 2) {
+    checks.push({
+      id: "BS-DETECTOR-04",
+      category: "BS_DETECTOR",
+      name: "Semantic Template Bleeding Filter",
+      status: "FAIL",
+      details: `FATAL PUBLICATION BLOCK: ${semanticBleedViolations.length} distinct out-of-sector concepts in narrative: [${semanticBleedViolations.join(", ")}]. Multiple foreign-sector terms prove template contamination, not coincidence.`,
+      expected: "Zero out-of-sector terms",
+      actual: `${semanticBleedViolations.length} violations`,
+    });
+  } else if (semanticBleedViolations.length > 0) {
     checks.push({
       id: "BS-DETECTOR-04",
       category: "BS_DETECTOR",
       name: "Semantic Template Bleeding Filter",
       status: "WARN",
-      details: `Out-of-sector keywords detected in narrative: [${semanticBleedViolations.join(", ")}]. These terms indicate template bleeding from unrelated sector boilerplate.`,
+      details: `Single out-of-sector keyword detected in narrative: [${semanticBleedViolations.join(", ")}]. Below the multi-term block threshold — review manually.`,
       expected: "Zero out-of-sector terms",
       actual: `${semanticBleedViolations.length} violations`,
     });

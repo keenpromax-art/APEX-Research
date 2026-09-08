@@ -1710,16 +1710,26 @@ const FundamentalAnalysisPage = ({ data }: { data: ReportData }) => {
             const waccBase = ledger?.wacc || data.dcf.assumptions?.wacc || 0.095;
             const waccBear = waccBase + 0.015;
             const waccBull = Math.max(0.07, waccBase - 0.015);
-            const bearOm = ledger?.scenarios?.bear.omDisplay || ledger?.scenarioMargins?.bearMarginDisplay || "6.0%";
+            const bearOm = ledger?.scenarios?.bear.omDisplay || ledger?.scenarioMargins?.bearMarginDisplay || "N/M";
             const baseOm = ledger?.scenarios?.base.omDisplay || fmtPct(baseOmVal);
-            const bullOm = ledger?.scenarios?.bull.omDisplay || ledger?.scenarioMargins?.bullMarginDisplay || "14.0%";
-            const bearRc = ledger?.scenarios?.bear.revCagrDisplay || "3.8%";
-            const baseRc = ledger?.scenarios?.base.revCagrDisplay || "8.2%";
-            const bullRc = ledger?.scenarios?.bull.revCagrDisplay || "14.5%";
+            const bullOm = ledger?.scenarios?.bull.omDisplay || ledger?.scenarioMargins?.bullMarginDisplay || "N/M";
+            const bearRc = ledger?.scenarios?.bear.revCagrDisplay || "N/M";
+            const baseRc = ledger?.scenarios?.base.revCagrDisplay || "N/M";
+            const bullRc = ledger?.scenarios?.bull.revCagrDisplay || "N/M";
+            // Scenario equity is derived FROM the scenario target (target ×
+            // shares) — never an independent ×0.75/×1.25 recompute of DCF equity.
+            const cscen = canonicalScenarios(data);
+            const scenBullTp = Math.max(0.01, cscen?.bull.targetPrice ?? canonicalValuation(data).targetPrice);
+            const scenBaseTp = Math.max(0.01, cscen?.base.targetPrice ?? canonicalValuation(data).targetPrice);
+            const scenBearTp = Math.max(0.01, cscen?.bear.targetPrice ?? canonicalValuation(data).targetPrice);
+            const scenShares = ledger?.sharesOutstanding || data.stockData.sharesOutstanding || 0;
+            const scenEqv = (tp: number) => scenShares > 0 && tp > 0
+              ? fmtBigCompact(Math.max(1000000, tp * scenShares), currency)
+              : "N/M";
             return [
-              ["Bearish Downside Case", bearRc, bearOm, `${(waccBear * 100).toFixed(1)}%`, fmtBigCompact(Math.max(1000000, data.dcf.equityValue * 0.75), currency), `${sym}${bearPrice}`],
-              ["Base-Case (Baseline)", baseRc, baseOm, `${(waccBase * 100).toFixed(1)}%`, fmtBigCompact(Math.max(1000000, data.dcf.equityValue), currency), `${sym}${fmtNum(fv, 2)}`],
-              ["Bullish Upside Case", bullRc, bullOm, `${(waccBull * 100).toFixed(1)}%`, fmtBigCompact(Math.max(1000000, data.dcf.equityValue * 1.25), currency), `${sym}${bullPrice}`],
+              ["Bearish Downside Case", bearRc, bearOm, `${(waccBear * 100).toFixed(1)}%`, scenEqv(scenBearTp), `${sym}${bearPrice}`],
+              ["Base-Case (Baseline)", baseRc, baseOm, `${(waccBase * 100).toFixed(1)}%`, scenEqv(fv), `${sym}${fmtNum(fv, 2)}`],
+              ["Bullish Upside Case", bullRc, bullOm, `${(waccBull * 100).toFixed(1)}%`, scenEqv(scenBullTp), `${sym}${bullPrice}`],
             ].map(([scen, rc, om, wacc, eqv, tp], ri) => (
               <View key={ri} style={ri === 1 ? [S.compactRow, { backgroundColor: "#fef3c7" }] : ri % 2 === 0 ? S.compactRow : S.compactRowAlt}>
                 <Text style={[ri === 1 ? S.compactCellBold : S.compactCell, { width: "22%" }]}>{scen}</Text>
@@ -2870,10 +2880,10 @@ const CreditAnalysisPage2 = ({ data }: { data: ReportData }) => {
         ),
       }))
     : [
-        { risk: "Supply Chain & Steel Sourcing", severity: "High", description: "Input commodity volatility and raw material component delivery lead times", mitigation: "Hedged via fixed-price steel contracts and formulaic pass-through clauses in SECI tenders." },
-        { risk: "Site Execution & Grid Evacuation", severity: "Moderate", description: "Interstate transmission substation connectivity and civil installation timelines", mitigation: "Mitigated by modular turbine designs, pre-fabricated foundations, and phased BOP billing." },
-        { risk: "Competitive Price Pressure", severity: "Moderate", description: "Aggressive competitor bidding compressing gross turbine realization margins", mitigation: "Defended by 3.15 MW platform cost-efficiency, high PLF metrics, and 15+ GW fleet density." },
-        { risk: "Macroeconomic Deceleration", severity: "Low", description: "Capital expenditure deferrals across private and commercial power developers", mitigation: "Expanding high-margin recurring 20-year fleet O&M maintenance service revenue streams." },
+        { risk: "Demand & Volume Variability", severity: "Moderate", description: "Revenue sensitivity to end-market demand cycles specific to the company's sector", mitigation: "Diversified customer base and flexible cost structure where evidenced." },
+        { risk: "Input Cost Variability", severity: "Moderate", description: "Key input cost movements relevant to the company's reported cost base", mitigation: "Procurement discipline and contractual pass-throughs where evidenced." },
+        { risk: "Regulatory Change", severity: "Moderate", description: "Sector-relevant regulatory shifts affecting operations or compliance costs", mitigation: "Monitoring and compliance programs proportionate to exposure." },
+        { risk: "Macroeconomic Deceleration", severity: "Low", description: "Broad demand softness deferring customer spending", mitigation: "Balance-sheet flexibility and recurring revenue elements where present." },
       ];
 
   return (
@@ -2883,19 +2893,19 @@ const CreditAnalysisPage2 = ({ data }: { data: ReportData }) => {
       <View style={{ flexDirection: "row", gap: 14, marginBottom: 5 }}>
         <View style={{ flex: 1, paddingRight: 4 }}>
           <Text style={{ fontSize: 6.6, color: COLORS.textSecondary, lineHeight: 1.35, textAlign: "justify", marginBottom: 3 }}>
-            In evaluating {data.profile.name}&apos;s capital structure and balance sheet efficiency, we observe that management has maintained conservative leverage discipline across operating cycles. The executive leadership team prioritizes long-term creditworthiness, liquidity preservation, and operational solvency over aggressive financial engineering.
+            In evaluating {data.profile.name}&apos;s capital structure, we anchor on reported leverage, cash reserves, and interest coverage from the statements above. No characterization beyond those figures is made here — see the Credit Analysis page for the model-implied assessment.
           </Text>
           <Text style={{ fontSize: 6.6, color: COLORS.textSecondary, lineHeight: 1.35, textAlign: "justify" }}>
-            Operating in a capital-intensive industry exposes the company to periodic demand cyclicality and input commodity volatility. However, formulaic contract escalation clauses and multi-year order backlogs mitigate margin compression, providing strong revenue conversion visibility.
+            Demand cyclicality, input-cost exposure, and order-backlog visibility are sector-specific and are addressed in the industry and risk sections against reported segment evidence — not assumed from a manufacturing template.
           </Text>
         </View>
 
         <View style={{ flex: 1, paddingLeft: 4 }}>
           <Text style={{ fontSize: 6.6, color: COLORS.textSecondary, lineHeight: 1.35, textAlign: "justify", marginBottom: 3 }}>
-            Supply chain execution and vendor concentration are active focus areas. The company maintains diversified vendor networks across key components and precision fabrication facilities, insulating production milestones from regional transport disruptions and freight cost spikes.
+            Supply-chain and vendor-concentration commentary requires company-specific disclosure; where filings do not detail sourcing structure, no diversification claim is made.
           </Text>
           <Text style={{ fontSize: 6.6, color: COLORS.textSecondary, lineHeight: 1.35, textAlign: "justify" }}>
-            Management&apos;s commitment to operational de-risking, disciplined working capital management, and robust cash reserves provides comprehensive downside insulation against macroeconomic shocks, reinforcing our high-conviction credit assessment.
+            Downside protection is a function of reported cash, coverage, and maturity profile — see the Credit Analysis page. No conviction modifier is asserted in this section.
           </Text>
         </View>
       </View>
@@ -2940,13 +2950,19 @@ const CreditAnalysisPage2 = ({ data }: { data: ReportData }) => {
             <Text style={[S.compactCellHeaderRight, { width: "19%" }]}>Currency Exposure</Text>
             <Text style={[S.compactCellHeader, { width: "20%" }]}>Refinancing Risk</Text>
           </View>
-          {[
-            ["Within 1 Year (FY25)", fmtBigCompact(latest.shortTermDebt || (latest.totalDebt ? latest.totalDebt * 0.15 : 1200), currency), "6.85% p.a.", "100% Domestic", "Negligible (Cash Funded)"],
-            ["1 - 2 Years (FY26)", fmtBigCompact(latest.totalDebt ? latest.totalDebt * 0.20 : 1600, currency), "7.10% p.a.", "90% Domestic / 10% FX", "Very Low (FCF Covered)"],
-            ["2 - 3 Years (FY27)", fmtBigCompact(latest.totalDebt ? latest.totalDebt * 0.25 : 2000, currency), "7.25% p.a.", "85% Domestic / 15% FX", "Low (Bank Rollover)"],
-            ["3 - 5 Years (FY28-29)", fmtBigCompact(latest.totalDebt ? latest.totalDebt * 0.25 : 2000, currency), "7.40% p.a.", "80% Domestic / 20% FX", "Low (Internal Cash)"],
-            ["Beyond 5 Years (Long-Term)", fmtBigCompact(latest.totalDebt ? latest.totalDebt * 0.15 : 1200, currency), "7.65% p.a.", "75% Domestic / 25% FX", "Minimal (Asset Backed)"],
-          ].map(([bucket, princ, cpn, cur, rsk], ri) => (
+          {(() => {
+            // Only the reported short/long split is stated. Dated buckets,
+            // coupons, currency splits, and risk labels were previously invented
+            // (fixed 15/20/25/25/15% splits, 6.85–7.65% coupons) and routinely
+            // conflicted with balance-sheet figures — all removed.
+            const st = latest.shortTermDebt || 0;
+            const lt = latest.longTermDebt || Math.max(0, (latest.totalDebt || 0) - st);
+            const rows: [string, string, string, string, string][] = [
+              ["Due Within 1 Year (reported)", fmtBigCompact(st, currency), "N/D", "N/D", st <= 0 ? "None due" : "See coverage"],
+              ["Due Beyond 1 Year (reported total; dated split undisclosed)", fmtBigCompact(lt, currency), "N/D", "N/D", lt <= 0 ? "None due" : "See coverage"],
+            ];
+            return rows;
+          })().map(([bucket, princ, cpn, cur, rsk], ri) => (
             <View key={ri} style={ri % 2 === 0 ? S.compactRow : S.compactRowAlt}>
               <Text style={[S.compactCellBold, { width: "25%" }]}>{bucket}</Text>
               <Text style={[S.compactCellRight, { width: "18%" }]}>{princ}</Text>
@@ -4359,31 +4375,34 @@ const AnalystForecastsSummaryPage = ({ data }: { data: ReportData }) => {
               <Text style={[S.compactCellHeaderRight, { width: "35%" }]}>Value ({currency})</Text>
             </View>
             {((): [string, string][] => {
+              // Pure ledger view: EV, net debt, equity, shares and per-share fair
+              // value ALL come from the assumptions ledger. A prior version
+              // recomputed eqVal from the rounded Millions statement model and
+              // printed a second, conflicting "fair value" ($27.10 vs $24.98).
               const ledger = data.assumptionsLedger;
-              // Source balance sheet debt & cash directly from audited balance sheet module (colH0)
-              const colH0 = models[2];
-              const bsDebt = (colH0.shortDebt + colH0.longDebt) * 1e6;
-              const bsCash = colH0.cash * 1e6;
-              const bsNetDebt = bsDebt - bsCash;
+              const cvb = canonicalValuation(data);
               const ev = ledger?.enterpriseValue ?? data.dcf.enterpriseValue;
-              const eqVal = ev - bsNetDebt;
-              const sharesCount = ledger?.sharesOutstanding || data.stockData.sharesOutstanding || ((data.stockData.marketCap || 1e9) / (data.cmp || 100));
+              const netDebt = ledger?.netDebt ?? data.dcf.netDebt ?? 0;
+              const eqVal = ledger?.equityValue ?? (ev - netDebt);
+              const bsDebtLine = ledger?.totalDebt ?? data.dcf.totalDebt ?? 0;
+              const bsCashLine = ledger?.cashAndEquiv ?? data.dcf.cashAndEquiv ?? 0;
+              const sharesCount = ledger?.sharesOutstanding || data.stockData.sharesOutstanding || 0;
               const sharesM = sharesCount / 1e6;
-              const fvPerShare = sharesCount > 0 && eqVal > 0 ? eqVal / sharesCount : (ledger?.fairValue ?? fv);
+              const fvPerShare = cvb.targetPrice;
 
               const rows: [string, string][] = [
                 ["Present Value of 5-Yr Explicit FCFs", fmtBig(data.dcf.sumPvFcff, currency)],
                 ["Present Value of Terminal Value", fmtBig(data.dcf.pvTerminalValue, currency)],
                 ["Enterprise Value (EV) = PV(FCF) + PV(TV)", fmtBig(ev, currency)],
-                ["Less: Total Debt (Audited Balance Sheet)", safeTableValue(bsDebt > 0 ? `-${fmtBig(bsDebt, currency)}` : "0")],
-                ["Plus: Cash & Liquid Reserves (Audited Balance Sheet)", safeTableValue(bsCash > 0 ? `+${fmtBig(bsCash, currency)}` : "0")],
+                ["Less: Total Debt (Ledger)", safeTableValue(bsDebtLine > 0 ? `-${fmtBig(bsDebtLine, currency)}` : "0")],
+                ["Plus: Cash & Liquid Reserves (Ledger)", safeTableValue(bsCashLine > 0 ? `+${fmtBig(bsCashLine, currency)}` : "0")],
                 [
-                  bsNetDebt >= 0 ? "Net Debt Position (Debt – Cash)" : "Net Cash Surplus (Cash – Debt)",
-                  safeTableValue(bsNetDebt > 0 ? `-${fmtBig(bsNetDebt, currency)}` : bsNetDebt < 0 ? `+${fmtBig(Math.abs(bsNetDebt), currency)}` : "0")
+                  netDebt >= 0 ? "Net Debt Position (Debt – Cash)" : "Net Cash Surplus (Cash – Debt)",
+                  safeTableValue(netDebt > 0 ? `-${fmtBig(netDebt, currency)}` : netDebt < 0 ? `+${fmtBig(Math.abs(netDebt), currency)}` : "0")
                 ],
                 ["Implied Equity Value (EV – Net Debt)", fmtBig(eqVal, currency)],
                 ["Diluted Share Count (Millions)", sharesM > 0 ? `${fmtNum(sharesM, 2)} M` : "—"],
-                ["Institutional Fair Value per Share", `${sym}${fmtNum(fvPerShare, 2)}`],
+                ["Institutional Fair Value per Share (= Published Target)", `${sym}${fmtNum(fvPerShare, 2)}`],
               ];
               return rows;
             })().map(([comp, val], ri) => {
@@ -5449,11 +5468,21 @@ const ComparableCompanyAnalysisPage2 = ({ data }: { data: ReportData }) => {
         const subjectDe = isNetCash && totalDebt === 0 ? "0.0% (Net Cash)" : fmtPct(equity > 0 ? totalDebt / equity : 0.45);
         const subjectCr = fmtMult(data.stockData.currentRatio || data.ratiosByYear[data.ratiosByYear.length - 1]?.currentRatio || 2.0);
 
-        const peerCount = Math.max(1, peers.length);
-        const peerAvgGross = peers.reduce((acc, p) => acc + (p.grossMargin ?? 0.34), 0) / peerCount;
-        const peerAvgOp = peers.reduce((acc, p) => acc + (p.operatingMargin ?? 0.08), 0) / peerCount;
-        const peerAvgDe = peers.reduce((acc, p) => acc + (p.debtToEquity ?? 0.45), 0) / peerCount;
-        const peerAvgRoe = peers.reduce((acc, p) => acc + (p.roe ?? 0.10), 0) / peerCount;
+        const peerCount = peers.length;
+        // Peer averages use REPORTED values only — no 0.34/0.08/0.45/0.10 filler.
+        // With zero valid inputs the average is null and every comparative
+        // sentence below is replaced by a coverage limitation (never conclusions
+        // "against a peer cohort average" of nothing).
+        const avgReported = (get: (p: any) => number | null | undefined): number | null => {
+          const vals = peers.map(get).filter((v): v is number => typeof v === "number" && isFinite(v));
+          if (vals.length === 0) return null;
+          return vals.reduce((a, b) => a + b, 0) / vals.length;
+        };
+        const peerAvgGross = avgReported((p) => p.grossMargin);
+        const peerAvgOp = avgReported((p) => p.operatingMargin);
+        const peerAvgDe = avgReported((p) => p.debtToEquity);
+        const peerAvgRoe = avgReported((p) => p.roe);
+        const canCompare = peerCount >= 3 && peerAvgGross !== null && peerAvgOp !== null && peerAvgRoe !== null;
 
         return (
           <View style={{ padding: 5, backgroundColor: COLORS.offWhite, borderWidth: 0.5, borderColor: COLORS.hairlineLight }}>
@@ -5466,10 +5495,12 @@ const ComparableCompanyAnalysisPage2 = ({ data }: { data: ReportData }) => {
                   Operating Margin Expansion &amp; Scale Float
                 </Text>
                 <Text style={{ fontSize: 6.6, color: COLORS.textSecondary, lineHeight: 1.35, marginBottom: 2 }}>
-                  {data.profile.name} delivers {fmtPct(subjectGross)} gross margin and {fmtPct(subjectOp)} operating margin, outperforming the benchmark peer average of {fmtPct(peerAvgGross)} gross and {fmtPct(peerAvgOp)} EBIT across active comps. DuPont synthesis demonstrates that superior return on equity ({fmtPct(subjectRoe)} vs. {fmtPct(peerAvgRoe)} peer average) is primarily driven by high capital velocity and operating discipline rather than leverage.
+                  {canCompare
+                    ? `${data.profile.name} delivers ${fmtPct(subjectGross)} gross margin and ${fmtPct(subjectOp)} operating margin, versus a reported peer average of ${fmtPct(peerAvgGross as number)} gross and ${fmtPct(peerAvgOp as number)} operating margin across ${peerCount} active comps. DuPont synthesis shows return on equity of ${fmtPct(subjectRoe)} against ${fmtPct(peerAvgRoe as number)} peer average; the split between margin, turnover, and leverage drivers is as tabulated above.`
+                    : `${data.profile.name} reports ${fmtPct(subjectGross)} gross margin and ${fmtPct(subjectOp)} operating margin. Fewer than 3 peers with reported fundamentals are available, so no peer-average comparison is drawn — relative positioning is stated as not assessable in this build.`}
                 </Text>
                 <Text style={{ fontSize: 6.6, color: COLORS.textSecondary, lineHeight: 1.35 }}>
-                  Asset turnover of {fmtMult(subjectTurns)} reflects lean working capital requirements, scalable order-book execution, and supply chain vertical integration across key equipment manufacturing nodes.
+                  Asset turnover of {fmtMult(subjectTurns)} reflects the working-capital profile stated in the financials above; cross-company equipment or supply-chain claims are not made here.
                 </Text>
               </View>
               <View style={{ flex: 1 }}>
@@ -5477,10 +5508,12 @@ const ComparableCompanyAnalysisPage2 = ({ data }: { data: ReportData }) => {
                   Solvency Shield &amp; Refinancing Profile
                 </Text>
                 <Text style={{ fontSize: 6.6, color: COLORS.textSecondary, lineHeight: 1.35, marginBottom: 2 }}>
-                  Capital structure analysis shows {subjectDe} debt gearing against a peer cohort average of {fmtPct(peerAvgDe)}. Robust liquidity buffers ({subjectCr} current ratio) provide comprehensive insulation against refinancing risks and policy rate adjustments across volatile macroeconomic cycles.
+                  {peerAvgDe !== null && peerCount >= 3
+                    ? `Capital structure analysis shows ${subjectDe} debt gearing against a reported peer average of ${fmtPct(peerAvgDe)} across ${peerCount} comps.`
+                    : `Capital structure analysis shows ${subjectDe} debt gearing on a standalone basis; no peer-cohort average is available, so no relative leverage conclusion is drawn.`} {subjectCr !== "—" ? `Reported current ratio is ${subjectCr}.` : `Liquidity ratios are not disclosed.`} Refinancing risk is assessed from the maturity disclosure above — no insulation is claimed beyond stated cash and coverage.
                 </Text>
                 <Text style={{ fontSize: 6.6, color: COLORS.textSecondary, lineHeight: 1.35 }}>
-                  Interest coverage remains resilient, ensuring that operating cash generation exceeds debt service obligations while safeguarding capacity for growth capex and strategic technology reinvestment.
+                  Interest coverage and debt-service headroom follow from reported operating cash generation versus stated obligations; capacity for growth capex is conditional on the coverage shown, not assumed.
                 </Text>
               </View>
             </View>

@@ -290,6 +290,45 @@ export const INTERNET_PLATFORM_PROFILE: SectorProfile = {
   standardMarginMetric: "Operating Margin"
 };
 
+export const AUTO_PROFILE: SectorProfile = {
+  id: "auto",
+  name: "Automotive OEMs, EVs & Auto Components",
+  allowedKPIs: [
+    "Vehicle Deliveries (units)",
+    "Average Selling Price (ASP) per Vehicle",
+    "Automotive Gross Margin ex-Regulatory Credits",
+    "Regulatory Credit Revenue",
+    "Energy Storage Deployments (MWh)",
+    "Operating Margin",
+    "Free Cash Flow Conversion",
+    "China Mix & Shanghai Output",
+    "Supercharger / Services Revenue",
+    "Return on Invested Capital (ROIC)"
+  ],
+  preferredValuationModels: ["FCFF_DCF", "EV_EBITDA", "MULTIPLES_PE"],
+  financialMetrics: ["Automotive Sales Revenue", "Regulatory Credit Revenue", "Energy Generation & Storage Revenue", "Services Revenue", "Operating Income", "Manufacturing Capex", "Operating Cash Flow", "Free Cash Flow"],
+  riskCategories: ["EV Price-War & ASP Erosion", "China Demand & Competition", "Autonomy Regulation (FSD/Robotaxi)", "Battery Cost & 4680 Ramp"],
+  moatDrivers: ["Manufacturing scale and vertical integration (gigafactories)", "Software-defined vehicle stack and fleet data scale", "Charging network and brand pull"],
+  forbiddenConcepts: [
+    "casa", "casa ratio", "current account savings account", "net interest margin", "nim",
+    "loan book", "credit cost", "gross non-performing assets", "gnpa", "nnpa", "credit provisioning",
+    "spectrum auction", "spectrum", "4g/5g", "tower deployment", "tower tenancy",
+    "telecom towers", "subscriber churn", "agr dues",
+    "master service agreement", "total contract value", "tcv", "saas churn", "arr expansion",
+    "cloud subscription churn", "enterprise contract", "software services", "deal signing cycles",
+    "discretionary consulting", "offshore", "onsite effort",
+    "copra", "palm oil procurement", "packaged goods", "personal care", "brand recall",
+    "iconic consumer brand", "multi-tier retail distribution", "fmcg", "modern trade",
+    "wafer fab", "wafer fabrication", "foundry capacity", "semiconductor fab",
+    "refinery throughput", "refinery margin", "refinery crack", "refinery", "crack spread",
+    "clinical trial", "clinical trials", "fda 483", "us fda", "anda approvals", "anda filings",
+    "dark stores", "dark store", "gross merchandise value", "take rate",
+    "plant turnaround", "plant utilization"
+  ],
+  isFinancialInstitution: false,
+  standardMarginMetric: "Operating Margin"
+};
+
 export const RENEWABLE_ENERGY_PROFILE: SectorProfile = {
   id: "renewable-energy",
   name: "Renewable Energy & Equipment",
@@ -739,6 +778,34 @@ export function classifySector(
     combined.includes("sumitomo chemical")
   ) {
     return AGROCHEMICAL_PROFILE;
+  }
+
+  // 9. Automotive OEMs, EVs & Auto Components. MUST precede Industrials:
+  // "auto" descriptions routinely mention plants/engineering, which would
+  // otherwise route Tesla to the generic industrial template (no EV KPIs,
+  // no forbidden-concept coverage → blind validator).
+  if (
+    combined.includes("auto manufacturer") ||
+    combined.includes("auto parts") ||
+    combined.includes("auto components") ||
+    combined.includes("electric vehicle") ||
+    combined.includes("ev manufacturer") ||
+    combined.includes(" passenger vehicle") ||
+    combined.includes("commercial vehicle") ||
+    combined.includes("two wheeler") ||
+    combined.includes("two-wheeler") ||
+    combined.includes("tesla") ||
+    combined.includes("tata motors") ||
+    combined.includes("maruti") ||
+    combined.includes("mahindra") ||
+    combined.includes("bajaj auto") ||
+    combined.includes("hero moto") ||
+    combined.includes("eicher motors") ||
+    (combined.includes("auto") && !combined.includes("automation") && !combined.includes("data processing") && !combined.includes("software")) ||
+    combined.includes("motorcycle") ||
+    combined.includes("oem")
+  ) {
+    return AUTO_PROFILE;
   }
 
   // 10. Cement & Building Materials

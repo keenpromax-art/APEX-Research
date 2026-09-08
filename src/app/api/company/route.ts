@@ -194,6 +194,15 @@ export async function GET(request: NextRequest) {
         } else if (sec.includes("energy") || ind.includes("oil")) {
           peerTickers = ["XOM", "CVX", "COP", "PSX"];
         } else if (
+          ind.includes("auto") ||
+          ind.includes("motor") ||
+          ind.includes("vehicle") ||
+          ["TSLA", "F", "GM", "TM", "HMC", "RIVN", "LCID", "STLA", "NIO", "XPEV", "LI"].includes(sym) ||
+          (companyProfile.description || "").toLowerCase().includes("electric vehicle") ||
+          (companyProfile.description || "").toLowerCase().includes("automotive")
+        ) {
+          peerTickers = ["F", "GM", "TM", "RIVN", "STLA", "HMC"];
+        } else if (
           ind.includes("apparel") ||
           ind.includes("footwear") ||
           ind.includes("textile") ||

@@ -162,10 +162,14 @@ export function generatePEFirmAnalysis(input: PEAnalysisInput): AIAnalysis {
     companyOverview = `${profile.name} is an integrated energy, refining, petrochemical, and industrial enterprise operating world-scale assets and specialized distribution infrastructure.`;
     investmentThesis = `The operational thesis centers on unrivaled processing scale, superior refining complexity, and counter-cyclical capex execution. Vertical integration across feedstocks and downstream derivatives insulates baseline cash generation across volatile global commodity cycles.`;
     investmentConclusion = `We formulate ${recAction} recommendation on ${profile.name} with a fair value target of ${sym}${fv.toFixed(2)}, benchmarked against peer processing margins and enterprise value multiples.`;
+  } else if (sectorType === "auto_manufacturing") {
+    companyOverview = `${profile.name} is an automotive OEM operating vehicle manufacturing (including EVs where applicable), auto components, and adjacent energy-storage/services businesses. Unit economics are measured in vehicle deliveries, average selling price (ASP), automotive gross margin excluding regulatory credits, and free cash flow after manufacturing capex — banking, telecom-carrier, and enterprise-software metrics do not apply here.`;
+    investmentThesis = `Our auto-sector thesis evaluates ${profile.name} on three drivers: First, delivery-volume growth and ASP discipline through model-mix, pricing actions, and geographic mix (notably China). Second, automotive gross-margin trajectory excluding regulatory credits, driven by manufacturing cost-down (gigafactory scale, vertical integration) net of price cuts. Third, free-cash-flow conversion after heavy manufacturing capex, plus optionality from energy storage deployments and driver-assistance software. Carrier, banking, and enterprise-software metrics do not apply.`;
+    investmentConclusion = `We formulate ${recAction} recommendation on ${profile.name} with a fair value target of ${sym}${fv.toFixed(2)} per share (${formatPct(upsidePct)} implied upside), anchored on delivery/ASP/margin delivery against the DCF trajectory.`;
   } else {
-    companyOverview = `${profile.name} is an established enterprise in the ${profile.sector} sector, specializing in ${profile.industry}. The corporation maintains a diversified operational footprint with integrated manufacturing, supply chain logistics, and broad customer distribution channels across core domestic and export jurisdictions.`;
-    investmentThesis = `Our fundamental equity research identifies ${profile.name} as an established franchise benefitting from defensible market share, cost-leadership manufacturing scale, and disciplined working capital allocation. Operating cash flows fund sustaining capital expenditures while preserving robust debt coverage ratios.`;
-    investmentConclusion = `We formulate ${recAction} recommendation on ${profile.name} with an intrinsic fair value target of ${sym}${fv.toFixed(2)} per share (${formatPct(upsidePct)} implied upside), reflecting tangible competitive advantages and operational execution.`;
+    companyOverview = `${profile.name} operates in the ${profile.sector} sector (${profile.industry}). The business description and segment disclosures in the company profile, together with the reported financials below, define its operating model — no sector-specific template applies.`;
+    investmentThesis = `Our analysis of ${profile.name} is anchored on its reported revenue trajectory, margin structure, cash conversion, and balance-sheet capacity as detailed below. Without a sector-specific template match, no industry boilerplate (manufacturing scale, loan books, subscriber metrics, or platform dynamics) is assumed.`;
+    investmentConclusion = `We formulate ${recAction} recommendation on ${profile.name} with an intrinsic fair value target of ${sym}${fv.toFixed(2)} per share (${formatPct(upsidePct)} implied upside), reflecting reported fundamentals and operational execution.`;
   }
 
   // Company-specific evidence lead: grounds the sector template in THIS
@@ -340,6 +344,19 @@ export function generatePEFirmAnalysis(input: PEAnalysisInput): AIAnalysis {
       { pillar: "Direct-to-Consumer Margin", durability: "Narrow (8-10 Yrs)", rationale: "Owned digital and retail channels expand gross margin, data capture, and full-price sell-through." },
       { pillar: "Supply Chain Resilience", durability: "Narrow (7-10 Yrs)", rationale: "Strategic sourcing diversification and vertical integration protect margins against input-cost volatility." },
     ];
+  } else if (sectorType === "auto_manufacturing") {
+    moatSources = {
+      switchingCosts: `Ownership Ecosystem & Charging: Charging-network access, software-defined features, and service integration create moderate owner stickiness, but switching costs remain far below enterprise-software lock-in and must not be described in SaaS terms.`,
+      intangibleAssets: `Brand Pull & Manufacturing Know-How: Brand desirability plus proprietary manufacturing processes (gigacasting, vertical integration) and driver-assistance data scale. No banking, telecom, or consulting intangible applies.`,
+      costAdvantage: `Scale & Vertical Integration: High-volume plants and in-house component/battery-pack integration lower unit cost versus sub-scale OEMs, offset by price-cut discipline and China cost competition.`,
+      moatTrend: `Stable: Durability hinges on sustained cost-down outpacing ASP erosion; ecosystem language must stay consistent with the composite moat rating.`,
+    };
+    moatPillars = [
+      { pillar: "Manufacturing Scale & Vertical Integration", durability: "Narrow (7-10 Yrs)", rationale: "Gigafactory scale and in-house integration lower unit costs versus smaller OEMs." },
+      { pillar: "Brand & Direct-Sales Pull", durability: "Narrow (7-10 Yrs)", rationale: "Order-backlog brand strength supports pricing power within segments." },
+      { pillar: "Charging & Software Ecosystem", durability: "Narrow (5-8 Yrs)", rationale: "Charging access and software features aid retention without enterprise-grade lock-in." },
+      { pillar: "Energy Storage Optionality", durability: "Narrow (5-8 Yrs)", rationale: "Storage deployments diversify revenue but remain margin-dilutive at current scale." },
+    ];
   } else {
     moatSources = {
       switchingCosts: `Customer Relationships & Workflow Integration: The durability of switching costs depends on the company’s actual product, service, contract, and distribution model.`,
@@ -449,6 +466,15 @@ export function generatePEFirmAnalysis(input: PEAnalysisInput): AIAnalysis {
       { force: "Threat of Substitutes", level: "High", commentary: "Low-cost passive products, internal investment teams, and alternative managers provide credible substitutes in many asset classes." },
       { force: "Competitive Rivalry", level: "High", commentary: "Competition is driven by performance, fees, distribution access, product innovation, and technology capability." },
     ];
+  } else if (sectorType === "auto_manufacturing") {
+    industryDynamicsCommentary = `The automotive industry is a scale-driven, cyclical manufacturing sector where competition centers on delivery volumes, transaction pricing (ASP), manufacturing cost per unit, and model-cycle freshness. For EV-exposed OEMs the incremental drivers are battery-pack cost curves, charging-network coverage, software-defined features, and China price competition — not telecom tariffs, bank credit cycles, or enterprise software budgets.`;
+    fiveForces = [
+      { force: "Threat of New Entrants", level: "Moderate", commentary: "Chinese EV OEMs and new entrants can scale quickly with state-supported supply chains, though gigafactory capex and homologation remain material hurdles." },
+      { force: "Bargaining Power of Buyers", level: "High", commentary: "Transparent transaction pricing, short model cycles, and financing sensitivity give buyers leverage; price cuts transmit immediately to ASP and margin." },
+      { force: "Bargaining Power of Suppliers", level: "Moderate", commentary: "Battery-cell, semiconductor, and lithium supply chains confer leverage, partly offset by vertical integration and multi-sourcing." },
+      { force: "Threat of Substitutes", level: "Moderate", commentary: "Hybrids, improved ICE efficiency, and mobility services substitute at the margin; within EVs, models substitute aggressively on price." },
+      { force: "Competitive Rivalry", level: "High", commentary: "Global overcapacity and China-led price competition compress industry ASP; share shifts on cost-down execution and model cadence." },
+    ];
   } else {
     industryDynamicsCommentary = `The ${profile.industry || "general"} sector requires company-specific assessment of demand, competition, customer concentration, regulatory exposure, and cost structure. No manufacturing, lending, or platform-specific driver is assumed without evidence in the company profile or reported results.`;
     fiveForces = [
@@ -506,6 +532,14 @@ export function generatePEFirmAnalysis(input: PEAnalysisInput): AIAnalysis {
       { event: "Fee Pressure or Investment Underperformance", horizon: "Ongoing", probability: "Evidence-Dependent", impact: "Lower organic growth and fee realization" },
       { event: "Broad Market Decline or Institutional Redemptions", horizon: "Ongoing", probability: "Evidence-Dependent", impact: "AUM and performance-fee downside" },
     ];
+  } else if (sectorType === "auto_manufacturing") {
+    businessStrategyCommentary = `${profile.name}'s roadmap centers on three levers: First, delivery growth via model-mix, production ramp, and geographic expansion, defended by ASP discipline. Second, automotive gross-margin defense excluding regulatory credits through manufacturing cost-down outpacing price actions. Third, capital allocation across manufacturing capacity, energy-storage scale-up, and driver-assistance development, funded from operating cash flow.`;
+    catalysts = [
+      { event: "Delivery Beat with Stable-to-Firm ASP and Ex-Credit Margin Defense", horizon: "6-12 Months", probability: "Evidence-Dependent", impact: "Validates volume/margin thesis; supports fair value" },
+      { event: "Energy Storage Deployment Acceleration", horizon: "12-18 Months", probability: "Evidence-Dependent", impact: "Diversifies mix; margin-accretive at scale" },
+      { event: "Driver-Assistance / Autonomy Regulatory Milestone", horizon: "12-24 Months", probability: "Evidence-Dependent", impact: "Re-rates software optionality; timeline-sensitive" },
+      { event: "China Price War / Demand Softness Compressing ASP", horizon: "Ongoing", probability: "Evidence-Dependent", impact: "Margin and target downside sensitivity" },
+    ];
   } else {
     businessStrategyCommentary = `${profile.name}'s strategy requires validation against its reported operating model, segment disclosures, and capital-allocation record. This baseline deliberately avoids assuming plants, loan growth, inventory, subscriber metrics, or platform infrastructure where those are not evidenced.`;
     catalysts = [
@@ -520,6 +554,15 @@ export function generatePEFirmAnalysis(input: PEAnalysisInput): AIAnalysis {
   // AGENT 5: CREDIT ANALYSIS, CAPITAL STRUCTURE & BALANCE SHEET REALITY
   // ─────────────────────────────────────────────────────────────────────────────
   let creditAnalysisCommentary: { financialHealth: string; liquidityBuffers: string; debtMaturity: string; stressTesting: string };
+
+  // Company-specific credit figures — computed once, interpolated everywhere
+  // below so no branch can print generic "banking consortium / covenant" boilerplate.
+  const _intExp = (latest as any).interestExpense || 0;
+  const _cov = _intExp > 0 && ebitda > 0 ? ebitda / _intExp : (ebitda > 0 ? 99 : 0);
+  const _covStr = _cov >= 99 ? "no meaningful interest burden (interest expense ~nil)" : `${_cov.toFixed(1)}x EBITDA interest coverage`;
+  const _levStr = ebitda > 0 ? `${(netDebt / ebitda).toFixed(1)}x net debt/EBITDA` : "no EBITDA cover base";
+  const _cashStr = formatLargeNum(cash, cur);
+  const _debtStr = formatLargeNum(totalDebt, cur);
 
   if (archetype === "DISTRESSED") {
     creditAnalysisCommentary = {
@@ -537,17 +580,19 @@ export function generatePEFirmAnalysis(input: PEAnalysisInput): AIAnalysis {
     };
   } else if (isDeleveraged) {
     creditAnalysisCommentary = {
-      financialHealth: `${profile.name} maintains an exceptionally conservative capital structure following comprehensive balance sheet deleveraging. The company has virtually eradicated legacy debt liabilities, transforming its financial architecture into a net cash position. Significant liquidity across cash, bank deposits, and operational float insulates the business against cyclical contractions.`,
-      liquidityBuffers: `${profile.name} maintains robust undrawn working capital lines with leading commercial banking consortiums. The business utilizes disciplined customer milestone billing and inventory management, keeping working capital requirements low and generating steady organic operating cash flows to fund baseline corporate needs without external borrowing.`,
-      debtMaturity: `With gross debt negligible or fully extinguished, the company faces virtually zero debt maturity or refinancing risk over our forecast horizon. Management is liberated from restrictive financial covenants, enabling generated operational cash flow to be deployed toward capacity expansion, technological R&D, and shareholder returns.`,
-      stressTesting: `Our downside stress test models a severe 25% contraction in sector demand combined with a 350-basis-point compression in operating EBITDA margins. Under this adversarial scenario, cash reserves ensure that solvency ratios remain securely above covenant boundaries, confirming an investment-grade risk profile.`,
+      financialHealth: `${profile.name} reports ${formatLargeNum(totalDebt, cur)} of funded debt against ${_cashStr} of cash and liquid reserves (${_levStr}). The structure is net-cash or near it; solvency is a liquidity-management question, not a refinancing one, and no bank-credit model applies.`,
+      liquidityBuffers: `Reported cash of ${_cashStr} covers short-term obligations from internal reserves. Undrawn facilities are not disclosed in available filings, so no revolving-line capacity is assumed — the buffer analysis rests on stated cash plus operating cash generation.`,
+      debtMaturity: totalDebt <= 0
+        ? `No funded debt is reported, so no maturity schedule applies.`
+        : `Funded debt of ${_debtStr} is small relative to cash; a dated maturity ladder is not disclosed in available filings, so no refinancing-cliff claim is made.`,
+      stressTesting: `Our downside screen assumes a severe 25% demand contraction with 350 bps of EBITDA-margin compression. Under it, ${_covStr} and the cash buffer determine headroom; covenant compliance cannot be asserted because facility covenants are undisclosed.`,
     };
   } else {
     creditAnalysisCommentary = {
-      financialHealth: `${profile.name} exhibits a well-structured debt maturity ladder supported by comfortable operating cash flow generation. Debt obligations are managed with adequate EBITDA interest coverage, providing headroom above standard debt service covenants.`,
-      liquidityBuffers: `${profile.name} maintains revolving credit lines and positive operating cash flow generation, providing adequate operational liquidity buffers across business cycles.`,
-      debtMaturity: `Debt liabilities are staggered across a multi-year maturity horizon with balanced fixed and floating coupon rates. Management actively terms out short-term facilities, neutralizing interest rate volatility.`,
-      stressTesting: `Downside stress modeling confirms that cash generation and available credit lines absorb cyclical demand slowdowns, maintaining debt-to-EBITDA within sustainable operational boundaries.`,
+      financialHealth: `${profile.name} carries ${_debtStr} of funded debt (${_levStr}) with ${_covStr}. Leverage and coverage are as reported — not benchmarked against bank capital norms, which do not apply outside financials.`,
+      liquidityBuffers: `Liquidity rests on ${_cashStr} of reported cash plus operating cash generation. Undrawn credit lines are not disclosed and are not assumed.`,
+      debtMaturity: `A dated maturity ladder is not disclosed in available filings; the analysis tracks the reported short/long split only and makes no refinancing-cliff claim.`,
+      stressTesting: `Downside modeling scales reported EBITDA against ${_covStr}; headroom language is conditional on undisclosed covenants and is stated as such.`,
     };
   }
 
@@ -603,6 +648,13 @@ export function generatePEFirmAnalysis(input: PEAnalysisInput): AIAnalysis {
       { risk: "Wholesale Channel Rationalization & DTC Transition Friction", severity: "Medium", description: "Continued wholesale partner consolidation and DTC margin mix shifts can create near-term revenue volatility as inventory channels rebalance.", mitigation: "Controlled DTC ramp, wholesale partner margin protection, and full-price sell-through discipline." },
       { risk: "Input-Cost & Logistics Inflation", severity: "Medium", description: "Elevated freight rates, raw material (rubber, EVA, synthetic leather) input costs, and wage inflation in manufacturing hubs pressure gross margin.", mitigation: "Formulaic customer pass-through contracts, strategic intermediate buffer stocks, and multi-vendor procurement agreements." },
       { risk: "Competitive Brand Cycle & Fad Risk", severity: "Low to Medium", description: "Lifestyle and fashion cycles can erode flagship franchise relevance if innovation cadence lags.", mitigation: "Accelerated proprietary technology pipeline (Air, Flyknit, React) and sustained A&P reinvestment protecting brand heat." },
+    ];
+  } else if (sectorType === "auto_manufacturing") {
+    enterpriseRiskCommentary = [
+      { risk: "EV Price War & ASP Erosion", severity: "High", description: "China-led discounting and legacy-OEM EV pushes compress transaction prices faster than manufacturing cost-down, squeezing automotive gross margin ex-credits.", mitigation: "Model-mix discipline, cost-down cadence (gigacasting, vertical integration), and geographic diversification." },
+      { risk: "China Concentration", severity: "High", description: "Shanghai output and Chinese demand swings drive delivery volatility amid intense local competition (BYD et al.) and policy shifts.", mitigation: "Multi-region plant footprint and export flexibility; localized supply chains." },
+      { risk: "Battery Cost & Technology Ramp", severity: "Medium", description: "Lithium/cell cost swings and 4680-class ramp delays can stall unit-cost targets.", mitigation: "Multi-supplier cell strategy plus in-house pack integration; contractual pass-throughs where available." },
+      { risk: "Autonomy Regulation & Safety Liability", severity: "Medium", description: "FSD/robotaxi timelines depend on regulators; incidents invite scrutiny, recalls, and liability.", mitigation: "Staged deployment with safety-case disclosure; no autonomy revenue recognized before regulatory clearance." },
     ];
   } else {
     enterpriseRiskCommentary = [
@@ -740,7 +792,7 @@ export function generatePEFirmAnalysis(input: PEAnalysisInput): AIAnalysis {
   let swotThreats: string[];
   let keyRisks: { risk: string; description: string; impact: "High" | "Medium" | "Low"; mitigation?: string }[];
 
-  if (archProfile.archetype === "DISTRESSED") {
+  if (archProfile.archetype === "DISTRESSED" && sectorType === "telecom") {
     swotStrengths = [
       "Extensive nationwide subscriber footprint and mission-critical telecommunications network presence.",
       "Valuable spectrum holdings across core frequency bands (900MHz, 1800MHz, 2100MHz) anchoring subscriber reach.",
@@ -766,7 +818,7 @@ export function generatePEFirmAnalysis(input: PEAnalysisInput): AIAnalysis {
       { risk: "Postpaid Subscriber Attrition", description: "Continuous loss of premium subscribers to competitors offering faster 5G networks.", impact: "High", mitigation: "Targeted 4G/5G capex deployment in priority revenue-generating urban circles" },
       { risk: "Network Capex Underinvestment", description: "Inadequate cash generation leading to delayed cell tower and network modernization.", impact: "Medium", mitigation: "Consortium bank debt restructuring and vendor credit milestone agreements" },
     ];
-  } else if (archProfile.archetype === "EARLY_PLATFORM_GROWTH") {
+  } else if (archProfile.archetype === "EARLY_PLATFORM_GROWTH" && sectorType === "platform_gig_economy") {
     swotStrengths = [
       "Market-leading consumer mindshare and dense, high-frequency active transacting user base.",
       "Extensive hyperlocal dark store mesh infrastructure achieving sub-15 minute fulfillment unit economics.",
@@ -791,6 +843,62 @@ export function generatePEFirmAnalysis(input: PEAnalysisInput): AIAnalysis {
       { risk: "Quick-Commerce Promotional Escalation", description: "Deep competitor discounting and rapid dark store land-grabs compressing contribution margins.", impact: "High", mitigation: "Improving dark store order batching density and expanding higher-margin non-grocery AOV" },
       { risk: "Labor & Gig Worker Regulation", description: "Legislative shifts mandating minimum statutory wages or social security benefits for fleet partners.", impact: "Medium", mitigation: "Algorithmic route dispatch efficiency and performance-linked dynamic payout structures" },
       { risk: "Dark Store Cannibalization", description: "Over-clustering fulfillment centers in saturated urban micro-markets diluting store-level throughput.", impact: "Medium", mitigation: "Micro-market spatial density modeling and selective brownfield store rationalization" },
+    ];
+  } else if (archProfile.archetype === "DISTRESSED") {
+    // Generic distressed-company SWOT: no telecom spectrum/AGR language unless
+    // the company is actually a carrier (handled above).
+    swotStrengths = [
+      "Entrenched operating footprint and customer relationships sustaining baseline revenue through restructuring.",
+      "Tangible asset base available for selective divestiture to fund deleveraging.",
+      "Potential recapitalization optionality via asset sales, strategic investors, or creditor-led restructuring.",
+    ];
+    swotWeaknesses = [
+      "Substantial balance sheet leverage constraining investment and strategic flexibility.",
+      "Persistent operating losses and negative free cash flow limiting self-funded recovery.",
+      "Elevated refinancing risk on near-term maturities absent external funding.",
+    ];
+    swotOpportunities = [
+      "Deleveraging via asset disposals and liability management restoring solvency headroom.",
+      "Operational restructuring and cost reset improving through-cycle margins.",
+      "Strategic equity infusion or creditor compromise funding a turnaround plan.",
+    ];
+    swotThreats = [
+      "Creditor acceleration or covenant enforcement forcing distressed asset sales.",
+      "Working-capital seizure by suppliers tightening liquidity further.",
+      "Prolonged demand weakness delaying any earnings recovery past maturity walls.",
+    ];
+    keyRisks = [
+      { risk: "Refinancing & Maturity Wall", description: "Inability to refinance near-term maturities from internal cash generation.", impact: "High", mitigation: "Liability management, asset disposals, and creditor negotiation" },
+      { risk: "Operating Loss Persistence", description: "Continued negative earnings eroding equity cushions quarter by quarter.", impact: "High", mitigation: "Cost restructuring and focus on cash-generative core operations" },
+      { risk: "Covenant Breach", description: "Leverage and coverage covenants at risk under further downside.", impact: "Medium", mitigation: "Covenant waivers, amend-and-extend, and deleveraging milestones" },
+    ];
+  } else if (archProfile.archetype === "EARLY_PLATFORM_GROWTH") {
+    // Generic high-growth loss-maker SWOT: no dark-store language unless this is
+    // actually a quick-commerce platform (handled above).
+    swotStrengths = [
+      "Rapid revenue scaling with expanding user/customer adoption.",
+      "Liquid balance sheet post-equity capitalization funding the growth runway.",
+      "Product and technology investment compounding differentiation.",
+    ];
+    swotWeaknesses = [
+      "Near-term operating losses as growth investment front-runs monetization.",
+      "High customer-acquisition spend with payback timing uncertainty.",
+      "Unit-margin sensitivity to scale, pricing power, and competitive intensity.",
+    ];
+    swotOpportunities = [
+      "Operating leverage as fixed-cost absorption inflects with scale.",
+      "Higher-margin product-mix expansion lifting blended realization.",
+      "Path to contribution-margin breakeven on maturing cohorts.",
+    ];
+    swotThreats = [
+      "Well-funded competition compressing pricing and raising acquisition costs.",
+      "Regulatory shifts increasing operating or compliance costs.",
+      "Macro demand softness elongating the path to profitability.",
+    ];
+    keyRisks = [
+      { risk: "Burn Multiple & Runway", description: "Cash burn relative to net new revenue determines funding needs.", impact: "High", mitigation: "Disciplined acquisition spend and milestone-gated investment" },
+      { risk: "Competitive Intensity", description: "Rivals can prolong loss-making while contesting share.", impact: "Medium", mitigation: "Differentiation and retention over discount-led growth" },
+      { risk: "Monetization Timing", description: "Delayed take-rate or pricing power pushes breakeven outward.", impact: "Medium", mitigation: "Phased monetization tied to engagement thresholds" },
     ];
   } else if (archProfile.archetype === "CYCLICAL_CAPITAL_INTENSIVE") {
     swotStrengths = [
