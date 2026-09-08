@@ -180,7 +180,8 @@ export function computeWACC(
   stockData: StockData,
   fin: AnnualFinancials,
   archetypeProfile?: ArchetypeProfile,
-  country?: string
+  country?: string,
+  annualFinancials?: AnnualFinancials[]
 ): DCFAssumptions {
   const cp = resolveCountryParams(country);
   const riskFreeRate = cp.riskFreeRate;
@@ -222,9 +223,39 @@ export function computeWACC(
   const baseWacc = costOfEquity * equityWeight + costOfDebtPostTax * debtWeight;
   const wacc = Math.max(0.085, Math.min(0.16, Number((baseWacc + distressSpread).toFixed(4))));
 
-  // Item 6: Archetype scenario margins feed directly into base EBIT margin
+  // Mid-cycle EBIT margin anchor from reported history (through-cycle).
+  // The prior logic used the archetype's trough-derived baseMargin or the
+  // single latest ebitMargin, so a one-year crash (Ford FY2025 -4.9%) anchored
+  // the entire 5-year forecast at trough. Now we take the average of
+  // positive through-cycle EBIT margins (or median if all are negative),
+  // dropping a distressed outlier when the archetype is DISTRESSED — a true
+  // mid-cycle anchor. Bounded 2–14% so an outlier history cannot produce
+  // absurd margins.
+  let midCycleMargin: number | undefined;
+  if (annualFinancials && annualFinancials.length >= 2) {
+    const hist = annualFinancials
+      .map((f) => f.ebitMargin)
+      .filter((m): m is number => typeof m === "number" && isFinite(m) && m > -0.5 && m < 0.5);
+    if (hist.length >= 2) {
+      const sorted = [...hist].sort((a, b) => a - b);
+      const isDistressedTrough = archetypeProfile?.archetype === "DISTRESSED" && sorted[0] < -0.02 && hist.length >= 3;
+      const usable = isDistressedTrough ? sorted.slice(1) : sorted;
+      const positives = usable.filter((m) => m > 0.01);
+      const anchorPool = positives.length >= 2 ? positives : usable;
+      const mid = anchorPool.reduce((a, b) => a + b, 0) / anchorPool.length;
+      if (isFinite(mid) && mid > -0.5 && mid < 0.5) midCycleMargin = mid;
+    }
+  }
   const archetypeBaseMargin = archetypeProfile?.scenarioMargins?.baseMargin;
-  const effectiveMargin = (archetypeBaseMargin !== undefined && archetypeBaseMargin > 0)
+  // Priority: mid-cycle history > archetype trough > latest > live > 14% fallback.
+  // Mid-cycle is clamped to 2–14% to prevent absurd anchors on thin histories.
+  // For auto/industrial cyclicals we floor at 3% (normalized through-cycle
+  // trough for manufacturing) so a deep-cycle year does not permanently depress
+  // the explicit forecast — the bridge then remains economically coherent.
+  const cyclicalFloor = archetypeProfile?.sector === "auto_manufacturing" || archetypeProfile?.sector === "renewables" ? 0.03 : 0.02;
+  const effectiveMargin = midCycleMargin !== undefined
+    ? Math.max(cyclicalFloor, Math.min(0.14, midCycleMargin))
+    : (archetypeBaseMargin !== undefined && archetypeBaseMargin > 0)
     ? archetypeBaseMargin
     : (fin.ebitMargin > 0.03
         ? fin.ebitMargin
@@ -272,7 +303,7 @@ export function computeDCF(
   const lastRev = latest.revenue;
   const cagr = years > 1 ? Math.pow(lastRev / (firstRev || 1), 1 / (years - 1)) - 1 : 0.15;
 
-  const assumptions = computeWACC(stockData, latest, archetypeProfile, country);
+  const assumptions = computeWACC(stockData, latest, archetypeProfile, country, annualFinancials);
 
   // Item 5: Winsorized blend of live revenue growth and historical CAGR
   const liveRevGrowth = stockData.revenueGrowth;
@@ -376,7 +407,11 @@ export function computeDCF(
   // Inapplicable to financials (separate residual-income path) and to firms
   // without material receivables — for them the offset is exactly zero.
   const receivables = Number(latest.netReceivables) || 0;
-  const tradeAllowance = latest.revenue > 0 ? 0.20 * latest.revenue : 0;
+  const isAutoCaptive = archetypeProfile?.sector === "auto_manufacturing";
+  // Auto OEMs carry dealer/finance receivables ~6–8% trade WC; 12% is already
+  // conservative for the trade allowance, leaving true finance book as offset.
+  // Other sectors use 20% to avoid over-netting normal trade receivables.
+  const tradeAllowance = latest.revenue > 0 ? (isAutoCaptive ? 0.12 : 0.20) * latest.revenue : 0;
   const financeReceivablesOffset = latest.revenue > 0 && receivables > 0 && latestDebt > 0
     ? Math.min(Math.max(0, receivables - tradeAllowance), latestDebt)
     : 0;

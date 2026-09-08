@@ -366,13 +366,19 @@ export function classifyArchetype(
 
   if (archetype === "DISTRESSED") {
     capitalAllocationLabel = "Stressed / Capital Conservation";
-    capitalAllocationDescription = `Management's capital allocation charter is constrained by high debt leverage and operational restructuring mandates. Capital priorities are strictly directed toward debt service, essential spectrum and network maintenance, and liquidity preservation, with equity capital distributions completely suspended.`;
+    // Sector-conditional: carrier language ("spectrum", "telecom") must never
+    // leak into non-carrier distressed names (it tripped sector QA on automakers).
+    capitalAllocationDescription = sector === "telecom"
+      ? `Management's capital allocation charter is constrained by high debt leverage and operational restructuring mandates. Capital priorities are strictly directed toward debt service, essential spectrum and network maintenance, and liquidity preservation, with equity capital distributions completely suspended.`
+      : `Management's capital allocation charter is constrained by high debt leverage and operational restructuring mandates. Capital priorities are strictly directed toward debt service, critical operating infrastructure, and liquidity preservation, with equity capital distributions completely suspended.`;
   } else if (sector === "asset_management") {
     capitalAllocationLabel = "Disciplined Capital Return & Fiduciary Stewardship";
     capitalAllocationDescription = `Executive leadership manages capital allocation with an asset-light posture, directing resources toward core investment platform scalability, risk technology enhancements, and consistent shareholder capital returns through regular dividends and programmatic share repurchases.`;
   } else if (archetype === "EARLY_PLATFORM_GROWTH") {
     capitalAllocationLabel = "Growth Reinvestment / Platform Expansion";
-    capitalAllocationDescription = `The leadership team directs 100% of available capital into customer acquisition, dark store network rollout, technology infrastructure, and fulfillment density. Given platform scaling dynamics, capital distribution is deferred in favor of expanding market share and achieving long-term contribution margin operating leverage.`;
+    capitalAllocationDescription = sector === "platform_gig_economy"
+      ? `The leadership team directs 100% of available capital into customer acquisition, dark store network rollout, technology infrastructure, and fulfillment density. Given platform scaling dynamics, capital distribution is deferred in favor of expanding market share and achieving long-term contribution margin operating leverage.`
+      : `The leadership team directs 100% of available capital into customer acquisition, technology infrastructure, and operating scale. Given platform scaling dynamics, capital distribution is deferred in favor of expanding market share and achieving long-term contribution margin operating leverage.`;
   } else if (archetype === "CYCLICAL_CAPITAL_INTENSIVE") {
     if (netDebt <= 0 && netIncome > 0) {
       capitalAllocationLabel = "Disciplined Post-Deleveraging Reinvestment";

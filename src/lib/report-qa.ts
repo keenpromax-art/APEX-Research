@@ -224,10 +224,12 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
   // that offset — and the offset itself is bounds-checked against reported
   // receivables and total debt (an invented offset cannot pass).
   const dcfOffset = Number((data.dcf as any)?.financeReceivablesOffset) || 0;
+  const isAutoForOffset = sectorProfile.id === "auto";
   const bsReceivables = Number((latestFin as any)?.netReceivables) || 0;
   const bsRevenue = Number(latestFin?.revenue) || 0;
+  const tradeAllowanceRate = isAutoForOffset ? 0.12 : 0.20;
   const maxLegitOffset = bsRevenue > 0 && bsReceivables > 0
-    ? Math.min(Math.max(0, bsReceivables - 0.20 * bsRevenue), bsTotalDebt)
+    ? Math.min(Math.max(0, bsReceivables - tradeAllowanceRate * bsRevenue), bsTotalDebt)
     : 0;
   const offsetLegit = dcfOffset >= 0 && dcfOffset <= maxLegitOffset + 1000;
   const expectedLinkedNetDebt = bsCalculatedNetDebt - (offsetLegit ? dcfOffset : 0);
@@ -238,7 +240,7 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
       category: "CROSS_REFERENCE",
       name: "Balance Sheet to DCF Bridge Variable Linking Reconciled",
       status: "FAIL",
-      details: `FATAL PUBLICATION BLOCK: DCF captive-finance offset (${dcfOffset.toFixed(0)}) exceeds the verifiable bound (${maxLegitOffset.toFixed(0)} = receivables ${bsReceivables.toFixed(0)} − 20% trade allowance, capped at debt). Unbounded adjustments prohibited.`,
+      details: `FATAL PUBLICATION BLOCK: DCF captive-finance offset (${dcfOffset.toFixed(0)}) exceeds the verifiable bound (${maxLegitOffset.toFixed(0)} = receivables ${bsReceivables.toFixed(0)} − ${(tradeAllowanceRate * 100).toFixed(0)}% trade allowance, capped at debt). Unbounded adjustments prohibited.`,
       expected: `≤ ${maxLegitOffset.toFixed(0)}`,
       actual: dcfOffset.toFixed(0),
     });

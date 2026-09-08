@@ -171,8 +171,11 @@ export function validateFinancialIdentities(params: {
     const rawNetDebt = totalDebtVal - cash;
     const bsReceivables = Number((latest as any)?.netReceivables) || 0;
     const bsRevenue = Number((latest as any)?.revenue) || 0;
+    // Mirror DCF's sector-aware allowance: auto OEMs use 12%, others 20%.
+    // We infer auto by receivables scale vs revenue (finance book) to stay decoupled from classifier import cycles.
+    const tradeAllowanceRate = bsReceivables > (bsRevenue * 0.15) ? 0.12 : 0.20;
     const maxLegitOffset = bsRevenue > 0 && bsReceivables > 0 && totalDebtVal > 0
-      ? Math.min(Math.max(0, bsReceivables - 0.20 * bsRevenue), totalDebtVal)
+      ? Math.min(Math.max(0, bsReceivables - tradeAllowanceRate * bsRevenue), totalDebtVal)
       : 0;
     const claimedOffset = Number((dcf as any)?.financeReceivablesOffset) || 0;
     const verifiedOffset = Math.min(Math.max(0, claimedOffset), maxLegitOffset);
@@ -183,7 +186,7 @@ export function validateFinancialIdentities(params: {
         code: "DCF_EV_EQUITY_BRIDGE_FAIL",
         severity: "FATAL",
         identityName: "Captive-Finance Offset Bound",
-        message: `DCF captive-finance offset (${claimedOffset}) exceeds the verifiable bound (${maxLegitOffset.toFixed(0)} = receivables − 20% trade allowance, capped at debt). Inflated adjustments prohibited.`,
+        message: `DCF captive-finance offset (${claimedOffset}) exceeds the verifiable bound (${maxLegitOffset.toFixed(0)} = receivables − ${(tradeAllowanceRate * 100).toFixed(0)}% trade allowance, capped at debt). Inflated adjustments prohibited.`,
         expected: maxLegitOffset,
         actual: claimedOffset,
         tolerance: 0.08,
