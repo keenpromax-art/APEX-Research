@@ -35,6 +35,8 @@ export const DEFAULT_SECTOR_DISTRIBUTIONS: Record<string, SectorDistributionPara
   "asset-management": { sectorId: "asset-management", meanUpside: 0.100, stdDevUpside: 0.150 },
   "internet-platform": { sectorId: "internet-platform", meanUpside: 0.105, stdDevUpside: 0.170 },
   "internet-retail": { sectorId: "internet-retail", meanUpside: 0.150, stdDevUpside: 0.210 },
+  hospitality: { sectorId: "hospitality", meanUpside: 0.115, stdDevUpside: 0.185 },
+  "real-estate": { sectorId: "real-estate", meanUpside: 0.110, stdDevUpside: 0.175 },
   general: { sectorId: "general", meanUpside: 0.120, stdDevUpside: 0.180 },
 };
 

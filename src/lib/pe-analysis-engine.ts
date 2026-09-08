@@ -193,6 +193,20 @@ export function generatePEFirmAnalysis(input: PEAnalysisInput): AIAnalysis {
     companyOverview = `${profile.name} is an automotive OEM operating vehicle manufacturing (including EVs where applicable), auto components, and adjacent energy-storage/services businesses. Unit economics are measured in vehicle deliveries, average selling price (ASP), automotive gross margin excluding regulatory credits, and free cash flow after manufacturing capex — banking, telecom-carrier, and enterprise-software metrics do not apply here.`;
     investmentThesis = `Our auto-sector thesis evaluates ${profile.name} on three drivers: First, delivery-volume growth and ASP discipline through model-mix, pricing actions, and geographic mix (notably China). Second, automotive gross-margin trajectory excluding regulatory credits, driven by manufacturing cost-down (gigafactory scale, vertical integration) net of price cuts. Third, free-cash-flow conversion after heavy manufacturing capex, plus optionality from energy storage deployments and driver-assistance software. Carrier, banking, and enterprise-software metrics do not apply.`;
     investmentConclusion = `We formulate ${recAction} recommendation on ${profile.name} with a fair value target of ${sym}${fv.toFixed(2)} per share (${formatPct(upsidePct)} implied upside), anchored on delivery/ASP/margin delivery against the DCF trajectory.`;
+  } else if (sectorType === "hospitality" || sectorType === "hospitality_owner_operator" || sectorType === "hospitality_asset_light" || sectorType === "hospitality_reit" || sectorType === "real_estate") {
+    const isReit = sectorType === "hospitality_reit" || sectorType === "real_estate";
+    const isAssetLight = sectorType === "hospitality_asset_light";
+    companyOverview = isReit
+      ? `${profile.name} is a hospitality-focused real-estate owner and lessor operating a portfolio of owned hotels and leased investment properties. Economics are measured in Net Operating Income (NOI) per room, Funds From Operations (FFO)/AFFO, leased-area occupancy, rent per sq ft with contractual escalation, Weighted Average Lease Expiry (WALE), and cap-rate-implied NAV — manufacturing, loan-book, spectrum, and enterprise-software metrics do not apply.`
+      : isAssetLight
+      ? `${profile.name} is an asset-light hotel management and franchise platform operating owned, managed, and franchised keys across luxury, premium, select-service, and leisure tiers. Economics are measured in RevPAR (ADR × Occupancy), GOPPAR, EBITDAR margin and EBITDAR-to-rent coverage, available room nights, F&B and MICE mix, and management/franchise fee annuity — banking, telecom-carrier, refinery, and enterprise-software metrics do not apply.`
+      : `${profile.name} is a hospitality owner-operator developing, owning, and operating hotels, resorts, and lodging assets across gateway cities and leisure destinations. Unit economics are RevPAR-driven (Occupancy % × ADR), measured via GOPPAR, EBITDAR margin, available room inventory and keys pipeline, banquet/MICE and F&B contribution, and property-level cash flow after maintenance and refurb capex — banking, telecom, and manufacturing metrics do not apply.`;
+    investmentThesis = isReit
+      ? `Our hospitality REIT thesis evaluates ${profile.name} on three drivers: First, leased-area occupancy and rent per sq ft with 4-5% contractual escalation plus WALE renewal spreads. Second, NOI and AFFO conversion after property opex, leasing commissions, and maintenance capex, stressed against cap-rate expansion. Third, balance-sheet leverage (net debt + lease liabilities) against stable, annuity-like rental cash flows; valuation is anchored on NAV cap-rate and EV/EBITDA cross-check, not loan-book or subscriber economics.`
+      : isAssetLight
+      ? `Our asset-light hospitality thesis evaluates ${profile.name} on three drivers: First, RevPAR growth = Occupancy recovery to 68-72% stabilized × ADR inflation (CPI + 1-2% + tier premium) plus keys pipeline signed/under-construction ramp. Second, fee annuity — management and franchise fees as % of rooms revenue, with high incremental margins and low capex intensity versus owned hotels. Third, EBITDAR conversion and FCF after brand and loyalty investment, with valuation on EV/EBITDAR and fee-EBITDA multiples, explicitly excluding banking/telecom/refinery concepts.`
+      : `Our hospitality owner-operator thesis evaluates ${profile.name} on RevPAR-native drivers: First, Occupancy % and ADR by city tier and seasonality (RevPAR = Occupancy × ADR) plus keys pipeline and banquet/MICE mix. Second, GOPPAR and EBITDAR margin after fixed cost per available room and variable cost per occupied room, undistributed expenses, and lease/IFRS-16 rent. Third, property-level FCF after maintenance capex (4-5% rooms revenue) and 8-year refurb reserves.`;
+    investmentConclusion = `We formulate ${recAction} recommendation on ${profile.name} with a fair value target of ${sym}${fv.toFixed(2)} per share (${formatPct(upsidePct)} implied upside), anchored on ${isReit ? "NOI/AFFO and NAV cap-rate" : "RevPAR/EBITDAR"} delivery against the hospitality DCF trajectory.`;
   } else {
     companyOverview = `${profile.name} operates in the ${profile.sector} sector (${profile.industry}). The business description and segment disclosures in the company profile, together with the reported financials below, define its operating model — no sector-specific template applies.`;
     investmentThesis = `Our analysis of ${profile.name} is anchored on its reported revenue trajectory, margin structure, cash conversion, and balance-sheet capacity as detailed below. Without a sector-specific template match, no industry boilerplate (manufacturing scale, loan books, subscriber metrics, or platform dynamics) is assumed.`;
@@ -384,6 +398,41 @@ export function generatePEFirmAnalysis(input: PEAnalysisInput): AIAnalysis {
       { pillar: "Charging & Software Ecosystem", durability: "Narrow (5-8 Yrs)", rationale: "Charging access and software features aid retention without enterprise-grade lock-in." },
       { pillar: "Energy Storage Optionality", durability: "Narrow (5-8 Yrs)", rationale: "Storage deployments diversify revenue but remain margin-dilutive at current scale." },
     ];
+  } else if (sectorType === "hospitality" || sectorType === "hospitality_owner_operator" || sectorType === "hospitality_asset_light" || sectorType === "hospitality_reit" || sectorType === "real_estate") {
+    const isReit2 = sectorType === "hospitality_reit" || sectorType === "real_estate";
+    const isAssetLight2 = sectorType === "hospitality_asset_light";
+    moatSources = isReit2 ? {
+      switchingCosts: `Tenant Stickiness & Lease Tenor: Long WALE, contractual escalation, and high relocation costs for tenants create annuity-like retention.`,
+      intangibleAssets: `Prime Micro-Market Land Bank & Investment Property Portfolio: Gateway-city locations with irreplaceable catchment and development approvals.`,
+      costAdvantage: `Scale Leasing & Low-Cost Development: Centralized leasing, standardized development, and low-cost capital access versus fragmented owners.`,
+      moatTrend: `Stable: Durability hinged on occupancy, rent escalation, and cap-rate stability; REIT leverage and tenant concentration are the swing factors.`,
+    } : isAssetLight2 ? {
+      switchingCosts: `Loyalty & Distribution Mix: Direct-booking loyalty (e.g., Bonvoy/InnerCircle equivalent) and corporate rate contracts drive repeat stays; OTA commission avoidance is the switching-cost analogue.`,
+      intangibleAssets: `Brand Tiering & Management Know-How: Multi-tier brand architecture (luxury/premium/select) plus proprietary operating SOPs and franchise system scale.`,
+      costAdvantage: `Fee Annuity & Centralized Scale: Management/franchise fees carry 70-80% incremental margins; central procurement, loyalty, and distribution scale versus independent hotels.`,
+      moatTrend: `Positive: Network density, tier-premium RevPAR, and fee-mix shift widen the moat if direct-booking and RevPAR premium are sustained.`,
+    } : {
+      switchingCosts: `Loyalty & Corporate Contracts: Repeated corporate and MICE demand, loyalty program stickiness (direct booking), and contracted rate cards create repeat purchase friction versus independent hotels.`,
+      intangibleAssets: `Gateway-City Location Network & Brand Tiering: Cluster density in high-demand micro-markets plus tiered brand pricing power across luxury/premium/select.`,
+      costAdvantage: `Operating Leverage & Scale Procurement: Fixed cost per available room absorbed over occupancy ramp; centralized procurement and distribution lower cost per occupied room.`,
+      moatTrend: `Stable: RevPAR premium, GOPPAR, and EBITDAR-to-rent coverage determine moat durability; must be consistent with composite moat rating.`,
+    };
+    moatPillars = isReit2 ? [
+      { pillar: "Leased Portfolio & WALE", durability: "Wide (12+ Yrs)", rationale: "Long-tenor leases with 4-5% escalation create contracted, inflation-linked annuity." },
+      { pillar: "Prime Location Land Bank", durability: "Wide (15+ Yrs)", rationale: "Gateway micro-market land parcels are irreplaceable and support rent premium." },
+      { pillar: "Scale Leasing & Tenant Diversification", durability: "Narrow (7-10 Yrs)", rationale: "Broad tenant base and centralized leasing reduce vacancy and collection risk." },
+      { pillar: "Low-Cost Capital & Development", durability: "Narrow (7-10 Yrs)", rationale: "REIT capital access and execution track record lower funding and development cost." },
+    ] : isAssetLight2 ? [
+      { pillar: "Franchise & Management Fee Annuity", durability: "Wide (15+ Yrs)", rationale: "Fee revenue (3-7% rooms + incentive) carries high margin and low capex versus owned hotels." },
+      { pillar: "Loyalty & Direct Booking Scale", durability: "Wide (12+ Yrs)", rationale: "Loyalty program and direct channel reduce OTA take-rate and drive repeat stays." },
+      { pillar: "Brand Tier Architecture", durability: "Wide (12+ Yrs)", rationale: "Tiered brands sustain pricing power across segments and geographies." },
+      { pillar: "Centralized Distribution & Procurement", durability: "Narrow (8-10 Yrs)", rationale: "System-wide procurement and distribution lower cost per occupied room." },
+    ] : [
+      { pillar: "Gateway-City Location Clusters", durability: "Wide (15+ Yrs)", rationale: "Irreplaceable prime locations and cluster density support occupancy and ADR premium." },
+      { pillar: "Brand Tier Pricing Power", durability: "Wide (12+ Yrs)", rationale: "Luxury/premium/select tiering sustains ADR premium over independent hotels." },
+      { pillar: "Loyalty & Corporate Rate Stickiness", durability: "Narrow (8-10 Yrs)", rationale: "Loyalty and contracted corporate/MICE demand drive repeat stays and direct bookings." },
+      { pillar: "Operating Leverage & Scale", durability: "Narrow (7-10 Yrs)", rationale: "Fixed-cost absorption on occupancy ramp plus scale procurement improves GOPPAR." },
+    ];
   } else {
     moatSources = {
       switchingCosts: `Customer Relationships & Workflow Integration: The durability of switching costs depends on the company’s actual product, service, contract, and distribution model.`,
@@ -502,6 +551,24 @@ export function generatePEFirmAnalysis(input: PEAnalysisInput): AIAnalysis {
       { force: "Threat of Substitutes", level: "Moderate", commentary: "Hybrids, improved ICE efficiency, and mobility services substitute at the margin; within EVs, models substitute aggressively on price." },
       { force: "Competitive Rivalry", level: "High", commentary: "Global overcapacity and China-led price competition compress industry ASP; share shifts on cost-down execution and model cadence." },
     ];
+  } else if (sectorType === "hospitality" || sectorType === "hospitality_owner_operator" || sectorType === "hospitality_asset_light" || sectorType === "hospitality_reit" || sectorType === "real_estate") {
+    const isReit3 = sectorType === "hospitality_reit" || sectorType === "real_estate";
+    industryDynamicsCommentary = isReit3
+      ? `The hospitality REIT / commercial real-estate sector is an annuity-driven property market where value is leasing spreads, occupancy, rent escalation, and cap-rate. Economics hinge on leasable area, WALE, collection efficiency, and NAV sensitivity to interest rates — not consumer-goods volume or spectrum economics.`
+      : `The hospitality and lodging sector is a cyclical, operating-leverage-driven services industry where economics center on RevPAR (Occupancy × ADR), GOPPAR, and EBITDAR. Performance is driven by available room nights and keys pipeline, city-tier and seasonal occupancy curves, ADR pricing power, F&B and MICE mix, and fee annuity for managed/franchised keys. Lease/IFRS-16 rent and refurb cycles are first-order cost drivers.`;
+    fiveForces = isReit3 ? [
+      { force: "Threat of New Entrants", level: "Low", commentary: "Prime land acquisition, development approvals, and large upfront capital create high barriers; REIT scale adds capital cost advantage." },
+      { force: "Bargaining Power of Tenants", level: "Moderate", commentary: "Large tenants can negotiate rents and renewal spreads, but gateway location scarcity and long WALE provide pricing power." },
+      { force: "Bargaining Power of Suppliers", level: "Low", commentary: "Construction and facility costs are competitive; REIT procurement scale mitigates supplier leverage." },
+      { force: "Threat of Substitutes", level: "Moderate", commentary: "Remote work, alternative asset classes, and new supply in micro-markets substitute at the margin." },
+      { force: "Competitive Rivalry", level: "Moderate", commentary: "Rivalry centers on micro-market positioning, tenant mix, and occupancy/rent trade-off rather than product throughput." },
+    ] : [
+      { force: "Threat of New Entrants", level: "Moderate", commentary: "Gateway-city land scarcity and brand/loyalty scale create barriers, but select-service development remains contestable in Tier-1 markets." },
+      { force: "Bargaining Power of Buyers", level: "Moderate to High", commentary: "Corporate volume buyers, OTAs (15-25% take-rates), and MICE planners exert pricing pressure; direct-booking loyalty offsets it." },
+      { force: "Bargaining Power of Suppliers", level: "Low to Moderate", commentary: "Labor, energy, and food costs are inputs; centralized procurement and scale reduce supplier leverage." },
+      { force: "Threat of Substitutes", level: "Moderate", commentary: "Alternative lodging (vacation rentals, serviced apartments) and virtual meetings substitute at the margin." },
+      { force: "Competitive Rivalry", level: "High", commentary: "Rivalry centers on location clusters, brand tier RevPAR premium, and occupancy/ADR trade-off across seasons." },
+    ];
   } else {
     industryDynamicsCommentary = `The ${profile.industry || "general"} sector requires company-specific assessment of demand, competition, customer concentration, regulatory exposure, and cost structure. No manufacturing, lending, or platform-specific driver is assumed without evidence in the company profile or reported results.`;
     fiveForces = [
@@ -566,6 +633,22 @@ export function generatePEFirmAnalysis(input: PEAnalysisInput): AIAnalysis {
       { event: "Energy Storage Deployment Acceleration", horizon: "12-18 Months", probability: "Evidence-Dependent", impact: "Diversifies mix; margin-accretive at scale" },
       { event: "Driver-Assistance / Autonomy Regulatory Milestone", horizon: "12-24 Months", probability: "Evidence-Dependent", impact: "Re-rates software optionality; timeline-sensitive" },
       { event: "China Price War / Demand Softness Compressing ASP", horizon: "Ongoing", probability: "Evidence-Dependent", impact: "Margin and target downside sensitivity" },
+    ];
+  } else if (sectorType === "hospitality" || sectorType === "hospitality_owner_operator" || sectorType === "hospitality_asset_light" || sectorType === "hospitality_reit" || sectorType === "real_estate") {
+    const isReit4 = sectorType === "hospitality_reit" || sectorType === "real_estate";
+    businessStrategyCommentary = isReit4
+      ? `${profile.name}'s strategy centers on three hospitality-real-estate levers: occupancy and rent escalation with long WALE renewal, NOI margin after property opex and leasing costs, and NAV-accretive capital recycling with disciplined leverage (net debt + leases). No manufacturing or loan-book expansion thesis applies.`
+      : `${profile.name}'s hospitality roadmap centers on three levers: RevPAR expansion via occupancy ramp to 68-72% stabilized and ADR growth (CPI+ tier premium), keys pipeline conversion and F&B/MICE mix enhancement, and GOPPAR/EBITDAR margin via fixed-cost absorption and direct-booking mix. For asset-light keys the incremental driver is fee annuity, not property capex.`;
+    catalysts = isReit4 ? [
+      { event: "Lease Renewal Spread and Rent Escalation Realization", horizon: "6-12 Months", probability: "Evidence-Dependent", impact: "NOI and AFFO upside; NAV support" },
+      { event: "Occupancy Recovery and Collection Efficiency Improvement", horizon: "6-12 Months", probability: "Evidence-Dependent", impact: "Validates leasing thesis" },
+      { event: "Cap-Rate Compression or Asset Monetization at Premium to NAV", horizon: "12-24 Months", probability: "Evidence-Dependent", impact: "NAV re-rating" },
+      { event: "Cap-Rate Expansion or Tenant Default Concentration", horizon: "Ongoing", probability: "Evidence-Dependent", impact: "NAV and distribution downside" },
+    ] : [
+      { event: "RevPAR Beat via Occupancy + ADR Trade-off Optimization", horizon: "6-12 Months", probability: "Evidence-Dependent", impact: "Validates RevPAR thesis; supports fair value" },
+      { event: "Keys Pipeline Conversion and MICE/Banquet Mix Improvement", horizon: "12-18 Months", probability: "Evidence-Dependent", impact: "GOPPAR and EBITDAR expansion" },
+      { event: "Direct-Booking / Loyalty Mix Improvement Reducing OTA Take-Rate", horizon: "12-24 Months", probability: "Evidence-Dependent", impact: "Net RevPAR and margin accretion" },
+      { event: "Seasonal Demand Softness or New Supply Pressuring Occupancy/ADR", horizon: "Ongoing", probability: "Evidence-Dependent", impact: "RevPAR and target downside sensitivity" },
     ];
   } else {
     businessStrategyCommentary = `${profile.name}'s strategy requires validation against its reported operating model, segment disclosures, and capital-allocation record. This baseline deliberately avoids assuming plants, loan growth, inventory, subscriber metrics, or platform infrastructure where those are not evidenced.`;
@@ -953,6 +1036,87 @@ export function generatePEFirmAnalysis(input: PEAnalysisInput): AIAnalysis {
       { risk: "Consumer Demand Cyclicality", description: "Discretionary spending pullback compressing volumes and forcing promotional discounting.", impact: "High", mitigation: "Brand heat, innovation pipeline, and full-price sell-through discipline" },
       { risk: "Channel Inventory Overhang", description: "Wholesale partners destocking excess inventory, deferring reorders.", impact: "Medium", mitigation: "Disciplined sell-in, inventory visibility, and DTC offset" },
       { risk: "Input Cost & FX Volatility", description: "Material and freight cost swings plus currency headwinds compressing gross margin.", impact: "Medium", mitigation: "Hedging, pricing actions, and sourcing diversification" },
+    ];
+  } else if (sectorType === "hospitality" || sectorType === "hospitality_owner_operator" || sectorType === "hospitality_asset_light" || sectorType === "hospitality_reit" || sectorType === "real_estate") {
+    const isReit5 = sectorType === "hospitality_reit" || sectorType === "real_estate";
+    if (isReit5) {
+      swotStrengths = [
+        "Contracted rental annuity with long WALE and 4-5% contractual escalation.",
+        "Prime micro-market land bank and investment property portfolio with scale leasing.",
+        "Low-cost capital access and disciplined capital recycling.",
+      ];
+      swotWeaknesses = [
+        "Tenant concentration and leasing demand cyclicality.",
+        "Interest-rate sensitivity of NAV via cap-rate expansion.",
+        "Refinancing and asset revaluation risk on tenancy churn.",
+      ];
+      swotOpportunities = [
+        "Mark-to-market rent spreads on WALE renewal and occupancy improvement.",
+        "Asset monetization at premium to NAV and cap-rate compression.",
+        "Development and re-leasing of under-utilized leasable area.",
+      ];
+      swotThreats = [
+        "Cap-rate expansion compressing NAV and increasing funding costs.",
+        "Tenant defaults or sector-specific demand shocks.",
+        "New supply in micro-markets pressuring rents and occupancy.",
+      ];
+      keyRisks = [
+        { risk: "Cap-Rate Expansion & NAV Devaluation", description: "Rising yields compress property valuations and NAV per share.", impact: "High", mitigation: "Long WALE, fixed escalation, and conservative leverage" },
+        { risk: "Tenant Concentration & Default", description: "Key tenant churn or default impairs rental annuity.", impact: "Medium", mitigation: "Diversified tenant base and proactive leasing" },
+        { risk: "Leasing Demand Cyclicality", description: "Macro slowdown reduces new leasing and renewal spreads.", impact: "Medium", mitigation: "Gateway location moat and flexible lease structures" },
+      ];
+    } else {
+      swotStrengths = [
+        "Prime gateway-city location clusters and tiered brand portfolio supporting ADR premium.",
+        "Loyalty and corporate/MICE repeat demand plus direct-booking mix reducing OTA dependency.",
+        "Scale procurement and centralized distribution improving GOPPAR and EBITDAR.",
+      ];
+      swotWeaknesses = [
+        "High operating leverage on occupancy — fixed cost per available room pressures GOPPAR when occupancy dips.",
+        "Seasonality and city-tier demand concentration.",
+        "Capital intensity of maintenance and 8-year refurb cycles plus lease/IFRS-16 leverage.",
+      ];
+      swotOpportunities = [
+        "RevPAR expansion via occupancy ramp to 68-72% stabilized and ADR growth (CPI + tier premium).",
+        "Keys pipeline conversion, banquet/MICE mix enhancement, and F&B upsell.",
+        "Fee-mix shift toward managed/franchised annuity for asset-light hotels.",
+      ];
+      swotThreats = [
+        "New supply in gateway markets compressing occupancy and ADR.",
+        "Demand shocks (travel cyclicality, MICE structural shift) and OTA commission pressure.",
+        "Input-cost inflation (labor, energy, food) and regulatory changes in hospitality.",
+      ];
+      keyRisks = [
+        { risk: "RevPAR Cyclicality & Seasonality", description: "Occupancy or ADR shortfall compresses RevPAR and GOPPAR due to high fixed-cost leverage.", impact: "High", mitigation: "Prime location clusters, tiered pricing, and MICE diversification" },
+        { risk: "Lease & Refurb Leverage", description: "IFRS-16 lease liabilities and 8-year refurb capex elevate fixed charges and EBITDAR-to-rent coverage.", impact: "Medium", mitigation: "Conservative lease structuring and maintenance reserves" },
+        { risk: "New Supply & OTA Pressure", description: "Competitive supply additions and OTA take-rates pressure occupancy/ADR and net realization.", impact: "Medium", mitigation: "Loyalty direct-booking scale and brand premium" },
+      ];
+    }
+  } else if (sectorType === "banking_financials" || sectorType === "nbfc") {
+    swotStrengths = [
+      "Granular low-cost CASA deposit franchise providing structural funding cost advantage.",
+      "Prudent underwriting and risk-calibrated credit architecture with through-cycle NPA containment.",
+      "Extensive branch and digital distribution matrix with scale operating leverage.",
+    ];
+    swotWeaknesses = [
+      "Exposure to credit cycle asset-quality shocks and provisioning volatility.",
+      "Net interest margin sensitivity to policy rate and liquidity conditions.",
+      "Regulatory capital and liquidity compliance overhead constraining leverage.",
+    ];
+    swotOpportunities = [
+      "CASA and fee-income expansion via digital transaction and cross-sell growth.",
+      "Formalization and financial inclusion lifting systemic credit penetration.",
+      "Improved asset-quality and provision coverage enabling re-rating.",
+    ];
+    swotThreats = [
+      "Systemic asset-quality deterioration and slippage from stressed sectors.",
+      "Margin compression from deposit competition and rate volatility.",
+      "Fintech and platform disruption disintermediating payments and lending.",
+    ];
+    keyRisks = [
+      { risk: "Asset Quality Shock", description: "Slippage in corporate or retail portfolios elevating GNPA and credit costs.", impact: "High", mitigation: "Sectoral underwriting caps, early-warning triggers, and provision buffers" },
+      { risk: "Net Interest Margin Compression", description: "Deposit repricing and competitive lending rates compressing NIM and spreads.", impact: "Medium", mitigation: "CASA mobilization and risk-adjusted pricing discipline" },
+      { risk: "Regulatory Capital Pressure", description: "Higher capital adequacy and provisioning requirements constraining growth.", impact: "Medium", mitigation: "Capital planning and internal accrual retention" },
     ];
   } else if (archProfile.archetype === "CYCLICAL_CAPITAL_INTENSIVE") {
     swotStrengths = [

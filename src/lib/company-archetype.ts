@@ -4,7 +4,7 @@
 // operational reality before generating financial templates and narratives.
 // ============================================================
 import type { CompanyProfile, StockData, AnnualFinancials } from "@/types/report";
-import { isInternetPlatformCompany } from "./sectors/profiles";
+import { isInternetPlatformCompany, isHospitalityCompany, isRealEstateCompany } from "./sectors/profiles";
 
 export type FinancialArchetype =
   | "DISTRESSED"              // High leverage, negative EBITDA/earnings, debt restructuring (e.g. Vodafone Idea)
@@ -28,6 +28,11 @@ export type GICSSector =
   | "consumer_fmcg"            // Consumer packaged goods, food manufacturing, personal care
   | "consumer_durables"        // Branded footwear, apparel, accessories, sportswear, luxury goods
   | "auto_manufacturing"       // Automotive OEMs, vehicles, auto components
+  | "hospitality"              // Hotels, resorts, lodging — RevPAR/ADR/Occupancy driven
+  | "hospitality_owner_operator"
+  | "hospitality_asset_light"
+  | "hospitality_reit"
+  | "real_estate"              // REITs, property development — NOI/AFFO driven
   | "general_industrial";      // Capital goods, engineering, diversified manufacturing
 
 export interface ArchetypeProfile {
@@ -202,6 +207,37 @@ export function classifyArchetype(
   ) {
     sector = "auto_manufacturing";
   } else if (
+    isHospitalityCompany(s, ind, desc, name) ||
+    ind.includes("lodg") ||
+    ind.includes("hotel") ||
+    ind.includes("resort")
+  ) {
+    // Hospitality operating model decomposition (hard archetype)
+    if (ind.includes("reit") || text.includes(" reit") || text.includes("trust") || name.includes("reit")) {
+      sector = "hospitality_reit";
+    } else if (
+      text.includes("managed and franchised") ||
+      text.includes("franchise fee") ||
+      text.includes("asset-light") ||
+      text.includes("asset light") ||
+      name.includes("marriott") ||
+      name.includes("hilton") ||
+      name.includes("hyatt") ||
+      name.includes("ihg")
+    ) {
+      sector = "hospitality_asset_light";
+    } else if (text.includes("owned hotels") || text.includes("own hotels") || text.includes("owned rooms")) {
+      sector = "hospitality_owner_operator";
+    } else {
+      sector = "hospitality";
+    }
+  } else if (
+    isRealEstateCompany(s, ind, desc, name) ||
+    ind.includes("real estate") ||
+    s.includes("real estate")
+  ) {
+    sector = "real_estate";
+  } else if (
     ind.includes("apparel") ||
     ind.includes("footwear") ||
     ind.includes("textile") ||
@@ -251,6 +287,7 @@ export function classifyArchetype(
   const isEbitdaNegative = ebitda <= 0 || (latest.ebitdaMargin !== undefined && latest.ebitdaMargin < 0);
   const isFinancialSector = sector === "banking_financials" || sector === "nbfc";
   const isAssetLightFinancial = sector === "asset_management" || sector === "financial_data_ratings";
+  const isHospitalitySector = sector === "hospitality" || sector === "hospitality_owner_operator" || sector === "hospitality_asset_light" || sector === "hospitality_reit" || sector === "real_estate";
 
   // ── 3. Determine Financial Archetype ──────────────────────────────────
   let archetype: FinancialArchetype = "MATURE_COMPOUNDER";
@@ -276,7 +313,10 @@ export function classifyArchetype(
     sector === "energy_petrochem" ||
     sector === "auto_manufacturing" ||
     sector === "renewables" ||
-    (!isFinancialSector && !isAssetLightFinancial && totalDebt > rev * 0.35 && !isLossMaking)
+    sector === "hospitality" ||
+    sector === "hospitality_owner_operator" ||
+    sector === "hospitality_reit" ||
+    (!isFinancialSector && !isAssetLightFinancial && !isHospitalitySector && totalDebt > rev * 0.35 && !isLossMaking)
   ) {
     archetype = "CYCLICAL_CAPITAL_INTENSIVE";
   } else {
@@ -311,6 +351,14 @@ export function classifyArchetype(
   } else if (archetype === "EARLY_PLATFORM_GROWTH") {
     // Platform growth companies have limited debt but lack positive earnings
     creditRating = totalDebt > 0 ? "BB-" : "Unrated (Growth)";
+  } else if (isHospitalitySector) {
+    // Hospitality leverage is measured on EBITDAR incl. leases; thresholds looser than manufacturing but tighter than REIT
+    // netDebtToEbitda is a proxy (true EBITDAR would be lower leverage); use hospitality-specific grid
+    if (netDebtToEbitda < 2.5) creditRating = "A";
+    else if (netDebtToEbitda < 4.0) creditRating = "BBB+";
+    else if (netDebtToEbitda < 5.5) creditRating = "BBB-";
+    else if (netDebtToEbitda < 7.0) creditRating = "BB";
+    else creditRating = "B+";
   } else if (archetype === "CYCLICAL_CAPITAL_INTENSIVE") {
     if (netDebtToEbitda < 1.5) creditRating = "AA-";
     else if (netDebtToEbitda < 3.0) creditRating = "A";

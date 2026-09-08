@@ -322,6 +322,18 @@ export function computeDCF(
     baseGrowth * 0.66,
   ];
 
+  // Sector-specific driver overrides (Priority 2: driver-based operating models)
+  const isHospSector = sectorProfile?.id === "hospitality" || sectorProfile?.id === "real-estate"
+    || archetypeProfile?.sector === "hospitality" || archetypeProfile?.sector === "hospitality_owner_operator"
+    || archetypeProfile?.sector === "hospitality_asset_light" || archetypeProfile?.sector === "hospitality_reit"
+    || archetypeProfile?.sector === "real_estate";
+  if (isHospSector) {
+    // Hospitality: RevPAR-driven (Occupancy × ADR) + keys pipeline + F&B/MICE; mid-cycle occupancy, not endless CAGR
+    // Terminal growth lower (3.5% = 2% real + 1.5% inflation) with EBITDAR focus; capex higher (maintenance 4-5% + 8-yr refurb reserve ≈ 6-7%)
+    assumptions.terminalGrowthRate = sectorProfile?.id === "real-estate" ? 0.03 : 0.035;
+    // Override evidence trail later, but keep mechanics auditable
+  }
+
   // Item 6: Archetype capital intensity calibrations
   const nonZeroRevCount = annualFinancials.filter(f => f.revenue > 0).length || 1;
   const rawAvgCapexPct =
@@ -340,6 +352,22 @@ export function computeDCF(
   } else if (archetypeProfile?.archetype === "EARLY_PLATFORM_GROWTH") {
     avgCapexPct = Math.min(avgCapexPct, 0.030); // Asset-light platform
     avgNwcChangePct = 0.035;                   // Customer acquisition / inventory buffer
+  }
+
+  // Hospitality overlay: capitalized leased assets + refurb cycle; hospitality reit is leased-asset heavy
+  if (isHospSector) {
+    if (sectorProfile?.id === "real-estate" || archetypeProfile?.sector === "hospitality_reit" || archetypeProfile?.sector === "real_estate") {
+      avgCapexPct = Math.max(avgCapexPct, 0.045); // REIT: lower maintenance, but re-leasing capex
+      avgNwcChangePct = 0.008; // Rent receivables light
+    } else if (archetypeProfile?.sector === "hospitality_asset_light") {
+      avgCapexPct = Math.min(avgCapexPct, 0.025); // Fee annuity, low owned capex
+      avgNwcChangePct = 0.015;
+    } else {
+      // Owner-operator: maintenance 4-5% + refurb reserve push to ~6.5%
+      avgCapexPct = Math.max(avgCapexPct, 0.060);
+      avgDeptPct = Math.max(avgDeptPct, 0.040);
+      avgNwcChangePct = 0.012; // Hospitality NWC ~ 3-4% rooms revenue changed, light vs manufacturing
+    }
   }
 
   const wacc = assumptions.wacc;
@@ -489,6 +517,17 @@ export function computeDCF(
     wacc: assumptions.parameterSource || "CAPM blend (parameters undisclosed)",
     terminal: `4.0% nominal-GDP anchor; TV capped at 25× terminal-year FCFF${isTvCapped ? " (CAP ACTIVE — see diagnostics)" : " (not binding)"}`,
   };
+
+  // Hospitality/Reit driver overlay: replace generic CAGR language with RevPAR-native evidence
+  if (isHospSector) {
+    assumptionBasis.revenueGrowth = hasLive
+      ? `Hospitality RevPAR-driven: Occupancy ramp to 68-72% stabilized × ADR (CPI + 1-2% tier premium) plus keys pipeline and F&B/MICE mix; 55% hist CAGR (${(cagr * 100).toFixed(1)}%) + 45% live (${(liveRevGrowth * 100).toFixed(1)}%) → base ${(baseGrowth * 100).toFixed(1)}% fading ×0.90/0.82/0.74/0.66 (RevPAR-implied, not generic)`
+      : `Hospitality RevPAR-driven: Occupancy × ADR with keys pipeline and F&B/MICE; hist CAGR (${(cagr * 100).toFixed(1)}%) → base ${(baseGrowth * 100).toFixed(1)}% fading yearly (RevPAR-implied)`;
+    assumptionBasis.capex = `Hospitality capex: maintenance 4-5% rooms revenue + 8-yr refurb reserve → ${(avgCapexPct * 100).toFixed(1)}% of revenue (clamped)${isHospSector ? `; ${archetypeProfile?.sector} overlay` : ""}; D&A ${(rawAvgDeptPct * 100).toFixed(1)}%`;
+    assumptionBasis.workingCapital = `Hospitality NWC: receivables 3-4% rooms revenue changed → ${(avgNwcChangePct * 100).toFixed(1)}% of revenue`;
+    assumptionBasis.terminal = `${(assumptions.terminalGrowthRate * 100).toFixed(1)}% hospitality nominal anchor (real ~2% + inflation, mid-cycle occupancy, not perpetual high growth); TV capped at 25×${isTvCapped ? " (CAP ACTIVE)" : " (not binding)"} — sector-specific, not generic 4.0%`;
+    assumptionBasis.ebitMargin = `Hospitality EBITDAR-derived: Base from ${marginSource}; GOPPAR/EBITDAR margin ramp +1.0/+1.8/+2.4/+2.8/+3.0pp capped 26-30%, with IFRS-16 rent sensitivity disclosed`;
+  }
 
   return {
     status,

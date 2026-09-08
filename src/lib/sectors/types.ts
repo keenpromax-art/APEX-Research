@@ -16,6 +16,7 @@ export type SectorId =
   | "renewable-energy"
   | "telecom"
   | "real-estate"
+  | "hospitality"
   | "utilities"
   | "agrochemical"
   | "cement"
@@ -23,15 +24,24 @@ export type SectorId =
   | "internet-platform"
   | "general";
 
+export interface SectorDriverSpec {
+  revenueDrivers: string[]; // e.g. ["Available Room Nights", "Occupancy %", "ADR"]
+  costDrivers: string[];    // e.g. ["Fixed cost per available room", "Variable cost per occupied room"]
+  capexDrivers: string[];   // e.g. ["Maintenance capex per room", "Refurb reserve"]
+  nwcDrivers: string[];     // e.g. ["Receivables % rooms revenue"]
+}
+
 export interface SectorProfile {
   id: SectorId;
   name: string;
   allowedKPIs: string[];
-  preferredValuationModels: Array<"FCFF_DCF" | "PB_RESIDUAL_INCOME" | "DDM" | "MULTIPLES_PE" | "MULTIPLES_PB" | "EV_EBITDA">;
+  preferredValuationModels: Array<"FCFF_DCF" | "PB_RESIDUAL_INCOME" | "DDM" | "MULTIPLES_PE" | "MULTIPLES_PB" | "EV_EBITDA" | "EV_EBITDAR" | "NAV_CAP_RATE">;
   financialMetrics: string[];
   riskCategories: string[];
   moatDrivers: string[];
   forbiddenConcepts: string[];
   isFinancialInstitution: boolean;
-  standardMarginMetric: "EBITDA Margin" | "Operating Margin" | "NIM" | "Net Spread" | "Underwriting Margin";
+  standardMarginMetric: "EBITDA Margin" | "EBITDAR Margin" | "Operating Margin" | "NIM" | "Net Spread" | "Underwriting Margin";
+  driverSpec?: SectorDriverSpec;
+  operatingArchetypes?: string[]; // e.g. hospitality: ["owner-operator","asset-light","reit"]
 }

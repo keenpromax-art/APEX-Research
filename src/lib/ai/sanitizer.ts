@@ -86,9 +86,11 @@ export const SEMANTIC_BLEED_RULES: { sectors: string[]; blocked: string[] }[] = 
   { sectors: ["internet content", "social media", "digital advertising", "interactive media", "family of apps"], blocked: ["spectrum auction", "spectrum", "4g/5g", "tower deployment", "tower tenancy", "telecom towers", "subscriber churn", "agr dues", "copra", "palm oil procurement", "packaged goods", "personal care", "brand recall", "iconic consumer brand", "multi-tier retail distribution", "fmcg", "modern trade", "casa", "nim", "gnpa", "clinical trial", "wafer fab", "refinery throughput", "crack spread", "dark stores", "gross merchandise value"] },
   { sectors: ["telecom", "communication", "wireless", "internet", "restaurants"], blocked: ["proprietary silicon", "custom neural engine", "wafer fabrication", "foundry capacity", "us fda", "cgmp", "iso 13485"] },
   { sectors: ["pharma", "health", "biotech", "drug"], blocked: ["spectrum auction", "arpu", "tower tenancy", "dark store", "dark stores", "ride hailing", "proprietary silicon"] },
-  { sectors: ["consumer", "fmcg", "food", "beverage", "retail"], blocked: ["proprietary silicon", "custom neural engine", "spectrum auction", "agr dues", "clinical trial phase"] },
   { sectors: ["technology", "software", "it services"], blocked: ["us fda", "cgmp", "spectrum auction", "agr dues", "refinery throughput", "crack spread"] },
   { sectors: ["energy", "oil", "gas", "mining"], blocked: ["app store commission", "saas churn", "arr expansion", "dark store", "dark stores", "proprietary silicon"] },
+  // NOTE: consumer and hospitality are NOT listed here — their blocked terms are enforced via SectorProfile.forbiddenConcepts
+  // which is industry-strict (classifySector requires industry to be hospitality/consumer). Description mentions like
+  // "serves hospitality / consumer banking" must not trigger sanitizer bleed for IT/bank reports.
 ];
 
 /**

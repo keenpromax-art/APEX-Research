@@ -481,6 +481,74 @@ export const CEMENT_PROFILE: SectorProfile = {
   standardMarginMetric: "EBITDA Margin"
 };
 
+export const HOSPITALITY_PROFILE: SectorProfile = {
+  id: "hospitality",
+  name: "Hospitality, Hotels & Lodging (Owner-Operator, Management & REIT)",
+  allowedKPIs: [
+    "RevPAR (Revenue per Available Room)",
+    "ADR (Average Daily Rate)",
+    "Occupancy %",
+    "GOPPAR (Gross Operating Profit per Available Room)",
+    "EBITDAR Margin / EBITDAR to Rent Coverage",
+    "Available Room Nights / Owned Room Inventory",
+    "F&B Revenue Mix & Banquet/MICE Revenue",
+    "Management & Franchise Fee Revenue %",
+    "Net Operating Income (NOI) per Room (REIT)",
+    "Operating Leverage: Fixed vs Variable Cost per Occupied Room"
+  ],
+  preferredValuationModels: ["EV_EBITDAR", "FCFF_DCF", "NAV_CAP_RATE", "EV_EBITDA"],
+  financialMetrics: ["Room Revenue", "F&B Revenue", "Management Fee Revenue", "GOP", "EBITDAR", "Operating Lease Expense / Rent", "Net Debt + Lease Liabilities", "Property-level Cash Flow"],
+  riskCategories: ["Travel Demand Cyclicality & Seasonality", "ADR vs Occupancy Trade-off", "Operating Lease / IFRS-16 Leverage", "Asset Devaluation & Cap Rate Expansion", "MICE/Business Travel Structural Shift"],
+  moatDrivers: ["Prime location network & gateway city cluster density", "Loyalty program scale & direct-booking mix (switching costs)", "Brands tiering & pricing power across luxury/premium/select", "Asset-light management/franchise fee annuity"],
+  forbiddenConcepts: [
+    "casa", "casa ratio", "net interest margin", "nim", "loan book", "credit cost", "gnpa", "nnpa",
+    "spectrum auction", "spectrum holdings", "4g/5g", "tower deployment", "tower tenancy", "telecom towers", "subscriber churn", "agr dues",
+    "semiconductor fab", "wafer capacity", "foundry", "wafer fab", "wafer fabrication",
+    "refinery throughput", "crack spread", "plant turnaround", "order inflow", "order book-to-bill", "manufacturing line", "assembly line",
+    "enterprise contract", "master service agreement", "total contract value", "tcv", "saas churn", "offshore utilization", "software services", "cloud migration",
+    "clinical trial", "fda 483", "anda approvals", "copra", "palm oil procurement"
+  ],
+  isFinancialInstitution: false,
+  standardMarginMetric: "EBITDAR Margin",
+  driverSpec: {
+    revenueDrivers: ["Available Room Nights", "Occupancy %", "ADR", "F&B Revenue % Rooms", "Management Fee %"],
+    costDrivers: ["Fixed cost per available room", "Variable cost per occupied room", "Undistributed operating expense % revenue", "Lease rent / IFRS-16"],
+    capexDrivers: ["Maintenance capex per room", "Refurb cycle reserve (8-yr)", "New keys pipeline capex"],
+    nwcDrivers: ["Receivables % rooms revenue (3-4%)", "Payables % opex"]
+  },
+  operatingArchetypes: ["hospitality_owner_operator", "hospitality_asset_light", "hospitality_reit", "hospitality_leisure"]
+};
+
+export const REAL_ESTATE_PROFILE: SectorProfile = {
+  id: "real-estate",
+  name: "Real Estate, REITs & Property Development",
+  allowedKPIs: [
+    "Net Operating Income (NOI)",
+    "Funds From Operations (FFO) / AFFO",
+    "Occupancy % (Leased Area)",
+    "Weighted Average Lease Expiry (WALE)",
+    "Rent per sq ft & Escalation %",
+    "Cap Rate & NAV per Share",
+    "Leasable Area (msf)",
+    "Collection Efficiency"
+  ],
+  preferredValuationModels: ["NAV_CAP_RATE", "FCFF_DCF", "EV_EBITDA"],
+  financialMetrics: ["Rental Revenue", "NOI", "FFO", "AFFO", "Net Debt", "Investment Property Value", "Operating Cash Flow"],
+  riskCategories: ["Leasing Demand Cyclicality", "Cap Rate Expansion", "Tenant Concentration", "Regulatory / RERA", "Interest Rate Sensitivity on NAV"],
+  moatDrivers: ["Prime micro-market land bank & location moat", "Scale leasing & tenant relationships", "Low-cost development & execution track record"],
+  forbiddenConcepts: [
+    "casa", "nim", "gnpa", "credit cost", "arpu", "spectrum", "wafer fab", "refinery throughput", "dark stores", "enterprise contract", "clinical trial"
+  ],
+  isFinancialInstitution: false,
+  standardMarginMetric: "Operating Margin",
+  driverSpec: {
+    revenueDrivers: ["Leasable Area", "Occupancy %", "Rent per sq ft", "Escalation %"],
+    costDrivers: ["Property operating expense % NOI", "Leasing commission % new leases"],
+    capexDrivers: ["Development capex per msf", "Maintenance capex % NOI"],
+    nwcDrivers: ["Rent receivables % rental revenue"]
+  }
+};
+
 export const GENERAL_PROFILE: SectorProfile = {
   id: "general",
   name: "General Corporate Equities",
@@ -498,7 +566,10 @@ export const GENERAL_PROFILE: SectorProfile = {
   financialMetrics: ["Revenue", "EBITDA", "Operating Income", "Net Income", "Total Debt", "Free Cash Flow"],
   riskCategories: ["Demand Softening", "Competitive Pricing Pressure", "Input Cost Inflation", "Macro Volatility"],
   moatDrivers: ["Brand recognition", "Distribution channels", "Operating cost efficiencies"],
-  forbiddenConcepts: [],
+  forbiddenConcepts: [
+    // General is no longer empty — it blocks the most egregious cross-sector bleed so leakage cannot silently publish
+    "spectrum auction", "spectrum holdings", "4g/5g", "wafer fab", "refinery throughput", "crack spread", "clinical trial", "dark stores"
+  ],
   isFinancialInstitution: false,
   standardMarginMetric: "EBITDA Margin"
 };
@@ -560,6 +631,61 @@ export function isTelecomCarrierCompany(
     combined.includes("vodafone idea") ||
     combined.includes("spectrum auction") ||
     combined.includes("agr dues")
+  );
+}
+
+export function isHospitalityCompany(
+  sector?: string,
+  industry?: string,
+  description?: string,
+  name?: string
+): boolean {
+  const industryLower = `${industry || ""}`.toLowerCase();
+  const sectorLower = `${sector || ""}`.toLowerCase();
+  const combined = `${sector || ""} ${industry || ""} ${description || ""} ${name || ""}`.toLowerCase();
+  // Industry is the strongest signal — Lodging is the GICS hospitality industry
+  if (
+    industryLower.includes("lodg") ||
+    industryLower.includes("hotel") ||
+    industryLower.includes("resort") ||
+    industryLower.includes("hospitality")
+  ) return true;
+  if (sectorLower.includes("hotel") || sectorLower.includes("hospitality")) return true;
+  return (
+    combined.includes("revpar") ||
+    combined.includes("average daily rate") ||
+    combined.includes("goppar") ||
+    combined.includes("taj hotels") ||
+    combined.includes("indian hotels") ||
+    combined.includes("eih limited") ||
+    combined.includes("lemon tree hotels") ||
+    combined.includes("chalet hotels") ||
+    combined.includes("marriott international") ||
+    combined.includes("hilton worldwide") ||
+    combined.includes("hyatt hotels") ||
+    combined.includes("ihg ") ||
+    combined.includes("intercontinental hotels") ||
+    combined.includes("accor") ||
+    combined.includes("oyorooms") ||
+    combined.includes("oyo hotels")
+  );
+}
+
+export function isRealEstateCompany(
+  sector?: string,
+  industry?: string,
+  description?: string,
+  name?: string
+): boolean {
+  const industryLower = `${industry || ""}`.toLowerCase();
+  const sectorLower = `${sector || ""}`.toLowerCase();
+  if (industryLower.includes("reit") || sectorLower.includes("reit")) return true;
+  if (industryLower.includes("real estate") || sectorLower.includes("real estate")) return true;
+  const combined = `${sector || ""} ${industry || ""} ${description || ""} ${name || ""}`.toLowerCase();
+  return (
+    combined.includes("investment trust") && combined.includes("propert") ||
+    combined.includes("leasable area") ||
+    combined.includes("cap rate")
   );
 }
 
@@ -701,6 +827,16 @@ export function classifySector(
     combined.includes("clean energy developer")
   ) {
     return RENEWABLE_ENERGY_PROFILE;
+  }
+
+  // 5a. Hospitality, Hotels & Lodging — MUST precede Industrials/FMCG/Pharma to prevent lodging falling to GENERAL or FMCG
+  if (isHospitalityCompany(sector, industry, description)) {
+    return HOSPITALITY_PROFILE;
+  }
+
+  // 5a2. Real Estate / REITs
+  if (isRealEstateCompany(sector, industry, description)) {
+    return REAL_ESTATE_PROFILE;
   }
 
   // 5. Pharmaceuticals — require industry to be pharma/healthcare

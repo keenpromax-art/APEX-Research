@@ -1358,6 +1358,262 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
     });
   }
 
+  // PEER-01: Business-model similarity gate (Priority 4)
+  // Peers must be business-model similar, not merely curated. Average relevance <30 indicates
+  // fundamentally inappropriate comps fabricating a relative valuation.
+  {
+    const peerList = (data.peers || []) as any[];
+    if (peerList.length > 0) {
+      const scores = peerList.map(p => p.relevanceScore).filter((s: any) => typeof s === "number" && s !== null);
+      const avgRel = scores.length ? scores.reduce((a: number, b: number) => a + b, 0) / scores.length : null;
+      const lowPeers = peerList.filter((p: any) => typeof p.relevanceScore === "number" && p.relevanceScore < 30);
+      if (avgRel !== null && avgRel < 30) {
+        checks.push({
+          id: "PEER-01",
+          category: "BS_DETECTOR",
+          name: "Peer Business-Model Similarity",
+          status: "FAIL",
+          details: `FATAL: Peer set is business-model inappropriate — average relevance ${avgRel.toFixed(1)} (<30). Peers: ${peerList.map((p: any) => `${p.ticker}(${p.relevanceScore ?? "null"})`).join(", ")}. Relative valuation would be fabricated.`,
+          expected: "Average relevance ≥30",
+          actual: `${avgRel.toFixed(1)}`,
+        });
+      } else if (lowPeers.length >= 2) {
+        checks.push({
+          id: "PEER-01",
+          category: "BS_DETECTOR",
+          name: "Peer Business-Model Similarity",
+          status: "WARN",
+          details: `${lowPeers.length} peer(s) have low relevance (<30): ${lowPeers.map((p: any) => `${p.ticker}(${p.relevanceScore})`).join(", ")} — review comp selection.`,
+          expected: "All peers relevance ≥30",
+          actual: `${lowPeers.length} low`,
+        });
+      } else {
+        checks.push({
+          id: "PEER-01",
+          category: "BS_DETECTOR",
+          name: "Peer Business-Model Similarity",
+          status: "PASS",
+          details: `Peer business-model similarity adequate — avg relevance ${avgRel !== null ? avgRel.toFixed(1) : "N/A"} across ${peerList.length} peers.`,
+        });
+      }
+      // Hospitality / REIT must not be compared to loan-book / manufacturing peers (ontology hard gate)
+      const sectorProfileForPeer = getSectorProfile(data.profile.sector || "", data.profile.industry || "", (data.profile as any).description || "");
+      if ((sectorProfileForPeer.id === "hospitality" || sectorProfileForPeer.id === "real-estate") && peerList.some((p: any) => {
+        const ps = (p.sector || "").toLowerCase(); const pi = (p.industry || "").toLowerCase();
+        return ps.includes("bank") || pi.includes("bank") || ps.includes("financial") && !ps.includes("reit");
+      })) {
+        // Already penalized via relevance, but explicit block if bank appears in hospitality comps
+        const bad = peerList.filter((p: any) => {
+          const ps = (p.sector || "").toLowerCase(); const pi = (p.industry || "").toLowerCase();
+          return ps.includes("bank") || pi.includes("bank");
+        }).map((p: any) => p.ticker).join(",");
+        if (bad) {
+          checks.push({
+            id: "PEER-01",
+            category: "BS_DETECTOR",
+            name: "Peer Ontology Exclusion",
+            status: "FAIL",
+            details: `FATAL: Hospitality/REIT report contains banking peers [${bad}] — business-model inappropriate; peer engine contamination.`,
+            expected: "No banking peers for hospitality/REIT",
+            actual: bad,
+          });
+        }
+      }
+    } else {
+      checks.push({
+        id: "PEER-01",
+        category: "BS_DETECTOR",
+        name: "Peer Business-Model Similarity",
+        status: "PASS",
+        details: `No peers — relative valuation withheld; no similarity gate applies (conservative).`,
+      });
+    }
+  }
+
+  // HOSP-01: Hospitality ontology hard control (Priority 1) — RevPAR/ADR/Occupancy mandatory, manufacturing/banking language forbidden
+  {
+    const hospProfile = getSectorProfile(data.profile.sector || "", data.profile.industry || "", (data.profile as any).description || "");
+    const isHosp = hospProfile.id === "hospitality" || hospProfile.id === "real-estate";
+    if (isHosp) {
+      const fullHospText = JSON.stringify({ ...(data.aiAnalysis || {}), ...(data as any).peAnalysis || {} }).toLowerCase();
+      const hasRevpar = fullHospText.includes("revpar");
+      const hasAdr = fullHospText.includes("adr") || fullHospText.includes("average daily rate");
+      const hasOcc = fullHospText.includes("occupancy");
+      const hasGopparOrEbitdar = fullHospText.includes("goppar") || fullHospText.includes("ebitdar") || fullHospText.includes("noi") || fullHospText.includes("affo");
+      const hospForbidden = ["loan book", "order backlog", "order book", "refinery throughput", "crack spread", "wafer fab", "spectrum auction", "enterprise contract", "master service agreement", "semiconductor fab"];
+      const hospLeaks = hospForbidden.filter(t => {
+        const esc = t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        return new RegExp(`(^|[^a-z0-9])${esc}([^a-z0-9]|$)`, "i").test(fullHospText);
+      });
+      if (hospLeaks.length > 0) {
+        checks.push({
+          id: "HOSP-01",
+          category: "BS_DETECTOR",
+          name: "Hospitality Ontology Contamination",
+          status: "FAIL",
+          details: `FATAL: Hospitality/REIT narrative contains manufacturing/banking contamination [${hospLeaks.join(", ")}] — ontology hard control violated.`,
+          expected: "Zero hospitality-forbidden concepts",
+          actual: `${hospLeaks.length} leak(s)`,
+        });
+      } else if (!hasRevpar || !hasAdr || !hasOcc) {
+        // Owner-operator and REIT both need these; asset-light also RevPAR-driven
+        const missing: string[] = [];
+        if (!hasRevpar) missing.push("RevPAR");
+        if (!hasAdr) missing.push("ADR");
+        if (!hasOcc) missing.push("Occupancy");
+        checks.push({
+          id: "HOSP-01",
+          category: "BS_DETECTOR",
+          name: "Hospitality Ontology Completeness",
+          status: "FAIL",
+          details: `FATAL: Hospitality report missing core RevPAR-native KPIs [${missing.join(", ")}] — driver-based ontology requires Occupancy × ADR → RevPAR → GOPPAR/EBITDAR. Generic template detected.`,
+          expected: "RevPAR + ADR + Occupancy present",
+          actual: `missing ${missing.join(", ")}`,
+        });
+      } else if (!hasGopparOrEbitdar) {
+        checks.push({
+          id: "HOSP-01",
+          category: "BS_DETECTOR",
+          name: "Hospitality Ontology Completeness",
+          status: "WARN",
+          details: `Hospitality report has RevPAR/ADR/Occupancy but lacks GOPPAR/EBITDAR/NOI/AFFO — operating leverage and lease-adjusted profitability not evidenced.`,
+          expected: "GOPPAR/EBITDAR/NOI/AFFO",
+          actual: "missing",
+        });
+      } else {
+        checks.push({
+          id: "HOSP-01",
+          category: "BS_DETECTOR",
+          name: "Hospitality Ontology Control",
+          status: "PASS",
+          details: `Hospitality ontology hard-controlled: RevPAR/ADR/Occupancy + GOPPAR/EBITDAR/NOI evidenced, zero manufacturing/banking bleed.`,
+        });
+      }
+    } else {
+      checks.push({
+        id: "HOSP-01",
+        category: "BS_DETECTOR",
+        name: "Hospitality Ontology Control",
+        status: "PASS",
+        details: `Not a hospitality/REIT sector — hosp ontology gate not applicable.`,
+      });
+    }
+  }
+
+  // WACC-01: Sector-specific valuation plausibility (Priority 2/3) — hospitality terminal growth and WACC must be sector-calibrated
+  {
+    const secProf = getSectorProfile(data.profile.sector || "", data.profile.industry || "", (data.profile as any).description || "");
+    if ((secProf.id === "hospitality" || secProf.id === "real-estate") && Number.isFinite(tgr)) {
+      // Hospitality REIT terminal growth 2.8-3.5% (real 2% + inflation), generic 4% would overvalue cyclical occupancy
+      if (tgr > 0.036) {
+        checks.push({
+          id: "WACC-01",
+          category: "BALANCE_SHEET",
+          name: "Sector Terminal Growth Plausibility",
+          status: "FAIL",
+          details: `FATAL: Hospitality/REIT terminal growth ${(tgr * 100).toFixed(2)}% exceeds sector cap 3.6% — cyclical occupancy cannot compound at generic 4% nominal GDP perpetually.`,
+          expected: "≤3.6% (hospitality: 3.0-3.5%)",
+          actual: `${(tgr * 100).toFixed(2)}%`,
+        });
+      } else {
+        checks.push({
+          id: "WACC-01",
+          category: "BALANCE_SHEET",
+          name: "Sector Terminal Growth Plausibility",
+          status: "PASS",
+          details: `Hospitality terminal growth ${(tgr * 100).toFixed(2)}% sector-calibrated (≤3.6%).`,
+        });
+      }
+    } else {
+      // Generic WACC sanity: clamp already enforces 8.5-16% in calculations.ts, but QA independently verifies
+      if (!Number.isFinite(wacc) || wacc < 0.07 || wacc > 0.18) {
+        checks.push({
+          id: "WACC-01",
+          category: "BALANCE_SHEET",
+          name: "WACC Plausibility",
+          status: "FAIL",
+          details: `FATAL: WACC ${(wacc * 100).toFixed(2)}% outside plausible 7-18% band — model calibration error.`,
+          expected: "7% ≤ WACC ≤ 18%",
+          actual: `${(wacc * 100).toFixed(2)}%`,
+        });
+      } else {
+        checks.push({
+          id: "WACC-01",
+          category: "BS_DETECTOR",
+          name: "WACC Plausibility",
+          status: "PASS",
+          details: `WACC ${(wacc * 100).toFixed(2)}% within plausible band.`,
+        });
+      }
+    }
+  }
+
+  // CLAIM-01: Fact-bound narrative — every material numeric claim must be traceable to a validated fact/claim ID (Priority 5)
+  // Unsupported raw numbers (e.g., fabricated RevPAR Rs 8,400, occupancy 68%) cannot reach PDF without evidence linkage.
+  // Enforce via placeholder discipline and allowlist of model facts: only numbers present in DCF/ledger/financials are permitted.
+  {
+    const fullNarrativeForClaim = JSON.stringify({ ...(data.aiAnalysis || {}), ...(data as any).peAnalysis || {} });
+    const hasLeakedPlaceholder = /\{\{[^}]+\}\}/.test(fullNarrativeForClaim);
+    if (hasLeakedPlaceholder) {
+      const leaked = Array.from(new Set(fullNarrativeForClaim.match(/\{\{[^}]+\}\}/g) || [])).slice(0, 3).join(", ");
+      checks.push({
+        id: "CLAIM-01",
+        category: "BS_DETECTOR",
+        name: "Fact-Bound Claim Placeholder Leakage",
+        status: "FAIL",
+        details: `FATAL: Narrative contains unresolved fact placeholders [${leaked}] — LLM emitted placeholders without injection; fact binding broken.`,
+        expected: "Zero unresolved {{...}} tokens",
+        actual: leaked,
+      });
+    } else {
+      // Allowlist of model-grounded numbers: CMP, FV, upside, growth rates, margins, wacc, tgr, revenue, ebitda, shares
+      const modelFacts: number[] = [];
+      if (Number.isFinite(cmp)) modelFacts.push(cmp, fv);
+      if (Array.isArray((data.dcf as any)?.assumptions?.revenueGrowthRates)) modelFacts.push(...(data.dcf as any).assumptions.revenueGrowthRates);
+      if (Array.isArray(data.dcf?.assumptions?.ebitMargins)) modelFacts.push(...data.dcf.assumptions.ebitMargins);
+      if (Number.isFinite(wacc)) modelFacts.push(wacc);
+      if (Number.isFinite(tgr)) modelFacts.push(tgr);
+      // Extract candidate unsupported percentages / currency figures from thesis-like fields only (narrow to avoid flagging dates/years)
+      const thesisFields = [ (data.aiAnalysis as any)?.investmentThesis, (data as any)?.peAnalysis?.investmentThesis, (data.aiAnalysis as any)?.companyOverview].filter(Boolean).join(" ");
+      const pctMatches = Array.from(thesisFields.matchAll(/(\d+(?:\.\d+)?)\s*%/g)).map(m => parseFloat(m[1]) / 100);
+      // Only flag percentages that are material (>2% and <80%) and not within 0.8pp of any model fact percentage
+      const unsupportedPcts = pctMatches.filter(p => p > 0.02 && p < 0.80 && !modelFacts.some(mf => Math.abs(mf - p) < 0.008));
+      // For hospitality, occupancy 68% etc will be unsupported under generic model — that is intentional: hospitality needs driver model
+      // So only FAIL if narrative is hospitality and contains standalone occupancy % that cannot be evidenced via RevPAR drivers in ledger
+      const hospProf = getSectorProfile(data.profile.sector || "", data.profile.industry || "", (data.profile as any).description || "");
+      const isHospClaim = hospProf.id === "hospitality" || hospProf.id === "real-estate";
+      if (isHospClaim && unsupportedPcts.length >= 2) {
+        checks.push({
+          id: "CLAIM-01",
+          category: "BS_DETECTOR",
+          name: "Fact-Bound Claim Evidence",
+          status: "WARN",
+          details: `Hospitality narrative contains ${unsupportedPcts.length} percentage claim(s) [${unsupportedPcts.slice(0, 3).map(p => (p * 100).toFixed(1) + "%").join(", ")}] not traceable to DCF drivers (RevPAR/ADR/Occupancy). Evidence linkage recommended — driver-based model should source these via assumptionBasis.`,
+          expected: "All % claims traceable to drivers",
+          actual: `${unsupportedPcts.length} unsupported`,
+        });
+      } else if (!isHospClaim && unsupportedPcts.length >= 3) {
+        checks.push({
+          id: "CLAIM-01",
+          category: "BS_DETECTOR",
+          name: "Fact-Bound Claim Evidence",
+          status: "WARN",
+          details: `Narrative contains ${unsupportedPcts.length} percentage claim(s) not traceable to model facts [${unsupportedPcts.slice(0, 3).map(p => (p * 100).toFixed(1) + "%").join(", ")}] — verify via claim IDs.`,
+          expected: "All % claims traceable",
+          actual: `${unsupportedPcts.length} unsupported`,
+        });
+      } else {
+        checks.push({
+          id: "CLAIM-01",
+          category: "BS_DETECTOR",
+          name: "Fact-Bound Claim Evidence",
+          status: "PASS",
+          details: `No material unsupported numeric claims detected (${pctMatches.length} % tokens, ${unsupportedPcts.length} outside model tolerance).`,
+        });
+      }
+    }
+  }
+
   const failCount = checks.filter(c => c.status === "FAIL").length;
   const warnCount = checks.filter(c => c.status === "WARN").length;
   // If ANY check has failed, report is strictly failed and score is capped at 50 max

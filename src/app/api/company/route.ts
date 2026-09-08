@@ -6,7 +6,7 @@ import { classifyArchetype } from "@/lib/company-archetype";
 import { buildMasterReportFacts } from "@/lib/report-facts";
 import { buildEventPriceMovements } from "@/lib/event-price-engine";
 import { normalizeTicker } from "@/lib/request-validation";
-import { isInternetPlatformCompany, isTelecomCarrierCompany } from "@/lib/sectors/profiles";
+import { isInternetPlatformCompany, isTelecomCarrierCompany, isHospitalityCompany, isRealEstateCompany } from "@/lib/sectors/profiles";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -134,6 +134,11 @@ export async function GET(request: NextRequest) {
           peerTickers = ["ICRA.NS", "CAREERP.NS", "BSE.NS", "MCX.NS"];
         } else if (sym.includes("SPANDANA") || ind.includes("microfinance") || ind.includes("consumer finance") || (companyProfile.description || "").toLowerCase().includes("microfinance")) {
           peerTickers = ["CREDITACC.NS", "FUSION.NS", "SATIN.NS", "ARMANFIN.NS"];
+        } else if (isHospitalityCompany(companyProfile.sector, companyProfile.industry, companyProfile.description, companyProfile.name) || ind.includes("lodg") || ind.includes("hotel") || ind.includes("resort") || ind.includes("hospitality")) {
+          // Hospitality owner-operator / management peers (Indian)
+          peerTickers = ["INDHOTEL.NS", "EIHOTEL.NS", "LEMONTREE.NS", "CHALET.NS"];
+        } else if (isRealEstateCompany(companyProfile.sector, companyProfile.industry, companyProfile.description, companyProfile.name) || ind.includes("reit") || ind.includes("real estate") || ind.includes("property")) {
+          peerTickers = ["DLF.NS", "GODREJPROP.NS", "OBEROIRLTY.NS", "PRESTIGE.NS"];
         } else if (sec.includes("agri") || ind.includes("agro") || ind.includes("crop") || ind.includes("fertiliz") || ind.includes("pesticide") || (companyProfile.description || "").toLowerCase().includes("crop protection") || (companyProfile.description || "").toLowerCase().includes("agrochemical")) {
           peerTickers = ["PIIND.NS", "UPL.NS", "COROMANDEL.NS", "SUMICHEM.NS", "DHANUKA.NS"];
         } else if (ind.includes("wind") || ind.includes("solar") || ind.includes("renewable") || sym.includes("SUZLON") || (companyProfile.name || "").toLowerCase().includes("suzlon")) {
@@ -212,6 +217,10 @@ export async function GET(request: NextRequest) {
           (companyProfile.description || "").toLowerCase().includes("automotive")
         ) {
           peerTickers = ["F", "GM", "TM", "RIVN", "STLA", "HMC"];
+        } else if (isHospitalityCompany(companyProfile.sector, companyProfile.industry, companyProfile.description, companyProfile.name) || ind.includes("lodg") || ind.includes("hotel") || ind.includes("resort") || ind.includes("hospitality")) {
+          peerTickers = ["MAR", "HLT", "H", "IHG", "WH", "CHH"];
+        } else if (isRealEstateCompany(companyProfile.sector, companyProfile.industry, companyProfile.description, companyProfile.name) || ind.includes("reit") || ind.includes("real estate") || ind.includes("property")) {
+          peerTickers = ["AMT", "PLD", "EQIX", "PSA", "O"];
         } else if (
           ind.includes("apparel") ||
           ind.includes("footwear") ||
@@ -264,21 +273,42 @@ export async function GET(request: NextRequest) {
           const pDebtToEquity = parseNum(p.debtToEquity);
           const pCurrentRatio = parseNum(p.currentRatio);
 
-          // Peer relevance scoring (sector/industry overlap + size proximity) is
-          // surfaced on each peer for display and QA. Missing Yahoo sector fields
-          // never disqualify; curated lists stay authoritative but scored honestly.
+          // Business-model similarity engine: sector/industry + size + financial distance + ontology penalty
+          // Curated lists are the candidate universe; scoring is the similarity gate (Priority 4).
+          // Hospitality/REIT vs bank/industrial mismatches are heavily penalized so peer-relative valuation is not fabricated.
           const qSec = ((p.sector as string) || "").toLowerCase() || null;
           const qInd = ((p.industry as string) || "").toLowerCase() || null;
           let relevanceScore: number | null = null;
           if (qSec || qInd) {
             let score = 0;
             if (qSec && subjSec && (qSec.includes(subjSec) || subjSec.includes(qSec))) score += 50;
-            else if (qSec && subjSec) score -= 50;
+            else if (qSec && subjSec) score -= 30;
             if (qInd && subjInd && (qInd.includes(subjInd) || subjInd.includes(qInd))) score += 30;
+            else if (qInd && subjInd) score -= 10;
             if (pCap && subjCap > 0) {
               const ratio = Math.min(pCap, subjCap) / Math.max(pCap, subjCap);
               score += Math.round(ratio * 20);
             }
+            // Financial distance: net margin and ROE proximity (business model similarity)
+            const subjMargin = (stockData as any).profitMargins ?? annualFinancials[annualFinancials.length - 1]?.netMargin ?? null;
+            if (pNetMargin !== null && subjMargin !== null && Number.isFinite(subjMargin)) {
+              const mDiff = Math.abs(pNetMargin - subjMargin);
+              // Within 5pp = +10, within 10pp = +5, >20pp = -10
+              if (mDiff <= 0.05) score += 10;
+              else if (mDiff <= 0.10) score += 5;
+              else if (mDiff > 0.20) score -= 10;
+            }
+            // Ontology penalty: hospitality/REIT must not be compared to loan-book or manufacturing
+            const subjIsHosp = subjInd.includes("lodg") || subjInd.includes("hotel") || subjInd.includes("resort") || subjInd.includes("hospitality") || subjSec.includes("hotel");
+            const peerIsHosp = (qInd && (qInd.includes("lodg") || qInd.includes("hotel") || qInd.includes("resort") || qInd.includes("hospitality"))) || (qSec && qSec.includes("hotel"));
+            const peerIsFinancial = qSec && (qSec.includes("financial") || qSec.includes("bank"));
+            const peerIsIndustrial = qSec && (qSec.includes("industrial") || qSec.includes("manufacturing"));
+            if (subjIsHosp && !peerIsHosp && (peerIsFinancial || peerIsIndustrial)) score -= 40;
+            // Real-estate vs non-real-estate penalty
+            const subjIsRE = subjInd.includes("reit") || subjInd.includes("real estate") || subjSec.includes("real estate");
+            const peerIsRE = (qInd && (qInd.includes("reit") || qInd.includes("real estate"))) || (qSec && qSec.includes("real estate"));
+            if (subjIsRE && !peerIsRE && peerIsFinancial) score -= 30;
+
             relevanceScore = Math.max(0, Math.min(100, score));
           }
 
