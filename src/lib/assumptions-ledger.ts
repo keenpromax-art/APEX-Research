@@ -64,7 +64,7 @@ export function createAssumptionsLedger({
 
   const sumPvFcff = Number(dcf.sumPvFcff) || 0;
   const pvTerminalValue = Number(dcf.pvTerminalValue) || 0;
-  let enterpriseValue = isBankOrNbfc ? (Number(dcf.enterpriseValue) || Number(dcf.equityValue) || 0) : (Number(dcf.enterpriseValue) || (sumPvFcff + pvTerminalValue));
+  const enterpriseValue = isBankOrNbfc ? (Number(dcf.enterpriseValue) || Number(dcf.equityValue) || 0) : (Number(dcf.enterpriseValue) || (sumPvFcff + pvTerminalValue));
 
   const bsDebt = Number(latestFin?.totalDebt) || ((Number(latestFin?.shortTermDebt) || 0) + (Number(latestFin?.longTermDebt) || 0));
   const bsCash = ((Number(latestFin?.cash) || 0) + (Number(latestFin?.shortTermInvestments) || 0));
@@ -92,27 +92,13 @@ export function createAssumptionsLedger({
   }
 
   // Insufficient inputs: assert no modeled valuation — anchor to price with NR.
+  // NOTE: there is deliberately NO fallback for a merely insolvent model.
+  // If the FCFF engine cannot produce positive equity on validated inputs,
+  // the dossier must hard-block (XREF-02/XREF-03/XREF-05) — publishing a
+  // market-anchored number in place of a failed valuation is prohibited.
   if (insufficientInputs) {
     fairValue = currentPrice > 0 ? currentPrice : 0.01;
     equityValue = fairValue * (sharesOutstanding > 0 ? sharesOutstanding : 1);
-  }
-
-  // Distressed-model fallback: the FCFF engine is insolvent on the reported
-  // capital structure (typical when captive-finance or restructuring debt sits
-  // on the balance sheet, e.g. automakers), yet price/shares/history are valid.
-  // Rather than publishing equity=0 (which breaks every downstream bridge) or
-  // blocking the whole dossier, carry a MARKET-IMPLIED bridge that is exact by
-  // construction (EV = net debt + price×shares), assert no edge
-  // (fair value = price), and force NR. The raw insolvent DCF stays visible in
-  // dcf.diagnostics — nothing is hidden, nothing is fabricated.
-  let valuationFallback: "MARKET_ANCHORED_DISTRESSED" | null = null;
-  const dcfModelInvalid = !isBankOrNbfc && !insufficientInputs &&
-    (dcf as any)?.status !== undefined && (dcf as any).status !== "valid";
-  if (dcfModelInvalid && currentPrice > 0 && sharesOutstanding > 0) {
-    valuationFallback = "MARKET_ANCHORED_DISTRESSED";
-    equityValue = currentPrice * sharesOutstanding;
-    enterpriseValue = netDebt + equityValue;
-    fairValue = currentPrice;
   }
 
   const targetPrice = Math.max(0.01, fairValue);
@@ -126,9 +112,6 @@ export function createAssumptionsLedger({
   if (insufficientInputs) {
     rating = "NR";
     ratingRationale = `Model recommendation: Not Rated (NR) — insufficient inputs (history: ${annualFinancials.length}y, shares: ${sharesOutstanding}, price: ${currentPrice}). No valuation asserted; manual inputs required before modeling.`;
-  } else if (valuationFallback) {
-    rating = "NR";
-    ratingRationale = `Model recommendation: Not Rated (NR) — FCFF model insolvent on reported capital structure (DCF status: ${(dcf as any)?.status}; ${(dcf.diagnostics || []).join(" ").slice(0, 160)}). Market-implied bridge carried with no edge asserted; fundamental model review required before any directional call.`;
   } else if (dcf.verdict === "NR" || (dcf as any).confidence === "low" || upsideDownsidePct > 1.50 || upsideDownsidePct < -0.80) {
     rating = "NR";
     ratingRationale = `Model recommendation: Not Rated (NR) — valuation upside/downside (${(upsideDownsidePct * 100).toFixed(1)}%) breaches sanity bounds (±150%) or fails confidence verification. Fundamental model review required.`;
@@ -454,14 +437,11 @@ export function createAssumptionsLedger({
     dcfBaseTarget: baseTarget,
     publishedTargetPrice: baseTarget,
     probabilityWeightedValue: scenarios.probabilityWeightedValue,
-    valuationMethodology: valuationFallback
-      ? "MARKET-IMPLIED BRIDGE (FCFF insolvent on reported capital structure — e.g. captive-finance debt — so no DCF edge is asserted; EV = net debt + price×shares by construction; NR)"
-      : dcf.terminalValueCapped
+    valuationMethodology: dcf.terminalValueCapped
       ? "5-Year Explicit DCF Base Case; bull/bear targets are ±25% arithmetic sensitivities around base (not independently re-solved DCFs); terminal value capped at 25x terminal-year FCFF — uncapped value disclosed in terminalValueUncapped"
       : "5-Year Explicit DCF Base Case; bull/bear targets are ±25% arithmetic sensitivities around base (not independently re-solved DCFs)",
     terminalValueUncapped: (dcf as any).unadjustedTerminalValue ?? null,
     insufficientData: insufficientInputs,
-    valuationFallback,
     creditRatingNote: "Model-implied internal grade — not a CRISIL/ICRA/S&P agency rating",
     dataQualityFlags,
     uncertaintyScore,

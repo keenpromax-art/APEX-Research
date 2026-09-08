@@ -161,18 +161,39 @@ export function validateFinancialIdentities(params: {
   // 6. Enterprise Value to Equity Value Bridge (Non-Financial Corporates Only):
   // EV = Equity Value + Net Debt  =>  Equity Value = EV - Net Debt
   // Financial institutions (Banks/NBFCs) do not have an EV bridge because deposits/borrowings are operating liabilities.
+  // The expected bridge is recomputed INDEPENDENTLY from balance-sheet inputs
+  // (including a recomputed captive-finance bound — the model's claimed offset
+  // is verified against it, never trusted). An inflated offset fails here.
   if (!isFinancialInstitution && dcf && dcf.enterpriseValue > 0) {
     metricsAudited++;
     const cash = (latest.cash || 0) + (latest.shortTermInvestments || 0);
-    const netDebt = (latest.totalDebt || 0) - cash;
-    const expectedEquityValue = Math.max(0, dcf.enterpriseValue - netDebt);
+    const totalDebtVal = (latest.totalDebt || 0);
+    const rawNetDebt = totalDebtVal - cash;
+    const bsReceivables = Number((latest as any)?.netReceivables) || 0;
+    const bsRevenue = Number((latest as any)?.revenue) || 0;
+    const maxLegitOffset = bsRevenue > 0 && bsReceivables > 0 && totalDebtVal > 0
+      ? Math.min(Math.max(0, bsReceivables - 0.20 * bsRevenue), totalDebtVal)
+      : 0;
+    const claimedOffset = Number((dcf as any)?.financeReceivablesOffset) || 0;
+    const verifiedOffset = Math.min(Math.max(0, claimedOffset), maxLegitOffset);
+    const expectedEquityValue = Math.max(0, dcf.enterpriseValue - (rawNetDebt - verifiedOffset));
 
-    if (dcf.equityValue > 0 && !withinTolerance(dcf.equityValue, expectedEquityValue, 0.08)) {
+    if (claimedOffset > maxLegitOffset + 1000) {
+      issues.push({
+        code: "DCF_EV_EQUITY_BRIDGE_FAIL",
+        severity: "FATAL",
+        identityName: "Captive-Finance Offset Bound",
+        message: `DCF captive-finance offset (${claimedOffset}) exceeds the verifiable bound (${maxLegitOffset.toFixed(0)} = receivables − 20% trade allowance, capped at debt). Inflated adjustments prohibited.`,
+        expected: maxLegitOffset,
+        actual: claimedOffset,
+        tolerance: 0.08,
+      });
+    } else if (dcf.equityValue > 0 && !withinTolerance(dcf.equityValue, expectedEquityValue, 0.08)) {
       issues.push({
         code: "DCF_EV_EQUITY_BRIDGE_FAIL",
         severity: "FATAL",
         identityName: "Equity Value = EV - Net Debt",
-        message: `DCF Equity Value (${dcf.equityValue}) violates the Enterprise Value bridge: EV (${dcf.enterpriseValue}) - Net Debt (${netDebt}) != Equity Value.`,
+        message: `DCF Equity Value (${dcf.equityValue}) violates the Enterprise Value bridge: EV (${dcf.enterpriseValue}) - Net Debt (${(rawNetDebt - verifiedOffset).toFixed(0)}${verifiedOffset > 0 ? " incl. verified captive offset" : ""}) != Equity Value.`,
         expected: expectedEquityValue,
         actual: dcf.equityValue,
         tolerance: 0.08,

@@ -117,12 +117,13 @@ export function selectAndComputeValuation(params: {
         ebitMargins: [0.25, 0.25, 0.25, 0.25, 0.25]
       },
       projections: [],
-      assumptionBasis: {
-        revenueGrowth: "Not applicable — residual-income model values financials on sustainable ROE, not revenue trajectory.",
-        ebitMargin: "Not applicable — residual-income model; earnings power captured via sustainable ROE below.",
-        capex: "Not applicable — bank/NBFC capex is non-material to the residual-income bridge.",
-        workingCapital: "Not applicable — deposits/borrowings are operating liabilities for financials.",
-        wacc: `Cost of equity ${(costOfEquity * 100).toFixed(1)}% as hurdle (Rf 6.85% + beta ${effectiveBeta.toFixed(2)} × ERP 6.0%, clamped 9.5–14.5%)`,
+  assumptionBasis: {
+    revenueGrowth: "Not applicable — residual-income model values financials on sustainable ROE, not revenue trajectory.",
+    ebitMargin: "Not applicable — residual-income model; earnings power captured via sustainable ROE below.",
+    capex: "Not applicable — bank/NBFC capex is non-material to the residual-income bridge.",
+    workingCapital: "Not applicable — deposits/borrowings are operating liabilities for financials.",
+    netDebt: "Not applicable — no EV bridge for financials; deposits are operating liabilities, equity valued directly.",
+    wacc: `Cost of equity ${(costOfEquity * 100).toFixed(1)}% as hurdle (Rf 6.85% + beta ${effectiveBeta.toFixed(2)} × ERP 6.0%, clamped 9.5–14.5%)`,
         terminal: `Sustainable ROE ${(sustainableRoe * 100).toFixed(1)}% (max of latest, historical average, reported, and ${(roeFloor * 100).toFixed(1)}% floor) growing at ${(terminalGrowth * 100).toFixed(1)}% terminal`,
       },
       sumPvFcff: 0,

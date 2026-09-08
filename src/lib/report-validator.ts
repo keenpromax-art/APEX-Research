@@ -145,14 +145,10 @@ export function validateMasterReport(
   }
 
   // Check Recommendation Deterministic Invariant.
-  // Exemption: when the ledger declares the model unusable (insufficient-data
-  // anchor or distressed market-implied fallback), NR is the MANDATED rating —
-  // penalizing it would force a directional call the model cannot support.
-  // Any directional declaration under those flags is still checked below.
-  const modelUnusable = Boolean(
-    (reportData?.assumptionsLedger as any)?.insufficientData ||
-    (reportData?.assumptionsLedger as any)?.valuationFallback
-  );
+  // Exemption: when inputs were insufficient the ledger mandates NR (there is
+  // no model output to contradict). Any directional call under any model
+  // failure is still checked — NR-by-construction is the only free pass.
+  const modelUnusable = Boolean((reportData?.assumptionsLedger as any)?.insufficientData);
   const declaredForRecCheck: string = facts.recommendation?.rating || "HOLD";
   const recCheck = (modelUnusable && (declaredForRecCheck === "NR" || declaredForRecCheck === "NOT RATED"))
     ? { valid: true, issues: [] as string[] }

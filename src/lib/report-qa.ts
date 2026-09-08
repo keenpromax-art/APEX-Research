@@ -178,14 +178,12 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
     ? Number(ledger.netDebt)
     : (data.dcf.netDebt !== undefined ? Number(data.dcf.netDebt) : ((Number(data.dcf.lessDebt) || 0) - (Number(data.dcf.plusCash) || 0)));
   const dcfEqVal = ledger?.equityValue !== undefined ? Number(ledger.equityValue) : (Number(data.dcf.equityValue) || 0);
-  // Prefer ledger bridge inputs: under the distressed fallback the ledger
-  // carries a market-implied EV (exact by construction); raw DCF EV would
-  // reintroduce the insolvency the fallback resolved. Identical otherwise.
+  // Prefer ledger bridge inputs (identical to raw DCF inputs in the normal
+  // case); raw DCF EV as fallback. XREF-01 independently validates DCF internals.
   const ledgerEv = Number(ledger?.enterpriseValue);
   const evForBridge = Number.isFinite(ledgerEv) && ledgerEv !== 0 ? ledgerEv : ev;
   const expectedEqVal = isBankOrNbfc ? dcfEqVal : evForBridge - dcfNetDebt;
   const bridgeEqVariance = Math.abs(dcfEqVal - expectedEqVal);
-  const distressedFallback = (ledger as any)?.valuationFallback === "MARKET_ANCHORED_DISTRESSED";
 
   if (bridgeEqVariance > 1000 && !isBankOrNbfc) {
     checks.push({
@@ -205,8 +203,6 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
       status: "PASS",
       details: isBankOrNbfc
         ? "Equity value modeled directly via justified multiple/residual income for banking entity."
-        : distressedFallback
-        ? `Market-implied bridge (FCFF insolvent): EV (${evForBridge.toFixed(0)}) = Net Debt + price×shares reconciles exactly by construction; no DCF edge asserted.`
         : `Enterprise Value minus Net Debt reconciles with Implied Equity Value (variance ${bridgeEqVariance.toFixed(0)} within ±1000 tolerance).`,
     });
   }
@@ -223,14 +219,37 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
     : ((Number(latestFin?.cash) || 0) + (Number(latestFin?.shortTermInvestments) || 0));
   const bsCalculatedNetDebt = bsTotalDebt - bsCashEquiv;
 
-  if (latestFin && !isBankOrNbfc && Math.abs(dcfNetDebt - bsCalculatedNetDebt) > 1000) {
+  // Adjustment-aware: when the DCF carries a captive-finance receivables offset,
+  // the expected bridge net debt is the REPORTED balance-sheet net debt minus
+  // that offset — and the offset itself is bounds-checked against reported
+  // receivables and total debt (an invented offset cannot pass).
+  const dcfOffset = Number((data.dcf as any)?.financeReceivablesOffset) || 0;
+  const bsReceivables = Number((latestFin as any)?.netReceivables) || 0;
+  const bsRevenue = Number(latestFin?.revenue) || 0;
+  const maxLegitOffset = bsRevenue > 0 && bsReceivables > 0
+    ? Math.min(Math.max(0, bsReceivables - 0.20 * bsRevenue), bsTotalDebt)
+    : 0;
+  const offsetLegit = dcfOffset >= 0 && dcfOffset <= maxLegitOffset + 1000;
+  const expectedLinkedNetDebt = bsCalculatedNetDebt - (offsetLegit ? dcfOffset : 0);
+
+  if (latestFin && !isBankOrNbfc && !offsetLegit && dcfOffset > 1000) {
     checks.push({
       id: "XREF-04",
       category: "CROSS_REFERENCE",
       name: "Balance Sheet to DCF Bridge Variable Linking Reconciled",
       status: "FAIL",
-      details: `FATAL PUBLICATION BLOCK: Net Debt in DCF bridge (${dcfNetDebt.toFixed(0)}) contradicts audited Balance Sheet Net Debt (${bsCalculatedNetDebt.toFixed(0)} = Total Debt ${bsTotalDebt.toFixed(0)} - Cash ${bsCashEquiv.toFixed(0)}). Financial statements are unlinked.`,
-      expected: bsCalculatedNetDebt.toFixed(0),
+      details: `FATAL PUBLICATION BLOCK: DCF captive-finance offset (${dcfOffset.toFixed(0)}) exceeds the verifiable bound (${maxLegitOffset.toFixed(0)} = receivables ${bsReceivables.toFixed(0)} − 20% trade allowance, capped at debt). Unbounded adjustments prohibited.`,
+      expected: `≤ ${maxLegitOffset.toFixed(0)}`,
+      actual: dcfOffset.toFixed(0),
+    });
+  } else if (latestFin && !isBankOrNbfc && Math.abs(dcfNetDebt - expectedLinkedNetDebt) > 1000) {
+    checks.push({
+      id: "XREF-04",
+      category: "CROSS_REFERENCE",
+      name: "Balance Sheet to DCF Bridge Variable Linking Reconciled",
+      status: "FAIL",
+      details: `FATAL PUBLICATION BLOCK: Net Debt in DCF bridge (${dcfNetDebt.toFixed(0)}) contradicts audited Balance Sheet Net Debt (${bsCalculatedNetDebt.toFixed(0)} = Total Debt ${bsTotalDebt.toFixed(0)} - Cash ${bsCashEquiv.toFixed(0)}${dcfOffset > 0 ? ` − captive offset ${dcfOffset.toFixed(0)}` : ""}). Financial statements are unlinked.`,
+      expected: expectedLinkedNetDebt.toFixed(0),
       actual: dcfNetDebt.toFixed(0),
     });
   } else {
@@ -241,6 +260,8 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
       status: "PASS",
       details: isBankOrNbfc
         ? "Banking entity balance sheet capital structure reconciled."
+        : dcfOffset > 0
+        ? `DCF net debt links via verified captive-finance offset (${dcfOffset.toFixed(0)} ≤ bound ${maxLegitOffset.toFixed(0)}).`
         : "DCF Net Debt strictly linked to audited balance sheet debt and liquid cash reserves.",
     });
   }
@@ -327,7 +348,7 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
   // ASSUME-01: every DCF assumption must carry an evidence-trail entry.
   {
     const basis = (data.dcf as any)?.assumptionBasis || {};
-    const required = ["revenueGrowth", "ebitMargin", "capex", "workingCapital", "wacc", "terminal"];
+    const required = ["revenueGrowth", "ebitMargin", "capex", "workingCapital", "netDebt", "wacc", "terminal"];
     const missing = required.filter((k) => typeof basis[k] !== "string" || basis[k].length < 20);
     if (missing.length > 0) {
       checks.push({
@@ -336,8 +357,8 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
         name: "Assumption Evidence Registry",
         status: "FAIL",
         details: `FATAL PUBLICATION BLOCK: DCF assumptions missing evidence-trail entries: ${missing.join(", ")}. Every assumption needs a stated empirical basis.`,
-        expected: "6 evidenced assumptions",
-        actual: `${required.length - missing.length}/6 evidenced`,
+        expected: "7 evidenced assumptions",
+        actual: `${required.length - missing.length}/7 evidenced`,
       });
     } else {
       checks.push({
@@ -345,7 +366,7 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
         category: "CROSS_REFERENCE",
         name: "Assumption Evidence Registry",
         status: "PASS",
-        details: `All 6 DCF assumptions carry evidence-trail entries.`,
+        details: `All 7 DCF assumptions carry evidence-trail entries.`,
       });
     }
   }
@@ -361,9 +382,9 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
   const modelTol = Math.max(0.06, Math.abs(ledgerFv) * 0.015);
   const modelMatchesLedger = dcfIntrinsic > 0 && ledgerFv > 0 && Math.abs(dcfIntrinsic - ledgerFv) <= modelTol;
   const ledgerAnchored = Boolean((ledger as any)?.insufficientData);
-  // Raw model produced no intrinsic value (invalid/insolvent DCF): nothing to
-  // contradict, so this degrades to WARN — the fallback/NR path is disclosed
-  // in the ledger methodology instead of failing the whole dossier.
+  // Raw model produced no intrinsic value (invalid/insolvent DCF): the ledger
+  // cannot legitimately carry a modeled fair value, so this is a HARD block —
+  // publication is prohibited until the engine validates (auditor rows #20/24).
   const modelInvalid = !modelMatchesLedger && data.dcf?.status !== undefined && data.dcf.status !== "valid";
   if (!targetPriceMatch || !recommendationMatch) {
     checks.push({
@@ -380,20 +401,10 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
       id: "XREF-02",
       category: "CROSS_REFERENCE",
       name: "Header Target vs Ledger Fair Value Check",
-      status: "WARN",
-      details: `Raw DCF model is ${data.dcf.status} (intrinsic ${dcfIntrinsic.toFixed(2)}) so no model-vs-ledger comparison applies; ledger carries a disclosed fallback with no edge asserted.`,
-      expected: "Disclosed fallback",
-      actual: `DCF ${data.dcf.status}`,
-    });
-  } else if (!modelMatchesLedger && !ledgerAnchored) {
-    checks.push({
-      id: "XREF-02",
-      category: "CROSS_REFERENCE",
-      name: "Header Target vs Ledger Fair Value Check",
       status: "FAIL",
-      details: `FATAL PUBLICATION BLOCK: Report targetPrice (${data.targetPrice}) or recommendation (${data.recommendation}) contradicts Assumptions Ledger (${fv}, ${rating}). Unsynchronized claims strictly prohibited.`,
-      expected: `${fv} (${rating})`,
-      actual: `${data.targetPrice} (${data.recommendation})`,
+      details: `FATAL PUBLICATION BLOCK: Raw DCF model is ${data.dcf.status} (intrinsic ${dcfIntrinsic.toFixed(2)}) — no validated intrinsic value exists, so publication is prohibited until the engine validates. Anchoring to price is not a valuation.`,
+      expected: "Valid DCF engine output",
+      actual: `DCF ${data.dcf.status}`,
     });
   } else if (!modelMatchesLedger && !ledgerAnchored) {
     checks.push({

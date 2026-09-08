@@ -4500,9 +4500,7 @@ const AnalystForecastsSummaryPage = ({ data }: { data: ReportData }) => {
               const rows: [string, string][] = [
                 ["Present Value of 5-Yr Explicit FCFs", fmtBig(data.dcf.sumPvFcff, currency)],
                 ["Present Value of Terminal Value", fmtBig(data.dcf.pvTerminalValue, currency)],
-                [(ledger as any)?.valuationFallback
-                  ? "Enterprise Value — MARKET-IMPLIED (FCFF insolvent; EV = Net Debt + price×shares)"
-                  : "Enterprise Value (EV) = PV(FCF) + PV(TV)", fmtBig(ev, currency)],
+                ["Enterprise Value (EV) = PV(FCF) + PV(TV)", fmtBig(ev, currency)],
                 ["Less: Total Debt (Ledger)", safeTableValue(bsDebtLine > 0 ? `-${fmtBig(bsDebtLine, currency)}` : "0")],
                 ["Plus: Cash & Liquid Reserves (Ledger)", safeTableValue(bsCashLine > 0 ? `+${fmtBig(bsCashLine, currency)}` : "0")],
                 [
@@ -4545,6 +4543,7 @@ const AnalystForecastsSummaryPage = ({ data }: { data: ReportData }) => {
               ["EBIT margin", basis.ebitMargin || "Basis not recorded — treat trajectory as judgmental."],
               ["Capex & D&A", basis.capex || "Basis not recorded."],
               ["Working capital", basis.workingCapital || "Basis not recorded."],
+              ["Net debt bridge", basis.netDebt || "Basis not recorded."],
               ["WACC inputs", basis.wacc || "Basis not recorded."],
               ["Terminal value", basis.terminal || "Basis not recorded."],
             ];

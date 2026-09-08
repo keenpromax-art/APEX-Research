@@ -367,11 +367,27 @@ export function computeDCF(
 
   const latestDebt = Number(latest.totalDebt) || ((Number(latest.shortTermDebt) || 0) + (Number(latest.longTermDebt) || 0));
   const latestCash = (Number(latest.cash) || 0) + (Number(latest.shortTermInvestments) || 0);
-  const netDebt = latestDebt - latestCash;
+  // Captive-finance adjustment (SOTP-lite): automakers/industrials with financing
+  // arms carry lender-scale debt matched by finance receivables. Charging the full
+  // consolidated debt against operating cash flows makes every such name
+  // "insolvent" by construction. Receivables in excess of a 20%-of-revenue trade
+  // allowance are treated as the offsetting finance book, capped at total debt.
+  // Bounded, disclosed in diagnostics + evidence trail, and re-verified by XREF-04.
+  // Inapplicable to financials (separate residual-income path) and to firms
+  // without material receivables — for them the offset is exactly zero.
+  const receivables = Number(latest.netReceivables) || 0;
+  const tradeAllowance = latest.revenue > 0 ? 0.20 * latest.revenue : 0;
+  const financeReceivablesOffset = latest.revenue > 0 && receivables > 0 && latestDebt > 0
+    ? Math.min(Math.max(0, receivables - tradeAllowance), latestDebt)
+    : 0;
+  const netDebt = latestDebt - latestCash - financeReceivablesOffset;
   const rawEquityValue = enterpriseValue - netDebt;
   const sharesOutstanding = stockData.sharesOutstanding || latest.sharesOutstanding || 0;
 
   const diagnostics: string[] = [];
+  if (financeReceivablesOffset > 0) {
+    diagnostics.push(`Captive-finance adjustment: ${financeReceivablesOffset.toFixed(0)} of receivables (above 20%-of-revenue trade allowance on revenue ${latest.revenue.toFixed(0)}) netted against debt; adjusted net debt ${netDebt.toFixed(0)}. See evidence trail.`);
+  }
   if (isTvCapped) {
     diagnostics.push(`Terminal value capped at 25.0x terminal-year FCFF safeguard (reduced from ${Math.round(rawTerminalValue / (terminalYearFcff || 1))}x).`);
   }
@@ -432,6 +448,9 @@ export function computeDCF(
     ebitMargin: `Base from ${marginSource}; explicit margins ramp +1.0/+1.8/+2.4/+2.8/+3.0pp, capped 26–30%`,
     capex: `Historical capex intensity ${(rawAvgCapexPct * 100).toFixed(1)}% of revenue (clamped 2.5–8.0% → ${(avgCapexPct * 100).toFixed(1)}%)${archetypeProfile?.archetype ? `; ${archetypeProfile.archetype} overlay applied` : ""}; D&A ${(rawAvgDeptPct * 100).toFixed(1)}% (clamped 2.0–6.0%)`,
     workingCapital: `Revenue-linked change ${(avgNwcChangePct * 100).toFixed(1)}%${archetypeProfile?.archetype === "EARLY_PLATFORM_GROWTH" ? " (platform buffer overlay)" : ""}`,
+    netDebt: financeReceivablesOffset > 0
+      ? `Reported net debt ${(latestDebt - latestCash).toFixed(0)} less captive-finance receivables offset ${financeReceivablesOffset.toFixed(0)} (receivables ${receivables.toFixed(0)} vs 20% trade allowance ${(tradeAllowance).toFixed(0)}, capped at total debt) → adjusted ${netDebt.toFixed(0)}`
+      : `Reported net debt in full (total debt ${latestDebt.toFixed(0)} − cash ${(latestCash).toFixed(0)}); no captive-finance offset (receivables ${receivables.toFixed(0)} within trade allowance)`,
     wacc: assumptions.parameterSource || "CAPM blend (parameters undisclosed)",
     terminal: `4.0% nominal-GDP anchor; TV capped at 25× terminal-year FCFF${isTvCapped ? " (CAP ACTIVE — see diagnostics)" : " (not binding)"}`,
   };
@@ -452,6 +471,7 @@ export function computeDCF(
     totalDebt: latestDebt,
     cashAndEquiv: latestCash,
     netDebt,
+    financeReceivablesOffset,
     lessDebt: Math.max(0, netDebt),
     plusCash: Math.max(0, -netDebt),
     equityValue,
