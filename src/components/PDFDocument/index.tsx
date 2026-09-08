@@ -1621,8 +1621,8 @@ const CoverPage = ({ data }: { data: ReportData }) => {
           </Text>
           <View style={S.compactTable}>
             <View style={S.compactRowHeader}>
-              <Text style={[S.compactCellHeader, { width: "65%" }]}>Return Channel</Text>
-              <Text style={[S.compactCellHeaderRight, { width: "35%" }]}>Current Rate</Text>
+              <Text style={[S.compactCellHeader, { width: "58%" }]}>Return Channel</Text>
+              <Text style={[S.compactCellHeaderRight, { width: "42%" }]}>Current Rate</Text>
             </View>
             {(() => {
               const divCagr = ledger?.dividendCAGRDisplay || (data.stockData.dividendYield > 0 ? "4.2% p.a." : "N/A (Zero/Suspended)");
@@ -1639,12 +1639,21 @@ const CoverPage = ({ data }: { data: ReportData }) => {
                 ["Total Shareholder Yield", totalYield],
                 ["ROIC Spread over WACC", roicSpread],
               ];
-            })().map(([ch, rt], ri) => (
-              <View key={ri} style={ri % 2 === 0 ? S.compactRow : S.compactRowAlt}>
-                <Text style={[S.compactCellBold, { width: "65%" }]}>{ch}</Text>
-                <Text style={[S.compactCellBoldRight, { width: "35%", color: COLORS.primaryRed }]}>{rt}</Text>
-              </View>
-            ))}
+            })().map(([ch, rt], ri) => {
+              const str = String(rt);
+              const m = str.match(/^([^()]+?)(\s*\(.*\))?$/);
+              const valPart = m ? m[1].trim() : str;
+              const notePart = m && m[2] ? m[2].trim() : "";
+              return (
+                <View key={ri} style={ri % 2 === 0 ? S.compactRow : S.compactRowAlt}>
+                  <Text style={[S.compactCellBold, { width: "58%", paddingVertical: 2 }]}>{ch}</Text>
+                  <View style={{ width: "42%", alignItems: "flex-end", justifyContent: "center", paddingHorizontal: 3.5, paddingVertical: 1.5 }}>
+                    <Text style={{ fontSize: 6.6, fontFamily: "Helvetica-Bold", color: COLORS.primaryRed, textAlign: "right" }}>{valPart}</Text>
+                    {notePart ? <Text style={{ fontSize: 5.0, color: COLORS.textMuted, textAlign: "right", marginTop: 1 }}>{notePart}</Text> : null}
+                  </View>
+                </View>
+              );
+            })}
           </View>
 
 

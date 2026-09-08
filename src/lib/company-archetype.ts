@@ -401,9 +401,25 @@ export function classifyArchetype(
     totalShareholderYieldDisplay = `${((divYield + bbYield) * 100).toFixed(1)}%`;
   } else {
     if (netDebt <= 0 && netIncome > 0) {
-      dividendCAGRDisplay = "0.0% (Post-Deleveraging Initiation Runway)";
-      buybackYieldDisplay = "None (Historical Restructuring)";
-      totalShareholderYieldDisplay = "Forward Yield Projected (Net Cash)";
+      // Hard ontology: net-cash alone does not justify forward yield. Must be ROIC-accretive.
+      // For TSLA-like net-cash growth names with ROIC deficit (-8.4%), projecting forward yield is a logical misalignment.
+      const roicProxy = (latest as any).roic ?? stockData.returnOnAssets ?? (ebitda > 0 && rev > 0 ? (ebitda / Math.max(1, (latest.totalAssets || rev * 1.2))) : 0);
+      const lowReturn = roicProxy < 0.08 || (latest.netMargin !== undefined && latest.netMargin < 0.05) || (stockData.returnOnEquity !== undefined && stockData.returnOnEquity < 0.08);
+      const isGrowthReinvestment = sector === "auto_manufacturing" || sector === "technology_hardware" || sector === "technology_platform" || archetype === "CYCLICAL_CAPITAL_INTENSIVE" && lowReturn;
+      if (lowReturn) {
+        // Value deficit: conserve cash, do not project yield
+        dividendCAGRDisplay = "0.0% (Conservation — ROIC < WACC)";
+        buybackYieldDisplay = "None (Value Deficit)";
+        totalShareholderYieldDisplay = "0.0% (Retained — ROIC Deficit)";
+      } else if (isGrowthReinvestment) {
+        dividendCAGRDisplay = "0.0% (Growth Reinvestment — Zero Payout)";
+        buybackYieldDisplay = "None (Reinvestment Priority)";
+        totalShareholderYieldDisplay = "0.0% (Reinvested — Growth)";
+      } else {
+        dividendCAGRDisplay = "0.0% (Post Deleveraging Initiation Runway)";
+        buybackYieldDisplay = "None (Historical Restructuring)";
+        totalShareholderYieldDisplay = "Forward Yield Projected (Net Cash)";
+      }
     } else {
       dividendCAGRDisplay = "N/A (Zero Dividend Track)";
       buybackYieldDisplay = "None";
