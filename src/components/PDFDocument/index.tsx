@@ -830,11 +830,17 @@ const buildFiveYearStatementModel = (data: ReportData): StatementColumn[] => {
     const cogs = rev - gp;
     // SAME margin path as the DCF (explicit assumption), not trailing margin.
     const opMarginUse = dcfMargin !== undefined ? dcfMargin : histOpMargin;
-    const opInc = Math.round(rev * opMarginUse);
     const sga = Math.round(rev * histSgaRatio);
     const rd = Math.round(rev * histRdRatio);
     const depr = Math.round(base.depr > 0 ? base.depr * (1 + g * 0.8) : rev * 0.04);
-    const otherOpExp = gp - sga - rd - depr - opInc;
+    // Target opInc from DCF margin path, but never via implausible negative otherOpExp.
+    // If gross profit cannot cover target opInc + opex, cap otherOpExp at 0 and let opInc float to achievable max.
+    let opInc = Math.round(rev * opMarginUse);
+    let otherOpExp = gp - sga - rd - depr - opInc;
+    if (otherOpExp < 0) {
+      otherOpExp = 0;
+      opInc = Math.max(0, gp - sga - rd - depr);
+    }
     const ebitda = opInc + depr;
 
     const intExp = base.longDebt > 0 ? Math.round(base.interestExp > 0 ? base.interestExp * 1.01 : (base.longDebt * 0.05)) : 0;

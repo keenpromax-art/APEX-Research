@@ -1005,25 +1005,15 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
   const rewrittenTerms = Array.from(
     new Set(((data as any).sanitizerReport?.rewrittenTerms || []) as string[])
   );
-  if (rewrittenTerms.length >= 2) {
+  if (rewrittenTerms.length >= 1) {
     checks.push({
       id: "SANITIZE-01",
       category: "KEYWORD_BLOCKLIST",
       name: "Sanitizer Rewrite Disclosure",
       status: "FAIL",
-      details: `FATAL PUBLICATION BLOCK: Sector sanitizer rewrote ${rewrittenTerms.length} distinct out-of-sector terms pre-QA: [${rewrittenTerms.slice(0, 8).join(", ")}]. The narrative was contaminated at generation — fix the template/prompt, not the output.`,
+      details: `FATAL PUBLICATION BLOCK: Sector sanitizer rewrote ${rewrittenTerms.length} distinct out-of-sector term(s) pre-QA: [${rewrittenTerms.slice(0, 8).join(", ")}]. Any rewrite proves generation-time contamination — fix the template/prompt, not the output.`,
       expected: "Zero rewritten terms",
       actual: `${rewrittenTerms.length} rewritten term(s)`,
-    });
-  } else if (rewrittenTerms.length === 1) {
-    checks.push({
-      id: "SANITIZE-01",
-      category: "KEYWORD_BLOCKLIST",
-      name: "Sanitizer Rewrite Disclosure",
-      status: "WARN",
-      details: `Sector sanitizer rewrote 1 out-of-sector term pre-QA: [${rewrittenTerms[0]}]. Below the block threshold — review manually.`,
-      expected: "Zero rewritten terms",
-      actual: "1 rewritten term",
     });
   } else {
     checks.push({
@@ -1155,7 +1145,7 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
     { sectors: ["telecom", "communication", "wireless", "internet", "restaurants"], blocked: ["proprietary silicon", "custom neural engine", "wafer fabrication", "foundry capacity", "us fda", "cgmp", "iso 13485"] },
     { sectors: ["pharma", "health", "biotech", "drug"], blocked: ["spectrum auction", "arpu", "tower tenancy", "dark store", "ride hailing", "proprietary silicon"] },
     { sectors: ["internet retail", "food delivery", "quick commerce", "hyperlocal", "marketplace", "platform"], blocked: ["copra", "palm oil procurement", "packaged goods", "personal care", "brand recall", "iconic consumer brand", "multi-tier retail distribution", "fmcg", "modern trade", "spectrum auction", "agr dues", "clinical trial phase", "proprietary silicon", "custom neural engine", "wafer fabrication", "foundry capacity", "us fda", "cgmp", "iso 13485"] },
-    { sectors: ["auto manufacturer", "auto manufacturers", "automobile", "auto oem", "auto parts", "auto components", "electric vehicle", "two wheeler", "two-wheeler", "passenger vehicle", "commercial vehicle"], blocked: ["casa", "casa ratio", "nim", "gnpa", "loan book", "credit cost", "spectrum auction", "spectrum", "tower deployment", "subscriber churn", "master service agreement", "total contract value", "saas churn", "enterprise contract", "software services", "deal signing", "discretionary consulting", "copra", "packaged goods", "personal care", "fmcg", "clinical trial", "dark stores", "refinery throughput", "crack spread", "proprietary silicon", "wafer fab"] },
+    { sectors: ["auto manufacturer", "auto manufacturers", "automobile", "auto oem", "auto parts", "auto components", "electric vehicle", "two wheeler", "two-wheeler", "passenger vehicle", "commercial vehicle"], blocked: ["casa", "casa ratio", "net interest margin", "nim", "loan book", "loan books", "credit cost", "credit costs", "gross non-performing assets", "gnpa", "deposits", "deposit", "branch", "branches", "loan repricing", "spectrum auction", "spectrum", "4g/5g", "tower deployment", "tower tenancy", "tower", "towers", "telecom towers", "subscriber churn", "subscriber", "agr dues", "ran", "bandwidth", "arpu", "master service agreement", "total contract value", "tcv", "saas churn", "arr expansion", "enterprise contract", "software services", "deal signing", "discretionary consulting", "copra", "packaged goods", "personal care", "fmcg", "clinical trial", "dark stores", "order backlog", "order book", "tender", "bidding", "commodity", "feedstock", "refinery throughput", "crack spread", "proprietary silicon", "wafer fab"] },
     { sectors: ["consumer", "fmcg", "food", "beverage", "retail"], blocked: ["proprietary silicon", "custom neural engine", "spectrum auction", "agr dues", "clinical trial phase"] },
     { sectors: ["technology", "software", "it services"], blocked: ["us fda", "cgmp", "spectrum auction", "agr dues", "refinery throughput", "crack spread"] },
     { sectors: ["energy", "oil", "gas", "mining"], blocked: ["app store commission", "saas churn", "arr expansion", "dark store", "proprietary silicon"] },
@@ -1198,23 +1188,13 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
   // Remove any violation whose concept is allowlisted for this sector
   semanticBleedViolations = semanticBleedViolations.filter((v) => !allowlisted.includes(v));
 
-  if (semanticBleedViolations.length >= 2) {
+  if (semanticBleedViolations.length >= 1) {
     checks.push({
       id: "BS-DETECTOR-04",
       category: "BS_DETECTOR",
       name: "Semantic Template Bleeding Filter",
       status: "FAIL",
-      details: `FATAL PUBLICATION BLOCK: ${semanticBleedViolations.length} distinct out-of-sector concepts in narrative: [${semanticBleedViolations.join(", ")}]. Multiple foreign-sector terms prove template contamination, not coincidence.`,
-      expected: "Zero out-of-sector terms",
-      actual: `${semanticBleedViolations.length} violations`,
-    });
-  } else if (semanticBleedViolations.length > 0) {
-    checks.push({
-      id: "BS-DETECTOR-04",
-      category: "BS_DETECTOR",
-      name: "Semantic Template Bleeding Filter",
-      status: "WARN",
-      details: `Single out-of-sector keyword detected in narrative: [${semanticBleedViolations.join(", ")}]. Below the multi-term block threshold — review manually.`,
+      details: `FATAL PUBLICATION BLOCK: ${semanticBleedViolations.length} distinct out-of-sector concept(s) in narrative: [${semanticBleedViolations.join(", ")}]. Any foreign-sector term proves template contamination.`,
       expected: "Zero out-of-sector terms",
       actual: `${semanticBleedViolations.length} violations`,
     });
