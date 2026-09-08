@@ -23,6 +23,7 @@ export async function POST(request: NextRequest) {
     dcf: DCFResult;
     news?: TickerNewsItem[];
     customKeyConfig?: CustomKeyConfig;
+    assumptionsLedger?: any;
   };
 
   try {
@@ -60,6 +61,9 @@ export async function POST(request: NextRequest) {
   }
 
   const { profile, stockData, annualFinancials, dcf, news } = body;
+  // Canonical ledger (when the client computed it pre-synthesis) threads the
+  // authoritative moat/rating into deterministic narratives for harmonization.
+  const ledgerForAnalysis = (body as any).assumptionsLedger || undefined;
 
   if (!profile || !stockData || !annualFinancials?.length || !dcf) {
     return NextResponse.json(
@@ -90,7 +94,8 @@ export async function POST(request: NextRequest) {
             dcf,
             news,
             (event) => send(event),
-            customConfig
+            customConfig,
+            ledgerForAnalysis
           );
 
           send({ type: "done", aiAnalysis });
@@ -132,7 +137,8 @@ export async function POST(request: NextRequest) {
       dcf,
       news,
       undefined,
-      customConfig
+      customConfig,
+      ledgerForAnalysis
     );
 
     return NextResponse.json({ aiAnalysis });

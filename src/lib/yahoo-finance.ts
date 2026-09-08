@@ -25,6 +25,35 @@ function safeNum(v: unknown, fallback = 0): number {
 }
 
 /**
+ * Provenance tracker for audited-vs-estimated financial fields.
+ * Every fixed-margin fallback MUST record its field name here so downstream
+ * ledgers, QA gates, and PDF footnotes can distinguish reported vs modeled data.
+ */
+function trackEstimate(used: string[], name: string): void {
+  if (!used.includes(name)) used.push(name);
+}
+
+/** True when any of the Yahoo statement keys holds a real reported (non-zero) value. */
+function hasStatementField(obj: Record<string, unknown>, keys: string[]): boolean {
+  if (!obj) return false;
+  for (const k of keys) {
+    const v = obj[k];
+    const raw = (typeof v === "object" && v !== null && "raw" in (v as Record<string, unknown>))
+      ? (v as Record<string, unknown>).raw
+      : v;
+    if (raw === null || raw === undefined) continue;
+    const n = Number(raw);
+    if (!isNaN(n) && isFinite(n) && n !== 0) return true;
+  }
+  return false;
+}
+
+/** True when a timeseries field holds a real reported (non-zero) value. */
+function hasReported(o: Record<string, number>, key: string): boolean {
+  return hasStatementField(o as unknown as Record<string, unknown>, [key]);
+}
+
+/**
  * Safely extracts a numeric value from an object checking multiple field name aliases.
  * Supports both raw scalar numbers and Yahoo Finance `{ raw: number }` structures.
  */
@@ -548,16 +577,21 @@ function parseTimeseriesFinancials(
     const dObj = new Date(dateStr);
     const dateTs = Math.floor(dObj.getTime() / 1000);
     const fyLabel = formatFiscalYear(dateTs, currency);
+    // Provenance: every fixed-margin synthesis below is recorded, never silent.
+    const estimatesUsed: string[] = [];
 
     const revenue = d.annualTotalRevenue || d.annualOperatingRevenue || 0;
     const grossProfit = d.annualGrossProfit || (revenue > 0 && d.annualCostOfRevenue ? Math.max(0, revenue - d.annualCostOfRevenue) : (revenue > 0 ? Math.round(revenue * 0.35) : 0));
+    if (revenue > 0 && !hasReported(d, "annualGrossProfit") && !d.annualCostOfRevenue) trackEstimate(estimatesUsed, "grossProfit@35%-of-revenue");
     const costOfRevenue = d.annualCostOfRevenue || (revenue > 0 && grossProfit > 0 ? Math.max(0, revenue - grossProfit) : 0);
     const grossMargin = revenue > 0 ? grossProfit / revenue : 0;
     const operatingIncome = d.annualOperatingIncome || d.annualEBIT || (revenue > 0 ? Math.round(revenue * 0.13) : 0);
+    if (revenue > 0 && !hasReported(d, "annualOperatingIncome") && !hasReported(d, "annualEBIT")) trackEstimate(estimatesUsed, "operatingIncome@13%-of-revenue");
     const totalOperatingExpenses = d.annualOperatingExpense || 0;
     const sellingGeneralAdministrative = d.annualSellingGeneralAndAdministration || 0;
     const researchDevelopment = d.annualResearchAndDevelopment || 0;
     const ebitda = d.annualEBITDA || d.annualNormalizedEBITDA || (operatingIncome > 0 ? operatingIncome + (d.annualDepreciationAndAmortization || Math.round(revenue * 0.04)) : (revenue > 0 ? Math.round(revenue * 0.175) : 0));
+    if (revenue > 0 && !hasReported(d, "annualEBITDA") && !hasReported(d, "annualNormalizedEBITDA")) trackEstimate(estimatesUsed, "ebitda@fixed-margin");
     const ebitdaMargin = revenue > 0 ? ebitda / revenue : 0;
     const ebitMargin = revenue > 0 ? operatingIncome / revenue : 0;
     const interestExpense = Math.abs(d.annualInterestExpense || 0);
@@ -610,9 +644,13 @@ function parseTimeseriesFinancials(
     const tangibleBookValue = d.annualTangibleBookValue || Math.max(0, totalEquity - goodwill - otherIntangibles);
     const netDebt = d.annualNetDebt || (totalDebt - cash - shortTermInvestments);
 
-    // Cash Flow
+    // Cash Flow (fixed-margin syntheses are provenance-tracked, never silent)
+    const ocfEstimated = !hasReported(d, "annualOperatingCashFlow");
     const operatingCashFlow = d.annualOperatingCashFlow || (netIncome + Math.round(revenue * 0.04));
+    if (ocfEstimated && revenue > 0) trackEstimate(estimatesUsed, "operatingCashFlow@NI+4%-of-revenue");
+    const capexEstimated = !hasReported(d, "annualCapitalExpenditure");
     const capitalExpenditures = Math.abs(d.annualCapitalExpenditure || Math.round(revenue * 0.05));
+    if (capexEstimated && revenue > 0) trackEstimate(estimatesUsed, "capex@5%-of-revenue");
     const freeCashFlow = d.annualFreeCashFlow || (operatingCashFlow - capitalExpenditures);
     const investingCashFlow = d.annualInvestingCashFlow || d.annualTotalCashFromInvestingActivities || -capitalExpenditures;
     const financingCashFlow = d.annualFinancingCashFlow || d.annualTotalCashFromFinancingActivities || 0;
@@ -622,6 +660,7 @@ function parseTimeseriesFinancials(
     const interestIncome = d.annualInterestIncome || 0;
     const ebit = d.annualEBIT || operatingIncome;
     const depr = d.annualReconciledDepreciation || d.annualDepreciationAndAmortization || (ebitda > operatingIncome ? ebitda - operatingIncome : Math.round(revenue * 0.035));
+    if (revenue > 0 && !hasReported(d, "annualReconciledDepreciation") && !hasReported(d, "annualDepreciationAndAmortization") && !(ebitda > operatingIncome)) trackEstimate(estimatesUsed, "depreciation@3.5%-of-revenue");
     const issuanceOfDebt = d.annualIssuanceOfDebt || 0;
     const repaymentOfDebt = Math.abs(d.annualRepaymentOfDebt || 0);
     const issuanceOfCapitalStock = d.annualIssuanceOfCapitalStock || 0;
@@ -707,6 +746,7 @@ function parseTimeseriesFinancials(
       changeInInventory,
       changeInPayables,
       endCashPosition,
+      estimatesUsed,
     };
   });
 }
@@ -932,6 +972,8 @@ export function parseQuoteSummary(raw: Record<string, unknown>, symbol: string) 
     const inc = incRev[i] as Record<string,unknown> ?? {};
     const bs = bsRev[i] as Record<string,unknown> ?? {};
     const cf = cfRev[i] as Record<string,unknown> ?? {};
+    // Provenance: every fixed-margin synthesis below is recorded, never silent.
+    const estimatesUsed: string[] = [];
 
     const endDateTs = safeNum((inc.endDate as Record<string,unknown>)?.raw);
     const fyLabel = formatFiscalYear(endDateTs, currency);
@@ -953,6 +995,7 @@ export function parseQuoteSummary(raw: Record<string, unknown>, symbol: string) 
     if (rev === 0 && ni > 0) {
       const pm = safeNum((finData.profitMargins as Record<string,unknown>)?.raw) || 0.18;
       rev = Math.round(ni / pm);
+      trackEstimate(estimatesUsed, "revenue@NI/profit-margin");
     }
 
     let ebit = readFirstNonZeroFieldVariant(inc, [
@@ -963,13 +1006,16 @@ export function parseQuoteSummary(raw: Record<string, unknown>, symbol: string) 
     ]);
     if (ebit === 0 && rev > 0) {
       ebit = Math.round(rev * fallbackOperatingMargin);
+      trackEstimate(estimatesUsed, "operatingIncome@fallback-margin");
     }
 
     let ebitda = 0;
     if (i === years - 1 && fallbackEbitda > 0) {
       ebitda = fallbackEbitda;
+      trackEstimate(estimatesUsed, "ebitda@current-finData");
     } else if (rev > 0) {
       ebitda = Math.round(rev * fallbackEbitdaMargin);
+      trackEstimate(estimatesUsed, "ebitda@fallback-margin");
     }
 
     let depr = readFirstNonZeroFieldVariant(cf, [
@@ -988,6 +1034,7 @@ export function parseQuoteSummary(raw: Record<string, unknown>, symbol: string) 
     ]);
     if (gp === 0 && rev > 0) {
       gp = Math.round(rev * fallbackGrossMargin);
+      trackEstimate(estimatesUsed, "grossProfit@fallback-margin");
     }
 
     let costOfRev = readFirstNonZeroFieldVariant(inc, [
@@ -1060,6 +1107,9 @@ export function parseQuoteSummary(raw: Record<string, unknown>, symbol: string) 
       "purchaseOfPropertyPlantAndEquipment",
       "capitalExpenditureReported",
     ], Math.round(rev * 0.035)));
+    if (!hasStatementField(cf, ["capitalExpenditures", "capitalExpenditure", "purchaseOfPPE", "purchaseOfPropertyPlantAndEquipment", "capitalExpenditureReported"]) && rev > 0) {
+      trackEstimate(estimatesUsed, "capex@3.5%-of-revenue");
+    }
 
     const ocf = readFirstNonZeroFieldVariant(cf, [
       "totalCashFromOperatingActivities",
@@ -1067,6 +1117,9 @@ export function parseQuoteSummary(raw: Record<string, unknown>, symbol: string) 
       "operatingCashFlow",
       "cashProvidedByUsedInOperatingActivities",
     ], Math.round(ni + depr));
+    if (!hasStatementField(cf, ["totalCashFromOperatingActivities", "cashFlowFromOperatingActivities", "operatingCashFlow", "cashProvidedByUsedInOperatingActivities"])) {
+      trackEstimate(estimatesUsed, "operatingCashFlow@NI+depr");
+    }
 
     const icf = readFieldVariant(cf, [
       "totalCashFromInvestingActivities",
@@ -1101,6 +1154,9 @@ export function parseQuoteSummary(raw: Record<string, unknown>, symbol: string) 
       "grossAccountsReceivable",
       "tradeReceivables",
     ], Math.round(rev * 0.15));
+    if (!hasStatementField(bs, ["netReceivables", "receivables", "accountsReceivable", "grossAccountsReceivable", "tradeReceivables"]) && rev > 0) {
+      trackEstimate(estimatesUsed, "receivables@15%-of-revenue");
+    }
 
     const inventory = readFirstNonZeroFieldVariant(bs, [
       "inventory",
@@ -1109,6 +1165,9 @@ export function parseQuoteSummary(raw: Record<string, unknown>, symbol: string) 
       "finishedGoods",
       "workInProgress",
     ], Math.round(rev * 0.10));
+    if (!hasStatementField(bs, ["inventory", "inventories", "rawMaterials", "finishedGoods", "workInProgress"]) && rev > 0) {
+      trackEstimate(estimatesUsed, "inventory@10%-of-revenue");
+    }
 
     const accountsPayable = readFirstNonZeroFieldVariant(bs, [
       "accountsPayable",
@@ -1116,6 +1175,9 @@ export function parseQuoteSummary(raw: Record<string, unknown>, symbol: string) 
       "tradePayables",
       "otherCurrentLiabilities",
     ], Math.round(rev * 0.12));
+    if (!hasStatementField(bs, ["accountsPayable", "payables", "tradePayables", "otherCurrentLiabilities"]) && rev > 0) {
+      trackEstimate(estimatesUsed, "payables@12%-of-revenue");
+    }
 
     const currentAssets = readFirstNonZeroFieldVariant(bs, [
       "totalCurrentAssets",
@@ -1181,16 +1243,20 @@ export function parseQuoteSummary(raw: Record<string, unknown>, symbol: string) 
       financingCashFlow: finCf,
       dividendsPaid: divPaid,
       changeInCash: safeNum((cf.changeInCash as Record<string,unknown>)?.raw),
+      estimatesUsed,
     };
   });
 
-  // Post-process balance sheets across all years: populate missing equity/debt/assets
+  // Post-process balance sheets across all years: populate missing equity/debt/assets.
+  // Every plug below is provenance-tracked — a fully-plugged balance sheet must
+  // never present as audited downstream.
   const latestRev = rawAnnualFinancials[rawAnnualFinancials.length - 1]?.revenue || 1;
   const legacyAnnualFinancials = rawAnnualFinancials.map((f, i) => {
     let eq = f.totalEquity;
     let debt = f.totalDebt;
     let cash = f.cash;
     let assets = f.totalAssets;
+    const plugs: string[] = [];
 
     if (eq === 0) {
       if (fallbackEquity > 0) {
@@ -1198,14 +1264,17 @@ export function parseQuoteSummary(raw: Record<string, unknown>, symbol: string) 
         const yearsBack = (rawAnnualFinancials.length - 1) - i;
         const discountFactor = Math.pow(0.85, yearsBack);
         eq = Math.round(fallbackEquity * discountFactor);
+        plugs.push("equity@book-value-decay");
       } else if (f.netIncome > 0) {
         const roe = safeNum((finData.returnOnEquity as Record<string,unknown>)?.raw) || 0.20;
         eq = Math.round(f.netIncome / roe);
+        plugs.push("equity@NI/ROE");
       }
     }
 
     if (debt === 0 && fallbackDebt > 0) {
       debt = fallbackDebt;
+      plugs.push("debt@current-finData");
     }
 
     let stDebt = f.shortTermDebt;
@@ -1213,20 +1282,26 @@ export function parseQuoteSummary(raw: Record<string, unknown>, symbol: string) 
     if (debt > 0 && stDebt === 0 && ltDebt === 0) {
       stDebt = Math.round(debt * 0.3);
       ltDebt = debt - stDebt;
+      plugs.push("debt-split@30/70");
     }
 
     if (cash === 0) {
       cash = fallbackCash > 0 ? Math.round(fallbackCash * (f.revenue / latestRev)) : Math.round(f.revenue * 0.15);
+      plugs.push("cash@scaled-or-15%-of-revenue");
     }
 
     if (assets === 0) {
       assets = eq + debt + cash;
+      plugs.push("assets@equity+debt+cash-plug");
     }
 
     const curAssets = f.currentAssets > 0 ? f.currentAssets : Math.round(assets * 0.45);
+    if (!(f.currentAssets > 0)) plugs.push("currentAssets@45%-of-assets");
     const curLiab = f.currentLiabilities > 0 ? f.currentLiabilities : Math.round((debt * 0.4) + (assets * 0.2));
+    if (!(f.currentLiabilities > 0)) plugs.push("currentLiabilities@formula-plug");
     const nwc = curAssets - curLiab;
     const netFixed = f.netFixedAssets > 0 ? f.netFixedAssets : Math.round(assets - curAssets);
+    if (!(f.netFixedAssets > 0)) plugs.push("netFixedAssets@residual-plug");
 
     return {
       ...f,
@@ -1241,6 +1316,7 @@ export function parseQuoteSummary(raw: Record<string, unknown>, symbol: string) 
       currentLiabilities: curLiab,
       netWorkingCapital: nwc,
       netFixedAssets: netFixed,
+      estimatesUsed: [...(f.estimatesUsed || []), ...plugs],
     };
   });
 
@@ -1317,9 +1393,12 @@ export function parseQuoteSummary(raw: Record<string, unknown>, symbol: string) 
     diiPct = Math.max(0, Math.round((instPct - fiiPct) * 1000) / 1000);
   }
 
-  // Parse raw institutions (from Form 13-F or international filings)
+  // Institutional holder detail is shown ONLY when Yahoo actually reports it.
+  // Yahoo does not publish SEC 13-F style schedules for most non-US listings, and
+  // inventing named holders with synthetic percentages is a compliance-grade
+  // integrity failure. Empty lists render as an honest "no detail disclosed" state.
   const rawInstList = ((instOwnership.ownershipList as unknown[]) || []);
-  let topInst: InstitutionalHolder[] = rawInstList.slice(0, 10).map((o) => {
+  const topInst: InstitutionalHolder[] = rawInstList.slice(0, 10).map((o) => {
     const ow = o as Record<string,unknown>;
     const shares = safeNum((ow.position as Record<string,unknown>)?.raw);
     const pct = safeNum((ow.pctHeld as Record<string,unknown>)?.raw) || (totalShares > 0 ? shares / totalShares : 0);
@@ -1335,9 +1414,9 @@ export function parseQuoteSummary(raw: Record<string, unknown>, symbol: string) 
     };
   });
 
-  // Parse raw mutual funds
+  // Parse raw mutual funds (only when Yahoo actually reports them — never synthesized)
   const rawFundList = ((rawFundOwnership.ownershipList as unknown[]) || []);
-  let topFunds: InstitutionalHolder[] = rawFundList.slice(0, 10).map((o) => {
+  const topFunds: InstitutionalHolder[] = rawFundList.slice(0, 10).map((o) => {
     const ow = o as Record<string,unknown>;
     const shares = safeNum((ow.position as Record<string,unknown>)?.raw);
     const pct = safeNum((ow.pctHeld as Record<string,unknown>)?.raw) || (totalShares > 0 ? shares / totalShares : 0);
@@ -1353,28 +1432,8 @@ export function parseQuoteSummary(raw: Record<string, unknown>, symbol: string) 
     };
   });
 
-  // If Indian equity where Yahoo doesn't report SEC 13-F schedules, provide real premier Indian institutional registers
-  if (isIndian && topInst.length === 0) {
-    const instSharesBase = totalShares > 0 ? totalShares * instPct : 100000000;
-    topInst = [
-      { name: "Life Insurance Corporation of India (LIC)", percentage: Math.round(instPct * 0.28 * 1000) / 1000, shares: Math.round(instSharesBase * 0.28), change: "+0.4%" },
-      { name: "SBI Mutual Fund / SBI Equity", percentage: Math.round(instPct * 0.22 * 1000) / 1000, shares: Math.round(instSharesBase * 0.22), change: "+1.2%" },
-      { name: "ICICI Prudential Asset Management", percentage: Math.round(instPct * 0.18 * 1000) / 1000, shares: Math.round(instSharesBase * 0.18), change: "+0.8%" },
-      { name: "HDFC Mutual Fund / Asset Management", percentage: Math.round(instPct * 0.15 * 1000) / 1000, shares: Math.round(instSharesBase * 0.15), change: "-0.3%" },
-      { name: "Government of Singapore (GIC / Temasek)", percentage: Math.round(instPct * 0.12 * 1000) / 1000, shares: Math.round(instSharesBase * 0.12), change: "+0.5%" },
-    ];
-  }
-
-  if (isIndian && topFunds.length === 0) {
-    const fundSharesBase = totalShares > 0 ? totalShares * instPct : 100000000;
-    topFunds = [
-      { name: "SBI Nifty 50 ETF / Large Cap Fund", percentage: Math.round(instPct * 0.16 * 1000) / 1000, shares: Math.round(fundSharesBase * 0.16), change: "+0.9%" },
-      { name: "Vanguard Emerging Markets Stock Index Fund", percentage: Math.round(instPct * 0.14 * 1000) / 1000, shares: Math.round(fundSharesBase * 0.14), change: "+0.3%" },
-      { name: "iShares Core MSCI Emerging Markets ETF", percentage: Math.round(instPct * 0.12 * 1000) / 1000, shares: Math.round(fundSharesBase * 0.12), change: "+0.6%" },
-      { name: "Nippon India ETF Nifty 50 BeES", percentage: Math.round(instPct * 0.10 * 1000) / 1000, shares: Math.round(fundSharesBase * 0.10), change: "+1.1%" },
-      { name: "Kotak Flexicap Fund / Kotak Bluechip", percentage: Math.round(instPct * 0.08 * 1000) / 1000, shares: Math.round(fundSharesBase * 0.08), change: "-0.2%" },
-    ];
-  }
+  // No synthetic holder backfill: when Yahoo reports no 13-F/LODR schedules,
+  // downstream renders an explicit "no institutional holder detail disclosed" state.
 
   // Insider Holders
   const parsedInsiders = ((rawInsiderHolders.holders as unknown[]) || []).slice(0, 8).map((h) => {
@@ -1400,9 +1459,12 @@ export function parseQuoteSummary(raw: Record<string, unknown>, symbol: string) 
     sellInfoCount: safeNum((rawNetActivity.sellInfoCount as Record<string, unknown>)?.raw),
   };
 
-  const provenanceNote = isIndian
-    ? "SEBI (LODR) Regulations / Statutory Shareholding Pattern Disclosures"
-    : "SEC Form 13-F / Form N-PORT Quarterly Institutional Filings";
+  const holderDetailAvailable = topInst.length > 0 || topFunds.length > 0;
+  const provenanceNote = holderDetailAvailable
+    ? (isIndian
+      ? "SEBI (LODR) Regulations / Statutory Shareholding Pattern Disclosures via Yahoo Finance"
+      : "SEC Form 13-F / Form N-PORT Quarterly Institutional Filings via Yahoo Finance")
+    : "No institutional holder breakdown disclosed by Yahoo Finance for this listing — holder detail omitted (not estimated)";
 
   const categories = isIndian
     ? [
@@ -1492,65 +1554,10 @@ function isCompanyRelevantNews(
   return false;
 }
 
-function generateCompanySpecificNews(ticker: string, companyName?: string): TickerNewsItem[] {
-  const clean = ticker.replace(/\.[a-zA-Z]+$/i, "");
-  const name = companyName || clean;
-  const now = new Date();
-  
-  const getPastDate = (daysAgo: number) =>
-    new Date(now.getTime() - daysAgo * 86400000).toISOString().slice(0, 10);
-
-  return [
-    {
-      title: `${name} (${clean}) Sustains Operational Revenue Growth Across Primary Commercial Verticals`,
-      publisher: "Corporate Regulatory Disclosures",
-      publishedAt: getPastDate(1),
-      summary: `${name} demonstrated resilient volume execution and operating margin defense supported by healthy contract renewals and enterprise account expansion.`,
-    },
-    {
-      title: `${name} Board Reaffirms Disciplined Capital Allocation and Shareholder Return Framework`,
-      publisher: "Exchange Regulatory Announcements",
-      publishedAt: getPastDate(4),
-      summary: `Management highlighted strong operating free cash flow conversion, funding sustaining corporate investments while preserving pristine balance sheet reserves.`,
-    },
-    {
-      title: `${name} Expands Core Service Mandates and Institutional Client Retention Pipeline`,
-      publisher: "Institutional Industry Intelligence",
-      publishedAt: getPastDate(9),
-      summary: `Recent master service agreement renewals and high-margin strategic additions reinforce ${name}'s economic moat and pricing durability.`,
-    },
-    {
-      title: `${name} Reports Quarterly EBITDA Margin Expansion Ahead of Consensus Estimates`,
-      publisher: "Financial Results Wire",
-      publishedAt: getPastDate(15),
-      summary: `Operating leverage delivered solid flow-through to pre-tax earnings with favorable unit economics across core operational geographies.`,
-    },
-    {
-      title: `${name} Secures Strategic Commercial Partnership for Next-Gen Infrastructure Modernization`,
-      publisher: "Commercial Disclosures Bureau",
-      publishedAt: getPastDate(22),
-      summary: `Long-term commercial agreement bolsters multi-year backlog and provides high visibility for forward cash flow compounding.`,
-    },
-    {
-      title: `${name} Receives Key Statutory Clearances for Core Manufacturing and Facility Expansion`,
-      publisher: "Statutory & Regulatory Surveillance",
-      publishedAt: getPastDate(30),
-      summary: `All regulatory benchmarks achieved on schedule, de-risking phase-two capacity ramp-up and long-term asset utilization.`,
-    },
-    {
-      title: `${name} Completes Balance Sheet De-leveraging and Debt Cost Optimization Milestone`,
-      publisher: "Capital Markets Wire",
-      publishedAt: getPastDate(42),
-      summary: `Proactive balance sheet restructuring lowered weighted average borrowing costs and widened interest coverage safety buffers.`,
-    },
-    {
-      title: `${name} Advances Technology Modernization Initiative with Enterprise Automation Rollout`,
-      publisher: "Corporate Technology Pulse",
-      publishedAt: getPastDate(55),
-      summary: `Proprietary digital workflow automation drive is projected to yield 80-120 bps in structural SG&A efficiency gains over a 24-month horizon.`,
-    },
-  ];
-}
+// REMOVED: generateCompanySpecificNews — synthetic bullish "news" with fabricated
+// publishers ("Corporate Regulatory Disclosures", "Capital Markets Wire", …) and
+// backdated timestamps is incompatible with institutional integrity. getTickerNews
+// returns verified items only; limited coverage is disclosed downstream.
 
 export async function getTickerNews(
   ticker: string,
@@ -1678,17 +1685,9 @@ export async function getTickerNews(
     }
   }
 
-  // 3. Fallback: If still fewer than 4 items, backfill with verified company corporate developments
-  if (verifiedItems.length < 4) {
-    const fallbacks = generateCompanySpecificNews(ticker, companyName);
-    for (const fb of fallbacks) {
-      if (!verifiedItems.some((v) => v.title.toLowerCase() === fb.title.toLowerCase())) {
-        verifiedItems.push(fb);
-      }
-      if (verifiedItems.length >= 8) break;
-    }
-  }
-
+  // 3. No synthetic backfill: bullish template "news" mixed with verified RSS
+  // destroys trust. Fewer than 4 real items returns what exists (possibly empty);
+  // downstream renders an explicit limited-coverage state instead of fiction.
   return verifiedItems;
 }
 

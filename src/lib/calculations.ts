@@ -148,15 +148,43 @@ export function computeDuPont(
 }
 
 // ─────────────────────────────────────────────
-// WACC Calculation
+// WACC Calculation (country-aware capital parameters)
 // ─────────────────────────────────────────────
+export interface CountryCapitalParams {
+  riskFreeRate: number;
+  equityRiskPremium: number;
+  costOfDebtPreTax: number;
+  marginalTaxRate: number;
+  label: string;
+}
+
+// Country CAPM parameter table v2026-09. Previously every listing — including US
+// names — was valued on India G-Sec RF/ERP with a 25% tax rate and no disclosure.
+export const COUNTRY_CAPITAL_PARAMS: Record<string, CountryCapitalParams> = {
+  IN: { riskFreeRate: 0.0685, equityRiskPremium: 0.060, costOfDebtPreTax: 0.075, marginalTaxRate: 0.25, label: "India 10Y G-Sec anchored" },
+  US: { riskFreeRate: 0.0420, equityRiskPremium: 0.050, costOfDebtPreTax: 0.055, marginalTaxRate: 0.21, label: "US 10Y Treasury anchored" },
+  GB: { riskFreeRate: 0.0400, equityRiskPremium: 0.050, costOfDebtPreTax: 0.055, marginalTaxRate: 0.25, label: "UK gilt anchored" },
+  EU: { riskFreeRate: 0.0250, equityRiskPremium: 0.055, costOfDebtPreTax: 0.050, marginalTaxRate: 0.25, label: "Euro-area anchored" },
+};
+
+export function resolveCountryParams(country?: string): CountryCapitalParams {
+  const c = (country || "").toUpperCase();
+  if (c.includes("INDIA") || c === "IN" || c === "INR") return COUNTRY_CAPITAL_PARAMS.IN;
+  if (c.includes("UNITED STATES") || c.includes("USA") || c === "US" || c === "USD") return COUNTRY_CAPITAL_PARAMS.US;
+  if (c.includes("UNITED KINGDOM") || c.includes("BRITAIN") || c === "GB" || c === "UK") return COUNTRY_CAPITAL_PARAMS.GB;
+  if (c.includes("EUROPE") || c.includes("GERMANY") || c.includes("FRANCE") || c === "EU" || c === "EUR") return COUNTRY_CAPITAL_PARAMS.EU;
+  return { ...COUNTRY_CAPITAL_PARAMS.US, label: "Global default (US-anchored; override pending)" };
+}
+
 export function computeWACC(
   stockData: StockData,
   fin: AnnualFinancials,
-  archetypeProfile?: ArchetypeProfile
+  archetypeProfile?: ArchetypeProfile,
+  country?: string
 ): DCFAssumptions {
-  const riskFreeRate = 0.0685; // 10Y G-Sec / Risk free benchmark
-  const equityRiskPremium = 0.060;
+  const cp = resolveCountryParams(country);
+  const riskFreeRate = cp.riskFreeRate;
+  const equityRiskPremium = cp.equityRiskPremium;
 
   // Item 8: Sanity range check on beta before WACC calculation
   // Reject or clamp implausible-but-finite values (outside [0.35, 2.50])
@@ -173,8 +201,8 @@ export function computeWACC(
   const beta = Math.max(0.5, Math.min(1.8, Number(blumeBeta.toFixed(3))));
   const costOfEquity = riskFreeRate + beta * equityRiskPremium;
 
-  const costOfDebtPreTax = 0.075;
-  const marginalTaxRate = 0.25;
+  const costOfDebtPreTax = cp.costOfDebtPreTax;
+  const marginalTaxRate = cp.marginalTaxRate;
   const costOfDebtPostTax = costOfDebtPreTax * (1 - marginalTaxRate);
 
   const totalMktCap = (stockData.currentPrice || 1) * (stockData.sharesOutstanding || fin.sharesOutstanding || 1);
@@ -214,6 +242,7 @@ export function computeWACC(
     equityWeight,
     wacc,
     terminalGrowthRate: 0.04, // 4.0% long-term nominal GDP anchor — single source of truth
+    parameterSource: `Country CAPM table v2026-09 (${cp.label})`,
     revenueGrowthRates: [0.18, 0.16, 0.14, 0.12, 0.10],
     ebitMargins: [
       Math.min(effectiveMargin + 0.010, 0.26),
@@ -232,7 +261,8 @@ export function computeDCF(
   annualFinancials: AnnualFinancials[],
   stockData: StockData,
   sectorProfile?: SectorProfile,
-  archetypeProfile?: ArchetypeProfile
+  archetypeProfile?: ArchetypeProfile,
+  country?: string
 ): DCFResult {
   const latest = annualFinancials[annualFinancials.length - 1];
 
@@ -242,7 +272,7 @@ export function computeDCF(
   const lastRev = latest.revenue;
   const cagr = years > 1 ? Math.pow(lastRev / (firstRev || 1), 1 / (years - 1)) - 1 : 0.15;
 
-  const assumptions = computeWACC(stockData, latest, archetypeProfile);
+  const assumptions = computeWACC(stockData, latest, archetypeProfile, country);
 
   // Item 5: Winsorized blend of live revenue growth and historical CAGR
   const liveRevGrowth = stockData.revenueGrowth;

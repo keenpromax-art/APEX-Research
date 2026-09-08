@@ -104,11 +104,11 @@ export default function ProgressTracker({
                           </div>
 
                           <div className={styles.subStepStatus}>
-                            {isAgentDone && (
-                              <span className={`${styles.subStepTag} ${styles.subTagDone}`}>
-                                {agent.id === "verifier" ? "COUNCIL CERTIFIED ✓" : "COUNCIL VERIFIED ✓"}
-                              </span>
-                            )}
+                              {isAgentDone && (
+                                <span className={`${styles.subStepTag} ${styles.subTagDone}`}>
+                                  {agent.id === "verifier" ? "AUDIT DONE ✓" : "COMPLETE ✓"}
+                                </span>
+                              )}
                             {isAgentVerifying && (
                               <span className={`${styles.subStepTag} ${styles.subTagVerifying}`}>
                                 COUNCIL AUDITING...

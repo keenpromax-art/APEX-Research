@@ -123,4 +123,5 @@ export const RATIO_FOOTNOTES = {
   NOT_MEANINGFUL: "N/M: Not Meaningful due to near-zero or negative equity/EBITDA base.",
   NEGATIVE_MULTIPLE: "N/M: Negative operating profit invalidates standard valuation multiple.",
   SANITY_CAPPED: "N/M*: Figure exceeds institutional solvency bounds; excluded from averages.",
+  ESTIMATED_INPUT: "Est.: Input field model-estimated from fixed-margin fallback (not company-reported). See Data Quality disclosure.",
 };

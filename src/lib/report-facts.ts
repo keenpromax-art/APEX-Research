@@ -382,7 +382,16 @@ export function buildMasterReportFacts(params: {
     ]
   };
 
-  // 12. Data Quality Engine
+  // 12. Data Quality Engine (estimate-aware: synthesized fields cap confidence)
+  const estimatedFieldsCount = annualFinancials.reduce((s, f) => s + (f.estimatesUsed?.length || 0), 0);
+  const estimatedYears = annualFinancials.filter(f => (f.estimatesUsed?.length || 0) > 0).length;
+  const estimateIssues: string[] = [];
+  if (estimatedFieldsCount > 0) {
+    estimateIssues.push(
+      `Financial statements include ${estimatedFieldsCount} model-estimated field(s) across ${estimatedYears}/${annualFinancials.length} year(s) (fixed-margin fallbacks, not reported — see statement footnotes).`
+    );
+  }
+
   const dataQualityScore = Math.round(
     (annualFinancials.length >= 4 ? 40 : annualFinancials.length * 10) +
     (isDcfValid ? 30 : 0) +
@@ -390,16 +399,19 @@ export function buildMasterReportFacts(params: {
     (stockData.currentPrice > 0 ? 10 : 0)
   );
 
+  const valuationConfidence: "High" | "Medium" | "Low" =
+    !isDcfValid ? "Low" : estimatedFieldsCount >= 12 ? "Low" : estimatedFieldsCount >= 5 ? "Medium" : "High";
+
   const quality: DataQuality = {
     score: dataQualityScore,
     historicalCoverage: annualFinancials.length >= 4 ? "High" : (annualFinancials.length >= 2 ? "Medium" : "Low"),
     peerCoverage: peerCoverage >= 0.70 ? "High" : (peerCoverage >= 0.40 ? "Medium" : "Low"),
-    valuationConfidence: isDcfValid ? "High" : "Low",
+    valuationConfidence,
     sourceCompleteness: annualFinancials.length >= 3 && cmp !== null ? "High" : "Medium",
-    issues: valuation.diagnostics
+    issues: [...valuation.diagnostics, ...estimateIssues]
   };
 
-  // 13. Provenance Map
+  // 13. Provenance Map (financials marked INFERENCE when fallbacks were used)
   const provenance: Record<string, ProvenanceType> = {
     currentPrice: "REPORTED",
     sharesOutstanding: "REPORTED",
@@ -412,7 +424,8 @@ export function buildMasterReportFacts(params: {
     terminalGrowth: "ASSUMPTION",
     scenarios: "DERIVED",
     moat: "DERIVED",
-    uncertainty: "DERIVED"
+    uncertainty: "DERIVED",
+    financials: estimatedFieldsCount > 0 ? "INFERENCE" : "REPORTED"
   };
 
   return {

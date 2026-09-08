@@ -257,11 +257,20 @@ export function sanitizeAIText(
   // 3. Contradictions
   const contradictionCheck = auditNarrativeContradictions(cleanedText, facts);
 
+  // 4. Residual placeholder leak scan: the injector covers a fixed token set —
+  // any surviving {{...}} (variant spelling, new token) must fail loudly, never
+  // render verbatim into a publishable report.
+  const leakedPlaceholders = Array.from(new Set(cleanedText.match(/\{\{[^}]+\}\}/g) || []));
+  const contradictions = [...contradictionCheck.contradictions];
+  for (const tok of leakedPlaceholders) {
+    contradictions.push(`Unresolved template token leaked into narrative: ${tok}. Placeholder injection incomplete.`);
+  }
+
   return {
     sanitizedText: cleanedText,
     injectedCount: replacementsCount,
     unsupportedNumbers: [],
-    contradictions: contradictionCheck.contradictions,
-    isClean: contradictionCheck.valid
+    contradictions,
+    isClean: contradictions.length === 0
   };
 }

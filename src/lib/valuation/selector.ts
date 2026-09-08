@@ -147,7 +147,7 @@ export function selectAndComputeValuation(params: {
   }
 
   // 2. Non-financial institutions: Standard FCFF DCF with archetype & sector integration
-  const standardDcf = computeDCF(annualFinancials, stockData, sectorProfile, archetypeProfile);
+  const standardDcf = computeDCF(annualFinancials, stockData, sectorProfile, archetypeProfile, profile.country);
   const fairValue = standardDcf.fairValuePerShare || (standardDcf.intrinsicValue > 0 ? standardDcf.intrinsicValue : null);
   const upside = standardDcf.upsideDownside;
   const rating = standardDcf.verdict;

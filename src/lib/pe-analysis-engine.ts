@@ -27,6 +27,7 @@ export interface PEAnalysisInput {
   dupontByYear?: DuPontAnalysis[];
   news?: TickerNewsItem[];
   assumptionsLedger?: any;
+  masterReportFacts?: any;
 }
 
 export function generatePEFirmAnalysis(input: PEAnalysisInput): AIAnalysis {
@@ -325,17 +326,14 @@ export function generatePEFirmAnalysis(input: PEAnalysisInput): AIAnalysis {
   // Harmonize Moat Pillars with canonical Moat Rating to prevent contradictions
   const canonicalMoat = (input.assumptionsLedger as any)?.moatRating || (input as any).masterReportFacts?.moat?.rating;
   if (canonicalMoat === "Narrow") {
-    let wideCount = 0;
+    // All Wide-durability pillars are downgraded: keeping a single "Wide" pillar
+    // under a Narrow composite tripped the MOAT-02 gate and contradicted the rating.
     moatPillars = moatPillars.map(p => {
       if (p.durability.startsWith("Wide")) {
-        if (wideCount === 0) {
-          wideCount++;
-          return { ...p, durability: "Wide (10-12 Yrs)" };
-        }
         return {
           ...p,
           durability: "Narrow (7-10 Yrs)",
-          rationale: p.rationale.replace(/multi-decade|unassailable|permanent/gi, "defensible")
+          rationale: `${p.rationale.replace(/multi-decade|unassailable|permanent|unassailable legal barriers/gi, "defensible")} (Durability capped to composite Narrow moat.)`
         };
       }
       return p;
@@ -346,6 +344,26 @@ export function generatePEFirmAnalysis(input: PEAnalysisInput): AIAnalysis {
       durability: "None (< 3 Yrs)",
       rationale: "Vulnerable to competitive encroachment and margin erosion without structural barriers."
     }));
+  }
+
+  // Harmonize moat narrative prose with the canonical rating: scrub Wide-claims
+  // from moatSources when the composite is Narrow/None. Pillars alone were
+  // patched before while moatSources still claimed Wide economics (MOAT-01/02 gap).
+  if (canonicalMoat === "Narrow" || canonicalMoat === "None") {
+    const scrubWide = (s: string) => (s || "")
+      .replace(/wide[\s-]economic[\s-]moat/gi, `${canonicalMoat} economic moat`)
+      .replace(/wide structural moat/gi, `${canonicalMoat} structural moat`)
+      .replace(/wide moat/gi, `${canonicalMoat} moat`)
+      .replace(/unassailable|insurmountable|impenetrable/gi, "defensible")
+      .replace(/multi-decade/gi, "multi-year");
+    moatSources = {
+      switchingCosts: scrubWide(moatSources.switchingCosts),
+      intangibleAssets: scrubWide(moatSources.intangibleAssets),
+      costAdvantage: scrubWide(moatSources.costAdvantage),
+      moatTrend: canonicalMoat === "None"
+        ? "Negative: no durable advantage evidenced; returns trail cost of capital."
+        : moatSources.moatTrend,
+    };
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -566,7 +584,7 @@ export function generatePEFirmAnalysis(input: PEAnalysisInput): AIAnalysis {
   // ─────────────────────────────────────────────────────────────────────────────
   // AGENT 7: GOVERNANCE, CAPITAL ALLOCATION & STEWARDSHIP
   // ─────────────────────────────────────────────────────────────────────────────
-  const governanceCommentary = `We view ${profile.name}'s corporate governance framework as sound. The board of directors maintains an independent committee structure overseeing audit scrutiny, executive remuneration, and enterprise risk controls.`;
+  const governanceCommentary = `Governance coverage for ${profile.name} is limited to disclosed filings available to this desk. No assessment is made on board independence, chair/CEO separation, clawback provisions, or incentive-hurdle specifics beyond what is evidenced in officer and ownership data — unevidenced pillars are reported as "No assessment" in the scorecard rather than assumed sound.`;
   const capitalAllocationCommentary = archProfile.capitalAllocationDescription;
   const capitalDeploymentHistory = {
     narrative: `Historical capital deployment over the past 5-year cycle reflects ${archProfile.archetype === "DISTRESSED" ? "rigorous liquidity preservation and debt obligation containment" : archProfile.archetype === "EARLY_PLATFORM_GROWTH" ? "aggressive reinvestment into core dark-store network scale and technology IP" : "prudent allocation across internal organic capex, deleveraging, and shareholder distributions"}.`,
@@ -586,170 +604,28 @@ export function generatePEFirmAnalysis(input: PEAnalysisInput): AIAnalysis {
   // ─────────────────────────────────────────────────────────────────────────────
   let analystNotes: { title: string; date: string; paragraphs: string[] }[] = [];
 
-  if (sectorType === "platform_gig_economy") {
-    analystNotes = [
-      {
-        title: "Quick-Commerce Dark Store Density Accelerates Path to Contribution Breakeven",
-        date: "28 Oct 2024",
+  // Verified-news-only analyst notes: derived exclusively from real input.news
+  // items (headline, publisher, date). No news produces no notes — the section
+  // is omitted downstream instead of rendering dated boilerplate as coverage.
+  {
+    const seenNoteTitles = new Set();
+    for (const item of input.news || []) {
+      const noteTitle = (item.title || "").trim();
+      if (!noteTitle || seenNoteTitles.has(noteTitle.toLowerCase())) continue;
+      seenNoteTitles.add(noteTitle.toLowerCase());
+      const noteDate = item.publishedAt ? item.publishedAt.slice(0, 10) : "Undated";
+      analystNotes.push({
+        title: noteTitle,
+        date: `${noteDate} \u00b7 ${item.publisher || "Media wire"}` ,
         paragraphs: [
-          `${profile.name} demonstrated strong operational execution across its hyperlocal quick-commerce network. Order volumes expanded by over 30% year-over-year, driven by accelerated dark store densification across top metropolitan hubs.`,
-          `Store-level contribution margins exhibited positive inflection as mature dark stores reached throughput targets exceeding 1,200 orders per day. Higher fulfillment density significantly compressed per-order delivery turnaround times.`,
-          `We reaffirm our ${recAction} stance with a fair value target of ${sym}${fv.toFixed(2)}, supported by structural convenience adoption and expanding platform monetization.`,
+          item.summary && item.summary.length > 20
+            ? item.summary
+            : `${profile.name} featured in ${item.publisher || "financial media"} coverage evaluated for earnings transmission.`,
+          `Desk stance ${recAction} with intrinsic fair value target of ${sym}${fv.toFixed(2)} frames how this development transmits into the investment case.`,
         ],
-      },
-      {
-        title: "Non-Grocery Category Expansion Drives Average Order Value and Take-Rate Upside",
-        date: "15 Aug 2024",
-        paragraphs: [
-          `The expansion of quick-commerce catalogs beyond fresh produce into consumer electronics, beauty, and festive gifting is yielding tangible Average Order Value (AOV) expansion. Non-grocery categories carry higher gross margins and manufacturer advertising spend.`,
-          `Platform advertising revenues expanded rapidly, providing high-margin incremental cash flow that accelerates consolidated operating leverage.`,
-        ],
-      },
-      {
-        title: "Hyperlocal Batching Algorithms Lower Per-Drop Logistics Unit Costs",
-        date: "18 Jun 2024",
-        paragraphs: [
-          `Continuous deployment of proprietary delivery route batching algorithms improved fleet utilization across peak ordering hours. Multi-order drop dispatching reduced effective delivery personnel payouts per fulfilled order.`,
-          `These unit-economics optimizations demonstrate that operational scale translates into sustainable cost advantages over prospective platform entrants.`,
-        ],
-      },
-      {
-        title: "Initiating Coverage: Hyperlocal Network Flywheel and Long-Term Platform Dominance",
-        date: "12 Jun 2023",
-        paragraphs: [
-          `We initiate research coverage on ${profile.name} with ${recAction} and an intrinsic fair value target of ${sym}${fv.toFixed(2)} per share. The enterprise commands entrenched consumer habituation and two-sided merchant network effects across the urban consumer ecosystem.`,
-          `While near-term growth investments in dark store real estate and user acquisition impact consolidated net income, long-term unit economics provide a clear path toward sustainable free cash flow generation.`,
-        ],
-      },
-    ];
-  } else if (sectorType === "telecom") {
-    analystNotes = [
-      {
-        title: "ARPU Progression and Tariff Rationalization Anchor Operational Cash Generation",
-        date: "28 Oct 2024",
-        paragraphs: [
-          `${profile.name} reported steady sequential Average Revenue Per User (ARPU) improvement following industry-wide tariff adjustments. Subscriber migration toward entry-level 4G/5G data bundled plans supported blended realization.`,
-          `Operational EBITDA margins stabilized, as tariff increases flowed directly to gross margin contribution while network operating costs remained controlled.`,
-          `We reiterate our ${recAction} stance on ${profile.name} with a calibrated fair value target of ${sym}${fv.toFixed(2)}.`,
-        ],
-      },
-      {
-        title: "Targeted 4G/5G Network Capex Deployment Focuses on Core Revenue Circles",
-        date: "15 Aug 2024",
-        paragraphs: [
-          `Management's network capital expenditure roadmap prioritizes capacity expansion across top-tier urban circles that generate over 75% of operational revenue. Fiberized cell tower tenancies expanded to support rising mobile data consumption.`,
-          `Selective capital allocation preserves liquidity while defending subscriber market share in key commercial geographies.`,
-        ],
-      },
-      {
-        title: "Sovereign Debt Relief & Moratorium Dialogue De-Risk Near-Term Liquidity Profile",
-        date: "18 Jun 2024",
-        paragraphs: [
-          `Constructive regulatory dialogue regarding statutory spectrum installments and Adjusted Gross Revenue (AGR) obligations provides vital balance sheet breathing room. Government equity participation supports triopoly sector stability.`,
-          `Execution of broader external debt refinancing and vendor payment restructuring remains the paramount milestone for long-term equity recovery.`,
-        ],
-      },
-      {
-        title: "Initiating Coverage: Capital Structure Dynamics and Market Fundamentals Shape Valuation",
-        date: "12 Jun 2023",
-        paragraphs: [
-          `We initiate research coverage on ${profile.name} with ${recAction} and a valuation target of ${sym}${fv.toFixed(2)}. The investment thesis balances substantial financial leverage with strategic national spectrum assets.`,
-          `Long-term equity returns remain contingent upon sustained industry-wide tariff compounding, government policy support, and operational cash flow inflection.`,
-        ],
-      },
-    ];
-  } else if (sectorType === "technology_platform") {
-    analystNotes = [
-      {
-        title: "Family of Apps Ad Pricing and ARPU (Advertising Basis) Anchor Earnings Beat",
-        date: "28 Oct 2024",
-        paragraphs: [
-          `${profile.name} reported resilient advertising revenue as ad-impression growth combined with average price-per-ad recovery, expanding digital-advertising ARPU across DAU/MAU cohorts. AI-driven ranking and Advantage+ automation lifted advertiser return on spend.`,
-          `Family of Apps operating margins expanded on disciplined headcount and infrastructure efficiency, partly offset by data-center and AI capex and the ongoing Reality Labs operating loss.`,
-          `We reaffirm our ${recAction} stance with a fair value target of ${sym}${fv.toFixed(2)}, supported by ad-platform scale and free-cash-flow conversion.`,
-        ],
-      },
-      {
-        title: "AI Infrastructure Capex Supports Ranking Gains; Conversion Efficiency in Focus",
-        date: "15 Aug 2024",
-        paragraphs: [
-          `Management's data-center and accelerator roadmap prioritizes ad ranking, recommendation relevance, and generative-AI assistants. Scaling training and inference capacity is the principal capex driver for the advertising platform.`,
-          `Sustained capex discipline tied to measurable advertiser ROI preserves consolidated free-cash-flow conversion across cycles.`,
-        ],
-      },
-      {
-        title: "Reality Labs Loss Containment and Wearables Optionality",
-        date: "18 Jun 2024",
-        paragraphs: [
-          `Reality Labs remains an investment drag with material annual operating losses, partially mitigated by Quest and AI-glasses (wearables) traction. Segment disclosure separation keeps Family of Apps margin structure transparent.`,
-          `Forward equity value remains anchored on Family of Apps ad durability rather than near-term hardware profitability.`,
-        ],
-      },
-      {
-        title: "Initiating Coverage: Scaled Attention Platform with Advertiser Pricing Power",
-        date: "12 Jun 2023",
-        paragraphs: [
-          `We initiate research coverage on ${profile.name} with ${recAction} and an intrinsic fair value target of ${sym}${fv.toFixed(2)} per share. The enterprise commands multi-billion DAU/MAU network effects and proprietary ad-measurement scale.`,
-          `Key debates are ad-spend cyclicality, privacy/antitrust regulation, AI capex intensity, and Reality Labs losses — not telecom tariffs or packaged-goods distribution.`,
-        ],
-      },
-    ];
-  } else if (sectorType === "nbfc") {
-    analystNotes = [
-      {
-        title: "Disbursement Momentum & Collection Discipline Drive Portfolio Health",
-        date: "28 Oct 2024",
-        paragraphs: [
-          `${profile.name} demonstrated steady disbursement volume growth across rural center meetings, supported by resilient rural borrower cash flows and active branch monitoring.`,
-          `Net interest spreads remained defensible as management effectively passed through funding costs while maintaining risk-calibrated underwriting standards.`,
-          `We formulate ${recAction} recommendation on ${profile.name} with an intrinsic fair value target of ${sym}${fv.toFixed(2)}.`,
-        ],
-      },
-      {
-        title: "Asset Quality & Stage-3 Coverage Buffer Solvency Runway",
-        date: "15 Aug 2024",
-        paragraphs: [
-          `Prudent provisioning policy and dedicated collection taskforces contained Gross Stage-3 slippages within modeled expectations.`,
-          `Capital adequacy remains securely above statutory minimums, providing strategic headroom to scale AUM sustainably.`,
-        ],
-      },
-      {
-        title: "Initiating Coverage: Grassroots Microfinance Franchise with Compounding Potential",
-        date: "12 Jun 2023",
-        paragraphs: [
-          `We initiate research coverage on ${profile.name} with ${recAction} and a fair value target of ${sym}${fv.toFixed(2)} per share. The franchise benefits from deep rural customer relationships and rigorous credit monitoring.`,
-          `Long-term equity returns are supported by grassroots financial deepening and operational operating leverage.`,
-        ],
-      },
-    ];
-  } else {
-    analystNotes = [
-      {
-        title: "Operational Execution & Operating Margin Discipline Underpin Earnings Outperformance",
-        date: "28 Oct 2024",
-        paragraphs: [
-          `${profile.name} reported resilient quarterly results reflecting steady volume demand and disciplined cost containment across primary operational divisions.`,
-          `EBITDA margins held firm at ${formatPct(ebitdaMargin)}, as management successfully mitigated inflationary pressures through operational automation and procurement efficiency.`,
-          `We reaffirm our ${recAction} recommendation on ${profile.name} with an intrinsic fair value target of ${sym}${fv.toFixed(2)}.`,
-        ],
-      },
-      {
-        title: "Capital Allocation Discipline: Prudent Reinvestment Supports Long-Term Return on Capital",
-        date: "15 Aug 2024",
-        paragraphs: [
-          `Management has demonstrated commendable capital discipline, directing growth investments toward high-return projects with quick payback horizons while eschewing speculative ventures.`,
-          `Balance sheet health provides flexibility to navigate broader macroeconomic fluctuations without compromising long-term competitiveness.`,
-        ],
-      },
-      {
-        title: "Initiating Research Coverage: Defensive Franchise Trading at Calibrated Valuation",
-        date: "12 Jun 2023",
-        paragraphs: [
-          `We initiate research coverage on ${profile.name} with ${recAction} and a fair value target of ${sym}${fv.toFixed(2)} per share. The franchise combines defensible competitive positioning with operational execution reliability.`,
-          `Current trading levels offer a balanced risk-reward profile for institutional fundamental investors.`,
-        ],
-      },
-    ];
+      });
+      if (analystNotes.length >= 4) break;
+    }
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -822,24 +698,8 @@ export function generatePEFirmAnalysis(input: PEAnalysisInput): AIAnalysis {
     };
   });
 
-  // Ensure at least 4 material news items are present for institutional completeness
-  if (recentNewsAnalysis.length < 4) {
-    const defaultHeadlines = [
-      { h: `${profile.name} Files Comprehensive Statutory Compliance & Corporate Governance Report`, p: "Regulatory Stock Exchange Filing", t: "Demonstrates institutional governance rigor and statutory adherence across operating subsidiaries." },
-      { h: `${profile.name} Discloses Ongoing Capacity Optimization and Modernization Capex`, p: "Exchange Surveillance Wire", t: "Supports progressive margin expansion through asset turn optimization and reduced unit overhead." },
-      { h: `${profile.name} Commercial Execution Supports Trailing Quarterly Operating Milestones`, p: "Institutional Research Desk", t: "Underpins revenue baseline stability against prevailing sectoral and macroeconomic fluctuations." },
-      { h: `${profile.name} Maintains Solid Balance Sheet Liquidity and Prudent Capital Allocation`, p: "Financial Intelligence Service", t: "Provides robust liquidity headroom to fund organic growth initiatives without balance sheet strain." },
-    ];
-    for (const dh of defaultHeadlines) {
-      if (recentNewsAnalysis.length >= 4) break;
-      recentNewsAnalysis.push({
-        headline: dh.h,
-        publisher: dh.p,
-        date: "Exchange Surveillance",
-        strategicTakeaway: dh.t,
-      });
-    }
-  }
+  // No padding: fewer than 4 verified items stays as-is. Downstream renders an
+  // explicit limited-coverage state rather than fictional exchange filings.
 
   // ── Archetype-Specific SWOT Analysis ─────────────────────────────
   let swotStrengths: string[];
@@ -1026,70 +886,74 @@ export function generatePEFirmAnalysis(input: PEAnalysisInput): AIAnalysis {
   const ratioCommentary = `Financial solvency, liquidity, and asset turnover ratios remain consistent with institutional research criteria, reflecting prudent risk management standards.`;
   const dcfCommentary = `Our discounted cash flow valuation anchors intrinsic enterprise value through a multi-stage forecast reflecting scenario-tested margin profiles and disciplined WACC discounting.`;
 
+  // Honest deterministic fallback: no LLM council ran. Never VERIFIED/99.
   const councilVerification: CouncilVerificationAudit = {
-    status: "VERIFIED",
-    integrityScore: 99,
-    summary: `Council Quality & Verification Officer confirmed 100% mathematical consistency across valuation targets, debt ratios, and DuPont decomposition for ${profile.name} (${profile.ticker}). Zero fatal hallucinations or contradictions detected.`,
+    status: "FLAGGED",
+    integrityScore: 0,
+    summary: `Deterministic PE fallback for ${profile.name} (${profile.ticker}) — no LLM council audit ran. All cross-checks below are unverified; treat narrative claims as unconfirmed pending council review.`,
     checks: [
       {
         name: "Valuation & CMP Mathematical Consistency",
         category: "VALUATION",
-        status: "PASS",
-        observation: `Current Market Price (${sym}${cmp.toFixed(2)}) and DCF Intrinsic Fair Value (${sym}${fv.toFixed(2)}) verified with exact ${formatPct(upsidePct)} spread.`,
+        status: "FLAG",
+        observation: `Not independently verified (deterministic fallback): CMP (${sym}${cmp.toFixed(2)}) vs DCF fair value (${sym}${fv.toFixed(2)}, ${formatPct(upsidePct)} spread).`,
       },
       {
         name: "Thesis & Model Recommendation Alignment",
         category: "RECOMMENDATION",
-        status: "PASS",
-        observation: `Investment thesis stance unambiguously reflects the quantitative ${verdict} directive without directional conflict.`,
+        status: "FLAG",
+        observation: `Not independently verified (deterministic fallback): thesis stance vs quantitative ${verdict} directive unchecked.`,
       },
       {
         name: "Balance Sheet & Solvency Cross-Verification",
         category: "SOLVENCY",
-        status: "PASS",
-        observation: `Solvency metrics verified: Net debt of ${formatLargeNum(netDebt, cur)} aligns with credit analysis profile.`,
+        status: "FLAG",
+        observation: `Not independently verified (deterministic fallback): net debt of ${formatLargeNum(netDebt, cur)} unchecked against commentary.`,
       },
       {
         name: "5-Stage DuPont & Operating Leverage Quality",
         category: "FINANCIALS",
-        status: "PASS",
-        observation: `Operating margin absorption and asset turnover dynamics align with historical financial statement trends.`,
+        status: "FLAG",
+        observation: `Not independently verified (deterministic fallback): margin and turnover dynamics unchecked.`,
       },
       {
         name: "Anti-Hallucination & Cross-Persona Integrity",
         category: "ANTI_HALLUCINATION",
-        status: "PASS",
-        observation: `No contradictory market share assertions, mismatched time horizons, or hallucinated numbers detected across council persona outputs.`,
+        status: "FLAG",
+        observation: `Not independently verified (deterministic fallback): cross-persona contradictions unchecked.`,
       },
     ],
     correctionsApplied: [
-      "Directional alignment verified across DCF projections and terminal multiples.",
-      "Audited credit risk profile against reported balance sheet liabilities.",
+      "No corrections applied — council verification did not run.",
     ],
     verificationTimestamp: new Date().toISOString(),
-    auditorSignature: "Supervisory Council Quality & Verification Officer (PE Audit Protocol)",
+    auditorSignature: "Supervisory Council Quality & Verification Officer (PE Audit Protocol) — AUDIT NOT PERFORMED",
   };
 
+  const hasVerifiedNews = recentNewsAnalysis.length > 0;
   const newsSummary: NewsSummaryDeskAnalysis = {
-    executiveNewsSummary: `${profile.name} has maintained consistent visibility across corporate disclosure feeds, characterized by steady execution in primary commercial verticals, strategic capacity additions, and disciplined balance sheet stewardship. Verified media and regulatory announcements corroborate operational delivery without unpriced downside surprises.`,
-    mediaSentimentScore: 0.72,
-    mediaSentimentLabel: "Constructive",
-    keyNarrativeThemes: [
-      "Core Commercial Capacity Expansion & Operational Scale",
-      "Disciplined Capital Allocation & Operating Cash Flow Conversion",
-      "Treasury Management & High Debt Service Coverage Headroom",
-      "Strategic Account Retention & Sector Value-Chain Moat",
-    ],
+    executiveNewsSummary: hasVerifiedNews
+      ? `${profile.name} appears in ${recentNewsAnalysis.length} verified disclosure-feed item(s), summarized below from stated sources. No sentiment beyond what the items state is asserted.`
+      : `No verified news items were available for ${profile.name} in the current feed; no media narrative is asserted.`,
+    mediaSentimentScore: 0,
+    mediaSentimentLabel: "Neutral",
+    keyNarrativeThemes: hasVerifiedNews
+      ? recentNewsAnalysis.slice(0, 4).map((n) => n.headline.slice(0, 80))
+      : [],
     topDisclosures: recentNewsAnalysis.slice(0, 5).map((item, idx) => ({
       date: item.date,
-      source: item.publisher || "Exchange Regulatory Filing",
+      source: item.publisher || "Media wire",
       headline: item.headline,
       category: idx === 0 ? "Operational Execution" : idx === 1 ? "Capital Allocation" : "Commercial Contract",
       valuationTransmission: item.strategicTakeaway,
       riskRating: "LOW" as const,
     })),
-    macroIndustryTransmission: `Sector-wide tailwinds in ${profile.sector || "core industrials"} support steady volume realization, while pricing power shields operating margins from input price volatility.`,
-    earningsTransmissionVerdict: `Positive operational momentum validates our fundamental DCF cash flow compounding trajectory and supports our fair value target without requiring negative risk premium adjustments.`,
+    macroIndustryTransmission: hasVerifiedNews
+      ? `Transmission of the above items into cash-flow expectations is judgmental and item-specific; no sector tailwind is assumed.`
+      : `No industry transmission assessed — no verified items.`,
+    earningsTransmissionVerdict: hasVerifiedNews
+      ? `Earnings impact is item-specific and unverified beyond the stated takeaways; no fair-value confirmation is claimed.`
+      : `No verdict — no verified news flow.`,
   };
 
   return {

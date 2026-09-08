@@ -150,6 +150,8 @@ export interface AnnualFinancials {
   changeInInventory?: number;
   changeInPayables?: number;
   endCashPosition?: number;
+  /** Names of fields synthesized from fixed-margin fallbacks (not reported). Empty/undefined = fully reported. */
+  estimatesUsed?: string[];
 }
 
 export interface QuarterlyFinancials {
@@ -242,6 +244,8 @@ export interface DCFAssumptions {
   terminalGrowthRate: number;
   revenueGrowthRates: number[];
   ebitMargins: number[];
+  /** Human-readable source of RF/ERP/tax parameters, e.g. "Country CAPM table v2026-09 (US)". */
+  parameterSource?: string;
 }
 
 export interface DCFResult {
@@ -358,6 +362,10 @@ export interface PeerData {
   currentRatio?: number | null;
   revenueGrowth: number | null;
   currency: string;
+  sector?: string | null;
+  industry?: string | null;
+  /** 0–100 peer-relevance score (sector/industry overlap + size proximity). Null = unscored. */
+  relevanceScore?: number | null;
 }
 
 export interface AIAnalysis {
@@ -475,6 +483,8 @@ export interface TickerNewsItem {
   link?: string;
   publishedAt?: string;
   summary?: string;
+  /** True only for model-generated placeholders. Must never render as verified news. */
+  isSynthetic?: boolean;
 }
 
 export interface EventPriceTrajectoryPoint {
@@ -608,6 +618,14 @@ export interface AssumptionsLedger {
   publishedTargetPrice?: number;
   probabilityWeightedValue?: number;
   valuationMethodology?: string;
+  /** Uncapped terminal value (when terminalValueCapped). Null when not applicable. */
+  terminalValueUncapped?: number | null;
+  /** True when inputs were insufficient — rating forced to NR. */
+  insufficientData?: boolean;
+  /** Mandatory label for the model-implied credit grade, e.g. "Model-implied — not a CRISIL/ICRA/S&P rating". */
+  creditRatingNote?: string;
+  /** Machine-readable data-quality flags, e.g. "ESTIMATED_FINANCIALS:4", "SYNTHETIC_FALLBACK_USED". */
+  dataQualityFlags?: string[];
   moat?: {
     rating: "Wide" | "Narrow" | "None";
     trend: "Positive" | "Stable" | "Negative";

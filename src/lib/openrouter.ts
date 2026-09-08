@@ -18,6 +18,7 @@ import type {
   TickerNewsItem,
   CouncilVerificationAudit,
   NewsSummaryDeskAnalysis,
+  AssumptionsLedger,
 } from "@/types/report";
 import { formatPct, formatLargeNum } from "./calculations";
 import { generatePEFirmAnalysis } from "./pe-analysis-engine";
@@ -753,48 +754,49 @@ async function runCouncilVerificationOfficer(
   const ebitda = latest.ebitda || (latest.revenue * (latest.ebitdaMargin || 0.15));
   const netDebtToEbitda = ebitda > 0 ? netDebt / ebitda : 0;
 
+  // Honest fallback: the council did NOT run. Never present as VERIFIED —
+  // downstream badges must show UNVERIFIED/FLAGGED until a real audit completes.
   const defaultAudit: CouncilVerificationAudit = {
-    status: "VERIFIED",
-    integrityScore: 98,
-    summary: `Council Verification Officer verified complete quantitative and directional alignment across all 6 specialized personas for ${profile.name} (${profile.ticker}). No fatal hallucinations or contradictions detected.`,
+    status: "FLAGGED",
+    integrityScore: 0,
+    summary: `Council verification did not complete for ${profile.name} (${profile.ticker}). Outputs below are unverified persona drafts — no anti-hallucination audit was performed. Treat all narrative claims as unconfirmed.`,
     checks: [
       {
         name: "Valuation & CMP Mathematical Consistency",
         category: "VALUATION",
-        status: "PASS",
-        observation: `CMP of ${sym}${cmp.toFixed(2)} and DCF intrinsic fair value of ${sym}${fv.toFixed(2)} (${upsidePct.toFixed(1)}% implied spread) verified across thesis commentary.`,
+        status: "FLAG",
+        observation: `Council audit unavailable — CMP of ${sym}${cmp.toFixed(2)} vs DCF fair value of ${sym}${fv.toFixed(2)} not independently verified.`,
       },
       {
         name: "Thesis & Model Recommendation Alignment",
         category: "RECOMMENDATION",
-        status: "PASS",
-        observation: `Investment thesis stance aligns strictly with the institutional ${verdict} model directive without directional ambiguity.`,
+        status: "FLAG",
+        observation: `Council audit unavailable — thesis stance vs model directive (${verdict}) not independently verified.`,
       },
       {
         name: "Balance Sheet & Solvency Cross-Verification",
         category: "SOLVENCY",
-        status: "PASS",
-        observation: `Net debt exposure (${formatLargeNum(netDebt, cur)}) and leverage ratios are faithfully mirrored without understating or overstating liquidity cushions.`,
+        status: "FLAG",
+        observation: `Council audit unavailable — net debt exposure (${formatLargeNum(netDebt, cur)}) not independently verified against commentary.`,
       },
       {
         name: "5-Stage DuPont & Earnings Quality Verification",
         category: "FINANCIALS",
-        status: "PASS",
-        observation: `Operating margin absorption and asset turnover dynamics align with historical financial statement trends.`,
+        status: "FLAG",
+        observation: `Council audit unavailable — margin and turnover dynamics not independently verified.`,
       },
       {
         name: "Anti-Hallucination & Inter-Agent Cross-Check",
         category: "ANTI_HALLUCINATION",
-        status: "PASS",
-        observation: `No contradictory market share claims or contradictory catalyst horizons detected across persona outputs.`,
+        status: "FLAG",
+        observation: `Council audit unavailable — cross-persona contradictions not checked.`,
       },
     ],
     correctionsApplied: [
-      "Confirmed directional alignment of all target price scenarios with DCF model ledger.",
-      "Validated solvency commentary against reported balance sheet liabilities.",
+      "No corrections applied — council verification did not run.",
     ],
     verificationTimestamp: new Date().toISOString(),
-    auditorSignature: "Council Supervisory Verification Desk (CFA/PE Audit Protocol)",
+    auditorSignature: "Council Supervisory Verification Desk (CFA/PE Audit Protocol) — AUDIT NOT PERFORMED",
   };
 
   const prompt = `You are the Supervisory Council Quality & Verification Officer at an institutional investment committee.
@@ -1020,10 +1022,12 @@ export async function generateAIAnalysis(
   dcf: DCFResult,
   news?: TickerNewsItem[],
   onProgress?: (event: AgentProgressEvent) => void,
-  customConfig?: CustomKeyConfig | null
+  customConfig?: CustomKeyConfig | null,
+  precomputedLedger?: AssumptionsLedger | null
 ): Promise<AIAnalysis> {
-  // Always build the deep PE foundation first (100% deterministic & sector-tailored)
-  const peBase = generatePEFirmAnalysis({ profile, stockData, annualFinancials, dcf, news });
+  // Always build the deep PE foundation first (100% deterministic & sector-tailored).
+  // The canonical ledger (when precomputed) harmonizes moat pillars/narrative.
+  const peBase = generatePEFirmAnalysis({ profile, stockData, annualFinancials, dcf, news, assumptionsLedger: precomputedLedger ?? undefined });
 
   let completedCount = 0;
   const total = AI_AGENT_PERSONAS.length;
@@ -1074,7 +1078,8 @@ export async function generateAIAnalysis(
     } catch (err) {
       if (err instanceof RateLimitError) throw err;
       console.warn(`Agent ${meta.name} fallback applied:`, err);
-      const auditNote = auditVerifier();
+      // Honest checkpoint: the agent failed — never emit a "Verified" audit note.
+      const auditNote = `UNVERIFIED — ${meta.name} failed; deterministic fallback used, council review pending.`;
       completedCount++;
       onProgress?.({
         type: "agent_complete",
@@ -1105,37 +1110,37 @@ export async function generateAIAnalysis(
       runWithCheckpoint(
         AI_AGENT_PERSONAS[0],
         () => runLeadEquityStrategist(profile, stockData, dcf, annualFinancials, customConfig),
-        () => `✓ Council Verified: Target price aligned with DCF intrinsic ledger (₹${dcf.intrinsicValue}) & monotonic scenarios.`
+        () => `Agent complete — queued for council audit (target vs DCF ledger check pending).`
       ),
       runWithCheckpoint(
         AI_AGENT_PERSONAS[1],
         () => runNewsIntelligenceAnalyst(profile, stockData, annualFinancials, news, customConfig),
-        () => "✓ Council Verified: Catalysts authenticated against verified regulatory announcements."
+        () => "Agent complete — queued for council audit (catalyst authentication pending)."
       ),
       runWithCheckpoint(
         AI_AGENT_PERSONAS[2],
         () => runMoatAndStrategyAnalyst(profile, stockData, annualFinancials, dcf, customConfig),
-        () => `✓ Council Verified: Economic moat spread validated against capital hurdle (WACC ${(dcf.assumptions.wacc * 100).toFixed(1)}%).`
+        () => `Agent complete — queued for council audit (moat-spread validation pending).`
       ),
       runWithCheckpoint(
         AI_AGENT_PERSONAS[3],
         () => runForensicFinancialAnalyst(profile, annualFinancials, customConfig),
-        () => "✓ Council Verified: 5-Stage DuPont identities mathematically reconciled with reported ROE."
+        () => "Agent complete — queued for council audit (DuPont reconciliation pending)."
       ),
       runWithCheckpoint(
         AI_AGENT_PERSONAS[4],
         () => runCreditSolvencyAnalyst(profile, annualFinancials, stockData, customConfig),
-        () => "✓ Council Verified: Solvency ratios & debt maturity profile cross-audited against balance sheet."
+        () => "Agent complete — queued for council audit (solvency cross-check pending)."
       ),
       runWithCheckpoint(
         AI_AGENT_PERSONAS[5],
         () => runGovernanceCapitalAnalyst(profile, stockData, annualFinancials, dcf, customConfig),
-        () => "✓ Council Verified: Board stewardship and capital reinvestment discipline verified."
+        () => "Agent complete — queued for council audit (stewardship review pending)."
       ),
       runWithCheckpoint(
         AI_AGENT_PERSONAS[6],
         () => runNewsSummaryDesk(profile, stockData, annualFinancials, news, customConfig),
-        () => "✓ Council Verified: News sentiment & media narrative cross-audited against exchange wires."
+        () => "Agent complete — queued for council audit (news cross-check pending)."
       ),
     ]);
 
@@ -1207,7 +1212,7 @@ export async function generateAIAnalysis(
     const verificationAudit = await runWithCheckpoint(
       AI_AGENT_PERSONAS[7],
       () => runCouncilVerificationOfficer(profile, stockData, annualFinancials, dcf, assembled, customConfig),
-      () => "✓ Council Certified: Comprehensive multi-analyst synthesis signed with zero fatal hallucinations."
+      () => "Council audit checkpoint reached — see verification audit status (VERIFIED / CORRECTED / FLAGGED)."
     );
 
     return {

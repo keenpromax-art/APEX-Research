@@ -64,8 +64,27 @@ export async function GET(request: NextRequest) {
 
       let peerTickers: string[] = [];
 
+      // Internet platforms (social / digital advertising) must be routed BEFORE
+      // the telecom branches below: "Communication Services" covers both carriers
+      // AND platforms, and platform descriptions contain carrier-like substrings.
+      const descLower = (companyProfile.description || "").toLowerCase();
+      const isInternetPlatform =
+        ind.includes("internet content") ||
+        ind.includes("internet media") ||
+        ind.includes("social media") ||
+        ind.includes("social network") ||
+        ind.includes("online advertising") ||
+        ind.includes("digital advertising") ||
+        ind.includes("interactive media") ||
+        descLower.includes("family of apps") ||
+        descLower.includes("reality labs") ||
+        descLower.includes("daily active users") ||
+        descLower.includes("monthly active users");
+
       if (isIndian) {
-        if (
+        if (isInternetPlatform) {
+          peerTickers = ["ZOMATO.NS", "DELHIVERY.NS", "PBFINTECH.NS", "NYKAA.NS"];
+        } else if (
           sym.includes("SWIGGY") ||
           sym.includes("ZOMATO") ||
           ind.includes("food delivery") ||
@@ -80,7 +99,9 @@ export async function GET(request: NextRequest) {
         } else if (ind.includes("telecom") || sec.includes("communication") || sym.includes("IDEA") || sym.includes("BHARTIARTL") || sym.includes("TATACOMM")) {
           peerTickers = ["BHARTIARTL.NS", "INDUSTOWER.NS", "TATACOMM.NS", "ROUTE.NS"];
         } else if (sym.includes("RELIANCE")) {
-          peerTickers = ["ONGC.NS", "BPCL.NS", "IOC.NS", "BHARTIARTL.NS"];
+          // Energy/conglomerate comparables only — telecom carriers excluded
+          // (BHARTIARTL was a cross-sector contamination).
+          peerTickers = ["ONGC.NS", "BPCL.NS", "IOC.NS", "NTPC.NS"];
         } else if (ind.includes("rating") || ind.includes("financial data") || ind.includes("exchange") || ind.includes("analytics")) {
           peerTickers = ["ICRA.NS", "CAREERP.NS", "BSE.NS", "MCX.NS"];
         } else if (sym.includes("SPANDANA") || ind.includes("microfinance") || ind.includes("consumer finance") || (companyProfile.description || "").toLowerCase().includes("microfinance")) {
@@ -121,7 +142,9 @@ export async function GET(request: NextRequest) {
           peerTickers = [];
         }
       } else {
-        if (
+        if (isInternetPlatform) {
+          peerTickers = ["GOOGL", "RDDT", "SNAP", "PINS"];
+        } else if (
           sym.includes("DASH") ||
           sym.includes("UBER") ||
           sym.includes("GRAB") ||
@@ -166,7 +189,10 @@ export async function GET(request: NextRequest) {
         ) {
           peerTickers = ["NKE", "LULU", "DECK", "CROX", "SKX", "HBI"];
         } else {
-          peerTickers = ["HON", "GE", "CAT", "UPS"];
+          // No generic catch-all bucket: unrelated industrials (HON/GE/CAT/UPS)
+          // contaminated every unclassified report. Empty list suppresses the
+          // relative-valuation conclusion instead of fabricating comparables.
+          peerTickers = [];
         }
       }
 
@@ -174,6 +200,9 @@ export async function GET(request: NextRequest) {
 
       if (filteredPeers.length > 0) {
         const peerRaw = await fetchPeerQuotes(filteredPeers);
+        const subjSec = (companyProfile.sector || "").toLowerCase();
+        const subjInd = (companyProfile.industry || "").toLowerCase();
+        const subjCap = stockData.marketCap || 0;
         peers = peerRaw.map(p => {
           const tickerStr = (p.symbol as string) || "";
           const parseNum = (v: any): number | null => {
@@ -198,26 +227,47 @@ export async function GET(request: NextRequest) {
           const pDebtToEquity = parseNum(p.debtToEquity);
           const pCurrentRatio = parseNum(p.currentRatio);
 
-          const isWindPeer = tickerStr.includes("INOXWIND");
+          // Peer relevance scoring (sector/industry overlap + size proximity) is
+          // surfaced on each peer for display and QA. Missing Yahoo sector fields
+          // never disqualify; curated lists stay authoritative but scored honestly.
+          const qSec = ((p.sector as string) || "").toLowerCase() || null;
+          const qInd = ((p.industry as string) || "").toLowerCase() || null;
+          let relevanceScore: number | null = null;
+          if (qSec || qInd) {
+            let score = 0;
+            if (qSec && subjSec && (qSec.includes(subjSec) || subjSec.includes(qSec))) score += 50;
+            else if (qSec && subjSec) score -= 50;
+            if (qInd && subjInd && (qInd.includes(subjInd) || subjInd.includes(qInd))) score += 30;
+            if (pCap && subjCap > 0) {
+              const ratio = Math.min(pCap, subjCap) / Math.max(pCap, subjCap);
+              score += Math.round(ratio * 20);
+            }
+            relevanceScore = Math.max(0, Math.min(100, score));
+          }
+
           return {
             ticker: tickerStr,
-            name: (p.longName as string) || (p.shortName as string) || (isWindPeer ? "Inox Wind Limited" : tickerStr),
-            marketCap: pCap ?? (isWindPeer ? 1.8e11 : null),
-            cmp: pCmp ?? (isWindPeer ? 142 : null),
-            pe: pPe ?? (isWindPeer ? 34.5 : null),
-            evToEbitda: pEvEbitda ?? (isWindPeer ? 18.2 : null),
-            evToSales: pEvSales ?? (isWindPeer ? 2.5 : null),
-            dividendYield: pDivYield ?? (isWindPeer ? 0.0 : null),
-            pb: pPb ?? (isWindPeer ? 4.2 : null),
-            roe: pRoe ?? (isWindPeer ? 0.14 : null),
-            netMargin: pNetMargin ?? (isWindPeer ? 0.085 : null),
-            grossMargin: pGrossMargin ?? (isWindPeer ? 0.32 : null),
-            ebitdaMargin: pEbitdaMargin ?? (isWindPeer ? 0.155 : (pNetMargin !== null ? pNetMargin * 1.4 : null)),
-            operatingMargin: pOpMargin ?? (isWindPeer ? 0.118 : (pNetMargin !== null ? pNetMargin * 1.2 : null)),
-            debtToEquity: pDebtToEquity ?? (isWindPeer ? 0.42 : null),
-            currentRatio: pCurrentRatio ?? (isWindPeer ? 1.25 : null),
-            revenueGrowth: pRevGrowth ?? (isWindPeer ? 0.45 : null),
+            name: (p.longName as string) || (p.shortName as string) || tickerStr,
+            // Missing market data stays null (renders N/M) — never invented constants.
+            marketCap: pCap,
+            cmp: pCmp,
+            pe: pPe,
+            evToEbitda: pEvEbitda,
+            evToSales: pEvSales,
+            dividendYield: pDivYield,
+            pb: pPb,
+            roe: pRoe,
+            netMargin: pNetMargin,
+            grossMargin: pGrossMargin,
+            ebitdaMargin: pEbitdaMargin,
+            operatingMargin: pOpMargin,
+            debtToEquity: pDebtToEquity,
+            currentRatio: pCurrentRatio,
+            revenueGrowth: pRevGrowth,
             currency: (p.currency as string) || companyProfile.currency,
+            sector: qSec,
+            industry: qInd,
+            relevanceScore,
           };
         }).filter(p => p.ticker && (p.marketCap != null || p.cmp != null || p.pe != null));
       }

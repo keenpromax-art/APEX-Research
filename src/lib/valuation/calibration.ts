@@ -32,6 +32,9 @@ export const DEFAULT_SECTOR_DISTRIBUTIONS: Record<string, SectorDistributionPara
   utilities: { sectorId: "utilities", meanUpside: 0.095, stdDevUpside: 0.145 },
   agrochemical: { sectorId: "agrochemical", meanUpside: 0.145, stdDevUpside: 0.195 },
   cement: { sectorId: "cement", meanUpside: 0.115, stdDevUpside: 0.170 },
+  "asset-management": { sectorId: "asset-management", meanUpside: 0.100, stdDevUpside: 0.150 },
+  "internet-platform": { sectorId: "internet-platform", meanUpside: 0.105, stdDevUpside: 0.170 },
+  "internet-retail": { sectorId: "internet-retail", meanUpside: 0.150, stdDevUpside: 0.210 },
   general: { sectorId: "general", meanUpside: 0.120, stdDevUpside: 0.180 },
 };
 
@@ -75,7 +78,9 @@ export function computeSpearmanRankCorrelation(
   realized: number[]
 ): number {
   const n = Math.min(predicted.length, realized.length);
-  if (n < 3) return 0.45; // Default stable historical information coefficient if sample is small
+  // No real history: report IC as 0 (unknown), never a fabricated 0.45 or a
+  // self-correlation (~1.0) computed from scaled copies of the same prediction.
+  if (n < 3) return 0;
 
   const getRanks = (arr: number[]) => {
     const indexed = arr.slice(0, n).map((val, idx) => ({ val, idx }));
@@ -154,15 +159,23 @@ export function calibrateValuation(params: {
     sectorRelativeRating = "HOLD";
   }
 
-  // 5. Information Coefficient (Spearman rank correlation)
-  const defaultSamplePred = [upside, upside * 0.8, upside * 1.1, upside * 0.6, upside * 1.2];
-  const defaultSampleReal = [upside * 0.9, upside * 0.7, upside * 1.05, upside * 0.55, upside * 1.15];
-  const preds = priorPredictions.length >= 3 ? priorPredictions : defaultSamplePred;
-  const reals = historicalRealizedReturns.length >= 3 ? historicalRealizedReturns : defaultSampleReal;
-  const informationCoefficient = computeSpearmanRankCorrelation(preds, reals);
+  // 5. Information Coefficient (Spearman rank correlation) — computed ONLY from
+  // real supplied histories. Without them IC is 0 (unknown), disclosed as such.
+  const hasRealHistory = priorPredictions.length >= 3 && historicalRealizedReturns.length >= 3;
+  const informationCoefficient = hasRealHistory
+    ? computeSpearmanRankCorrelation(priorPredictions, historicalRealizedReturns)
+    : 0;
+  if (!hasRealHistory) {
+    diagnostics.push("No realized-return history supplied — information coefficient reported as 0 (unknown), not estimated.");
+  }
 
   let calibrationConfidence: "High" | "Moderate" | "Low" = "Moderate";
-  if (Math.abs(informationCoefficient) >= 0.40 && Math.abs(upside) <= 0.80) {
+  if (!hasRealHistory) {
+    calibrationConfidence = "Low";
+    if (Math.abs(upside) > 1.20) {
+      diagnostics.push(`Elevated modeled upside dispersion (${(upside * 100).toFixed(1)}%) reduces calibration confidence.`);
+    }
+  } else if (Math.abs(informationCoefficient) >= 0.40 && Math.abs(upside) <= 0.80) {
     calibrationConfidence = "High";
   } else if (Math.abs(upside) > 1.20) {
     calibrationConfidence = "Low";

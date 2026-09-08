@@ -84,6 +84,17 @@ export default function ReportClient({ ticker }: Props) {
       }
       const companyData = await companyRes.json();
 
+      // Canonical ledger FIRST (pure, cheap): AI personas and the deterministic PE
+      // engine harmonize moat pillars/narrative to its moatRating. Reused below —
+      // never recomputed — so gate, narrative, and PDF share one canonical source.
+      const earlyLedger = createAssumptionsLedger({
+        profile: companyData.profile,
+        stockData: companyData.stockData,
+        annualFinancials: companyData.annualFinancials,
+        dcf: companyData.dcf,
+        calibration: companyData.calibration || companyData.dcf?.calibration,
+      });
+
       setState(s => ({
         ...s,
         step: "calculating",
@@ -128,6 +139,7 @@ export default function ReportClient({ ticker }: Props) {
             dcf: companyData.dcf,
             news: companyData.news,
             customKeyConfig: activeConfig,
+            assumptionsLedger: earlyLedger,
           }),
         });
 
@@ -322,13 +334,9 @@ export default function ReportClient({ ticker }: Props) {
       setState(s => ({ ...s, step: "building_pdf", progress: 95, message: "Finalizing research dossier..." }));
 
       const dcf = companyData.dcf;
-      const assumptionsLedger = createAssumptionsLedger({
-        profile: companyData.profile,
-        stockData: companyData.stockData,
-        annualFinancials: companyData.annualFinancials,
-        dcf,
-        calibration: companyData.calibration || dcf.calibration,
-      });
+      // Reuse the canonical early ledger (created before AI synthesis) — Step 3
+      // must not recompute it or gate/narrative/PDF sources diverge.
+      const assumptionsLedger = earlyLedger;
 
       const masterReportFacts = companyData.masterReportFacts || buildMasterReportFacts({
         stockData: companyData.stockData,
@@ -1574,7 +1582,7 @@ export default function ReportClient({ ticker }: Props) {
                           <div className={styles.personaMetaRight}>
                             <span className={styles.personaIndex} style={{ background: "rgba(34, 197, 94, 0.15)", color: "var(--bullish)", borderColor: "rgba(34, 197, 94, 0.3)" }}>AGENT 08 / 08</span>
                             <span className={styles.personaStatus}>
-                              <span className={styles.marketDot} /> VERIFIED &amp; AUDITED
+                              <span className={styles.marketDot} /> {reportData.aiAnalysis?.councilVerification ? `${reportData.aiAnalysis.councilVerification.status} & AUDITED` : "AUDIT NOT PERFORMED"}
                             </span>
                           </div>
                         </div>
@@ -1584,11 +1592,11 @@ export default function ReportClient({ ticker }: Props) {
                           <div className={styles.auditScoreBanner}>
                             <div className={styles.auditScoreLeft}>
                               <div className={styles.auditScoreVal}>
-                                {reportData.aiAnalysis?.councilVerification?.integrityScore || 98}<span>/100</span>
+                                {reportData.aiAnalysis?.councilVerification ? <>{reportData.aiAnalysis.councilVerification.integrityScore}<span>/100</span></> : "—"}
                               </div>
                               <div className={styles.auditScoreDesc}>
                                 <div className={styles.auditScoreBadge}>
-                                  STATUS: {reportData.aiAnalysis?.councilVerification?.status || "VERIFIED"}
+                                  STATUS: {reportData.aiAnalysis?.councilVerification?.status || "FLAGGED (audit not performed)"}
                                 </div>
                                 <div style={{ fontSize: "12px", color: "var(--ink-secondary)", marginTop: "4px" }}>
                                   Council Anti-Hallucination & Mathematical Integrity Score
@@ -1607,7 +1615,7 @@ export default function ReportClient({ ticker }: Props) {
                             <div className={styles.subSectionLabel}>Verification Audit Summary</div>
                             <p className={styles.subSectionText}>
                               {reportData.aiAnalysis?.councilVerification?.summary ||
-                                "Exhaustive cross-verification completed across all 6 specialized personas. Valuation multiples, revenue drivers, capital structure gearing, and strategic defensibility audited with zero fatal inconsistencies."}
+                                "Council verification did not complete for this report. Narrative claims below are unverified drafts — no anti-hallucination audit was performed."}
                             </p>
                           </div>
 

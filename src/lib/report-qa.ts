@@ -88,7 +88,7 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
       category: "CROSS_REFERENCE",
       name: "DCF Enterprise Value Bridge Reconciled",
       status: "PASS",
-      details: `PV of FCFF + PV of Terminal Value reconciles exactly with Enterprise Value (0 variance).`,
+      details: `PV of FCFF + PV of Terminal Value reconciles with Enterprise Value (variance ${bridgeEvVariance.toFixed(0)} within ±1000 tolerance).`,
     });
   }
 
@@ -122,7 +122,7 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
       status: "PASS",
       details: isBankOrNbfc
         ? "Equity value modeled directly via justified multiple/residual income for banking entity."
-        : "Enterprise Value minus Net Debt reconciles exactly with Implied Equity Value (0 variance).",
+        : `Enterprise Value minus Net Debt reconciles with Implied Equity Value (variance ${bridgeEqVariance.toFixed(0)} within ±1000 tolerance).`,
     });
   }
 
@@ -208,47 +208,9 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
     });
   }
 
-  // 3a2. XREF-03: DCF Equity Value Bridge Arithmetic Reconciliation
+  // 3a2/3a3 intentionally not duplicated: XREF-03/XREF-04 above are the single
+  // authoritative bridge checks (duplicate IDs with conflicting tolerances removed).
   const dcf = data.dcf;
-  if (dcf && dcf.enterpriseValue !== undefined && dcf.netDebt !== undefined) {
-    const dcfEquityBridge = dcf.enterpriseValue - dcf.netDebt;
-    const dcfEquityValue = Number(dcf.equityValue) || 0;
-    const bridgeTol = Math.max(1, dcfEquityValue * 0.01);
-    const bridgeMatches = Math.abs(dcfEquityBridge - dcfEquityValue) <= bridgeTol;
-    checks.push({
-      id: "XREF-03",
-      category: "CROSS_REFERENCE",
-      name: "DCF Equity Value Bridge Arithmetic Reconciled",
-      status: bridgeMatches ? "PASS" : "FAIL",
-      details: bridgeMatches
-        ? `Equity value bridge reconciles: EV (${dcf.enterpriseValue}) - Net Debt (${dcf.netDebt}) = Equity Value (${dcf.equityValue}).`
-        : `FATAL PUBLICATION BLOCK: DCF Equity Value bridge arithmetic broken. EV (${dcf.enterpriseValue}) - Net Debt (${dcf.netDebt}) = ${dcfEquityBridge}, but reported equity value is ${dcf.equityValue}.`,
-      expected: `${dcfEquityBridge}`,
-      actual: `${dcfEquityValue}`,
-    });
-  }
-
-  // 3a3. XREF-04: Balance Sheet to DCF Bridge Variable Linking Reconciled
-  if (dcf && data.annualFinancials && data.annualFinancials.length > 0) {
-    const latestFin = data.annualFinancials[data.annualFinancials.length - 1];
-    const bsDebt = Number(latestFin?.totalDebt) || ((Number(latestFin?.shortTermDebt) || 0) + (Number(latestFin?.longTermDebt) || 0));
-    const bsCash = (Number(latestFin?.cash) || 0) + (Number(latestFin?.shortTermInvestments) || 0);
-    const bsNetDebt = bsDebt - bsCash;
-    const dcfNetDebt = Number(dcf.netDebt);
-    const linkingTol = Math.max(1, Math.abs(bsNetDebt) * 0.05);
-    const linked = Math.abs(bsNetDebt - dcfNetDebt) <= linkingTol;
-    checks.push({
-      id: "XREF-04",
-      category: "CROSS_REFERENCE",
-      name: "Balance Sheet to DCF Bridge Variable Linking Reconciled",
-      status: linked ? "PASS" : "FAIL",
-      details: linked
-        ? `Balance sheet net debt (${bsNetDebt}) links to DCF net debt (${dcfNetDebt}) within tolerance.`
-        : `FATAL PUBLICATION BLOCK: Balance sheet net debt (${bsNetDebt}) does not link to DCF net debt (${dcfNetDebt}). Variables flowing from the balance sheet into the DCF model are disconnected.`,
-      expected: `${bsNetDebt}`,
-      actual: `${dcfNetDebt}`,
-    });
-  }
 
   // 3b. Moat Qualitative Narrative Consistency
   const canonicalMoat = ledger?.moatRating || data.masterReportFacts?.moat.rating;
@@ -342,19 +304,22 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
     }
   }
 
-  // 3e. Moat Overall vs Pillar Durability Consistency
-  const moatPillars = (data as any).masterReportFacts?.moat?.moatPillars || (data as any).peAnalysis?.moatPillars;
-  if (canonicalMoat === "Narrow" && moatPillars && moatPillars.length > 0) {
-    const allWide = moatPillars.every((p: any) => (p.durability || "").includes("Wide") || (p.durability || "").includes("20+"));
-    if (allWide) {
+  // 3e. Moat Overall vs Pillar Durability Consistency.
+  // ANY Wide-durability pillar under a Narrow/None composite is a contradiction
+  // (previously only all-Wide was caught, letting mixed cases through).
+  const moatPillars = (data as any).masterReportFacts?.moat?.moatPillars || (data as any).peAnalysis?.moatPillars
+    || (data.aiAnalysis as any)?.moatPillars;
+  if ((canonicalMoat === "Narrow" || canonicalMoat === "None") && moatPillars && moatPillars.length > 0) {
+    const widePillars = moatPillars.filter((p: any) => (p.durability || "").includes("Wide"));
+    if (widePillars.length > 0) {
       checks.push({
         id: "MOAT-02",
         category: "CROSS_REFERENCE",
         name: "Economic Moat Pillar Alignment Check",
         status: "FAIL",
-        details: `Overall moat is 'Narrow' but all moat pillars claim 'Wide (20+ Yrs)'. Pillar durability must harmonize with composite moat rating.`,
-        expected: "Narrow / Synchronized Durability",
-        actual: "All Wide Pillars",
+        details: `Overall moat is '${canonicalMoat}' but ${widePillars.length} moat pillar(s) claim 'Wide' durability (${widePillars.map((p: any) => p.pillar).join("; ").slice(0, 160)}). Pillar durability must harmonize with composite moat rating.`,
+        expected: "Narrow/None-consistent durability",
+        actual: `${widePillars.length} Wide pillar(s)`,
       });
     } else {
       checks.push({
@@ -406,17 +371,19 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
     }
   }
 
-  if (maxBsVariancePct > 15.0 && bsYearsEvaluated > 0) {
+  // Balance sheets must balance: FAIL above 5% (was 15%), WARN above 1% (was 5%).
+  // Plugged/estimated statements no longer hide behind a lenient gate.
+  if (maxBsVariancePct > 5.0 && bsYearsEvaluated > 0) {
     checks.push({
       id: "BS-01",
       category: "BALANCE_SHEET",
       name: "Balance Sheet Accounting Identity Check",
       status: "FAIL",
-      details: `FATAL PUBLICATION BLOCK: Balance sheet classification variance reaches ${maxBsVariancePct.toFixed(1)}% (> 15% ceiling). Assets != Liabilities + Equity. Financial statement data integrity compromised.`,
-      expected: "< 15.0%",
+      details: `FATAL PUBLICATION BLOCK: Balance sheet classification variance reaches ${maxBsVariancePct.toFixed(1)}% (> 5% ceiling). Assets != Liabilities + Equity. Financial statement data integrity compromised.`,
+      expected: "< 5.0%",
       actual: `${maxBsVariancePct.toFixed(1)}%`,
     });
-  } else if (maxBsVariancePct > 5.0 && bsYearsEvaluated > 0) {
+  } else if (maxBsVariancePct > 1.0 && bsYearsEvaluated > 0) {
     checks.push({
       id: "BS-01",
       category: "BALANCE_SHEET",
@@ -495,7 +462,32 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
       category: "KEYWORD_BLOCKLIST",
       name: "Sector Template Keyword Leakage Filter",
       status: "PASS",
-      details: `Zero out-of-sector boilerplate keywords found; narrative is 100% domain-specific.`,
+      details: `No out-of-sector boilerplate keywords from the screened list detected in narrative.`,
+    });
+  }
+
+  // PLACEHOLDER-01: Unresolved Template Token Leak.
+  // {{FAIR_VALUE}} etc. must never reach a publishable report. The injector only
+  // covers 12 tokens — any residual {{...}} (including variant spellings) blocks.
+  const narrativeJson = JSON.stringify(data.aiAnalysis || {});
+  const leakedTokens = Array.from(new Set(narrativeJson.match(/\{\{[^}]+\}\}/g) || []));
+  if (leakedTokens.length > 0) {
+    checks.push({
+      id: "PLACEHOLDER-01",
+      category: "KEYWORD_BLOCKLIST",
+      name: "Unresolved Template Token Check",
+      status: "FAIL",
+      details: `FATAL PUBLICATION BLOCK: Unresolved template tokens leaked into narrative: ${leakedTokens.slice(0, 5).join(", ")}. Placeholder injection incomplete.`,
+      expected: "Zero {{...}} tokens",
+      actual: `${leakedTokens.length} leaked token(s)`,
+    });
+  } else {
+    checks.push({
+      id: "PLACEHOLDER-01",
+      category: "KEYWORD_BLOCKLIST",
+      name: "Unresolved Template Token Check",
+      status: "PASS",
+      details: `No unresolved template tokens in narrative.`,
     });
   }
 
@@ -713,20 +705,34 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
     });
   }
 
-  // CREDIT-01: Credit Metric Reconciliation
+  // CREDIT-01: Credit Metric Reconciliation.
+  // Parses ANY quoted debt/EBITDA multiple in narrative/tables and recomputes it
+  // from the balance sheet (previously only the literal string "1.8x" was caught).
   const qaCreditFin = data.annualFinancials[data.annualFinancials.length - 1];
   const cashTotal = (qaCreditFin?.cash || 0) + (qaCreditFin?.shortTermInvestments || 0);
   const debtTotal = qaCreditFin?.totalDebt || 0;
-  const isCompanyNetCash = cashTotal > debtTotal;
-  if (isCompanyNetCash && (fullNarrative.includes("debt / ebitda = 1.8") || fullNarrative.includes("debt to ebitda of 1.8") || fullNarrative.includes("debt/ebitda: 1.8"))) {
+  const qaEbitda = qaCreditFin?.ebitda || qaCreditFin?.operatingIncome || 0;
+  const actualDebtEbitda = qaEbitda > 0 ? debtTotal / qaEbitda : (debtTotal > 0 ? 99 : 0);
+  const quotedLeverage: { raw: string; value: number }[] = [];
+  const levRegex = /debt\s*(?:\/|to)\s*ebitda\s*(?:=|:|of)?\s*(\d+(?:\.\d+)?)\s*x/gi;
+  let levMatch: RegExpExecArray | null;
+  while ((levMatch = levRegex.exec(fullNarrative)) !== null) {
+    quotedLeverage.push({ raw: levMatch[0], value: Number(levMatch[1]) });
+  }
+  const leverageContradiction = quotedLeverage.find((q) => {
+    if (q.value < 1.0) return false; // only material leverage claims are audited
+    if (debtTotal === 0 || cashTotal > debtTotal) return true; // debt-free/net-cash cannot carry >=1x
+    return Math.abs(q.value - actualDebtEbitda) / Math.max(0.5, actualDebtEbitda) > 0.75;
+  });
+  if (leverageContradiction) {
     checks.push({
       id: "CREDIT-01",
       category: "BALANCE_SHEET",
       name: "Credit Metric Reconciliation",
       status: "FAIL",
-      details: `FATAL PUBLICATION BLOCK: Company is in net cash position (Cash: ${cashTotal}, Debt: ${debtTotal}), but narrative or table quotes high leverage (1.8x). Reconcile debt metrics before publishing.`,
-      expected: "Net Cash / < 0.5x",
-      actual: "1.8x",
+      details: `FATAL PUBLICATION BLOCK: Narrative quotes "${leverageContradiction.raw.trim()}" but balance sheet recomputes Debt/EBITDA at ${actualDebtEbitda >= 99 ? "N/M" : actualDebtEbitda.toFixed(1) + "x"} (Debt: ${debtTotal}, Cash: ${cashTotal}). Reconcile debt metrics before publishing.`,
+      expected: actualDebtEbitda >= 99 ? "N/M" : `${actualDebtEbitda.toFixed(1)}x`,
+      actual: `${leverageContradiction.value}x`,
     });
   } else {
     checks.push({

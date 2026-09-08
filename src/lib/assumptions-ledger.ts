@@ -31,6 +31,7 @@ export function createAssumptionsLedger({
   calibration,
 }: CreateLedgerParams): AssumptionsLedger {
   const latestFin = annualFinancials[annualFinancials.length - 1];
+  const priceWasFallback = !(Number(stockData.currentPrice) > 0);
   const currentPrice = Number(stockData.currentPrice) || Number(latestFin?.eps ? latestFin.eps * 15 : 100);
 
   // Shares Outstanding
@@ -39,6 +40,18 @@ export function createAssumptionsLedger({
     Number(latestFin?.sharesOutstanding) ||
     Number(dcf?.sharesOutstanding) ||
     1;
+
+  // Input-sufficiency gate (private/unlisted names, empty histories, zero shares):
+  // never model a "valid" DCF on shares=1 / price=100 synthesis.
+  const insufficientInputs =
+    annualFinancials.length === 0 ||
+    !(sharesOutstanding > 0) ||
+    !(currentPrice > 0);
+  const estimatedFieldsTotal = annualFinancials.reduce((s, f) => s + (f.estimatesUsed?.length || 0), 0);
+  const dataQualityFlags: string[] = [];
+  if (annualFinancials.length === 0) dataQualityFlags.push("NO_FINANCIAL_HISTORY");
+  if (priceWasFallback) dataQualityFlags.push("PRICE_FALLBACK_USED");
+  if (estimatedFieldsTotal > 0) dataQualityFlags.push(`ESTIMATED_FINANCIALS:${estimatedFieldsTotal}`);
 
   // 1. DCF Arithmetic Bridge
   // For non-financials: EV = sumPvFcff + pvTerminalValue, Equity Value = EV - Net Debt
@@ -78,15 +91,24 @@ export function createAssumptionsLedger({
     fairValue = Math.max(0.01, computedFv);
   }
 
+  // Insufficient inputs: assert no modeled valuation — anchor to price with NR.
+  if (insufficientInputs) {
+    fairValue = currentPrice > 0 ? currentPrice : 0.01;
+    equityValue = fairValue * (sharesOutstanding > 0 ? sharesOutstanding : 1);
+  }
+
   const targetPrice = Math.max(0.01, fairValue);
 
   // 2. Rating & Stance Consistency (Rule: Fair Value vs Price dictates recommendation)
-  const upsideDownsidePct = currentPrice > 0 ? (fairValue - currentPrice) / currentPrice : 0;
+  const upsideDownsidePct = currentPrice > 0 && !insufficientInputs ? (fairValue - currentPrice) / currentPrice : 0;
 
   let rating: "BUY" | "HOLD" | "SELL" | "NR" = "HOLD";
   let ratingRationale = "";
 
-  if (dcf.verdict === "NR" || (dcf as any).confidence === "low" || upsideDownsidePct > 1.50 || upsideDownsidePct < -0.80) {
+  if (insufficientInputs) {
+    rating = "NR";
+    ratingRationale = `Model recommendation: Not Rated (NR) — insufficient inputs (history: ${annualFinancials.length}y, shares: ${sharesOutstanding}, price: ${currentPrice}). No valuation asserted; manual inputs required before modeling.`;
+  } else if (dcf.verdict === "NR" || (dcf as any).confidence === "low" || upsideDownsidePct > 1.50 || upsideDownsidePct < -0.80) {
     rating = "NR";
     ratingRationale = `Model recommendation: Not Rated (NR) — valuation upside/downside (${(upsideDownsidePct * 100).toFixed(1)}%) breaches sanity bounds (±150%) or fails confidence verification. Fundamental model review required.`;
   } else if (dcf.verdict && (dcf.verdict === "BUY" || dcf.verdict === "HOLD" || dcf.verdict === "SELL")) {
@@ -411,7 +433,13 @@ export function createAssumptionsLedger({
     dcfBaseTarget: baseTarget,
     publishedTargetPrice: baseTarget,
     probabilityWeightedValue: scenarios.probabilityWeightedValue,
-    valuationMethodology: "5-Year Explicit DCF Base Case (with 60/25/15 Scenario Probability-Weighted Triangulation)",
+    valuationMethodology: dcf.terminalValueCapped
+      ? "5-Year Explicit DCF Base Case; bull/bear targets are ±25% arithmetic sensitivities around base (not independently re-solved DCFs); terminal value capped at 25x terminal-year FCFF — uncapped value disclosed in terminalValueUncapped"
+      : "5-Year Explicit DCF Base Case; bull/bear targets are ±25% arithmetic sensitivities around base (not independently re-solved DCFs)",
+    terminalValueUncapped: (dcf as any).unadjustedTerminalValue ?? null,
+    insufficientData: insufficientInputs,
+    creditRatingNote: "Model-implied internal grade — not a CRISIL/ICRA/S&P agency rating",
+    dataQualityFlags,
     uncertaintyScore,
     uncertaintyRating,
     multiYearCAGR,

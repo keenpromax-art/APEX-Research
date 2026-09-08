@@ -168,6 +168,8 @@ const getPEAnalysis = (data: ReportData) => {
     dcf: data.dcf,
     ratiosByYear: data.ratiosByYear,
     dupontByYear: data.dupontByYear,
+    assumptionsLedger: data.assumptionsLedger,
+    masterReportFacts: data.masterReportFacts,
   });
   return {
     ...synthesized,
@@ -225,13 +227,12 @@ const getInstitutionalKPIs = (data: ReportData) => {
   const moat = ledger ? ledger.moatRating : "Narrow";
   const moatTrend = ledger ? ledger.moatTrend : "Positive";
 
+  // Single credit source: the Assumptions Ledger model-implied grade.
+  // The legacy beta→AAA ladder (a second, contradictory rating model) is removed.
+  // Any grade shown is labeled "(Model)" at render sites — never an agency rating.
   let credit = ledger?.calibratedCreditRating;
   if (!credit) {
-    if (beta < 0.75) credit = "AAA";
-    else if (beta < 1.05) credit = "AA-";
-    else if (beta < 1.35) credit = "A+";
-    else if (beta < 1.65) credit = "BBB";
-    else credit = "BB+";
+    credit = "NR";
   }
 
   const stewardship = ledger?.stewardshipRating || "Standard";
@@ -2555,7 +2556,7 @@ const CreditAnalysisPage1 = ({ data }: { data: ReportData }) => {
               ["Cash & Equivalents (beg)", ...models.map(m => fmtNum(m.begCash ?? m.cash, 0))],
               ["Adjusted Available Cash Flow", ...models.map(m => fmtNum(m.fcf, 0))],
               ["Total Cash Available Before Debt", ...models.map(m => fmtNum((m.begCash ?? m.cash) + m.fcf, 0))],
-              ["Principal Payments", ...models.map(m => (m.isForecast ? "-2,500" : "—"))],
+              ["Principal Payments (schedule N/D)", ...models.map(m => (m.isForecast ? "N/D" : "—"))],
               ["Interest Payments", ...models.map(m => fmtExpense(m.interestExp, 0))],
               ["Other Cash Commitments", ...models.map(m => fmtExpense(m.capex * 0.1, 0))],
               ["Total Cash Obligations", ...models.map(m => fmtExpense(m.interestExp + m.capex * 0.1, 0))],
@@ -2576,11 +2577,14 @@ const CreditAnalysisPage1 = ({ data }: { data: ReportData }) => {
           <View style={{ borderWidth: 0.5, borderColor: COLORS.hairlineLight, backgroundColor: "#fbfbfb", padding: 3, marginBottom: 3 }}>
             <Svg width="240" height="34" viewBox="0 0 240 34">
               <Line x1="10" y1="28" x2="230" y2="28" stroke="#d1d5db" strokeWidth="0.5" />
-              <Rect x="22" y="10" width="24" height="18" fill="#93c5fd" />
-              <Rect x="66" y="6" width="24" height="22" fill="#93c5fd" />
-              <Rect x="110" y="14" width="24" height="14" fill="#93c5fd" />
-              <Rect x="154" y="4" width="24" height="24" fill="#60a5fa" />
-              <Rect x="198" y="5" width="24" height="23" fill="#3b82f6" />
+              {(() => {
+                const vals = models.map(m => m.fcf || 0);
+                const maxAbs = Math.max(1, ...vals.map(v => Math.abs(v)));
+                return vals.map((v, i) => {
+                  const h = Math.max(2, Math.round((Math.abs(v) / maxAbs) * 22));
+                  return <Rect key={i} x={22 + i * 44} y={28 - h} width="24" height={h} fill={v >= 0 ? (i >= vals.length - 2 ? "#3b82f6" : "#93c5fd") : "#f87171"} />;
+                });
+              })()}
             </Svg>
             <View style={{ flexDirection: "row", paddingHorizontal: 10 }}>
               {models.map((m, i) => (
@@ -2625,13 +2629,28 @@ const CreditAnalysisPage1 = ({ data }: { data: ReportData }) => {
               <Text style={[S.compactCellHeaderRight, { width: "20%" }]}>Sector</Text>
               <Text style={[S.compactCellHeaderRight, { width: "20%" }]}>Universe</Text>
             </View>
-            {[
-              ["Business Risk", "2", "4.2", "5.0"],
-              ["Cash Flow Cushion", "1", "3.8", "5.8"],
-              ["Solvency Score", "1", "3.1", "4.9"],
-              ["Distance to Default", "1", "2.6", "4.0"],
-              ["Credit Rating", kpis.credit, "A", "BBB+"],
-            ].map(([p, c, s, u], ri) => (
+            {(() => {
+              // Dynamic pillar scores (1=Best, 10=Worst) from the current column.
+              // Sector/Universe peer averages are not computed in this build (shown as —).
+              const cur = models[2] || models[models.length - 1] || ({} as any);
+              const ebitdaV = cur.ebitda || 0;
+              const totDebtV = (cur.longDebt || 0) + (cur.shortDebt || 0);
+              const netDV = totDebtV - (cur.cash || 0);
+              const ndEbitda = ebitdaV > 0 ? netDV / ebitdaV : 99;
+              const intExpV = cur.interestExp || 0;
+              const intCov = intExpV > 0 && ebitdaV > 0 ? ebitdaV / intExpV : (ebitdaV > 0 ? 99 : 0);
+              const curRatio = (cur.currentLiab || 0) > 0 ? (cur.currentAssets || 0) / cur.currentLiab : 0;
+              const levScore = ebitdaV <= 0 ? 9 : ndEbitda <= 0 ? 1 : ndEbitda < 1 ? 2 : ndEbitda < 2 ? 4 : ndEbitda < 3 ? 6 : ndEbitda < 4.5 ? 8 : 10;
+              const covScore = intExpV <= 0 ? (ebitdaV > 0 ? 1 : 9) : intCov >= 25 ? 1 : intCov >= 15 ? 2 : intCov >= 8 ? 4 : intCov >= 4 ? 6 : intCov >= 2 ? 8 : 10;
+              const liqScore = curRatio <= 0 ? 9 : curRatio >= 2 ? 1 : curRatio >= 1.5 ? 3 : curRatio >= 1 ? 5 : curRatio >= 0.7 ? 7 : 9;
+              return [
+                ["Business Risk", `${levScore}`, "—", "—"],
+                ["Cash Flow Cushion", `${intExpV > 0 ? covScore : liqScore}`, "—", "—"],
+                ["Solvency Score", `${levScore}`, "—", "—"],
+                ["Distance to Default", `${covScore}`, "—", "—"],
+                ["Credit Rating (Model)", `${kpis.credit} (Model)`, "—", "—"],
+              ];
+            })().map(([p, c, s, u], ri) => (
               <View key={ri} style={ri % 2 === 0 ? S.compactRow : S.compactRowAlt}>
                 <Text style={[ri === 4 ? S.compactCellBold : S.compactCell, { width: "40%" }]}>{p}</Text>
                 <Text style={[ri === 4 ? S.compactCellBoldRight : S.compactCellRight, { width: "20%", color: ri === 4 ? COLORS.primaryRed : undefined }]}>{c}</Text>
@@ -2700,7 +2719,12 @@ const CreditAnalysisPage1 = ({ data }: { data: ReportData }) => {
           </Text>
           <Text style={{ fontSize: 6.4, color: COLORS.textSecondary, lineHeight: 1.34, textAlign: "justify", marginBottom: 4.5 }}>
             {pe.creditAnalysisCommentary?.financialHealth ||
-              `${data.profile.name} exhibits a disciplined capital structure designed to maintain operational resilience across sector cycles. With liquid reserves covering near-term contractual liabilities and positive operating cash flow generation, baseline capital expenditures remain fully funded from internal cash generation without requiring speculative debt financing.`}
+              (() => {
+                const m = models[2] || ({} as any);
+                const nd = ((m.longDebt || 0) + (m.shortDebt || 0)) - (m.cash || 0);
+                const lev = (m.ebitda || 0) > 0 ? nd / m.ebitda : null;
+                return `${data.profile.name} carries ${lev == null ? "unquantified" : lev <= 0 ? "net-cash (no net leverage)" : `${fmtNum(lev, 1)}x net debt/EBITDA`} on trailing figures. Assessment is model-implied from reported statements; no agency rating is claimed.`;
+              })()}
           </Text>
 
           <Text style={{ fontSize: 8.0, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2 }}>
@@ -2708,7 +2732,10 @@ const CreditAnalysisPage1 = ({ data }: { data: ReportData }) => {
           </Text>
           <Text style={{ fontSize: 6.4, color: COLORS.textSecondary, lineHeight: 1.34, textAlign: "justify", marginBottom: 4.5 }}>
             {pe.creditAnalysisCommentary?.liquidityBuffers ||
-              `The company maintains committed banking relationships and undrawn revolving credit lines across prime banking partners. Strict receivables monitoring and proactive inventory management insulate working capital from unexpected cash drag.`}
+              (() => {
+                const m = models[2] || ({} as any);
+                return `Reported cash of ${fmtBigCompact((m.cash || 0) * 1e6, data.profile.currency)} against short-term debt of ${fmtBigCompact((m.shortDebt || 0) * 1e6, data.profile.currency)}. Undrawn facilities are not disclosed in available filings — no revolving-line capacity is assumed.`;
+              })()}
           </Text>
 
           <Text style={{ fontSize: 8.0, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2 }}>
@@ -2716,7 +2743,15 @@ const CreditAnalysisPage1 = ({ data }: { data: ReportData }) => {
           </Text>
           <Text style={{ fontSize: 6.4, color: COLORS.textSecondary, lineHeight: 1.34, textAlign: "justify", marginBottom: 4.5 }}>
             {pe.creditAnalysisCommentary?.debtMaturity ||
-              `Outstanding liabilities feature an orderly amortization schedule with no near-term refinancing cliffs. Strong interest coverage ratios and sustainable operating margins ensure credit covenants remain comfortably respected.`}
+              (() => {
+                const m = models[2] || ({} as any);
+                const st = m.shortDebt || 0;
+                const lt = m.longDebt || 0;
+                const tot = st + lt;
+                return tot <= 0
+                  ? `No funded debt is reported; no maturity schedule applies.`
+                  : `Reported debt split is ${fmtBigCompact(st * 1e6, data.profile.currency)} short-term vs ${fmtBigCompact(lt * 1e6, data.profile.currency)} long-term. A dated maturity ladder is not disclosed in available filings — no refinancing-cliff assessment is made.`;
+              })()}
           </Text>
 
           <Text style={{ fontSize: 8.0, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2 }}>
@@ -2724,17 +2759,17 @@ const CreditAnalysisPage1 = ({ data }: { data: ReportData }) => {
           </Text>
           <Text style={{ fontSize: 6.4, color: COLORS.textSecondary, lineHeight: 1.34, textAlign: "justify", marginBottom: 5 }}>
             {pe.creditAnalysisCommentary?.stressTesting ||
-              `Our institutional stress-testing model—incorporating a 20% contraction in top-line volumes and 350 basis points of gross margin compression—indicates that operational cash flows remain sufficient to fully service interest obligations and essential maintenance capital requirements, confirming robust solvency protection.`}
+              `Illustrative downside screen (model assumption, not a covenant test): under a 20% volume contraction with 350 bps margin compression, headroom depends on undisclosed covenants — no compliance claim is made.`}
           </Text>
 
           {/* Institutional Credit Summary Box */}
           <View style={{ padding: 6, backgroundColor: "#f8fafc", borderWidth: 0.5, borderColor: COLORS.hairlineLight, borderRadius: 2 }}>
             <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 2 }}>
               <Text style={{ fontSize: 6.8, fontFamily: "Helvetica-Bold", color: COLORS.slateDark }}>Credit Assessment Summary</Text>
-              <Text style={{ fontSize: 6.8, fontFamily: "Helvetica-Bold", color: COLORS.primaryRed }}>Grade: {kpis.credit}</Text>
+              <Text style={{ fontSize: 6.8, fontFamily: "Helvetica-Bold", color: COLORS.primaryRed }}>Grade: {kpis.credit} (Model)</Text>
             </View>
             <Text style={{ fontSize: 5.8, color: COLORS.textSecondary, lineHeight: 1.32 }}>
-              Conservative capital structure and liquid reserves provide strong coverage for operating liabilities. Internal cash generation comfortably supports debt service under baseline and stressed scenarios.
+              Model-implied internal grade from leverage and coverage — not a CRISIL/ICRA/S&amp;P agency rating. See pillar scores above for the underlying inputs.
             </Text>
           </View>
         </View>
@@ -2754,22 +2789,40 @@ const CreditAnalysisPage1 = ({ data }: { data: ReportData }) => {
             <Text style={[S.compactCellHeaderRight, { width: "15%" }]}>Net Debt / EBITDA</Text>
             <Text style={[S.compactCellHeaderRight, { width: "16%" }]}>Solvency Headroom</Text>
           </View>
-          {[
-            ["Baseline Projection", "0.0% (Stable)", fmtPct(latest.operatingIncome && latest.revenue ? latest.operatingIncome / latest.revenue : 0.24), `${fmtNum(models[2].ebitda / (models[2].interestExp || 1), 1)}x`, `${fmtNum((models[2].longDebt - models[2].cash) / (models[2].ebitda || 1), 1)}x`, "Exceptional Cushion"],
-            ["Moderate Sector Downturn", "-10.0% YoY", "19.5%", "14.2x", "0.2x", "High Solvency Surplus"],
-            ["Protracted Stagflation", "-18.5% YoY", "16.8%", "8.5x", "0.6x", "Adequate Headroom"],
-            ["Severe Global Liquidity Shock", "-25.0% YoY", "14.0%", "5.2x", "1.1x", "Covenants Preserved"],
-          ].map(([scen, rev, om, cov, lev, head], ri) => (
+          {(() => {
+            // Stress rows scale the reported baseline — no hardcoded 19.5%/14.2x.
+            const b = models[2] || ({} as any);
+            const bEbitda = b.ebitda || 0;
+            const bInt = b.interestExp || 0;
+            const bNetD = ((b.longDebt || 0) + (b.shortDebt || 0)) - (b.cash || 0);
+            const bOM = latest.revenue ? latest.operatingIncome / latest.revenue : 0;
+            const cov = (e: number) => bInt > 0 && e > 0 ? `${fmtNum(e / bInt, 1)}x` : e > 0 ? ">40x" : "N/M";
+            const lev = (e: number) => e > 0 ? `${fmtNum(Math.max(0, bNetD) / e, 1)}x` : "N/M";
+            const head = (e: number) => e <= 0 ? "Distress" : (bInt > 0 ? e / bInt : 99) >= 4 && (bNetD / e) <= 3 ? "Covenants Preserved*" : "Tight — review covenants";
+            const stress = (label: string, revCut: number, omCut: number): [string, string, string, string, string, string] => {
+              const e = Math.max(0, bEbitda * (1 - revCut * 1.4));
+              return [label, `-${(revCut * 100).toFixed(1)}% YoY`, fmtPct(Math.max(0, bOM * (1 - omCut))), cov(e), lev(e), head(e)];
+            };
+            return [
+              ["Baseline Projection", "0.0% (Stable)", fmtPct(latest.operatingIncome && latest.revenue ? latest.operatingIncome / latest.revenue : 0.24), cov(bEbitda), lev(bEbitda), "Reported baseline"] as [string, string, string, string, string, string],
+              stress("Moderate Sector Downturn", 0.10, 0.15),
+              stress("Protracted Stagflation", 0.185, 0.30),
+              stress("Severe Liquidity Shock", 0.25, 0.42),
+            ];
+          })().map(([scen, rev, om, cov, lev, head], ri) => (
             <View key={ri} style={ri === 0 ? [S.compactRow, { backgroundColor: "#fef3c7" }] : ri % 2 === 0 ? S.compactRow : S.compactRowAlt}>
               <Text style={[ri === 0 ? S.compactCellBold : S.compactCell, { width: "24%" }]}>{scen}</Text>
               <Text style={[S.compactCellRight, { width: "15%" }]}>{rev}</Text>
               <Text style={[S.compactCellRight, { width: "15%" }]}>{om}</Text>
               <Text style={[S.compactCellBoldRight, { width: "15%", color: ri === 0 ? COLORS.primaryRed : undefined }]}>{cov}</Text>
               <Text style={[S.compactCellRight, { width: "15%" }]}>{lev}</Text>
-              <Text style={[S.compactCellBoldRight, { width: "16%", color: COLORS.green }]}>{head}</Text>
+              <Text style={[S.compactCellBoldRight, { width: "16%", color: /Preserved|baseline/.test(head) ? COLORS.green : /Tight/.test(head) ? COLORS.amber : COLORS.primaryRed }]}>{head}</Text>
             </View>
           ))}
         </View>
+        <Text style={{ fontSize: 5.0, color: COLORS.textMuted, marginTop: 1 }}>
+          * Headroom judged against standard thresholds (&lt;3.5x Debt/EBITDA, &gt;4x coverage). Actual facility covenants are undisclosed — no compliance claim is made.
+        </Text>
       </View>
 
       <PageFooter companyName={data.profile.name} />
@@ -2956,18 +3009,22 @@ const ManagementAndOwnershipPage1 = ({ data }: { data: ReportData }) => {
             </View>
             {(() => {
               const officers = data.profile.officers || [];
-              const rows = officers.length > 0
-                ? officers.slice(0, 6).map((o, idx) => [
-                    o.name || `Key Officer ${idx + 1}`,
-                    o.title || "Executive Director",
-                    "Active",
-                    "Filings",
-                  ])
-                : [
-                    ["Executive Leadership", "Board of Directors", "Active", "Filings"],
-                    ["Key Management Personnel", "Corporate Secretarial", "Active", "Filings"],
-                    ["Independent Directors", "Audit & Governance Committee", "Active", "Filings"],
-                  ];
+              if (officers.length === 0) {
+                return (
+                  <View style={S.compactRow}>
+                    <Text style={[S.compactCell, { width: "35%" }]}>Officer detail not disclosed in available feed</Text>
+                    <Text style={[S.compactCell, { width: "35%" }]}>—</Text>
+                    <Text style={[S.compactCellRight, { width: "15%", color: COLORS.textMuted }]}>N/D</Text>
+                    <Text style={[S.compactCellRight, { width: "15%", color: COLORS.textMuted }]}>—</Text>
+                  </View>
+                );
+              }
+              const rows = officers.slice(0, 6).map((o, idx) => [
+                o.name || `Key Officer ${idx + 1}`,
+                o.title || "Designation not disclosed",
+                "Active",
+                "Filings",
+              ]);
 
               return rows.map(([name, pos, stat, src], ri) => (
                 <View key={ri} style={ri % 2 === 0 ? S.compactRow : S.compactRowAlt}>
@@ -2994,13 +3051,17 @@ const ManagementAndOwnershipPage1 = ({ data }: { data: ReportData }) => {
             {(() => {
               const instList = data.shareholding?.topInstitutions && data.shareholding.topInstitutions.length > 0
                 ? data.shareholding.topInstitutions.slice(0, 5)
-                : [
-                    { name: "Premier Institutional Trust", percentage: 0.065, shares: 65000000, change: "+0.8%" },
-                    { name: "Sovereign Pension Fund", percentage: 0.048, shares: 48000000, change: "+0.4%" },
-                    { name: "Core Asset Management", percentage: 0.035, shares: 35000000, change: "-0.2%" },
-                    { name: "Global Equity Index Fund", percentage: 0.028, shares: 28000000, change: "+1.1%" },
-                    { name: "Domestic Mutual Fund Trust", percentage: 0.022, shares: 22000000, change: "+0.5%" },
-                  ];
+                : [];
+              if (instList.length === 0) {
+                return (
+                  <View style={S.compactRow}>
+                    <Text style={[S.compactCell, { width: "42%" }]}>No institutional holder breakdown disclosed for this listing</Text>
+                    <Text style={[S.compactCellRight, { width: "18%" }]}>—</Text>
+                    <Text style={[S.compactCellRight, { width: "20%" }]}>—</Text>
+                    <Text style={[S.compactCellRight, { width: "20%", color: COLORS.textMuted }]}>N/D</Text>
+                  </View>
+                );
+              }
 
               return instList.map((inst, ri) => {
                 const shFmt = inst.shares > 1e6 ? `${(inst.shares / 1e6).toFixed(1)}M` : `${(inst.shares / 1e3).toFixed(0)}k`;
@@ -3032,13 +3093,17 @@ const ManagementAndOwnershipPage1 = ({ data }: { data: ReportData }) => {
             {(() => {
               const fundList = data.shareholding?.topFunds && data.shareholding.topFunds.length > 0
                 ? data.shareholding.topFunds.slice(0, 5)
-                : [
-                    { name: "Broad Market Index ETF", percentage: 0.038, shares: 38000000, change: "+0.9%" },
-                    { name: "Large Cap Equity Fund", percentage: 0.031, shares: 31000000, change: "+0.4%" },
-                    { name: "Emerging Markets ETF", percentage: 0.025, shares: 25000000, change: "+0.6%" },
-                    { name: "Active Alpha Strategy Fund", percentage: 0.019, shares: 19000000, change: "-0.3%" },
-                    { name: "Systematic Bluechip Trust", percentage: 0.015, shares: 15000000, change: "+0.2%" },
-                  ];
+                : [];
+              if (fundList.length === 0) {
+                return (
+                  <View style={S.compactRow}>
+                    <Text style={[S.compactCell, { width: "42%" }]}>No fund-level breakdown disclosed for this listing</Text>
+                    <Text style={[S.compactCellRight, { width: "18%" }]}>—</Text>
+                    <Text style={[S.compactCellRight, { width: "20%" }]}>—</Text>
+                    <Text style={[S.compactCellRight, { width: "20%", color: COLORS.textMuted }]}>N/D</Text>
+                  </View>
+                );
+              }
 
               return fundList.map((fund, ri) => {
                 const shFmt = fund.shares > 1e6 ? `${(fund.shares / 1e6).toFixed(1)}M` : `${(fund.shares / 1e3).toFixed(0)}k`;
@@ -3067,27 +3132,38 @@ const ManagementAndOwnershipPage1 = ({ data }: { data: ReportData }) => {
           </View>
           <Text style={S.bodyText}>
             {pe.governanceCommentary ||
-              `We view ${data.profile.name}'s corporate governance and management stewardship as Standard. The board of directors comprises a healthy majority of independent directors who provide robust oversight of executive compensation, enterprise risk management, and capital expenditure proposals.`}
+              (() => {
+                const n = (data.profile.officers || []).length;
+                return `Governance assessment is limited to disclosed information: ${n > 0 ? `${n} key officer(s) are named in available filings` : "no officer detail is available in the current feed"}. Board independence, chair/CEO separation, clawback provisions, and equity-retention requirements are not disclosed in machine-readable filings available to this desk — no assessment is made on those pillars (see scorecard).`;
+              })()}
           </Text>
           <Text style={S.bodyText}>
             {pe.capitalAllocationCommentary ||
-              `The executive leadership team has demonstrated commendable operational competence, navigating complex sector supply chain environments with minimal margin disruption. Executive performance incentives are thoughtfully aligned with shareholder value creation, incorporating multi-year total shareholder return (TSR) and return on invested capital (ROIC) targets.`}
+              `Capital allocation commentary requires disclosed distribution and reinvestment history. Dividend, buyback, and capex discipline are evaluated from reported cash-flow statements on the Financials pages; incentive-plan specifics (TSR/ROIC hurdles) are not evidenced in available filings and are not asserted here.`}
           </Text>
           <Text style={S.bodyText}>
             {(() => {
-              const ins = data.shareholding?.insiderOwnership ? fmtPct(data.shareholding.insiderOwnership) : "the promoter group";
-              const inst = data.shareholding?.institutionalOwnership ? fmtPct(data.shareholding.institutionalOwnership) : "institutional holders";
-              const pub = data.shareholding?.publicFloat ? fmtPct(data.shareholding.publicFloat) : "public float";
-              return `Institutional holdings in ${data.profile.name} account for ${inst} of outstanding equity, anchored alongside strategic insiders (${ins}) and public retail float (${pub}). Regulatory filings confirm healthy diversification across pension funds, domestic institutions, and passive vehicles, mitigating concentration risk and ensuring robust governance oversight.`;
+              const hasLists = (data.shareholding?.topInstitutions?.length || 0) > 0 || (data.shareholding?.topFunds?.length || 0) > 0;
+              const ins = data.shareholding?.insiderOwnership ? fmtPct(data.shareholding.insiderOwnership) : null;
+              const inst = data.shareholding?.institutionalOwnership ? fmtPct(data.shareholding.institutionalOwnership) : null;
+              const pub = data.shareholding?.publicFloat ? fmtPct(data.shareholding.publicFloat) : null;
+              if (!hasLists && !ins && !inst) {
+                return `No institutional holder breakdown is disclosed for this listing; concentration and holder-identity assessments are omitted rather than estimated.`;
+              }
+              return `Reported ownership split ${inst ? `— institutions ${inst}` : ""}${ins ? `, insiders ${ins}` : ""}${pub ? `, public float ${pub}` : ""}. ${hasLists ? "Named holder detail is tabulated above from disclosed schedules." : "Named holder detail is not disclosed; split-level figures only."}`;
             })()}
           </Text>
           <Text style={S.bodyText}>
             {(() => {
-              const prov = data.shareholding?.provenanceNote || "statutory regulatory disclosures";
+              const prov = data.shareholding?.provenanceNote || "available regulatory disclosures";
               const netBuy = data.shareholding?.netActivity?.netInstSharesBuying;
               const netPct = data.shareholding?.netActivity?.netInstBuyingPercent;
               const flowNote = netBuy && netPct ? ` Trailing institutional flow activity indicates net volume of ${netBuy} shares (${netPct}).` : "";
-              return `Ownership registers and officer transaction logs are authenticated against ${prov}.${flowNote} Executive disclosures confirm that insider trading activities adhere strictly to regulatory frameworks, with no disruptive insider divestments observed.`;
+              const insiderCount = (data.shareholding?.insiderHolders || []).length;
+              const insiderNote = insiderCount > 0
+                ? ` ${insiderCount} insider holder record(s) are tabulated from disclosed filings.`
+                : ` No insider transaction detail is available — no trading-behavior claim is made.`;
+              return `Ownership registers are sourced from ${prov}.${flowNote}${insiderNote}`;
             })()}
           </Text>
         </View>
@@ -3105,12 +3181,16 @@ const ManagementAndOwnershipPage1 = ({ data }: { data: ReportData }) => {
             <Text style={[S.compactCellHeader, { width: "25%" }]}>Best Practice Standard</Text>
             <Text style={[S.compactCellHeader, { width: "25%" }]}>Research Assessment</Text>
           </View>
-          {[
-            ["Board Independence", "> 75% Independent", "> 66% Majority", "Exemplary Board Structure"],
-            ["Separation of Chair & CEO", "Independent Chair", "Independent Chair", "Optimal Shareholder Check"],
-            ["Executive Clawback Policy", "Strictly Implemented", "SEC / SEBI Rule 10D-1", "Robust Risk Mitigation"],
-            ["Minimum Equity Retention", "6x Base Salary for CEO", ">= 5x Base Salary", "Complete Long-Term Alignment"],
-          ].map(([p, s, b, a], ri) => (
+          {(() => {
+            const officerCount = (data.profile.officers || []).length;
+            const rows: [string, string, string, string][] = [
+              ["Board Independence", officerCount > 0 ? `${officerCount} officer(s) named; independence split N/D` : "Not disclosed", "> 66% Majority", officerCount > 0 ? "Partial — composition only" : "No assessment"],
+              ["Separation of Chair & CEO", "Not disclosed", "Independent Chair", "No assessment"],
+              ["Executive Clawback Policy", "Not disclosed", "SEC / SEBI Rule 10D-1", "No assessment"],
+              ["Minimum Equity Retention", "Not disclosed", ">= 5x Base Salary", "No assessment"],
+            ];
+            return rows;
+          })().map(([p, s, b, a], ri) => (
             <View key={ri} style={ri % 2 === 0 ? S.compactRow : S.compactRowAlt}>
               <Text style={[S.compactCellBold, { width: "30%" }]}>{p}</Text>
               <Text style={[S.compactCell, { width: "20%" }]}>{s}</Text>
@@ -3132,7 +3212,7 @@ const ManagementAndOwnershipPage1 = ({ data }: { data: ReportData }) => {
               Board Oversight &amp; Key-Person Dependency Mitigation
             </Text>
             <Text style={{ fontSize: 5.4, color: COLORS.textSecondary, lineHeight: 1.3, textAlign: "justify" }}>
-              The board maintains an active succession roadmap across all senior operational roles. Deep bench strength across divisional operating units mitigates key-person risk, while robust internal compliance and governance committees provide independent checks on executive decisions.
+              Succession and bench-strength specifics are not disclosed in available filings; key-person risk is therefore flagged as unassessed rather than assumed mitigated. Committee structures described in narrative sections reflect only what is evidenced in officer and filing data above.
             </Text>
           </View>
           <View style={{ flex: 1 }}>
@@ -3140,7 +3220,7 @@ const ManagementAndOwnershipPage1 = ({ data }: { data: ReportData }) => {
               Performance Compensation Hurdle Calibration
             </Text>
             <Text style={{ fontSize: 5.4, color: COLORS.textSecondary, lineHeight: 1.3, textAlign: "justify" }}>
-              Long-term equity incentives represent over 70% of total executive compensation, tied to relative TSR against global peer benchmarks and sustained Return on Invested Capital. This compensation architecture directly aligns executive rewards with multi-year shareholder wealth creation.
+              Executive incentive specifics (grant mix, TSR/ROIC hurdles, vesting) are not evidenced in available filings and are not asserted here. Alignment is evaluated from reported distributions and reinvestment on the Financials pages only.
             </Text>
           </View>
         </View>
@@ -3687,7 +3767,7 @@ const EventBasedPriceMovementPage = ({ data }: { data: ReportData }) => {
           <ProvenanceTag source="Ticker Disclosures & Stock Exchange Surveillance" type="MARKET" />
         </View>
         <Text style={{ fontSize: 5.2, color: COLORS.textMuted, lineHeight: 1.25 }}>
-          Isolates the transmission of material corporate disclosures into equity market valuation. Closing share prices are normalized to 100.0 at the T-1 baseline to quantify immediate announcement velocity (T0), multi-day post-earnings drift (T+5), and cumulative abnormal return alpha relative to the sector benchmark.
+          Stylized transmission sketches anchored on pre-event closes, shown only for verified ticker disclosures. Trajectories are model-illustrative (not measured tick data) and must be interpreted directionally; abnormal-return figures are not claimed as a formal event study.
         </Text>
       </View>
 
@@ -3932,6 +4012,14 @@ const CorporateDisclosuresAndCatalystsPage = ({ data }: { data: ReportData }) =>
           {renderNote(n7)}
         </View>
       </View>
+
+      {notes.length === 0 && (
+        <View style={{ padding: 6, backgroundColor: COLORS.offWhite, borderWidth: 0.5, borderColor: COLORS.hairlineLight, marginBottom: 5 }}>
+          <Text style={{ fontSize: 6.4, color: COLORS.textSecondary }}>
+            No verified third-party research notes or dated disclosures available for this listing in the current feed. This section is intentionally left blank rather than presenting model-generated filler as coverage.
+          </Text>
+        </View>
+      )}
 
       {/* Model-Implied Valuation Sensitivity & Distribution Matrix */}
       <View style={{ marginBottom: 4 }}>
@@ -4360,6 +4448,24 @@ const AnalystForecastsSummaryPage = ({ data }: { data: ReportData }) => {
 // PAGE 13: INCOME STATEMENT MULTI-YEAR DETAILED
 // Zero Gaps: Scaled in Millions + Margin Evolution Commentary Box
 // ─────────────────────────────────────────────────────────────────────────────
+// Shared provenance footnote: counts model-estimated statement fields so a
+// partially-synthesized history can never present as fully audited.
+const EstimateFootnote = ({ data }: { data: ReportData }) => {
+  const yrs = data.annualFinancials || [];
+  const n = yrs.reduce((s, f) => s + ((f as any).estimatesUsed?.length || 0), 0);
+  if (n === 0) return null;
+  const detail = yrs
+    .filter((f) => ((f as any).estimatesUsed?.length || 0) > 0)
+    .map((f) => `${f.year} (${((f as any).estimatesUsed || []).length})`)
+    .join(", ");
+  return (
+    <View style={{ padding: 3, backgroundColor: "#fffbeb", borderWidth: 0.5, borderColor: "#d97706", marginBottom: 3 }}>
+      <Text style={{ fontSize: 5.4, color: "#92400e", lineHeight: 1.3 }}>
+        DATA PROVENANCE: {n} figure(s) in this history are model-estimated fixed-margin fallbacks (not company-reported): {detail}. Affected ratios carry reduced weight in valuation confidence — see Data Quality.
+      </Text>
+    </View>
+  );
+};
 const IncomeStatementDetailedPage = ({ data }: { data: ReportData }) => {
   const { currency } = data.profile;
   const models = buildFiveYearStatementModel(data);
@@ -4421,6 +4527,8 @@ const IncomeStatementDetailedPage = ({ data }: { data: ReportData }) => {
           );
         })}
       </View>
+
+      <EstimateFootnote data={data} />
 
       {/* Table 2: Common-Size Income Statement & Margin Structure (% of Net Revenue) */}
       <Text style={{ fontSize: 7.8, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2 }}>
@@ -4572,6 +4680,8 @@ const BalanceSheetDetailedPage = ({ data }: { data: ReportData }) => {
           );
         })}
       </View>
+
+      <EstimateFootnote data={data} />
 
       {/* Table 2: Working Capital Efficiency & Solvency Metrics */}
       <Text style={{ fontSize: 7.8, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2 }}>
@@ -4740,6 +4850,8 @@ const CashFlowDetailedPage = ({ data }: { data: ReportData }) => {
         })}
       </View>
 
+      <EstimateFootnote data={data} />
+
       {/* Dense 2-Column Buy-Side Cash Flow Analysis Box */}
       <View style={{ padding: 5.5, backgroundColor: COLORS.offWhite, borderWidth: 0.5, borderColor: COLORS.hairlineLight, marginBottom: 3 }}>
         <Text style={{ fontSize: 7.8, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2 }}>
@@ -4775,54 +4887,13 @@ const CashFlowDetailedPage = ({ data }: { data: ReportData }) => {
 // PAGE 16: COMPARABLE COMPANY ANALYSIS (VALUATION, RETURNS, GROWTH)
 const getCuratedPeers = (data: ReportData) => {
   let peers = (data.peers || []).filter(p => p && p.ticker && (p.marketCap != null || p.cmp != null || p.pe != null || p.grossMargin != null));
-  const isSuzlonOrWind = (data.profile?.ticker || "").includes("SUZLON") || (data.profile?.name || "").toLowerCase().includes("suzlon");
-  if (isSuzlonOrWind && !peers.some(p => p.ticker.includes("INOXWIND"))) {
-    peers = [
-      {
-        ticker: "INOXWIND.NS",
-        name: "Inox Wind Limited",
-        marketCap: 1.8e11,
-        cmp: 142.5,
-        pe: 34.5,
-        evToEbitda: 18.2,
-        pb: 4.2,
-        roe: 0.14,
-        netMargin: 0.085,
-        grossMargin: 0.32,
-        ebitdaMargin: 0.155,
-        operatingMargin: 0.118,
-        debtToEquity: 0.42,
-        currentRatio: 1.25,
-        revenueGrowth: 0.45,
-        currency: "INR",
-      } as any,
-      ...peers.filter(p => !p.ticker.includes("NTPC") && !p.ticker.includes("POWERGRID")),
-    ];
-  }
+  // No synthetic peer injection: INOXWIND/AMC blocks with hardcoded market caps and
+  // multiples have been removed. Sub-3 coverage renders the DATA ADVISORY banner.
   const secLower = `${data.profile?.sector || ""} ${data.profile?.industry || ""} ${data.profile?.name || ""}`.toLowerCase();
   const isAssetMgmt = secLower.includes("asset management") || secLower.includes("wealth management") || (data.profile?.ticker || "").toUpperCase() === "BLK";
   if (isAssetMgmt) {
     const bankTickers = ["JPM", "BAC", "WFC", "C", "HDFCBANK.NS", "ICICIBANK.NS", "SBIN.NS", "AXISBANK.NS", "KOTAKBANK.NS"];
     peers = peers.filter(p => !bankTickers.some(bt => (p.ticker || "").toUpperCase().startsWith(bt)));
-    if (peers.length < 3) {
-      const isIndian = (data.profile?.currency === "INR") || (data.profile?.ticker || "").endsWith(".NS") || (data.profile?.ticker || "").endsWith(".BO");
-      if (isIndian) {
-        const amcPeers = [
-          { ticker: "HDFCAMC.NS", name: "HDFC Asset Management", marketCap: 8.5e11, cmp: 4100, pe: 42.1, evToEbitda: 32.5, pb: 12.4, roe: 0.31, netMargin: 0.68, operatingMargin: 0.74, debtToEquity: 0.0, revenueGrowth: 0.22, currency: "INR" },
-          { ticker: "NAM-INDIA.NS", name: "Nippon Life India AMC", marketCap: 4.2e11, cmp: 680, pe: 38.4, evToEbitda: 29.1, pb: 9.8, roe: 0.26, netMargin: 0.58, operatingMargin: 0.62, debtToEquity: 0.0, revenueGrowth: 0.24, currency: "INR" },
-          { ticker: "UTIAMC.NS", name: "UTI Asset Management", marketCap: 1.4e11, cmp: 1120, pe: 22.8, evToEbitda: 17.5, pb: 3.6, roe: 0.16, netMargin: 0.44, operatingMargin: 0.49, debtToEquity: 0.0, revenueGrowth: 0.18, currency: "INR" },
-        ] as any[];
-        peers = [...peers, ...amcPeers.filter(ap => !peers.some(p => p.ticker === ap.ticker))];
-      } else {
-        const amcPeers = [
-          { ticker: "STT", name: "State Street Corporation", marketCap: 2.8e10, cmp: 94.5, pe: 12.8, evToEbitda: 9.4, pb: 1.2, roe: 0.11, netMargin: 0.21, operatingMargin: 0.27, debtToEquity: 0.8, revenueGrowth: 0.05, currency: "USD" },
-          { ticker: "TROW", name: "T. Rowe Price Group", marketCap: 2.6e10, cmp: 118.0, pe: 14.2, evToEbitda: 10.1, pb: 2.6, roe: 0.19, netMargin: 0.29, operatingMargin: 0.36, debtToEquity: 0.0, revenueGrowth: 0.07, currency: "USD" },
-          { ticker: "IVZ", name: "Invesco Ltd.", marketCap: 8.2e9, cmp: 18.2, pe: 11.5, evToEbitda: 8.7, pb: 0.7, roe: 0.06, netMargin: 0.12, operatingMargin: 0.23, debtToEquity: 0.6, revenueGrowth: 0.04, currency: "USD" },
-          { ticker: "BX", name: "Blackstone Inc.", marketCap: 1.9e11, cmp: 158.0, pe: 38.5, evToEbitda: 26.4, pb: 18.2, roe: 0.24, netMargin: 0.35, operatingMargin: 0.52, debtToEquity: 0.4, revenueGrowth: 0.16, currency: "USD" },
-        ] as any[];
-        peers = [...peers, ...amcPeers.filter(ap => !peers.some(p => p.ticker === ap.ticker))];
-      }
-    }
   }
 
   return peers.filter(p => p.pe != null || p.pb != null || p.evToEbitda != null || p.grossMargin != null || p.operatingMargin != null);
@@ -4865,16 +4936,18 @@ const ComparableCompanyAnalysisPage1 = ({ data }: { data: ReportData }) => {
           <Text style={[S.compactCellHeaderRight, { width: "16%" }]}>P/Sales</Text>
         </View>
         {peers.map((p, i) => {
-          const evEbitdaVal = p.evToEbitda != null && p.evToEbitda > 0 ? p.evToEbitda : (p.pe != null && p.pe > 0 ? p.pe * 0.72 : 14.2);
-          const evSalesVal = p.evToSales != null && p.evToSales > 0 ? p.evToSales : (p.pb != null && p.pb > 0 ? p.pb * 0.9 : Math.max(0.8, evEbitdaVal * 0.35));
+          // Reported multiples only — no synthetic ladders (pe*0.72, pe*1.1, 14.2x/16.5x).
+          const evEbitdaVal = p.evToEbitda != null && p.evToEbitda > 0 ? p.evToEbitda : null;
+          const evSalesVal = p.evToSales != null && p.evToSales > 0 ? p.evToSales : null;
+          const peVal = p.pe != null && p.pe > 0 ? p.pe : null;
           return (
             <View key={i} style={i % 2 === 0 ? S.compactRow : S.compactRowAlt}>
               <Text style={[S.compactCellBold, { width: "26%" }]}>{p.name} ({p.ticker})</Text>
-              <Text style={[S.compactCellRight, { width: "10%" }]}>{p.pe != null && p.pe > 0 ? (p.pe / 22).toFixed(2) : "1.00"}</Text>
-              <Text style={[S.compactCellRight, { width: "16%" }]}>{p.pe != null && p.pe > 0 ? `${fmtNum(p.pe, 1)}x` : `${fmtNum(evEbitdaVal * 1.35, 1)}x`}</Text>
-              <Text style={[S.compactCellRight, { width: "16%" }]}>{`${fmtNum(evEbitdaVal, 1)}x`}</Text>
-              <Text style={[S.compactCellRight, { width: "16%" }]}>{p.pe != null && p.pe > 0 ? `${fmtNum(p.pe * 1.1, 1)}x` : "16.5x"}</Text>
-              <Text style={[S.compactCellRight, { width: "16%" }]}>{`${fmtNum(evSalesVal, 1)}x`}</Text>
+              <Text style={[S.compactCellRight, { width: "10%" }]}>{peVal != null ? (peVal / 22).toFixed(2) : "N/M"}</Text>
+              <Text style={[S.compactCellRight, { width: "16%" }]}>{peVal != null ? `${fmtNum(peVal, 1)}x` : "N/M"}</Text>
+              <Text style={[S.compactCellRight, { width: "16%" }]}>{evEbitdaVal != null ? `${fmtNum(evEbitdaVal, 1)}x` : "N/M"}</Text>
+              <Text style={[S.compactCellRight, { width: "16%" }]}>N/M</Text>
+              <Text style={[S.compactCellRight, { width: "16%" }]}>{evSalesVal != null ? `${fmtNum(evSalesVal, 1)}x` : "N/M"}</Text>
             </View>
           );
         })}
@@ -5188,17 +5261,18 @@ const ComparableCompanyAnalysisPage2 = ({ data }: { data: ReportData }) => {
           <Text style={[S.compactCellHeaderRight, { width: "20%" }]}>Net Margin %</Text>
         </View>
         {peers.map((p, i) => {
-          const netM = p.netMargin != null ? p.netMargin : (p.roe != null && p.roe > 0 ? Math.min(0.20, p.roe * 0.45) : 0.095);
-          const opM = p.operatingMargin != null ? p.operatingMargin : (p.ebitdaMargin != null ? p.ebitdaMargin * 0.8 : netM * 1.25);
-          const ebitdaM = p.ebitdaMargin != null ? p.ebitdaMargin : opM * 1.22;
-          const grossM = p.grossMargin != null ? p.grossMargin : Math.max(0.25, ebitdaM * 1.8);
+          // Reported margins only — no fixed-ratio ladders (roe*0.45, netM*1.25, *1.22, *1.8).
+          const netM = p.netMargin != null ? p.netMargin : null;
+          const opM = p.operatingMargin != null ? p.operatingMargin : null;
+          const ebitdaM = p.ebitdaMargin != null ? p.ebitdaMargin : null;
+          const grossM = p.grossMargin != null ? p.grossMargin : null;
           return (
             <View key={i} style={i % 2 === 0 ? S.compactRow : S.compactRowAlt}>
               <Text style={[S.compactCellBold, { width: "26%" }]}>{p.name} ({p.ticker})</Text>
-              <Text style={[S.compactCellRight, { width: "18%" }]}>{fmtPct(grossM)}</Text>
-              <Text style={[S.compactCellRight, { width: "18%" }]}>{fmtPct(ebitdaM)}</Text>
-              <Text style={[S.compactCellRight, { width: "18%" }]}>{fmtPct(opM)}</Text>
-              <Text style={[S.compactCellRight, { width: "20%" }]}>{fmtPct(netM)}</Text>
+              <Text style={[S.compactCellRight, { width: "18%" }]}>{grossM != null ? fmtPct(grossM) : "N/M"}</Text>
+              <Text style={[S.compactCellRight, { width: "18%" }]}>{ebitdaM != null ? fmtPct(ebitdaM) : "N/M"}</Text>
+              <Text style={[S.compactCellRight, { width: "18%" }]}>{opM != null ? fmtPct(opM) : "N/M"}</Text>
+              <Text style={[S.compactCellRight, { width: "20%" }]}>{netM != null ? fmtPct(netM) : "N/M"}</Text>
             </View>
           );
         })}
@@ -5223,17 +5297,17 @@ const ComparableCompanyAnalysisPage2 = ({ data }: { data: ReportData }) => {
           <Text style={[S.compactCellHeaderRight, { width: "20%" }]}>Assets / Equity</Text>
         </View>
         {peers.map((p, i) => {
-          const deRatio = p.debtToEquity != null ? p.debtToEquity : 0.38;
-          const dtcRatio = deRatio / (1 + deRatio);
-          const ebitdaInt = (1 / Math.max(0.08, deRatio)) * 6.2;
-          const assetsEq = 1 + deRatio;
+          // Reported leverage only — coverage is not inferable from D/E alone.
+          const deRatio = p.debtToEquity != null ? p.debtToEquity : null;
+          const dtcRatio = deRatio != null ? deRatio / (1 + deRatio) : null;
+          const assetsEq = deRatio != null ? 1 + deRatio : null;
           return (
             <View key={i} style={i % 2 === 0 ? S.compactRow : S.compactRowAlt}>
               <Text style={[S.compactCellBold, { width: "26%" }]}>{p.name} ({p.ticker})</Text>
-              <Text style={[S.compactCellRight, { width: "18%" }]}>{fmtPct(deRatio)}</Text>
-              <Text style={[S.compactCellRight, { width: "18%" }]}>{fmtPct(dtcRatio)}</Text>
-              <Text style={[S.compactCellRight, { width: "18%" }]}>{`${fmtNum(ebitdaInt, 1)}x`}</Text>
-              <Text style={[S.compactCellRight, { width: "20%" }]}>{fmtMult(assetsEq)}</Text>
+              <Text style={[S.compactCellRight, { width: "18%" }]}>{deRatio != null ? fmtPct(deRatio) : "N/M"}</Text>
+              <Text style={[S.compactCellRight, { width: "18%" }]}>{dtcRatio != null ? fmtPct(dtcRatio) : "N/M"}</Text>
+              <Text style={[S.compactCellRight, { width: "18%" }]}>N/M</Text>
+              <Text style={[S.compactCellRight, { width: "20%" }]}>{assetsEq != null ? fmtMult(assetsEq) : "N/M"}</Text>
             </View>
           );
         })}
@@ -5272,19 +5346,15 @@ const ComparableCompanyAnalysisPage2 = ({ data }: { data: ReportData }) => {
           <Text style={[S.compactCellHeaderRight, { width: "20%" }]}>Payout Ratio %</Text>
         </View>
         {peers.map((p, i) => {
-          const cr = p.currentRatio != null && p.currentRatio > 0 ? p.currentRatio : 1.35;
-          const qr = cr * 0.82;
-          const de = p.debtToEquity != null ? p.debtToEquity : 0.38;
-          const cashDebt = de > 0 ? Math.min(2.5, 0.45 / de) : 1.5;
-          const nm = p.netMargin != null ? p.netMargin : 0.08;
-          const payout = nm > 0 ? Math.min(0.45, Math.max(0.12, nm * 1.8)) : 0.0;
+          // Reported liquidity only — no 1.35x / 0.82x / payout-ladder imputations.
+          const cr = p.currentRatio != null && p.currentRatio > 0 ? p.currentRatio : null;
           return (
             <View key={i} style={i % 2 === 0 ? S.compactRow : S.compactRowAlt}>
               <Text style={[S.compactCellBold, { width: "26%" }]}>{p.name} ({p.ticker})</Text>
-              <Text style={[S.compactCellRight, { width: "18%" }]}>{fmtMult(cr)}</Text>
-              <Text style={[S.compactCellRight, { width: "18%" }]}>{fmtMult(qr)}</Text>
-              <Text style={[S.compactCellRight, { width: "18%" }]}>{fmtMult(cashDebt)}</Text>
-              <Text style={[S.compactCellRight, { width: "20%" }]}>{fmtPct(payout)}</Text>
+              <Text style={[S.compactCellRight, { width: "18%" }]}>{cr != null ? fmtMult(cr) : "N/M"}</Text>
+              <Text style={[S.compactCellRight, { width: "18%" }]}>N/M</Text>
+              <Text style={[S.compactCellRight, { width: "18%" }]}>N/M</Text>
+              <Text style={[S.compactCellRight, { width: "20%" }]}>N/M</Text>
             </View>
           );
         })}
@@ -6112,17 +6182,25 @@ const CreditRatingApproachPage2 = ({ data }: { data: ReportData }) => {
               </Text>
             </View>
 
-            {[
-              ["Business Risk", kpis.moat === "Wide" ? "Low Risk (Wide Moat)" : "Moderate Risk", kpis.moat === "Wide" ? "Exceptional" : "Good"],
-              ["Cash Flow Cushion", "> 3.8x Coverage Ratio", "Very Good"],
-              ["Quantitative Solvency Score", "8.2 / 10 Quantitative Rank", "Good"],
-              ["Distance to Default", "92nd Percentile (Low Volatility)", "Very Good"],
-              ["Preliminary Credit Rating", `${kpis.credit} (Indicative)`, "Solid"],
-            ].map(([pillar, metric, rank], idx) => {
+            {(() => {
+              const covR = data.ratiosByYear?.[data.ratiosByYear.length - 1]?.interestCoverage;
+              const covOk = covR != null && isFinite(covR) && covR > 0;
+              const covTxt = covOk ? `${fmtNum(Math.min(covR, 99), 1)}x reported interest coverage` : "N/M — interest expense not disclosed";
+              const covRank = !covOk ? "N/R" : covR >= 8 ? "Very Good" : covR >= 4 ? "Good" : covR >= 2 ? "Adequate" : "Weak";
+              return [
+                ["Business Risk", kpis.moat === "Wide" ? "Low Risk (Wide Moat)" : "Moderate Risk", kpis.moat === "Wide" ? "Exceptional" : "Good"],
+                ["Cash Flow Cushion", covTxt, covRank],
+                ["Quantitative Solvency Score", "Pillar scores — see Credit Analysis page", "See page"],
+                ["Distance to Default", "Not computed — no structural default model in this build", "N/R"],
+                ["Preliminary Credit Rating", `${kpis.credit} (Model — not an agency rating)`, "Model"],
+              ];
+            })().map(([pillar, metric, rank], idx) => {
               const rankColor = ["Exceptional", "Very Good", "Good", "Solid", "Strong"].some((s) => rank.includes(s))
                 ? COLORS.green
                 : ["Moderate", "Adequate"].some((s) => rank.includes(s))
                 ? COLORS.amber
+                : (rank === "Model" || rank === "See page")
+                ? COLORS.slateDark
                 : COLORS.primaryRed;
 
               return (
@@ -6136,7 +6214,7 @@ const CreditRatingApproachPage2 = ({ data }: { data: ReportData }) => {
 
             <View style={{ marginTop: 4, flexDirection: "row", justifyContent: "space-between", alignItems: "center", backgroundColor: COLORS.white, paddingVertical: 3.5, paddingHorizontal: 6, borderWidth: 0.5, borderColor: COLORS.hairlineLight }}>
               <Text style={{ fontSize: 7.0, fontFamily: "Helvetica-Bold", color: COLORS.slateDark }}>
-                Final Corporate Credit Rating:
+                Final Model-Implied Credit Grade:
               </Text>
               <Text style={{ fontSize: 12, fontFamily: "Helvetica-Bold", color: COLORS.primaryRed }}>
                 {kpis.credit}
@@ -6191,7 +6269,7 @@ const CreditRatingApproachPage2 = ({ data }: { data: ReportData }) => {
               Quantitative Solvency Tier Assessment
             </Text>
             <Text style={{ fontSize: 6.6, color: COLORS.textSecondary, lineHeight: 1.35 }}>
-              The APEX Quantitative Credit Model determines {data.profile.name}&apos;s credit score at {kpis.credit} with a Stable fundamental outlook. Resilient operational cash flow generation, conservative balance sheet leverage, and adequate debt service coverage reinforce a low modeled credit risk profile.
+              The APEX model-implied grade for {data.profile.name} is {kpis.credit} (internal model — not a CRISIL/ICRA/S&amp;P agency rating). It reflects reported leverage and interest coverage only; outlook, liquidity facilities, and covenants are assessed on the Credit Analysis page from disclosed figures.
             </Text>
           </View>
           <View style={{ flex: 1 }}>
@@ -6465,8 +6543,9 @@ const QualityAssuranceChecksumPage = ({ data }: { data: ReportData }) => {
 
       {/* Publication Gate Certification Banner */}
       {(()=>{
-        const gateStatus = qa?.gateStatus ?? "READY";
-        const isBlocked = gateStatus === "BLOCKED";
+        // No QA object means uncertified — never default to READY/all-PASS.
+        const gateStatus = qa?.gateStatus ?? "NOT RUN";
+        const isBlocked = gateStatus === "BLOCKED" || gateStatus === "NOT RUN";
         const isWarn = gateStatus === "READY_WITH_WARNINGS";
 
         const bgColor = isBlocked ? "#fef2f2" : isWarn ? "#fffbeb" : "#f0fdf4";
@@ -6474,19 +6553,23 @@ const QualityAssuranceChecksumPage = ({ data }: { data: ReportData }) => {
         const titleColor = isBlocked ? "#b91c1c" : isWarn ? "#b45309" : "#15803d";
         const badgeBg = isBlocked ? "#dc2626" : isWarn ? "#d97706" : "#16a34a";
 
-        const bannerTitle = isBlocked
+        const bannerTitle = gateStatus === "NOT RUN"
+          ? `PUBLICATION GATE: QA NOT RUN — UNCERTIFIED DRAFT`
+          : isBlocked
           ? `PUBLICATION GATE: BLOCKED — P0 INVARIANT VIOLATIONS DETECTED`
           : isWarn
           ? `PUBLICATION GATE: READY WITH WARNINGS — ELEVATED UNCERTAINTY`
           : `PUBLICATION GATE: READY — ALL 3 QUALITY TIERS VERIFIED`;
 
-        const bannerSub = isBlocked
+        const bannerSub = gateStatus === "NOT RUN"
+          ? "No automated audit was executed for this render. Nothing on this page is certified — treat the dossier as an uncertified draft."
+          : isBlocked
           ? "CRITICAL: Accounting identity or valuation plausibility boundary breached. Publication locked until inputs reconcile."
           : isWarn
           ? "ADVISORY: Secondary cross-checks or cyclical volatility flagged. Proceed with documented risk caveats."
           : "PASSED: Full arithmetic reconciliation, balance sheet identity verified, and zero sector template contamination.";
 
-        const tiers = qa?.tierSummary ?? { consistency: "PASS", plausibility: "PASS", appropriateness: "PASS" };
+        const tiers = qa?.tierSummary ?? { consistency: "FAIL", plausibility: "FAIL", appropriateness: "FAIL" };
 
         return (
           <View style={{ marginBottom: 4 }}>
@@ -6547,20 +6630,26 @@ const QualityAssuranceChecksumPage = ({ data }: { data: ReportData }) => {
             <Text style={[S.compactCellHeaderRight, { width: "28%" }]}>Consistency Status</Text>
           </View>
 
-          {[
-            ["Fair Value / Target", `${sym}${fv.toFixed(2)}`, "6 Document Sections", "PASS · 0.00% Variance"],
-            ["Cost of Capital (WACC)", `${(wacc * 100).toFixed(2)}%`, "DCF, Sensitivity, Drivers", "PASS · Single Source"],
-            ["Terminal Growth Rate", `${(tgr * 100).toFixed(1)}%`, "Gordon Anchor, Grid Cols", "PASS · Single Source"],
-            ["Investment Stance", rating, "Cover, Thesis, Header", "PASS · Upside Aligned"],
-            ["Economic Moat", `${ledger?.moatRating || "Narrow"} (${ledger?.moatTrend || "Stable"})`, "Badge, Porter Bridge", "PASS · Derived Output"],
-            ["DCF Bridge Arithmetic", "EV = PV(FCFF) + PV(TV)", "EV Reconciliation", "PASS · 0.00 Variance"],
-            ["Balance Sheet Check", "Assets = Liab + Equity", "5 Audited Fiscal Years", "PASS · Reconciled"],
-          ].map(([name, val, scope, status], idx) => (
+          {(() => {
+            // Ledger statuses derive from live QA checks — never hardcoded PASS.
+            const findCheck = (id: string) => (qa?.checks || []).find((c: any) => c.id === id);
+            const st = (id: string) => findCheck(id)?.status || (qa ? "—" : "NOT RUN");
+            const rows: [string, string, string, string][] = [
+              ["Fair Value / Target", `${sym}${fv.toFixed(2)}`, "6 Document Sections", st("XREF-02")],
+              ["Cost of Capital (WACC)", `${(wacc * 100).toFixed(2)}%`, "DCF, Sensitivity, Drivers", qa ? "Single Source (ledger)" : "NOT RUN"],
+              ["Terminal Growth Rate", `${(tgr * 100).toFixed(1)}%`, "Gordon Anchor, Grid Cols", qa ? "Single Source (ledger)" : "NOT RUN"],
+              ["Investment Stance", rating, "Cover, Thesis, Header", st("RATING-01")],
+              ["Economic Moat", `${ledger?.moatRating || "Narrow"} (${ledger?.moatTrend || "Stable"})`, "Badge, Porter Bridge", qa ? "Derived Output (ledger)" : "NOT RUN"],
+              ["DCF Bridge Arithmetic", "EV = PV(FCFF) + PV(TV)", "EV Reconciliation", st("XREF-01") === "PASS" && st("XREF-03") === "PASS" ? "PASS" : (st("XREF-01") === "NOT RUN" ? "NOT RUN" : "FAIL")],
+              ["Balance Sheet Check", "Assets = Liab + Equity", `${data.annualFinancials?.length || 0} Fiscal Years`, st("BS-01")],
+            ];
+            return rows;
+          })().map(([name, val, scope, status], idx) => (
             <View key={idx} style={idx % 2 === 0 ? S.compactRow : S.compactRowAlt}>
               <Text style={[S.compactCellBold, { width: "26%" }]}>{name}</Text>
               <Text style={[S.compactCell, { width: "20%", fontFamily: "Helvetica-Bold" }]}>{val}</Text>
               <Text style={[S.compactCell, { width: "26%", color: COLORS.textSecondary }]}>{scope}</Text>
-              <Text style={[S.compactCellRight, { width: "28%", color: status.startsWith("PASS") ? "#15803d" : "#b45309", fontFamily: "Helvetica-Bold" }]}>{status}</Text>
+              <Text style={[S.compactCellRight, { width: "28%", color: status.startsWith("PASS") || status.startsWith("Single") || status.startsWith("Derived") ? "#15803d" : status === "—" || status === "NOT RUN" ? "#b45309" : "#dc2626", fontFamily: "Helvetica-Bold" }]}>{status}</Text>
             </View>
           ))}
         </View>
@@ -6583,22 +6672,24 @@ const QualityAssuranceChecksumPage = ({ data }: { data: ReportData }) => {
             <Text style={[S.compactCellHeaderRight, { width: "38%" }]}>Finding / Auditor Detail</Text>
           </View>
           {(() => {
+            // No QA object → honest NOT-RUN state, never a hardcoded all-PASS table.
             const rawChecks = qa?.checks || [
-              { id: "RATING-01", name: "Rating vs Fair Value Alignment", status: "PASS", details: "Rating strictly matches implied upside corridor." },
-              { id: "XREF-01", name: "DCF Enterprise Value Bridge", status: "PASS", details: "PV(FCFF) + PV(TV) = Enterprise Value exactly." },
-              { id: "XREF-02", name: "Target Price Synchronization", status: "PASS", details: "All targets reference single assumptions ledger." },
-              { id: "BS-01", name: "Balance Sheet Identity", status: "PASS", details: "Assets = Liabilities + Equity constraint satisfied." },
-              { id: "RATIO-01", name: "Solvency Sanity Bound", status: "PASS", details: "All financial ratios within institutional boundaries." },
-              { id: "NARRATIVE-01", name: "Sector Keyword Filter", status: "PASS", details: "Zero out-of-sector boilerplate keywords detected." },
+              { id: "QA", name: "Pre-publish audit", status: "FAIL", details: "QA suite did not run for this render — uncertified draft." },
             ];
 
-            // Prioritize FAIL and WARN checks to the top so critical findings are never clipped
+            // Show every FAIL/WARN plus PASS rows (capped for layout) — failures are
+            // never clipped by a top-6 slice again.
             const sorted = [...rawChecks].sort((a, b) => {
               const score = (s: string) => (s === "FAIL" ? 0 : s === "WARN" ? 1 : 2);
               return score(a.status) - score(b.status);
             });
 
-            const displayChecks = sorted.slice(0, 6);
+            const fails = sorted.filter((c) => c.status !== "PASS");
+            const passes = sorted.filter((c) => c.status === "PASS");
+            const displayChecks = [...fails, ...passes.slice(0, Math.max(0, 12 - fails.length))];
+            const hiddenPasses = passes.length - (displayChecks.length - fails.length);
+            const nFail = fails.filter((c) => c.status === "FAIL").length;
+            const nWarn = fails.filter((c) => c.status === "WARN").length;
             return (
               <>
                 {displayChecks.map((c, idx) => (
@@ -6611,13 +6702,13 @@ const QualityAssuranceChecksumPage = ({ data }: { data: ReportData }) => {
                     <Text style={[S.compactCellRight, { width: "38%", color: COLORS.textSecondary }]}>{c.details}</Text>
                   </View>
                 ))}
-                {rawChecks.length > 6 && (
+                {(hiddenPasses > 0 || fails.length > 0) && (
                   <View style={{ flexDirection: "row", justifyContent: "space-between", backgroundColor: "#f8fafc", paddingVertical: 1.5, paddingHorizontal: 4, borderTopWidth: 0.5, borderTopColor: COLORS.hairlineLight }}>
                     <Text style={{ fontSize: 5.0, color: COLORS.textMuted }}>
-                      + {rawChecks.length - 6} Additional Pre-Publish Invariant Checks Audited
+                      {hiddenPasses > 0 ? `+ ${hiddenPasses} additional passing checks audited` : `${fails.length} finding(s) shown above — all failures displayed`}
                     </Text>
-                    <Text style={{ fontSize: 5.0, fontFamily: "Helvetica-Bold", color: "#15803d" }}>
-                      100% Core Computational Assertions Verified
+                    <Text style={{ fontSize: 5.0, fontFamily: "Helvetica-Bold", color: nFail > 0 ? "#dc2626" : "#15803d" }}>
+                      {nFail} failed · {nWarn} warnings · {passes.length} passed
                     </Text>
                   </View>
                 )}
@@ -6633,7 +6724,14 @@ const QualityAssuranceChecksumPage = ({ data }: { data: ReportData }) => {
           INSTITUTIONAL RESEARCH DESK AUDIT SIGNATURE &amp; METHODOLOGY NOTE
         </Text>
         <Text style={{ fontSize: 5.4, color: COLORS.textSecondary, lineHeight: 1.25 }}>
-          This document has undergone automated pre-publish computational audit. All financial statement items are reconciled to regulatory filings; DCF/Residual Income valuation bridges conform to Gordon Growth &amp; CAPM standards; and scenario variances are arithmetically balanced. Model Credit Scores represent indicative internal quantitative assessments and are not external ratings issued by a credit rating agency. Published under statutory safe-harbor research protocols.
+          {(() => {
+            const estCount = (data.annualFinancials || []).reduce((s, f) => s + ((f as any).estimatesUsed?.length || 0), 0);
+            const gate = qa?.gateStatus || "NOT RUN";
+            if (gate === "BLOCKED" || gate === "NOT RUN") {
+              return `Uncertified draft render (gate: ${gate}). No publication certification is claimed. ${estCount > 0 ? `${estCount} statement field(s) are model-estimated fallbacks, not reported figures — see Data Quality.` : "Statement provenance is disclosed in Data Quality."} Model-implied grades are internal quantitative assessments, not external agency ratings.`;
+            }
+            return `Automated pre-publish computational audit completed with gate status ${gate}. ${estCount > 0 ? `${estCount} statement field(s) are model-estimated fallbacks disclosed in Data Quality — remaining items reconcile to Yahoo-sourced filings.` : "Statement items reconcile to Yahoo-sourced filings."} DCF/Residual Income bridges conform to Gordon Growth & CAPM standards. Model Credit Scores represent indicative internal quantitative assessments and are not external ratings issued by a credit rating agency. Published under statutory safe-harbor research protocols.`;
+          })()}
         </Text>
       </View>
 
