@@ -630,6 +630,13 @@ export interface AssumptionsLedger {
   terminalValueUncapped?: number | null;
   /** True when inputs were insufficient — rating forced to NR. */
   insufficientData?: boolean;
+  /**
+   * Distressed-model fallback marker. Set when the FCFF model is insolvent on
+   * the reported capital structure (EV ≤ net debt) yet market inputs are valid:
+   * the ledger carries a market-implied bridge (EV = net debt + price×shares),
+   * asserts no edge (fair value = price), and forces NR. Never a valuation call.
+   */
+  valuationFallback?: "MARKET_ANCHORED_DISTRESSED" | null;
   /** Mandatory label for the model-implied credit grade, e.g. "Model-implied — not a CRISIL/ICRA/S&P rating". */
   creditRatingNote?: string;
   /** Machine-readable data-quality flags, e.g. "ESTIMATED_FINANCIALS:4", "SYNTHETIC_FALLBACK_USED". */

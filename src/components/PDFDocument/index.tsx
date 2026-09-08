@@ -4500,7 +4500,9 @@ const AnalystForecastsSummaryPage = ({ data }: { data: ReportData }) => {
               const rows: [string, string][] = [
                 ["Present Value of 5-Yr Explicit FCFs", fmtBig(data.dcf.sumPvFcff, currency)],
                 ["Present Value of Terminal Value", fmtBig(data.dcf.pvTerminalValue, currency)],
-                ["Enterprise Value (EV) = PV(FCF) + PV(TV)", fmtBig(ev, currency)],
+                [(ledger as any)?.valuationFallback
+                  ? "Enterprise Value — MARKET-IMPLIED (FCFF insolvent; EV = Net Debt + price×shares)"
+                  : "Enterprise Value (EV) = PV(FCF) + PV(TV)", fmtBig(ev, currency)],
                 ["Less: Total Debt (Ledger)", safeTableValue(bsDebtLine > 0 ? `-${fmtBig(bsDebtLine, currency)}` : "0")],
                 ["Plus: Cash & Liquid Reserves (Ledger)", safeTableValue(bsCashLine > 0 ? `+${fmtBig(bsCashLine, currency)}` : "0")],
                 [

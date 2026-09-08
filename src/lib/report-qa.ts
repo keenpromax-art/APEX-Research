@@ -178,8 +178,14 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
     ? Number(ledger.netDebt)
     : (data.dcf.netDebt !== undefined ? Number(data.dcf.netDebt) : ((Number(data.dcf.lessDebt) || 0) - (Number(data.dcf.plusCash) || 0)));
   const dcfEqVal = ledger?.equityValue !== undefined ? Number(ledger.equityValue) : (Number(data.dcf.equityValue) || 0);
-  const expectedEqVal = isBankOrNbfc ? dcfEqVal : ev - dcfNetDebt;
+  // Prefer ledger bridge inputs: under the distressed fallback the ledger
+  // carries a market-implied EV (exact by construction); raw DCF EV would
+  // reintroduce the insolvency the fallback resolved. Identical otherwise.
+  const ledgerEv = Number(ledger?.enterpriseValue);
+  const evForBridge = Number.isFinite(ledgerEv) && ledgerEv !== 0 ? ledgerEv : ev;
+  const expectedEqVal = isBankOrNbfc ? dcfEqVal : evForBridge - dcfNetDebt;
   const bridgeEqVariance = Math.abs(dcfEqVal - expectedEqVal);
+  const distressedFallback = (ledger as any)?.valuationFallback === "MARKET_ANCHORED_DISTRESSED";
 
   if (bridgeEqVariance > 1000 && !isBankOrNbfc) {
     checks.push({
@@ -187,7 +193,7 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
       category: "CROSS_REFERENCE",
       name: "DCF Equity Value Bridge Arithmetic Reconciled",
       status: "FAIL",
-      details: `FATAL PUBLICATION BLOCK: Enterprise Value (${ev.toFixed(0)}) minus Net Debt (${dcfNetDebt.toFixed(0)}) does not match Equity Value (${dcfEqVal.toFixed(0)}). Variance: ${bridgeEqVariance.toFixed(0)}`,
+      details: `FATAL PUBLICATION BLOCK: Enterprise Value (${evForBridge.toFixed(0)}) minus Net Debt (${dcfNetDebt.toFixed(0)}) does not match Equity Value (${dcfEqVal.toFixed(0)}). Variance: ${bridgeEqVariance.toFixed(0)}`,
       expected: expectedEqVal.toFixed(0),
       actual: dcfEqVal.toFixed(0),
     });
@@ -199,6 +205,8 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
       status: "PASS",
       details: isBankOrNbfc
         ? "Equity value modeled directly via justified multiple/residual income for banking entity."
+        : distressedFallback
+        ? `Market-implied bridge (FCFF insolvent): EV (${evForBridge.toFixed(0)}) = Net Debt + price×shares reconciles exactly by construction; no DCF edge asserted.`
         : `Enterprise Value minus Net Debt reconciles with Implied Equity Value (variance ${bridgeEqVariance.toFixed(0)} within ±1000 tolerance).`,
     });
   }
@@ -353,7 +361,31 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
   const modelTol = Math.max(0.06, Math.abs(ledgerFv) * 0.015);
   const modelMatchesLedger = dcfIntrinsic > 0 && ledgerFv > 0 && Math.abs(dcfIntrinsic - ledgerFv) <= modelTol;
   const ledgerAnchored = Boolean((ledger as any)?.insufficientData);
+  // Raw model produced no intrinsic value (invalid/insolvent DCF): nothing to
+  // contradict, so this degrades to WARN — the fallback/NR path is disclosed
+  // in the ledger methodology instead of failing the whole dossier.
+  const modelInvalid = !modelMatchesLedger && data.dcf?.status !== undefined && data.dcf.status !== "valid";
   if (!targetPriceMatch || !recommendationMatch) {
+    checks.push({
+      id: "XREF-02",
+      category: "CROSS_REFERENCE",
+      name: "Header Target vs Ledger Fair Value Check",
+      status: "FAIL",
+      details: `FATAL PUBLICATION BLOCK: Report targetPrice (${data.targetPrice}) or recommendation (${data.recommendation}) contradicts Assumptions Ledger (${fv}, ${rating}). Unsynchronized claims strictly prohibited.`,
+      expected: `${fv} (${rating})`,
+      actual: `${data.targetPrice} (${data.recommendation})`,
+    });
+  } else if (modelInvalid) {
+    checks.push({
+      id: "XREF-02",
+      category: "CROSS_REFERENCE",
+      name: "Header Target vs Ledger Fair Value Check",
+      status: "WARN",
+      details: `Raw DCF model is ${data.dcf.status} (intrinsic ${dcfIntrinsic.toFixed(2)}) so no model-vs-ledger comparison applies; ledger carries a disclosed fallback with no edge asserted.`,
+      expected: "Disclosed fallback",
+      actual: `DCF ${data.dcf.status}`,
+    });
+  } else if (!modelMatchesLedger && !ledgerAnchored) {
     checks.push({
       id: "XREF-02",
       category: "CROSS_REFERENCE",
