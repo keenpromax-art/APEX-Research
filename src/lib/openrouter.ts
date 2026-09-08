@@ -22,7 +22,7 @@ import type {
 } from "@/types/report";
 import { formatPct, formatLargeNum } from "./calculations";
 import { generatePEFirmAnalysis } from "./pe-analysis-engine";
-import { getSectorProfile } from "./sectors/index";
+import { buildCompanyOntology } from "./company-ontology";
 import {
   SUPPORTED_PROVIDERS,
   CustomKeyConfig,
@@ -50,14 +50,18 @@ const safeFix = (v: unknown, d = 2, fallback = "—"): string => {
 // leak into another sector's narrative and trip the publication gate.
 // ─────────────────────────────────────────────────────────────
 function buildSectorGuardrail(profile: CompanyProfile): string {
-  const sec = getSectorProfile(profile.sector, profile.industry, profile.description);
-  const kpis = sec.allowedKPIs.slice(0, 10).join("; ");
-  const forbidden = sec.forbiddenConcepts.slice(0, 20).join(", ") || "none";
-  return `Sector Guardrail (authoritative — violations block publication):
-- Authoritative sector template: ${sec.name} (${sec.id}); Company Sector/Industry: ${profile.sector} / ${profile.industry}.
-- Use ONLY these sector-appropriate KPIs and metrics: ${kpis}.
-- STRICTLY FORBIDDEN terms for this company (never mention in any form): ${forbidden}.
-- Never apply another sector's template (telecom carrier, FMCG, pharma, banking, energy, renewables). Internet platforms must not mention spectrum auctions, tower tenancies, telecom subscriber churn, or packaged-goods distribution. Telecom tariff/subscriber ARPU must not be confused with digital-advertising ARPU per DAU/MAU.`;
+  // Priority 1: hard CompanyOntology is the single authority (not a forked keyword list).
+  const onto = buildCompanyOntology(profile);
+  const kpis = onto.kpis.slice(0, 10).join("; ");
+  const forbidden = onto.forbiddenConcepts.slice(0, 24).join(", ") || "none";
+  const required = onto.requiredConcepts.slice(0, 8).join(", ");
+  const drivers = onto.revenueDrivers.join("; ");
+  return `Company Ontology Guardrail (authoritative ${onto.ontologyVersion} — violations block publication):
+- Ontology: ${onto.sectorName} (${onto.sectorId}) / ${onto.subSector}; operating archetype ${onto.operatingArchetype} / ${onto.financialArchetype}; segments: ${onto.segments.join(", ")}.
+- Revenue drivers (forecast ONLY via these): ${drivers}. Valuation lens: ${onto.valuationMethods.join(", ")}; margin metric: ${onto.standardMarginMetric}.
+- Use ONLY these KPIs: ${kpis}. REQUIRED concepts (must evidence ≥2): ${required}.
+- STRICTLY FORBIDDEN terms (never mention in any form): ${forbidden}.
+- Never apply another sector's template (telecom carrier, FMCG, pharma, banking, energy, renewables). Internet platforms must not mention spectrum auctions, tower tenancies, telecom subscriber churn, or packaged-goods distribution. Telecom tariff/subscriber ARPU must not be confused with digital-advertising ARPU per DAU/MAU. Every material number must carry source/period/currency/units provenance or be omitted.`;
 }
 
 interface OpenRouterMessage {

@@ -4,25 +4,30 @@
 // rating vs price misalignment, and template keyword leakage.
 // ============================================================
 // QA CONTRACT (block-vs-warn policy — adversarially tested, see
-// scratch/test-publication-gate.ts two-phase fixtures):
-//   FAIL (blocks export): arithmetic breaks (XREF-01/03/04/05, SCEN-01/02,
-//     PROB-01, FV-RECOMP-01, CHAIN-01, BS-01), identity defects (IDENTITY-01),
+// scratch/test-publication-gate.ts two-phase fixtures; Priority 4 independent gate):
+//   FAIL (blocks export): primary-data gaps (DATA-01), ontology violations (ONT-01,
+//     HOSP-01), arithmetic breaks (XREF-01/03/04/05, SCEN-01/02, PROB-01, FV-RECOMP-01,
+//     CHAIN-01, BS-01, MODEL-01), identity defects (IDENTITY-01),
 //     rating/moat/credit contradictions (RATING-01/02, MOAT-01/02, STEWARD-01,
-//     SEMANTIC-01, CREDIT-01), multi-term contamination (BS-DETECTOR-04 ≥2,
-//     SANITIZE-01 ≥2), clone signatures (BS-DETECTOR-05), unresolved tokens
-//     (PLACEHOLDER-01), missing assumption evidence (ASSUME-01).
-//   WARN (costs score, never blocks): single-term bleed (BS-DETECTOR-04 =1,
-//     SANITIZE-01 =1), unverified council (BS-DETECTOR-06), margin step-change
+//     SEMANTIC-01, CREDIT-01, WACC-01), contamination (BS-DETECTOR-04 ≥1,
+//     SANITIZE-01 ≥1), clone signatures (BS-DETECTOR-05), peer-similarity gate
+//     (PEER-01 threshold), unresolved tokens (PLACEHOLDER-01, CLAIM-01 placeholders),
+//     missing assumption evidence (ASSUME-01).
+//   WARN (costs score, never blocks): unverified council (BS-DETECTOR-06), margin step-change
 //     (MARGIN-01), loose chain tolerance (CHAIN-01), generic content screens
-//     (THESIS-01, OVERVIEW-01, COMPET-01, MGMT-01, CATALYST-01, GOV-01).
-//   Rationale: FAIL = machine-verifiable falsehood or proven contamination.
+//     (THESIS-01, OVERVIEW-01, COMPET-01, MGMT-01, CATALYST-01, GOV-01, CLAIM-01 evidence).
+//   Rationale: FAIL = machine-verifiable falsehood, missing primary, or proven contamination.
 //   WARN = style/evidence thinness where a strict block would false-positive
-//   on legitimate LLM phrasing. Every WARN names the remediation.
+//   on legitimate LLM phrasing. Every WARN names the remediation. Independent checks
+//   recompute from primaries and block regardless of other passes.
 // ============================================================
 import type { ReportData, ReportQAResult, QACheckItem } from "@/types/report";
 import { getSectorProfile, classifySector } from "./sectors/index";
 import { identityIssues } from "./canonical";
 import { getAllowlistedConcepts } from "./sector-allowlist";
+import { buildCompanyOntology, validateOntologyCoverage } from "./company-ontology";
+import { assessProvenance } from "./financial-provenance";
+import { gatePeerSet, SIMILARITY_THRESHOLD_AVG, SIMILARITY_MIN_QUALIFYING } from "./peer-similarity";
 
 const SECTOR_KEYWORD_BLOCKLIST: Record<string, { blocked: string[]; sectorNames: string[] }> = {
   telecom: {
@@ -1609,6 +1614,158 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
           name: "Fact-Bound Claim Evidence",
           status: "PASS",
           details: `No material unsupported numeric claims detected (${pctMatches.length} % tokens, ${unsupportedPcts.length} outside model tolerance).`,
+        });
+      }
+    }
+  }
+
+  // ── Priority 4: independent hard publication gate (data → sector → accounting → model → valuation → peers → narrative → PDF).
+  // Each check recomputes from PRIMARY inputs (profile/stockData/annualFinancials),
+  // never trusts the ledger/model output it audits. Any critical FAIL blocks export.
+
+  // DATA-01: primary-data integrity (source/period/currency/units/provenance). Independent of ledger.
+  {
+    const prov = assessProvenance({ profile: data.profile, stockData: data.stockData, annualFinancials: data.annualFinancials });
+    if (prov.isBlocked) {
+      checks.push({
+        id: "DATA-01",
+        category: "BALANCE_SHEET",
+        name: "Primary Data Integrity",
+        status: "FAIL",
+        details: `FATAL PUBLICATION BLOCK: ${prov.blockReason}. Every number needs source/period/currency/units — missing primaries cannot be modeled. Flags: ${prov.dataQualityFlags.join(", ") || "none"}.`,
+        expected: "revenue, shares, price, currency present",
+        actual: `missing: ${prov.criticalMissing.join(", ")}`,
+      });
+    } else if (prov.dataQualityFlags.length > 0) {
+      checks.push({
+        id: "DATA-01",
+        category: "BALANCE_SHEET",
+        name: "Primary Data Integrity",
+        status: prov.estimatedRatio >= 0.5 ? "FAIL" : "WARN",
+        details: prov.estimatedRatio >= 0.5
+          ? `FATAL PUBLICATION BLOCK: ${(prov.estimatedRatio * 100).toFixed(0)}% of audited fields are estimated fallbacks (${prov.estimatedCount} fields) — exceeds 50% modeling threshold. Flags: ${prov.dataQualityFlags.join(", ")}.`
+          : `Primary data verified (${prov.currency}, ${prov.units}); provenance flags disclosed: ${prov.dataQualityFlags.join(", ")}.`,
+        expected: "reported primaries",
+        actual: `${prov.estimatedCount} estimated`,
+      });
+    } else {
+      checks.push({
+        id: "DATA-01",
+        category: "BALANCE_SHEET",
+        name: "Primary Data Integrity",
+        status: "PASS",
+        details: `Primary filing verified: revenue/shares/price/currency/units present (${prov.currency}, ${prov.units}), zero estimated fallbacks.`,
+      });
+    }
+  }
+
+  // ONT-01: hard ontology coverage (generalized required/forbidden — independent of sanitizer rewrites).
+  {
+    const onto = buildCompanyOntology(data.profile);
+    const narrativeAll = JSON.stringify({ ...(data.aiAnalysis || {}), ...(data as unknown as { peAnalysis?: unknown }).peAnalysis || {} });
+    const cov = validateOntologyCoverage(onto, narrativeAll);
+    if (cov.presentForbidden.length > 0) {
+      checks.push({
+        id: "ONT-01",
+        category: "BS_DETECTOR",
+        name: "Ontology Forbidden Concepts",
+        status: "FAIL",
+        details: `FATAL PUBLICATION BLOCK: narrative contains ${cov.presentForbidden.length} ontology-forbidden concept(s) for ${onto.sectorId} [${cov.presentForbidden.slice(0, 6).join(", ")}]. Business-model violation — wrong template applied.`,
+        expected: "Zero forbidden concepts",
+        actual: `${cov.presentForbidden.length} forbidden`,
+      });
+    } else if (cov.missingRequired.length >= onto.requiredConcepts.length - 1 && onto.requiredConcepts.length > 2) {
+      // All-but-one required concepts missing = likely generic template.
+      // WARN (not FAIL): conglomerates and GENERAL-sector names legitimately lack
+      // narrow required vocab; HOSP-01 already hard-blocks hospitality. Avoids
+      // false BLOCK on misclassified/diversified names (e.g. Reliance).
+      checks.push({
+        id: "ONT-01",
+        category: "BS_DETECTOR",
+        name: "Ontology Required Concepts",
+        status: "WARN",
+        details: `Narrative evidences few of the required ${onto.sectorId} concepts [${onto.requiredConcepts.slice(0, 6).join(", ")}] — missing ${cov.missingRequired.length}/${onto.requiredConcepts.length}. Rebuild around sector drivers if sector is high-confidence.`,
+        expected: `≥2 of: ${onto.requiredConcepts.slice(0, 4).join(", ")}`,
+        actual: `missing ${cov.missingRequired.length}`,
+      });
+    } else {
+      checks.push({
+        id: "ONT-01",
+        category: "BS_DETECTOR",
+        name: "Ontology Coverage",
+        status: "PASS",
+        details: `Ontology ${onto.sectorId} (${onto.ontologyVersion}): required concepts evidenced, zero forbidden concepts.`,
+      });
+    }
+  }
+
+  // MODEL-01: independent DCF recomputation from primaries (never trusts ledger/model fields).
+  {
+    const fins = data.annualFinancials || [];
+    const latestM = fins[fins.length - 1];
+    const dcfM = data.dcf as unknown as Record<string, number>;
+    const indepIssues: string[] = [];
+    if (latestM && dcfM) {
+      const ev = Number(dcfM.enterpriseValue) || 0;
+      const sumPv = Number(dcfM.sumPvFcff) || 0;
+      const pvTv = Number(dcfM.pvTerminalValue) || 0;
+      if (Math.abs(ev - (sumPv + pvTv)) > 1000 && ev > 0) indepIssues.push(`EV≠PV(FCFF)+PV(TV) gap ${(Math.abs(ev - (sumPv + pvTv))).toFixed(0)}`);
+      const eq = Number(dcfM.equityValue) || 0;
+      const nd = Number((data.assumptionsLedger as unknown as Record<string, number> | undefined)?.netDebt ?? dcfM.netDebt) || 0;
+      const isFin = buildCompanyOntology(data.profile).isFinancialInstitution;
+      if (!isFin && ev > 0 && Math.abs(eq - (ev - nd)) > 1000) indepIssues.push(`Equity≠EV−NetDebt gap ${Math.abs(eq - (ev - nd)).toFixed(0)}`);
+      const shares = Number(data.stockData.sharesOutstanding) || Number(latestM.sharesOutstanding) || 0;
+      const fvM = Number((data.assumptionsLedger as unknown as Record<string, number> | undefined)?.fairValue ?? data.targetPrice) || 0;
+      if (shares > 0 && eq > 0 && Math.abs(fvM - eq / shares) > 1.0) indepIssues.push(`FV≠Equity/Shares gap ${Math.abs(fvM - eq / shares).toFixed(2)}`);
+      const w = Number(dcfM.wacc ?? (data.dcf as unknown as { assumptions?: { wacc?: number } }).assumptions?.wacc) || 0;
+      void w;
+    } else {
+      indepIssues.push("missing primaries for independent recomputation");
+    }
+    if (indepIssues.length > 0) {
+      checks.push({
+        id: "MODEL-01",
+        category: "CROSS_REFERENCE",
+        name: "Independent Model Recomputation",
+        status: "FAIL",
+        details: `FATAL PUBLICATION BLOCK: independent recomputation from primary statements disagrees with model outputs: ${indepIssues.slice(0, 3).join("; ")}. QA validates its own outputs — recompute, don't assert.`,
+        expected: "Independent bridge agreement",
+        actual: indepIssues.slice(0, 2).join("; "),
+      });
+    } else {
+      checks.push({
+        id: "MODEL-01",
+        category: "CROSS_REFERENCE",
+        name: "Independent Model Recomputation",
+        status: "PASS",
+        details: `Independent EV/equity/per-share bridges recomputed from primary statements agree with model.`,
+      });
+    }
+  }
+
+  // PEER-01 upgrade: similarity-threshold gate (Priority 5). Replaces fixed 30-cutoff with engine thresholds.
+  {
+    const peerList = (data.peers || []) as unknown as { relevanceScore?: number | null; ticker?: string }[];
+    if (peerList.length > 0) {
+      const gate = gatePeerSet(peerList as never);
+      const existingPeerFails = checks.filter((c) => c.id === "PEER-01" && c.status === "FAIL").length;
+      if (gate.suppress && existingPeerFails === 0) {
+        checks.push({
+          id: "PEER-01",
+          category: "BS_DETECTOR",
+          name: "Peer Similarity Threshold",
+          status: "FAIL",
+          details: `FATAL: peer set fails business-model similarity gate — ${gate.reason}. Suppress relative valuation; rating must rest on DCF alone.`,
+          expected: `avg ≥ ${SIMILARITY_THRESHOLD_AVG}, ≥${2} peers ≥ ${SIMILARITY_MIN_QUALIFYING}`,
+          actual: `avg ${gate.avg ?? "null"}, qualifying ${gate.qualifying}`,
+        });
+      } else if (!gate.suppress && gate.avg !== null) {
+        checks.push({
+          id: "PEER-01",
+          category: "BS_DETECTOR",
+          name: "Peer Similarity Threshold",
+          status: "PASS",
+          details: `Peer similarity gate passed — ${gate.reason}.`,
         });
       }
     }

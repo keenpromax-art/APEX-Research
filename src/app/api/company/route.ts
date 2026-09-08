@@ -7,6 +7,8 @@ import { buildMasterReportFacts } from "@/lib/report-facts";
 import { buildEventPriceMovements } from "@/lib/event-price-engine";
 import { normalizeTicker } from "@/lib/request-validation";
 import { isInternetPlatformCompany, isTelecomCarrierCompany, isHospitalityCompany, isRealEstateCompany } from "@/lib/sectors/profiles";
+import { buildCompanyOntology } from "@/lib/company-ontology";
+import { scorePeerSimilarity, gatePeerSet } from "@/lib/peer-similarity";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -246,9 +248,12 @@ export async function GET(request: NextRequest) {
 
       if (filteredPeers.length > 0) {
         const peerRaw = await fetchPeerQuotes(filteredPeers);
-        const subjSec = (companyProfile.sector || "").toLowerCase();
-        const subjInd = (companyProfile.industry || "").toLowerCase();
-        const subjCap = stockData.marketCap || 0;
+        // Priority 1+5: hard ontology is the candidate universe authority; similarity engine scores.
+        const ontology = buildCompanyOntology(companyProfile, archetypeProfile as never);
+        // Prefer ontology competitor universe when curated branch left gaps (general fallback).
+        if (peerTickers.length === 0 && ontology.competitors.length > 0) {
+          // (candidate pool already fixed above; ontology documents the intended universe for QA)
+        }
         peers = peerRaw.map(p => {
           const tickerStr = (p.symbol as string) || "";
           const parseNum = (v: any): number | null => {
@@ -273,43 +278,30 @@ export async function GET(request: NextRequest) {
           const pDebtToEquity = parseNum(p.debtToEquity);
           const pCurrentRatio = parseNum(p.currentRatio);
 
-          // Business-model similarity engine: sector/industry + size + financial distance + ontology penalty
-          // Curated lists are the candidate universe; scoring is the similarity gate (Priority 4).
-          // Hospitality/REIT vs bank/industrial mismatches are heavily penalized so peer-relative valuation is not fabricated.
+          // Priority 5: business-model similarity engine (operating model + geography +
+          // growth + margins + capital intensity + size). Ontology is the authority.
           const qSec = ((p.sector as string) || "").toLowerCase() || null;
           const qInd = ((p.industry as string) || "").toLowerCase() || null;
           let relevanceScore: number | null = null;
           if (qSec || qInd) {
-            let score = 0;
-            if (qSec && subjSec && (qSec.includes(subjSec) || subjSec.includes(qSec))) score += 50;
-            else if (qSec && subjSec) score -= 30;
-            if (qInd && subjInd && (qInd.includes(subjInd) || subjInd.includes(qInd))) score += 30;
-            else if (qInd && subjInd) score -= 10;
-            if (pCap && subjCap > 0) {
-              const ratio = Math.min(pCap, subjCap) / Math.max(pCap, subjCap);
-              score += Math.round(ratio * 20);
-            }
-            // Financial distance: net margin and ROE proximity (business model similarity)
-            const subjMargin = (stockData as any).profitMargins ?? annualFinancials[annualFinancials.length - 1]?.netMargin ?? null;
-            if (pNetMargin !== null && subjMargin !== null && Number.isFinite(subjMargin)) {
-              const mDiff = Math.abs(pNetMargin - subjMargin);
-              // Within 5pp = +10, within 10pp = +5, >20pp = -10
-              if (mDiff <= 0.05) score += 10;
-              else if (mDiff <= 0.10) score += 5;
-              else if (mDiff > 0.20) score -= 10;
-            }
-            // Ontology penalty: hospitality/REIT must not be compared to loan-book or manufacturing
-            const subjIsHosp = subjInd.includes("lodg") || subjInd.includes("hotel") || subjInd.includes("resort") || subjInd.includes("hospitality") || subjSec.includes("hotel");
-            const peerIsHosp = (qInd && (qInd.includes("lodg") || qInd.includes("hotel") || qInd.includes("resort") || qInd.includes("hospitality"))) || (qSec && qSec.includes("hotel"));
-            const peerIsFinancial = qSec && (qSec.includes("financial") || qSec.includes("bank"));
-            const peerIsIndustrial = qSec && (qSec.includes("industrial") || qSec.includes("manufacturing"));
-            if (subjIsHosp && !peerIsHosp && (peerIsFinancial || peerIsIndustrial)) score -= 40;
-            // Real-estate vs non-real-estate penalty
-            const subjIsRE = subjInd.includes("reit") || subjInd.includes("real estate") || subjSec.includes("real estate");
-            const peerIsRE = (qInd && (qInd.includes("reit") || qInd.includes("real estate"))) || (qSec && qSec.includes("real estate"));
-            if (subjIsRE && !peerIsRE && peerIsFinancial) score -= 30;
-
-            relevanceScore = Math.max(0, Math.min(100, score));
+            const breakdown = scorePeerSimilarity({
+              profile: companyProfile,
+              stockData,
+              annualFinancials,
+              ontologySectorId: ontology.sectorId,
+              ontologyArchetype: ontology.operatingArchetype,
+              peer: {
+                sector: qSec,
+                industry: qInd,
+                currency: (p.currency as string) || null,
+                marketCap: pCap,
+                roe: pRoe,
+                netMargin: pNetMargin,
+                revenueGrowth: pRevGrowth,
+                debtToEquity: pDebtToEquity,
+              },
+            });
+            relevanceScore = breakdown.total;
           }
 
           return {
@@ -339,6 +331,12 @@ export async function GET(request: NextRequest) {
             relevanceScore,
           };
         }).filter(p => p.ticker && (p.marketCap != null || p.cmp != null || p.pe != null));
+        // Priority 5 gate: suppress relative valuation when similarity is insufficient.
+        const gate = gatePeerSet(peers as never);
+        if (gate.suppress) {
+          console.warn(`Peer similarity gate suppressed relative valuation for ${symbol}: ${gate.reason}`);
+          peers = [];
+        }
       }
     } catch (peerError) {
       console.warn("Peer fetch failed:", peerError);

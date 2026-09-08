@@ -31,26 +31,43 @@ export function createAssumptionsLedger({
   calibration,
 }: CreateLedgerParams): AssumptionsLedger {
   const latestFin = annualFinancials[annualFinancials.length - 1];
+  // Priority 2: fail-closed provenance — never synthesize price=100 / shares=1.
+  // Missing price/shares/currency/revenue forces NR + BLOCKED (DATA-01), not a modeled value.
   const priceWasFallback = !(Number(stockData.currentPrice) > 0);
-  const currentPrice = Number(stockData.currentPrice) || Number(latestFin?.eps ? latestFin.eps * 15 : 100);
+  const sharesWasFallback = !(
+    Number(stockData.sharesOutstanding) > 0 ||
+    Number(latestFin?.sharesOutstanding) > 0 ||
+    Number(dcf?.sharesOutstanding) > 0
+  );
+  const currencyMissing = !(profile.currency && profile.currency.trim().length > 0);
+  const revenueMissing = !(Number(latestFin?.revenue) > 0);
+  const currentPrice = Number(stockData.currentPrice) > 0 ? Number(stockData.currentPrice) : 0;
 
-  // Shares Outstanding
+  // Shares Outstanding — 0 when missing (forces insufficientInputs, never 1-share synthesis)
   const sharesOutstanding =
-    Number(stockData.sharesOutstanding) ||
-    Number(latestFin?.sharesOutstanding) ||
-    Number(dcf?.sharesOutstanding) ||
-    1;
+    Number(stockData.sharesOutstanding) > 0
+      ? Number(stockData.sharesOutstanding)
+      : Number(latestFin?.sharesOutstanding) > 0
+        ? Number(latestFin.sharesOutstanding)
+        : Number(dcf?.sharesOutstanding) > 0
+          ? Number(dcf.sharesOutstanding)
+          : 0;
 
   // Input-sufficiency gate (private/unlisted names, empty histories, zero shares):
   // never model a "valid" DCF on shares=1 / price=100 synthesis.
   const insufficientInputs =
     annualFinancials.length === 0 ||
     !(sharesOutstanding > 0) ||
-    !(currentPrice > 0);
+    !(currentPrice > 0) ||
+    currencyMissing ||
+    revenueMissing;
   const estimatedFieldsTotal = annualFinancials.reduce((s, f) => s + (f.estimatesUsed?.length || 0), 0);
   const dataQualityFlags: string[] = [];
   if (annualFinancials.length === 0) dataQualityFlags.push("NO_FINANCIAL_HISTORY");
   if (priceWasFallback) dataQualityFlags.push("PRICE_FALLBACK_USED");
+  if (sharesWasFallback) dataQualityFlags.push("SHARES_FALLBACK_MISSING");
+  if (currencyMissing) dataQualityFlags.push("CURRENCY_UNKNOWN");
+  if (revenueMissing) dataQualityFlags.push("REVENUE_MISSING");
   if (estimatedFieldsTotal > 0) dataQualityFlags.push(`ESTIMATED_FINANCIALS:${estimatedFieldsTotal}`);
 
   // 1. DCF Arithmetic Bridge

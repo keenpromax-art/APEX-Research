@@ -17,6 +17,9 @@ import type { ArchetypeProfile } from "../company-archetype";
 
 export interface ValuationSelectionResult {
   selectedModel: "FCFF_DCF" | "PB_RESIDUAL_INCOME";
+  /** Operating-archetype valuation lens (Priority 5): primary DCF + corroborating multiple. */
+  valuationLens?: string;
+  corroboratingMultiple?: string;
   sectorProfile: SectorProfile;
   dcf: DCFResult;
   residualIncome?: ResidualIncomeResult;
@@ -25,6 +28,23 @@ export interface ValuationSelectionResult {
   rating: "BUY" | "HOLD" | "SELL" | "NR";
   calibration?: ValuationCalibrationResult;
   diagnostics: string[];
+}
+
+/** Priority 5: valuation method follows operating archetype, not sector label alone. */
+function resolveValuationLens(sectorId: string, operatingArchetype?: string): { lens: string; corroboration: string } {
+  const op = (operatingArchetype || "").toLowerCase();
+  if (op.startsWith("hospitality") || sectorId === "hospitality") {
+    if (op === "hospitality_asset_light") return { lens: "FCFF_DCF on fee annuity + EV/EBITDAR", corroboration: "EV/EBITDAR + fee-EBITDA multiple" };
+    return { lens: "FCFF_DCF (RevPAR-driven) + EV/EBITDAR cross-check", corroboration: "EV/EBITDAR + NAV cap-rate" };
+  }
+  if (sectorId === "real-estate" || op === "real_estate") return { lens: "FCFF_DCF + NAV cap-rate", corroboration: "NAV cap-rate + EV/EBITDA" };
+  if (sectorId === "auto" || op === "auto_manufacturing") return { lens: "FCFF_DCF (deliveries×ASP) + EV/EBITDA ex-credits", corroboration: "EV/EBITDA + P/E" };
+  if (sectorId === "it-services" || op === "technology_software") return { lens: "FCFF_DCF (utilization×realization) + EV/EBIT", corroboration: "EV/EBIT + PEG" };
+  if (sectorId === "internet-platform") return { lens: "FCFF_DCF (DAU×price-per-ad) + EV/EBITDA", corroboration: "EV/EBITDA + EV/Sales" };
+  if (sectorId === "internet-retail") return { lens: "FCFF_DCF (orders×AOV×take-rate) + EV/Sales", corroboration: "EV/Sales + EV/EBITDA" };
+  if (sectorId === "telecom") return { lens: "FCFF_DCF (subs×ARPU) + EV/EBITDA", corroboration: "EV/EBITDA + EV/Sales" };
+  if (sectorId === "pharma") return { lens: "FCFF_DCF (volumes×realization) + EV/EBITDA", corroboration: "EV/EBITDA + P/E ex-pipeline" };
+  return { lens: "FCFF_DCF (volume×realization×mix)", corroboration: "EV/EBITDA + P/E" };
 }
 
 export function selectAndComputeValuation(params: {
@@ -155,11 +175,12 @@ export function selectAndComputeValuation(params: {
     };
   }
 
-  // 2. Non-financial institutions: Standard FCFF DCF with archetype & sector integration
+  // 2. Non-financial institutions: driver-native FCFF DCF with archetype lens (Priority 3+5)
   const standardDcf = computeDCF(annualFinancials, stockData, sectorProfile, archetypeProfile, profile.country);
   const fairValue = standardDcf.fairValuePerShare || (standardDcf.intrinsicValue > 0 ? standardDcf.intrinsicValue : null);
   const upside = standardDcf.upsideDownside;
   const rating = standardDcf.verdict;
+  const lens = resolveValuationLens(sectorProfile.id, archetypeProfile?.sector);
 
   // Items 7 & 10: Sector-relative calibration & decile ranking
   const calibration = calibrateValuation({
@@ -169,12 +190,14 @@ export function selectAndComputeValuation(params: {
 
   return {
     selectedModel: "FCFF_DCF",
+    valuationLens: lens.lens,
+    corroboratingMultiple: lens.corroboration,
     sectorProfile,
     dcf: standardDcf,
     fairValue,
     upside,
     rating,
     calibration,
-    diagnostics: [...(standardDcf.diagnostics || []), ...calibration.diagnostics]
+    diagnostics: [`Valuation lens: ${lens.lens}; corroboration: ${lens.corroboration}.`, ...(standardDcf.diagnostics || []), ...calibration.diagnostics]
   };
 }

@@ -14,6 +14,7 @@ import { calculateRecommendation } from "./recommendation";
 import { computeReverseDCF } from "./valuation/reverse-dcf";
 import type { ArchetypeProfile } from "./company-archetype";
 import type { SectorProfile } from "./sectors/types";
+import { computeDriverForecast } from "./driver-models";
 
 const safe = (n: number, d = 0) =>
   isFinite(n) && !isNaN(n) ? n : d;
@@ -314,27 +315,10 @@ export function computeDCF(
     ? 0.55 * winsorizedCagr + 0.45 * winsorizedLive
     : winsorizedCagr;
 
-  assumptions.revenueGrowthRates = [
-    baseGrowth,
-    baseGrowth * 0.90,
-    baseGrowth * 0.82,
-    baseGrowth * 0.74,
-    baseGrowth * 0.66,
-  ];
-
-  // Sector-specific driver overrides (Priority 2: driver-based operating models)
-  const isHospSector = sectorProfile?.id === "hospitality" || sectorProfile?.id === "real-estate"
-    || archetypeProfile?.sector === "hospitality" || archetypeProfile?.sector === "hospitality_owner_operator"
-    || archetypeProfile?.sector === "hospitality_asset_light" || archetypeProfile?.sector === "hospitality_reit"
-    || archetypeProfile?.sector === "real_estate";
-  if (isHospSector) {
-    // Hospitality: RevPAR-driven (Occupancy × ADR) + keys pipeline + F&B/MICE; mid-cycle occupancy, not endless CAGR
-    // Terminal growth lower (3.5% = 2% real + 1.5% inflation) with EBITDAR focus; capex higher (maintenance 4-5% + 8-yr refurb reserve ≈ 6-7%)
-    assumptions.terminalGrowthRate = sectorProfile?.id === "real-estate" ? 0.03 : 0.035;
-    // Override evidence trail later, but keep mechanics auditable
-  }
-
-  // Item 6: Archetype capital intensity calibrations
+  // Priority 3: sector/segment driver forecast (replaces single generic CAGR).
+  // Base growth stays winsorized history+live; shape, margins, capex, terminal
+  // are driver-native per business type (auto volume×ASP, hospitality Occ×ADR,
+  // IT utilization×realization, platform DAU×price-per-ad, etc.).
   const nonZeroRevCount = annualFinancials.filter(f => f.revenue > 0).length || 1;
   const rawAvgCapexPct =
     annualFinancials.reduce((s, f) => s + (f.revenue > 0 ? f.capitalExpenditures / f.revenue : 0), 0) /
@@ -342,32 +326,43 @@ export function computeDCF(
   const rawAvgDeptPct =
     annualFinancials.reduce((s, f) => s + (f.revenue > 0 ? f.depreciation / f.revenue : 0), 0) /
     nonZeroRevCount;
+  // effectiveMargin mirrors computeWACC's mid-cycle anchor (first explicit margin minus 1pp ramp).
+  const effectiveMarginSeed = (assumptions.ebitMargins?.[0] ?? 0.14) - 0.01;
+  const sectorIdForDrivers = sectorProfile?.id ?? "general";
+  const driver = computeDriverForecast({
+    sectorId: sectorIdForDrivers,
+    operatingArchetype: archetypeProfile?.sector ?? "general_industrial",
+    inputs: {
+      cagr,
+      winsorizedCagr,
+      winsorizedLive,
+      baseGrowth,
+      hasLive,
+      liveRevGrowth: hasLive ? liveRevGrowth : cagr,
+      years,
+      effectiveMargin: effectiveMarginSeed,
+      rawAvgCapexPct,
+      rawAvgDeptPct,
+    },
+  });
+  assumptions.revenueGrowthRates = driver.revenueGrowthRates;
+  assumptions.ebitMargins = driver.ebitMargins;
+  assumptions.terminalGrowthRate = driver.terminalGrowthRate;
 
-  let avgCapexPct = Math.min(0.08, Math.max(0.025, rawAvgCapexPct || 0.04));
-  let avgDeptPct = Math.min(0.06, Math.max(0.020, rawAvgDeptPct || 0.035));
-  let avgNwcChangePct = 0.02;
+  const isHospSector = sectorProfile?.id === "hospitality" || sectorProfile?.id === "real-estate"
+    || archetypeProfile?.sector === "hospitality" || archetypeProfile?.sector === "hospitality_owner_operator"
+    || archetypeProfile?.sector === "hospitality_asset_light" || archetypeProfile?.sector === "hospitality_reit"
+    || archetypeProfile?.sector === "real_estate";
+
+  let avgCapexPct = driver.avgCapexPct;
+  let avgDeptPct = driver.avgDeptPct;
+  let avgNwcChangePct = driver.avgNwcChangePct;
 
   if (archetypeProfile?.archetype === "CYCLICAL_CAPITAL_INTENSIVE") {
     avgCapexPct = Math.max(avgCapexPct, 0.065); // High capex cycle absorption
   } else if (archetypeProfile?.archetype === "EARLY_PLATFORM_GROWTH") {
     avgCapexPct = Math.min(avgCapexPct, 0.030); // Asset-light platform
-    avgNwcChangePct = 0.035;                   // Customer acquisition / inventory buffer
-  }
-
-  // Hospitality overlay: capitalized leased assets + refurb cycle; hospitality reit is leased-asset heavy
-  if (isHospSector) {
-    if (sectorProfile?.id === "real-estate" || archetypeProfile?.sector === "hospitality_reit" || archetypeProfile?.sector === "real_estate") {
-      avgCapexPct = Math.max(avgCapexPct, 0.045); // REIT: lower maintenance, but re-leasing capex
-      avgNwcChangePct = 0.008; // Rent receivables light
-    } else if (archetypeProfile?.sector === "hospitality_asset_light") {
-      avgCapexPct = Math.min(avgCapexPct, 0.025); // Fee annuity, low owned capex
-      avgNwcChangePct = 0.015;
-    } else {
-      // Owner-operator: maintenance 4-5% + refurb reserve push to ~6.5%
-      avgCapexPct = Math.max(avgCapexPct, 0.060);
-      avgDeptPct = Math.max(avgDeptPct, 0.040);
-      avgNwcChangePct = 0.012; // Hospitality NWC ~ 3-4% rooms revenue changed, light vs manufacturing
-    }
+    avgNwcChangePct = Math.max(avgNwcChangePct, 0.035); // Customer acquisition / inventory buffer
   }
 
   const wacc = assumptions.wacc;
@@ -505,29 +500,17 @@ export function computeDCF(
           ? `live operating margin ${(stockData.operatingMargins * 100).toFixed(1)}%`
           : `14% default (no margin basis — treat with caution)`;
   const assumptionBasis: Record<string, string> = {
-    revenueGrowth: hasLive
-      ? `55% historical revenue CAGR (${(cagr * 100).toFixed(1)}% over ${Math.max(1, years - 1)}y, winsorized ${(winsorizedCagr * 100).toFixed(1)}%) + 45% live growth (${(liveRevGrowth * 100).toFixed(1)}%, winsorized ${(winsorizedLive * 100).toFixed(1)}%) → base ${(baseGrowth * 100).toFixed(1)}%, fading ×0.90/0.82/0.74/0.66`
-      : `Historical revenue CAGR (${(cagr * 100).toFixed(1)}% over ${Math.max(1, years - 1)}y, winsorized ${(winsorizedCagr * 100).toFixed(1)}%) → base ${(baseGrowth * 100).toFixed(1)}%, fading yearly (no live growth input)`,
-    ebitMargin: `Base from ${marginSource}; explicit margins ramp +1.0/+1.8/+2.4/+2.8/+3.0pp, capped 26–30%`,
-    capex: `Historical capex intensity ${(rawAvgCapexPct * 100).toFixed(1)}% of revenue (clamped 2.5–8.0% → ${(avgCapexPct * 100).toFixed(1)}%)${archetypeProfile?.archetype ? `; ${archetypeProfile.archetype} overlay applied` : ""}; D&A ${(rawAvgDeptPct * 100).toFixed(1)}% (clamped 2.0–6.0%)`,
-    workingCapital: `Revenue-linked change ${(avgNwcChangePct * 100).toFixed(1)}%${archetypeProfile?.archetype === "EARLY_PLATFORM_GROWTH" ? " (platform buffer overlay)" : ""}`,
+    revenueGrowth: `${driver.driverEquation}; 55% hist CAGR (${(cagr * 100).toFixed(1)}% over ${Math.max(1, years - 1)}y, winsorized ${(winsorizedCagr * 100).toFixed(1)}%) + 45% live (${hasLive ? `${(liveRevGrowth * 100).toFixed(1)}%, winsorized ${(winsorizedLive * 100).toFixed(1)}%` : "n/a"}) → base ${(baseGrowth * 100).toFixed(1)}% driver-shaped fade`,
+    ebitMargin: `Driver-shaped (${sectorIdForDrivers}): base from ${marginSource}; explicit path ${driver.ebitMargins.map((m) => `${(m * 100).toFixed(1)}%`).join(" → ")}`,
+    capex: `Driver capex ${(avgCapexPct * 100).toFixed(1)}% of revenue (hist ${(rawAvgCapexPct * 100).toFixed(1)}% clamped 2.5–8.0%)${archetypeProfile?.archetype ? `; ${archetypeProfile.archetype} overlay` : ""}; D&A ${(rawAvgDeptPct * 100).toFixed(1)}% (clamped 2.0–6.0%)`,
+    workingCapital: `Driver NWC change ${(avgNwcChangePct * 100).toFixed(1)}% of revenue (revenue-linked, sector-calibrated for ${sectorIdForDrivers})${archetypeProfile?.archetype === "EARLY_PLATFORM_GROWTH" ? " with platform buffer overlay" : ""}`,
     netDebt: financeReceivablesOffset > 0
       ? `Reported net debt ${(latestDebt - latestCash).toFixed(0)} less captive-finance receivables offset ${financeReceivablesOffset.toFixed(0)} (receivables ${receivables.toFixed(0)} vs 20% trade allowance ${(tradeAllowance).toFixed(0)}, capped at total debt) → adjusted ${netDebt.toFixed(0)}`
       : `Reported net debt in full (total debt ${latestDebt.toFixed(0)} − cash ${(latestCash).toFixed(0)}); no captive-finance offset (receivables ${receivables.toFixed(0)} within trade allowance)`,
     wacc: assumptions.parameterSource || "CAPM blend (parameters undisclosed)",
-    terminal: `4.0% nominal-GDP anchor; TV capped at 25× terminal-year FCFF${isTvCapped ? " (CAP ACTIVE — see diagnostics)" : " (not binding)"}`,
+    terminal: `${(assumptions.terminalGrowthRate * 100).toFixed(1)}% sector anchor (${sectorIdForDrivers}); TV capped at 25× terminal-year FCFF${isTvCapped ? " (CAP ACTIVE — see diagnostics)" : " (not binding)"}`,
+    driverEquation: driver.driverEquation,
   };
-
-  // Hospitality/Reit driver overlay: replace generic CAGR language with RevPAR-native evidence
-  if (isHospSector) {
-    assumptionBasis.revenueGrowth = hasLive
-      ? `Hospitality RevPAR-driven: Occupancy ramp to 68-72% stabilized × ADR (CPI + 1-2% tier premium) plus keys pipeline and F&B/MICE mix; 55% hist CAGR (${(cagr * 100).toFixed(1)}%) + 45% live (${(liveRevGrowth * 100).toFixed(1)}%) → base ${(baseGrowth * 100).toFixed(1)}% fading ×0.90/0.82/0.74/0.66 (RevPAR-implied, not generic)`
-      : `Hospitality RevPAR-driven: Occupancy × ADR with keys pipeline and F&B/MICE; hist CAGR (${(cagr * 100).toFixed(1)}%) → base ${(baseGrowth * 100).toFixed(1)}% fading yearly (RevPAR-implied)`;
-    assumptionBasis.capex = `Hospitality capex: maintenance 4-5% rooms revenue + 8-yr refurb reserve → ${(avgCapexPct * 100).toFixed(1)}% of revenue (clamped)${isHospSector ? `; ${archetypeProfile?.sector} overlay` : ""}; D&A ${(rawAvgDeptPct * 100).toFixed(1)}%`;
-    assumptionBasis.workingCapital = `Hospitality NWC: receivables 3-4% rooms revenue changed → ${(avgNwcChangePct * 100).toFixed(1)}% of revenue`;
-    assumptionBasis.terminal = `${(assumptions.terminalGrowthRate * 100).toFixed(1)}% hospitality nominal anchor (real ~2% + inflation, mid-cycle occupancy, not perpetual high growth); TV capped at 25×${isTvCapped ? " (CAP ACTIVE)" : " (not binding)"} — sector-specific, not generic 4.0%`;
-    assumptionBasis.ebitMargin = `Hospitality EBITDAR-derived: Base from ${marginSource}; GOPPAR/EBITDAR margin ramp +1.0/+1.8/+2.4/+2.8/+3.0pp capped 26-30%, with IFRS-16 rent sensitivity disclosed`;
-  }
 
   return {
     status,

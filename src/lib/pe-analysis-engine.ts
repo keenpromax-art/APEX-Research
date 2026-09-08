@@ -17,6 +17,7 @@ import type {
 } from "@/types/report";
 import { formatPct, formatLargeNum } from "./calculations";
 import { classifyArchetype, type GICSSector, type FinancialArchetype } from "./company-archetype";
+import { buildCompanyOntology } from "./company-ontology";
 
 export interface PEAnalysisInput {
   profile: CompanyProfile;
@@ -35,21 +36,15 @@ export function generatePEFirmAnalysis(input: PEAnalysisInput): AIAnalysis {
   const latest = annualFinancials[annualFinancials.length - 1] || ({} as AnnualFinancials);
   const prev = annualFinancials[annualFinancials.length - 2] || latest;
   
-  // Authoritative Archetype & Sector Classification
+  // Priority 1: hard CompanyOntology is the single authority (sector + archetype + drivers + KPIs).
   const archProfile = classifyArchetype(profile, stockData, annualFinancials);
   const sectorType = archProfile.sector;
   const archetype = archProfile.archetype;
+  const ontology = buildCompanyOntology(profile, archProfile);
   // Also resolve canonical SectorProfile id (consumer / auto / etc.) for
   // cases where archetype sector is generic (general_industrial) but the
-  // company is clearly FMCG/consumer by GICS (e.g. ITC). This ensures
-  // consumer companies never fall through to IT-generic SWOT/risks.
-  // Lazy import to avoid circular deps at module load.
-  let sectorProfileId: string = sectorType;
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { classifySector: _cs } = require("./sectors/profiles") as typeof import("./sectors/profiles");
-    sectorProfileId = _cs(profile.sector, profile.industry, profile.description).id;
-  } catch { /* keep archetype sector */ }
+  // company is clearly FMCG/consumer by GICS (e.g. ITC). Ontology is authoritative.
+  const sectorProfileId: string = ontology.sectorId;
 
   const cur = profile.currency || "INR";
   const sym = cur === "INR" ? "Rs. " : cur === "USD" ? "$" : cur === "EUR" ? "€" : "£";

@@ -40,6 +40,8 @@ export interface SectorProfile {
   riskCategories: string[];
   moatDrivers: string[];
   forbiddenConcepts: string[];
+  /** Positive control: concepts that MUST be evidenced for this sector (Priority 1). Optional for backward compat — ontology supplies defaults. */
+  requiredConcepts?: string[];
   isFinancialInstitution: boolean;
   standardMarginMetric: "EBITDA Margin" | "EBITDAR Margin" | "Operating Margin" | "NIM" | "Net Spread" | "Underwriting Margin";
   driverSpec?: SectorDriverSpec;

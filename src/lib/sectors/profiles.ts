@@ -614,7 +614,9 @@ export function isInternetPlatformCompany(
 }
 
 /** Telecom CARRIERS only. Internet platforms are excluded even when their
- * sector string says "Communication Services". */
+ * sector string says "Communication Services". Industry-strict: a conglomerate
+ * description mentioning telecom as one segment (e.g. Reliance) must NOT route
+ * to telecom when its industry is oil/energy/retail. */
 export function isTelecomCarrierCompany(
   sector?: string,
   industry?: string,
@@ -622,16 +624,31 @@ export function isTelecomCarrierCompany(
   name?: string
 ): boolean {
   if (isInternetPlatformCompany(sector, industry, description, name)) return false;
+  const industryLower = `${industry || ""}`.toLowerCase();
+  const sectorLower = `${sector || ""}`.toLowerCase();
   const combined = `${sector || ""} ${industry || ""} ${description || ""} ${name || ""}`.toLowerCase();
-  return (
-    combined.includes("telecom") ||
-    combined.includes("wireless") ||
-    combined.includes("cellular") ||
-    combined.includes("telecommunications service") ||
+  // Strong signals: industry/sector is telecom, or carrier-specific identifiers
+  if (
+    industryLower.includes("telecom") ||
+    industryLower.includes("wireless") ||
+    industryLower.includes("telecommunications service") ||
+    sectorLower.includes("telecom") ||
     combined.includes("vodafone idea") ||
+    combined.includes("bharti airtel") ||
     combined.includes("spectrum auction") ||
     combined.includes("agr dues")
-  );
+  ) return true;
+  // Weak signals (bare "telecom"/"cellular" in description only): only when industry
+  // is not clearly another sector (energy/oil/retail/bank/pharma). Prevents
+  // conglomerate contamination (Reliance Energy + telecom segment → telecom).
+  const weakHit = combined.includes("telecom") || combined.includes("cellular") || combined.includes("wireless");
+  if (!weakHit) return false;
+  const clearlyOther =
+    industryLower.includes("oil") || industryLower.includes("gas") || industryLower.includes("energy") ||
+    industryLower.includes("refin") || industryLower.includes("petro") || industryLower.includes("retail") ||
+    industryLower.includes("bank") || industryLower.includes("pharma") || industryLower.includes("software") ||
+    industryLower.includes("technology services");
+  return !clearlyOther;
 }
 
 export function isHospitalityCompany(
