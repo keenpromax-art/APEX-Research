@@ -4,6 +4,7 @@
 // operational reality before generating financial templates and narratives.
 // ============================================================
 import type { CompanyProfile, StockData, AnnualFinancials } from "@/types/report";
+import { isInternetPlatformCompany } from "./sectors/profiles";
 
 export type FinancialArchetype =
   | "DISTRESSED"              // High leverage, negative EBITDA/earnings, debt restructuring (e.g. Vodafone Idea)
@@ -68,22 +69,13 @@ export function classifyArchetype(
   // Internet platform / social / digital advertising MUST be evaluated before
   // telecom: "Communication Services" covers both carriers AND platforms, and
   // platform descriptions contain "consumer hardware" (Meta Reality Labs).
-  const isInternetPlatform =
-    ind.includes("internet content") ||
-    ind.includes("internet media") ||
-    ind.includes("social media") ||
-    ind.includes("social network") ||
-    ind.includes("online advertising") ||
-    ind.includes("digital advertising") ||
-    ind.includes("interactive media") ||
-    text.includes("family of apps") ||
-    text.includes("reality labs") ||
-    text.includes("daily active users") ||
-    text.includes("monthly active users") ||
-    text.includes("ad impressions") ||
-    text.includes("meta platforms") ||
-    text.includes("facebook") ||
-    (text.includes("instagram") && text.includes("whatsapp"));
+  // Shared predicate with classifySector — do not fork a local copy.
+  const isInternetPlatform = isInternetPlatformCompany(
+    profile.sector,
+    profile.industry,
+    profile.description,
+    profile.name
+  );
 
   if (
     text.includes("swiggy") ||

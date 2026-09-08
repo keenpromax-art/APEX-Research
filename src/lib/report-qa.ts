@@ -5,6 +5,7 @@
 // ============================================================
 import type { ReportData, ReportQAResult, QACheckItem } from "@/types/report";
 import { getSectorProfile, classifySector } from "./sectors/index";
+import { identityIssues } from "./canonical";
 import { getAllowlistedConcepts } from "./sector-allowlist";
 
 const SECTOR_KEYWORD_BLOCKLIST: Record<string, { blocked: string[]; sectorNames: string[] }> = {
@@ -35,6 +36,30 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
   const rating = ledger?.rating ?? data.recommendation;
   const wacc = ledger?.wacc ?? data.dcf.assumptions?.wacc ?? 0.095;
   const tgr = ledger?.terminalGrowthRate ?? data.dcf.assumptions?.terminalGrowthRate ?? 0.04;
+
+  // 0. Company Identity Integrity — fail-closed. A report that cannot prove
+  // WHO it covers (unknown sector, ticker-as-name, unknown exchange/currency)
+  // must never render as a valid listed-company dossier.
+  const identityProblems = identityIssues(data);
+  if (identityProblems.length > 0) {
+    checks.push({
+      id: "IDENTITY-01",
+      category: "CROSS_REFERENCE",
+      name: "Company Identity Integrity",
+      status: "FAIL",
+      details: `FATAL PUBLICATION BLOCK: Company identity unverifiable — ${identityProblems.join("; ")}. Refuse ticker/identity and re-resolve via search.`,
+      expected: "Verified ticker, name, sector, exchange, currency",
+      actual: `${identityProblems.length} identity defect(s)`,
+    });
+  } else {
+    checks.push({
+      id: "IDENTITY-01",
+      category: "CROSS_REFERENCE",
+      name: "Company Identity Integrity",
+      status: "PASS",
+      details: `Ticker, name, sector, exchange, and currency all verified present.`,
+    });
+  }
 
   // 1. Rating vs Upside Consistency Check
   const upside = cmp > 0 ? (fv - cmp) / cmp : 0;
@@ -185,9 +210,17 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
     });
   }
 
-  // 3. Assumptions Ledger Verification (Target Price and Recommendation match)
+  // 3. Assumptions Ledger Verification: header sync PLUS an independent
+  // model-vs-ledger check. The old version compared the ledger to itself
+  // (ReportClient copies both fields from the ledger), so it could never fail.
+  // The DCF comparison below is independent: raw model output vs ledger record.
   const targetPriceMatch = data.targetPrice === fv || (data.targetPrice !== undefined && fv !== undefined && Math.abs(data.targetPrice - fv) < 0.05);
   const recommendationMatch = data.recommendation === rating;
+  const dcfIntrinsic = Number(data.dcf?.intrinsicValue) || 0;
+  const ledgerFv = Number(ledger?.fairValue) || 0;
+  const modelTol = Math.max(0.06, Math.abs(ledgerFv) * 0.015);
+  const modelMatchesLedger = dcfIntrinsic > 0 && ledgerFv > 0 && Math.abs(dcfIntrinsic - ledgerFv) <= modelTol;
+  const ledgerAnchored = Boolean((ledger as any)?.insufficientData);
   if (!targetPriceMatch || !recommendationMatch) {
     checks.push({
       id: "XREF-02",
@@ -198,13 +231,33 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
       expected: `${fv} (${rating})`,
       actual: `${data.targetPrice} (${data.recommendation})`,
     });
+  } else if (!modelMatchesLedger && !ledgerAnchored) {
+    checks.push({
+      id: "XREF-02",
+      category: "CROSS_REFERENCE",
+      name: "Header Target vs Ledger Fair Value Check",
+      status: "FAIL",
+      details: `FATAL PUBLICATION BLOCK: Raw DCF intrinsic value (${dcfIntrinsic.toFixed(2)}) diverges from ledger fair value (${ledgerFv.toFixed(2)}) beyond ±1.5% — ledger overrides model output without reconciliation.`,
+      expected: `${ledgerFv.toFixed(2)}`,
+      actual: `${dcfIntrinsic.toFixed(2)}`,
+    });
+  } else if (!modelMatchesLedger && ledgerAnchored) {
+    checks.push({
+      id: "XREF-02",
+      category: "CROSS_REFERENCE",
+      name: "Header Target vs Ledger Fair Value Check",
+      status: "WARN",
+      details: `Ledger fair value (${ledgerFv.toFixed(2)}) anchored to price under insufficient-data NR — raw DCF output (${dcfIntrinsic.toFixed(2)}) intentionally not used.`,
+      expected: "NR-anchored",
+      actual: `${dcfIntrinsic.toFixed(2)} vs ${ledgerFv.toFixed(2)}`,
+    });
   } else {
     checks.push({
       id: "XREF-02",
       category: "CROSS_REFERENCE",
       name: "Header Target vs Ledger Fair Value Check",
       status: "PASS",
-      details: `All top-level valuation targets match Assumptions Ledger (₹${fv}).`,
+      details: `Header, ledger, and raw DCF model agree on fair value (₹${fv}).`,
     });
   }
 
@@ -785,6 +838,35 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
       name: "Peer Metric Cloning Detection",
       status: "PASS",
       details: `Peer financial metrics show sufficient inter-peer variance; no clone signatures detected across ${peers.length} peers.`,
+    });
+  }
+
+  // BS-DETECTOR-06: Council Verification Effectiveness.
+  // A FLAGGED/missing council audit must be visible in QA scoring — previously a
+  // dossier with "AUDIT NOT PERFORMED / score 0" gated identically to a verified
+  // one. WARN (not FAIL) preserves availability for throttled runs while costing
+  // score and showing on every QA surface.
+  const council = (data.aiAnalysis as any)?.councilVerification;
+  const councilStatus = council?.status;
+  if (!council || councilStatus !== "VERIFIED") {
+    checks.push({
+      id: "BS-DETECTOR-06",
+      category: "BS_DETECTOR",
+      name: "Council Verification Effectiveness",
+      status: "WARN",
+      details: !council
+        ? `No council verification audit attached — narrative claims are unverified drafts.`
+        : `Council audit status is "${councilStatus}" (score ${council?.integrityScore ?? "n/a"}) — treat narrative as unconfirmed pending real audit.`,
+      expected: "VERIFIED",
+      actual: councilStatus || "missing",
+    });
+  } else {
+    checks.push({
+      id: "BS-DETECTOR-06",
+      category: "BS_DETECTOR",
+      name: "Council Verification Effectiveness",
+      status: "PASS",
+      details: `Council verification audit VERIFIED (score ${council?.integrityScore ?? "n/a"}).`,
     });
   }
 

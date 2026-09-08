@@ -463,6 +463,66 @@ export const GENERAL_PROFILE: SectorProfile = {
 };
 
 /**
+ * Shared company-type predicates — SINGLE source of truth for the
+ * platform-vs-carrier distinction. classifySector, classifyArchetype, the
+ * ledger moat classifier, and the peer router MUST all use these; divergent
+ * inline copies previously routed META to three different sectors at once.
+ */
+export function isInternetPlatformCompany(
+  sector?: string,
+  industry?: string,
+  description?: string,
+  name?: string
+): boolean {
+  const industryLower = `${industry || ""}`.toLowerCase();
+  if (
+    industryLower.includes("internet content") ||
+    industryLower.includes("internet media") ||
+    industryLower.includes("social media") ||
+    industryLower.includes("social network") ||
+    industryLower.includes("online advertising") ||
+    industryLower.includes("digital advertising") ||
+    industryLower.includes("interactive media")
+  ) {
+    return true;
+  }
+  const combined = `${sector || ""} ${industry || ""} ${description || ""} ${name || ""}`.toLowerCase();
+  return (
+    combined.includes("family of apps") ||
+    combined.includes("reality labs") ||
+    combined.includes("daily active users") ||
+    combined.includes("monthly active users") ||
+    combined.includes("ad impressions") ||
+    combined.includes("average price per ad") ||
+    combined.includes("meta platforms") ||
+    combined.includes("facebook") ||
+    combined.includes("instagram") ||
+    combined.includes("whatsapp")
+  );
+}
+
+/** Telecom CARRIERS only. Internet platforms are excluded even when their
+ * sector string says "Communication Services". */
+export function isTelecomCarrierCompany(
+  sector?: string,
+  industry?: string,
+  description?: string,
+  name?: string
+): boolean {
+  if (isInternetPlatformCompany(sector, industry, description, name)) return false;
+  const combined = `${sector || ""} ${industry || ""} ${description || ""} ${name || ""}`.toLowerCase();
+  return (
+    combined.includes("telecom") ||
+    combined.includes("wireless") ||
+    combined.includes("cellular") ||
+    combined.includes("telecommunications service") ||
+    combined.includes("vodafone idea") ||
+    combined.includes("spectrum auction") ||
+    combined.includes("agr dues")
+  );
+}
+
+/**
  * Classify a company into its authoritative SectorProfile.
  */
 export function classifySector(
@@ -597,39 +657,14 @@ export function classifySector(
   // covers both telecom carriers AND internet platforms, and platform descriptions
   // legitimately contain the substring "consumer" (e.g. Meta's "consumer hardware"
   // + Reality Labs). Without this guard, Meta mis-routes to FMCG/telecom templates.
-  const industryLower = `${industry || ""}`.toLowerCase();
-  const isInternetPlatformIndustry =
-    industryLower.includes("internet content") ||
-    industryLower.includes("internet media") ||
-    industryLower.includes("social media") ||
-    industryLower.includes("social network") ||
-    industryLower.includes("online advertising") ||
-    industryLower.includes("digital advertising") ||
-    industryLower.includes("interactive media");
-  const isInternetPlatformSignal =
-    isInternetPlatformIndustry ||
-    combined.includes("family of apps") ||
-    combined.includes("reality labs") ||
-    combined.includes("daily active users") ||
-    combined.includes("monthly active users") ||
-    combined.includes("ad impressions") ||
-    combined.includes("average price per ad") ||
-    combined.includes("meta platforms") ||
-    combined.includes("facebook") ||
-    combined.includes("instagram") ||
-    combined.includes("whatsapp");
+  // Shared helper below — ledger moat, archetype, and peer router MUST use it too.
+  const isInternetPlatformSignal = isInternetPlatformCompany(sector, industry, description);
   if (isInternetPlatformSignal) {
     return INTERNET_PLATFORM_PROFILE;
   }
 
   // 6. Telecom (carriers only — never internet content / social / advertising platforms)
-  if (
-    !isInternetPlatformSignal &&
-    (combined.includes("telecom") ||
-    combined.includes("wireless") ||
-    combined.includes("cellular") ||
-    combined.includes("telecommunications service"))
-  ) {
+  if (isTelecomCarrierCompany(sector, industry, description)) {
     return TELECOM_PROFILE;
   }
 

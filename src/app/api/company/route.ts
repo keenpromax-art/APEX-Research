@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { fetchQuoteSummary, parseQuoteSummary, fetchPeerQuotes, getTickerNews } from "@/lib/yahoo-finance";
+import { fetchQuoteSummary, parseQuoteSummary, fetchPeerQuotes, getTickerNews, fetchDailyPriceHistory } from "@/lib/yahoo-finance";
 import { computeRatios, computeDuPont } from "@/lib/calculations";
 import { selectAndComputeValuation } from "@/lib/valuation";
 import { classifyArchetype } from "@/lib/company-archetype";
 import { buildMasterReportFacts } from "@/lib/report-facts";
 import { buildEventPriceMovements } from "@/lib/event-price-engine";
 import { normalizeTicker } from "@/lib/request-validation";
+import { isInternetPlatformCompany, isTelecomCarrierCompany } from "@/lib/sectors/profiles";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -33,6 +34,25 @@ export async function GET(request: NextRequest) {
 
     // Fetch verified real-time ticker news strictly validated for the subject company
     const tickerNews = await getTickerNews(symbol, companyProfile.name, 15);
+
+    // Measured event-study sessions: one chart fetch spanning all news windows
+    // so event trajectories derive from real closes (null-tolerant fallback).
+    let eventPriceLookup: { sessions: { date: string; close: number | null; volume: number | null }[] } | null = null;
+    try {
+      const dated = tickerNews
+        .filter((n) => n.publishedAt && !isNaN(new Date(n.publishedAt).getTime()))
+        .map((n) => new Date(n.publishedAt as string).getTime());
+      if (dated.length > 0) {
+        const sessions = await fetchDailyPriceHistory(
+          symbol,
+          (Math.min(...dated) - 70 * 86400000) / 1000,
+          (Math.max(Date.now(), Math.max(...dated)) + 20 * 86400000) / 1000
+        );
+        if (sessions && sessions.length > 0) eventPriceLookup = { sessions };
+      }
+    } catch (priceErr) {
+      console.warn("Event price history fetch failed (illustrative fallback):", priceErr);
+    }
 
     // Compute ratios for each year
     const cmp = stockData.currentPrice;
@@ -64,22 +84,20 @@ export async function GET(request: NextRequest) {
 
       let peerTickers: string[] = [];
 
-      // Internet platforms (social / digital advertising) must be routed BEFORE
-      // the telecom branches below: "Communication Services" covers both carriers
-      // AND platforms, and platform descriptions contain carrier-like substrings.
-      const descLower = (companyProfile.description || "").toLowerCase();
-      const isInternetPlatform =
-        ind.includes("internet content") ||
-        ind.includes("internet media") ||
-        ind.includes("social media") ||
-        ind.includes("social network") ||
-        ind.includes("online advertising") ||
-        ind.includes("digital advertising") ||
-        ind.includes("interactive media") ||
-        descLower.includes("family of apps") ||
-        descLower.includes("reality labs") ||
-        descLower.includes("daily active users") ||
-        descLower.includes("monthly active users");
+      // Shared platform/carrier predicates (same as classifySector, archetype,
+      // ledger moat). "Communication Services" MUST NOT imply telecom carriers.
+      const isInternetPlatform = isInternetPlatformCompany(
+        companyProfile.sector,
+        companyProfile.industry,
+        companyProfile.description,
+        companyProfile.name
+      );
+      const isCarrier = isTelecomCarrierCompany(
+        companyProfile.sector,
+        companyProfile.industry,
+        companyProfile.description,
+        companyProfile.name
+      );
 
       if (isIndian) {
         if (isInternetPlatform) {
@@ -96,7 +114,7 @@ export async function GET(request: NextRequest) {
           (companyProfile.description || "").toLowerCase().includes("quick commerce")
         ) {
           peerTickers = ["ZOMATO.NS", "DELHIVERY.NS", "NAUKRI.NS", "JUSTDIAL.NS"];
-        } else if (ind.includes("telecom") || sec.includes("communication") || sym.includes("IDEA") || sym.includes("BHARTIARTL") || sym.includes("TATACOMM")) {
+        } else if (isCarrier || sym.includes("IDEA") || sym.includes("BHARTIARTL") || sym.includes("TATACOMM")) {
           peerTickers = ["BHARTIARTL.NS", "INDUSTOWER.NS", "TATACOMM.NS", "ROUTE.NS"];
         } else if (sym.includes("RELIANCE")) {
           // Energy/conglomerate comparables only — telecom carriers excluded
@@ -120,7 +138,7 @@ export async function GET(request: NextRequest) {
           peerTickers = ["SRF.NS", "DEEPAKNTR.NS", "NAVINFLUOR.NS", "AARTIIND.NS", "ATUL.NS"];
         } else if (sec.includes("capital goods") || ind.includes("infrastructure") || ind.includes("engineering") || ind.includes("machinery")) {
           peerTickers = ["LT.NS", "SIEMENS.NS", "ABB.NS", "BHEL.NS", "THERMAX.NS"];
-        } else if (sec.includes("telecom") || ind.includes("telecom") || ind.includes("communication")) {
+        } else if (isCarrier) {
           peerTickers = ["BHARTIARTL.NS", "IDEA.NS", "TATACOMM.NS", "INDUSTOWER.NS"];
         } else if (ind.includes("asset management") || ind.includes("wealth management") || ind.includes("mutual fund") || sym.includes("HDFCAMC") || sym.includes("NAM-INDIA") || sym.includes("UTIAMC")) {
           peerTickers = ["HDFCAMC.NS", "NAM-INDIA.NS", "UTIAMC.NS", "CAMS.NS"];
@@ -153,7 +171,7 @@ export async function GET(request: NextRequest) {
           (companyProfile.description || "").toLowerCase().includes("ride sharing")
         ) {
           peerTickers = ["DASH", "UBER", "LYFT", "GRAB"];
-        } else if (ind.includes("telecom") || sec.includes("communication")) {
+        } else if (isCarrier) {
           peerTickers = ["VZ", "T", "TMUS", "CMCSA"];
         } else if (ind.includes("rating") || ind.includes("financial data") || ind.includes("exchange") || ind.includes("analytics")) {
           peerTickers = ["SPGI", "MCO", "MSCI", "FDS"];
@@ -264,7 +282,9 @@ export async function GET(request: NextRequest) {
             debtToEquity: pDebtToEquity,
             currentRatio: pCurrentRatio,
             revenueGrowth: pRevGrowth,
-            currency: (p.currency as string) || companyProfile.currency,
+            // Missing peer currency stays null (renders N/M) — never inherit
+            // the subject's currency, which stamps wrong FX on foreign peers.
+            currency: (p.currency as string) || null,
             sector: qSec,
             industry: qInd,
             relevanceScore,
@@ -296,7 +316,7 @@ export async function GET(request: NextRequest) {
       shareholding,
       peers,
       news: tickerNews,
-      eventPriceMovements: buildEventPriceMovements(tickerNews, stockData, companyProfile),
+      eventPriceMovements: buildEventPriceMovements(tickerNews, stockData, companyProfile, eventPriceLookup),
       masterReportFacts,
       calibration: valuationCalibration,
     });

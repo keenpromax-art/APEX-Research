@@ -361,7 +361,7 @@ export interface PeerData {
   debtToEquity?: number | null;
   currentRatio?: number | null;
   revenueGrowth: number | null;
-  currency: string;
+  currency: string | null;
   sector?: string | null;
   industry?: string | null;
   /** 0–100 peer-relevance score (sector/industry overlap + size proximity). Null = unscored. */
@@ -501,6 +501,8 @@ export interface EventPriceMovement {
   headline: string;
   publisher?: string;
   eventDate: string;
+  /** True when trajectory/volumes come from measured exchange sessions. */
+  measured?: boolean;
   category: "EARNINGS" | "CONTRACT_WIN" | "PRODUCT_LAUNCH" | "REGULATORY" | "STRATEGIC_MA" | "CAPEX_EXPANSION" | "GENERAL_CORPORATE";
   categoryLabel: string;
   summary: string;

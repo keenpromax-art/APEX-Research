@@ -63,6 +63,33 @@ export function generatePEFirmAnalysis(input: PEAnalysisInput): AIAnalysis {
     ? "an institutional SELL / UNDERWEIGHT"
     : "an institutional HOLD / NEUTRAL";
 
+  // Company-specific evidence lead (deterministic, statement-grounded).
+  const buildThesisEvidenceLead = (): string => {
+    const parts: string[] = [];
+    const nFY = annualFinancials.length;
+    if (nFY >= 2 && prev.revenue > 0 && rev > 0) {
+      const cagr = Math.pow(rev / prev.revenue, 1 / (nFY - 1)) - 1;
+      parts.push(
+        `${profile.name} compounded revenue at ${formatPct(cagr)} p.a. across the last ${nFY} reported years to ${formatLargeNum(rev, cur)}, with trailing EBITDA margin at ${formatPct(ebitdaMargin)} and net margin at ${formatPct(netMargin)}.`
+      );
+    } else if (rev > 0) {
+      parts.push(
+        `${profile.name} reported trailing revenue of ${formatLargeNum(rev, cur)} at ${formatPct(ebitdaMargin)} EBITDA margin and ${formatPct(netMargin)} net margin.`
+      );
+    }
+    if (ebitda > 0) {
+      parts.push(
+        netDebt <= 0
+          ? `The balance sheet is net-cash, so enterprise value tracks equity value and the ${formatPct(upsidePct)} spread to our ${sym}${fv.toFixed(2)} fair value is a pure earnings-multiple call.`
+          : `Net debt stands at ${(netDebt / ebitda).toFixed(1)}x trailing EBITDA, so leverage ${netDebt / ebitda > 3 ? "is the binding constraint on" : "leaves headroom for"} the ${formatPct(upsidePct)} spread to our ${sym}${fv.toFixed(2)} fair value.`
+      );
+    }
+    if (pe > 0 && netIncome > 0) {
+      parts.push(`At ${pe.toFixed(1)}x trailing earnings, the market prices ${netMargin >= 0.15 ? "a premium compounding multiple that demands sustained margin defense" : "a moderate multiple that leaves room for re-rating on margin recovery"}.`);
+    }
+    return parts.join(" ");
+  };
+
   // ─────────────────────────────────────────────────────────────────────────────
   // AGENT 1: PRIVATE EQUITY INVESTMENT THESIS & STRATEGIC VALUE CREATION
   // ─────────────────────────────────────────────────────────────────────────────
@@ -140,6 +167,11 @@ export function generatePEFirmAnalysis(input: PEAnalysisInput): AIAnalysis {
     investmentThesis = `Our fundamental equity research identifies ${profile.name} as an established franchise benefitting from defensible market share, cost-leadership manufacturing scale, and disciplined working capital allocation. Operating cash flows fund sustaining capital expenditures while preserving robust debt coverage ratios.`;
     investmentConclusion = `We formulate ${recAction} recommendation on ${profile.name} with an intrinsic fair value target of ${sym}${fv.toFixed(2)} per share (${formatPct(upsidePct)} implied upside), reflecting tangible competitive advantages and operational execution.`;
   }
+
+  // Company-specific evidence lead: grounds the sector template in THIS
+  // company's reported numbers so theses for different names never read
+  // identically. Computed purely from statements/ratios/DCF — no LLM needed.
+  investmentThesis = `${buildThesisEvidenceLead()} ${investmentThesis}`;
 
   // ─────────────────────────────────────────────────────────────────────────────
   // AGENT 2: ECONOMIC MOAT, SWITCHING COSTS & UNIT ECONOMICS

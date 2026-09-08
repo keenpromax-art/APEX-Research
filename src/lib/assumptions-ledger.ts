@@ -13,7 +13,7 @@ import type {
 } from "@/types/report";
 import { classifyArchetype } from "./company-archetype";
 import { computeReverseDCF } from "./valuation/reverse-dcf";
-import { classifySector } from "./sectors/profiles";
+import { classifySector, isTelecomCarrierCompany } from "./sectors/profiles";
 
 export interface CreateLedgerParams {
   profile: CompanyProfile;
@@ -180,12 +180,12 @@ export function createAssumptionsLedger({
     ind.includes("refin") ||
     name.includes("reliance");
 
-  const isTelecom =
-    ind.includes("telecom") ||
-    sector.includes("communication") ||
-    name.includes("airtel") ||
-    name.includes("vodafone") ||
-    name.includes("idea");
+  const isTelecom = isTelecomCarrierCompany(
+    profile.sector,
+    profile.industry,
+    profile.description,
+    profile.name
+  );
 
   const isAgroOrSpecialtyChem =
     sector.includes("materials") ||

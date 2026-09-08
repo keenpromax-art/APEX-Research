@@ -111,6 +111,52 @@ function formatFiscalYear(timestamp: number, currency: string): string {
 }
 
 // ─────────────────────────────────────────────
+// Daily price/volume history (powers MEASURED event studies).
+// Yahoo chart API v8; tolerant — returns null on any failure so callers
+// fall back to the labeled illustrative path instead of failing the report.
+// ─────────────────────────────────────────────
+export interface DailyPriceSession {
+  /** UTC calendar date YYYY-MM-DD */
+  date: string;
+  close: number | null;
+  volume: number | null;
+}
+
+export async function fetchDailyPriceHistory(
+  symbol: string,
+  period1Sec: number,
+  period2Sec: number
+): Promise<DailyPriceSession[] | null> {
+  try {
+    for (const base of [YF_BASE, YF_BASE2]) {
+      try {
+        const url = `${base}/v8/finance/chart/${encodeURIComponent(symbol)}?period1=${Math.floor(period1Sec)}&period2=${Math.floor(period2Sec)}&interval=1d&events=div%7Csplit`;
+        const res = await fetch(url, { headers: HEADERS });
+        if (!res.ok) continue;
+        const json = await res.json();
+        const result = json?.chart?.result?.[0];
+        const timestamps: number[] = result?.timestamp || [];
+        const quote = result?.indicators?.quote?.[0] || {};
+        const closes: (number | null)[] = quote.close || [];
+        const volumes: (number | null)[] = quote.volume || [];
+        if (!timestamps.length) continue;
+        const sessions: DailyPriceSession[] = timestamps.map((ts: number, i: number) => ({
+          date: new Date(ts * 1000).toISOString().slice(0, 10),
+          close: typeof closes[i] === "number" && isFinite(closes[i]) ? closes[i] as number : null,
+          volume: typeof volumes[i] === "number" && isFinite(volumes[i]) ? volumes[i] as number : null,
+        })).filter((s) => s.close !== null);
+        if (sessions.length > 0) return sessions;
+      } catch {
+        // try next base
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+// ─────────────────────────────────────────────
 // Search companies
 // ─────────────────────────────────────────────
 export async function searchCompanies(query: string) {
@@ -831,10 +877,13 @@ export function parseQuoteSummary(raw: Record<string, unknown>, symbol: string) 
   const rawInsiderHolders = raw.insiderHolders as Record<string, unknown> ?? {};
   const rawNetActivity = raw.netSharePurchaseActivity as Record<string, unknown> ?? {};
 
+  // Fail-closed identity: unknown currency stays EMPTY (never a "USD" guess).
+  // IDENTITY-01 blocks export until identity resolves; downstream defaults
+  // must not re-mask an unverified listing as a dollar-denominated company.
   const currency: string =
     (priceData.currency as string) ||
     (summary.currency as string) ||
-    "USD";
+    "";
 
   // ── Profile ──────────────────────────────────────────────────────────────
   const companyProfile = {
@@ -881,9 +930,9 @@ export function parseQuoteSummary(raw: Record<string, unknown>, symbol: string) 
       safeNum((priceData.marketCap as Record<string,unknown>)?.raw) ||
       safeNum((summary.marketCap as Record<string,unknown>)?.raw),
     enterpriseValue: safeNum((keyStats.enterpriseValue as Record<string,unknown>)?.raw),
-    pe:
-      safeNum((summary.trailingPE as Record<string,unknown>)?.raw) ||
-      safeNum((priceData.regularMarketPrice as Record<string,unknown>)?.raw),
+    // Never fall back to price-as-P/E: a missing trailingPE is 0 (renders N/M),
+    // not the share price masquerading as a 250x multiple.
+    pe: safeNum((summary.trailingPE as Record<string,unknown>)?.raw),
     forwardPE: safeNum((summary.forwardPE as Record<string,unknown>)?.raw),
     pb: safeNum((keyStats.priceToBook as Record<string,unknown>)?.raw),
     ps: safeNum((keyStats.priceToSalesTrailing12Months as Record<string,unknown>)?.raw),

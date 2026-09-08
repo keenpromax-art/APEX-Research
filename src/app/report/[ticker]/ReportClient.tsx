@@ -6,6 +6,7 @@ import ProgressTracker from "@/components/ProgressTracker";
 import type { ReportData, GenerationState, AgentCheckpoint } from "@/types/report";
 import { generatePEFirmAnalysis } from "@/lib/pe-analysis-engine";
 import { createAssumptionsLedger } from "@/lib/assumptions-ledger";
+import { canPublishReport, canonicalValuation } from "@/lib/canonical";
 import { validateReportIntegrity } from "@/lib/report-qa";
 import { validateMasterReport } from "@/lib/report-validator";
 import { buildMasterReportFacts } from "@/lib/report-facts";
@@ -292,7 +293,9 @@ export default function ReportClient({ ticker }: Props) {
                             status: "complete" as const,
                             completedAt: Date.now(),
                             durationMs: event.durationMs,
-                            verifiedByCouncil: true,
+                            // Per-agent completion is NOT council verification —
+                            // the flag resolves from the final audit outcome below.
+                            verifiedByCouncil: false,
                             councilAuditNote: event.councilAuditNote || "Agent complete — council audit pending",
                           }
                         : cp
@@ -412,7 +415,7 @@ export default function ReportClient({ ticker }: Props) {
             currentCheckpoints[i] = {
               ...currentCheckpoints[i],
               status: "complete",
-              verifiedByCouncil: true,
+              verifiedByCouncil: false,
               councilAuditNote: note,
             };
             const completed = i + 1;
@@ -427,12 +430,13 @@ export default function ReportClient({ ticker }: Props) {
           }
         }
       } else {
-        // All streamed agents finished — mark pipeline complete. Final audit
-        // outcome is shown in the verification panel, not assumed here.
+        // All streamed agents finished — the verified flag resolves ONLY from
+        // the final council audit outcome, never from pipeline completion.
+        const councilOk = (aiAnalysis as any)?.councilVerification?.status === "VERIFIED";
         currentCheckpoints = currentCheckpoints.map(cp => ({
           ...cp,
           status: "complete" as const,
-          verifiedByCouncil: true,
+          verifiedByCouncil: councilOk,
         }));
         setState(s => ({
           ...s,
@@ -714,8 +718,9 @@ export default function ReportClient({ ticker }: Props) {
             : (stockData.debtToEquity || 0);
           const deStr = isFinite(deVal) && !isNaN(deVal) ? `${deVal.toFixed(2)}x` : "0.00x";
 
-          const upsidePct = (dcf.upsideDownside * 100).toFixed(1);
-          const isBullish = dcf.upsideDownside >= 0;
+          const cv = canonicalValuation(reportData);
+          const upsidePct = (cv.upside * 100).toFixed(1);
+          const isBullish = cv.upside >= 0;
 
           return (
             <div className={styles.resultWrapper}>
@@ -737,14 +742,14 @@ export default function ReportClient({ ticker }: Props) {
                     <div className={styles.quoteMetric}>
                       <span className={styles.quoteMetricLabel}>Market Price</span>
                       <span className={styles.quoteMetricVal}>
-                        {sym}{stockData.currentPrice.toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        {sym}{cv.cmp.toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </span>
                     </div>
 
                     <div className={styles.quoteMetric}>
                       <span className={styles.quoteMetricLabel}>{isBankOrNbfc ? "Fair Value (P/B Model)" : "DCF Intrinsic Value"}</span>
                       <span className={styles.quoteMetricVal}>
-                        {sym}{dcf.intrinsicValue.toFixed(2)}
+                        {sym}{cv.targetPrice.toFixed(2)}
                       </span>
                       <span className={isBullish ? styles.quoteDeltaPositive : styles.quoteDeltaNegative}>
                         {isBullish ? `▲ +${upsidePct}%` : `▼ ${upsidePct}%`}
@@ -753,8 +758,8 @@ export default function ReportClient({ ticker }: Props) {
 
                     <div className={styles.quoteMetric}>
                       <span className={styles.quoteMetricLabel}>Verdict</span>
-                      <span className={`badge-solid ${reportData.recommendation === "BUY" ? "badge-buy" : reportData.recommendation === "SELL" ? "badge-sell" : "badge-hold"}`}>
-                        {reportData.recommendation}
+                      <span className={`badge-solid ${cv.rating === "BUY" ? "badge-buy" : cv.rating === "SELL" ? "badge-sell" : "badge-hold"}`}>
+                        {cv.rating}
                       </span>
                     </div>
                   </div>
@@ -828,8 +833,12 @@ export default function ReportClient({ ticker }: Props) {
                 </div>
               </div>
 
-              {/* ── Pre-Publish QA Gate Alert Banner (if BLOCKED) ── */}
-              {reportData.qaReport && reportData.qaReport.gateStatus === "BLOCKED" && (
+              {/* ── Pre-Publish QA Gate Alert Banner (canonical gate) ── */}
+              {(() => {
+                const gate = canPublishReport(reportData);
+                if (gate.canPublish) return null;
+                const failChips = (reportData.qaReport?.checks || []).filter(c => c.status === "FAIL");
+                return (
                 <div style={{
                   backgroundColor: "rgba(239, 68, 68, 0.12)",
                   border: "1px solid #ef4444",
@@ -850,15 +859,21 @@ export default function ReportClient({ ticker }: Props) {
                       The internal QA gate detected arithmetic reconciliation or semantic template bleeding errors. Client PDF export is locked until all cross-reference invariants balance.
                     </div>
                     <div style={{ marginTop: "8px", display: "flex", flexWrap: "wrap", gap: "6px" }}>
-                      {reportData.qaReport.checks.filter(c => c.status === "FAIL").map((fc, i) => (
+                      {failChips.map((fc, i) => (
                         <span key={i} style={{ backgroundColor: "#ef4444", color: "#fff", fontSize: "11px", padding: "2px 8px", borderRadius: "4px", fontWeight: "600" }}>
                           {fc.id}: {fc.name}
+                        </span>
+                      ))}
+                      {failChips.length === 0 && gate.reasons.slice(0, 4).map((r, i) => (
+                        <span key={i} style={{ backgroundColor: "#ef4444", color: "#fff", fontSize: "11px", padding: "2px 8px", borderRadius: "4px", fontWeight: "600" }}>
+                          {r}
                         </span>
                       ))}
                     </div>
                   </div>
                 </div>
-              )}
+                );
+              })()}
 
               {/* ── Interactive Navigation Tabs ── */}
               <div className={styles.tabBar}>
@@ -1097,8 +1112,8 @@ export default function ReportClient({ ticker }: Props) {
 
                           <div className={styles.calloutBanner}>
                             <strong style={{ color: "var(--ink)" }}>Strategist Verdict & Valuation Anchor:</strong>{" "}
-                            {reportData.recommendation === "BUY" ? "High-Conviction Overweight" : reportData.recommendation === "SELL" ? "Underweight / Capital Preservation" : "Neutral / Selective Hold"} with DCF fair value target of{" "}
-                            <span style={{ color: "var(--cyan)", fontWeight: 700 }}>{sym}{dcf.intrinsicValue.toFixed(2)}</span> ({isBullish ? `+${upsidePct}% upside` : `${upsidePct}% downside`} from CMP {sym}{stockData.currentPrice.toFixed(2)}).
+                            {cv.rating === "BUY" ? "High-Conviction Overweight" : cv.rating === "SELL" ? "Underweight / Capital Preservation" : "Neutral / Selective Hold"} with DCF fair value target of{" "}
+                            <span style={{ color: "var(--cyan)", fontWeight: 700 }}>{sym}{cv.targetPrice.toFixed(2)}</span> ({isBullish ? `+${upsidePct}% upside` : `${upsidePct}% downside`} from CMP {sym}{cv.cmp.toFixed(2)}).
                           </div>
 
                           {/* 4-Quadrant Institutional SWOT */}

@@ -44,6 +44,14 @@ import {
   RATIO_FOOTNOTES,
 } from "@/lib/ratio-guards";
 import { classifySector } from "@/lib/sectors";
+import {
+  canPublishReport,
+  canonicalValuation,
+  canonicalRating,
+  canonicalMoat,
+  canonicalWacc,
+  canonicalScenarios,
+} from "@/lib/canonical";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // HELPER FORMATTERS
@@ -204,15 +212,18 @@ const InstitutionalDeskBadge = ({ ticker }: { ticker: string }) => (
 );
 
 const getInstitutionalKPIs = (data: ReportData) => {
+  // Canonical reads only — this strip must never disagree with cover/thesis/QA.
+  const v = canonicalValuation(data);
+  const m = canonicalMoat(data);
   const ledger = data.assumptionsLedger;
   const { currency } = data.profile;
-  const cmp = (ledger ? ledger.currentPrice : data.cmp) || data.stockData?.currentPrice || 100;
-  const fv = (ledger ? ledger.fairValue : data.targetPrice) || data.dcf?.intrinsicValue || (cmp * 1.15);
+  const cmp = v.cmp;
+  const fv = v.fv;
   const beta = ledger ? ledger.beta : (data.stockData.beta || 1.0);
   const latest = data.annualFinancials[data.annualFinancials.length - 1];
   const roe = latest && latest.totalEquity > 0 ? latest.netIncome / latest.totalEquity : 0.16;
 
-  const ratio = cmp / (fv || 1);
+  const ratio = fv > 0 ? cmp / fv : 1;
   let stars = "★★★☆☆";
   let starCount = 3;
   if (ratio <= 0.70) { stars = "★★★★★"; starCount = 5; }
@@ -223,9 +234,9 @@ const getInstitutionalKPIs = (data: ReportData) => {
 
   const uncertainty = ledger?.uncertaintyRating || "Medium";
 
-  // Single Assumptions Ledger is the authoritative source for Moat & Trend
-  const moat = ledger ? ledger.moatRating : "Narrow";
-  const moatTrend = ledger ? ledger.moatTrend : "Positive";
+  // Canonical moat — same source as badges, portal bridge, and QA.
+  const moat = m.rating;
+  const moatTrend = m.trend;
 
   // Single credit source: the Assumptions Ledger model-implied grade.
   // The legacy beta→AAA ladder (a second, contradictory rating model) is removed.
@@ -237,31 +248,31 @@ const getInstitutionalKPIs = (data: ReportData) => {
 
   const stewardship = ledger?.stewardshipRating || "Standard";
 
-  // Market-anchored downside support floor and bull scenario target
-  // Evaluated relative to prevailing market price (CMP) and scenario distributions
-  const scen = ledger?.scenarios;
+  // Scenario-anchored floors/targets from the ledger ONLY. The old
+  // cmp*0.85 / cmp*1.20 fallbacks invented corridor levels out of thin air.
+  const scen = canonicalScenarios(data);
   const rawBear = scen?.bear?.targetPrice;
   const rawBull = scen?.bull?.targetPrice;
 
-  // Downside Support Floor: scenario bear price, or 15% market support buffer below CMP
+  // Downside Support Floor: scenario bear price when sane, else N/M.
   const downsideFloor = (rawBear && rawBear > 0 && rawBear < cmp)
-    ? rawBear
-    : Math.max(0.01, cmp * 0.85);
+    ? `${rawBear.toFixed(2)} ${currency}`
+    : "N/M";
 
-  // Bull Target: scenario bull price, or 20% upside expansion above CMP (or fv * 1.25 if higher)
+  // Bull Target: scenario bull price when sane, else N/M.
   const bullTarget = (rawBull && rawBull > cmp)
-    ? rawBull
-    : Math.max(cmp * 1.20, fv * 1.25);
+    ? `${rawBull.toFixed(2)} ${currency}`
+    : "N/M";
 
   return {
     stars,
     starCount,
     lastPrice: `${cmp.toFixed(2)} ${currency}`,
-    fairValue: `${(ledger?.targetPrice || fv).toFixed(2)} ${currency}`,
-    downsideFloor: `${downsideFloor.toFixed(2)} ${currency}`,
-    bullTarget: `${bullTarget.toFixed(2)} ${currency}`,
-    considerBuy: `${downsideFloor.toFixed(2)} ${currency}`,
-    considerSell: `${bullTarget.toFixed(2)} ${currency}`,
+    fairValue: `${v.targetPrice.toFixed(2)} ${currency}`,
+    downsideFloor,
+    bullTarget,
+    considerBuy: downsideFloor,
+    considerSell: bullTarget,
     uncertainty,
     moat,
     moatTrend,
@@ -972,8 +983,9 @@ const CoverPage = ({ data }: { data: ReportData }) => {
     month: "short",
     year: "numeric",
   });
-  const fv = data.targetPrice;
-  const cmp = data.cmp;
+  const cv = canonicalValuation(data);
+  const fv = cv.targetPrice;
+  const cmp = cv.cmp;
   const pfRatio = (cmp / (fv || 1)).toFixed(2);
   const finYears = data.annualFinancials.slice(-4);
   const pe = getPEAnalysis(data);
@@ -997,8 +1009,9 @@ const CoverPage = ({ data }: { data: ReportData }) => {
         </Text>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
           {(()=>{
-            const canPublish = data.finalQAResult ? data.finalQAResult.canPublish : (data.qaReport?.passed ?? true);
-            if (!canPublish) {
+            // Canonical fail-closed gate — same predicate as the download button.
+            const gate = canPublishReport(data);
+            if (!gate.canPublish) {
               return (
                 <View style={{ backgroundColor: "#dc2626", paddingHorizontal: 6, paddingVertical: 1.5, borderRadius: 2 }}>
                   <Text style={{ fontSize: 6.0, fontFamily: "Helvetica-Bold", color: "#ffffff" }}>
@@ -1013,10 +1026,9 @@ const CoverPage = ({ data }: { data: ReportData }) => {
         </View>
       </View>
 
-      {/* ── QA Gate Blocked Flag Banner ── */}
+      {/* ── QA Gate Blocked Flag Banner (canonical gate) ── */}
       {(()=>{
-        const isBlocked = (data.qaReport && data.qaReport.gateStatus === "BLOCKED") || (data.finalQAResult && !data.finalQAResult.canPublish);
-        if (isBlocked) {
+        if (!canPublishReport(data).canPublish) {
           return (
             <View style={{ backgroundColor: "#fef2f2", borderWidth: 0.75, borderColor: "#dc2626", padding: 3.5, marginBottom: 4 }}>
               <Text style={{ fontSize: 6.2, fontFamily: "Helvetica-Bold", color: "#b91c1c", textAlign: "center" }}>
@@ -1632,8 +1644,9 @@ const FundamentalAnalysisPage = ({ data }: { data: ReportData }) => {
   const genDate = new Date(data.generatedAt).toLocaleDateString("en-US", { day: "numeric", month: "short", year: "numeric" });
   const { currency } = data.profile;
   const sym = currency === "INR" ? "Rs. " : currency === "USD" ? "$" : currency === "GBP" ? "£" : currency === "EUR" ? "€" : "";
-  const fv = data.targetPrice;
-  const cmp = data.cmp;
+  const cv = canonicalValuation(data);
+  const fv = cv.targetPrice;
+  const cmp = cv.cmp;
   const pfRatio = (cmp / (fv || 1)).toFixed(2);
   const latest = data.annualFinancials[data.annualFinancials.length - 1] || ({} as AnnualFinancials);
   const latestRatio = data.ratiosByYear && data.ratiosByYear.length > 0 ? data.ratiosByYear[data.ratiosByYear.length - 1] : null;
@@ -1837,8 +1850,9 @@ const MoatAndPriceFairValuePage = ({ data }: { data: ReportData }) => {
   const pe = getPEAnalysis(data);
   const genDate = new Date(data.generatedAt).toLocaleDateString("en-US", { day: "numeric", month: "short", year: "numeric" });
   const { currency } = data.profile;
-  const fv = data.targetPrice;
-  const cmp = data.cmp;
+  const cv = canonicalValuation(data);
+  const fv = cv.targetPrice;
+  const cmp = cv.cmp;
   const pfRatio = (cmp / (fv || 1)).toFixed(2);
 
   const currentYearNum = parseInt(String(data.annualFinancials?.[data.annualFinancials.length - 1]?.year || "2024").replace(/\D/g, "")) || 2024;
@@ -2479,13 +2493,14 @@ const BullsSayBearsSayPage = ({ data }: { data: ReportData }) => {
             const bearTmNum = sm ? sm.bearMargin * 100 : 12.0;
             const blendedMargin = (0.25 * bullTmNum + 0.60 * baseTmNum + 0.15 * bearTmNum).toFixed(1);
             const sym = data.profile.currency === "INR" ? "Rs. " : "$";
-            const scenBullTp = Math.max(0.01, ledger?.scenarios?.bull.targetPrice ?? data.targetPrice * 1.25);
-            const scenBaseTp = Math.max(0.01, ledger?.scenarios?.base.targetPrice ?? data.targetPrice);
-            const scenBearTp = Math.max(0.01, ledger?.scenarios?.bear.targetPrice ?? data.targetPrice * 0.75);
+            const cscen = canonicalScenarios(data);
+            const scenBullTp = Math.max(0.01, cscen?.bull.targetPrice ?? canonicalValuation(data).targetPrice);
+            const scenBaseTp = Math.max(0.01, cscen?.base.targetPrice ?? canonicalValuation(data).targetPrice);
+            const scenBearTp = Math.max(0.01, cscen?.bear.targetPrice ?? canonicalValuation(data).targetPrice);
             const probWeightedTp = Math.max(0.01, ledger?.probabilityWeightedValue ?? (scenBullTp * 0.25 + scenBaseTp * 0.60 + scenBearTp * 0.15));
 
-            const isBuy = (ledger?.rating || data.dcf.verdict) === "BUY";
-            const isSell = (ledger?.rating || data.dcf.verdict) === "SELL";
+            const isBuy = canonicalRating(data) === "BUY";
+            const isSell = canonicalRating(data) === "SELL";
             const triggerVerdict = isBuy
               ? "Risk-reward skew supports institutional BUY thesis"
               : isSell
@@ -3743,7 +3758,7 @@ const EventBasedPriceMovementPage = ({ data }: { data: ReportData }) => {
         seenTitles.add(ev.headline.toLowerCase().trim());
         items.push({
           date: ev.eventDate,
-          publisher: ev.publisher || "Regulatory Surveillance Wire",
+          publisher: ev.publisher || "Source not disclosed",
           headline: ev.headline,
           takeaway: ev.narrative.priceImpact,
           categoryBadge: ev.category,
@@ -3767,16 +3782,21 @@ const EventBasedPriceMovementPage = ({ data }: { data: ReportData }) => {
           <ProvenanceTag source="Ticker Disclosures & Stock Exchange Surveillance" type="MARKET" />
         </View>
         <Text style={{ fontSize: 5.2, color: COLORS.textMuted, lineHeight: 1.25 }}>
-          Stylized transmission sketches anchored on pre-event closes, shown only for verified ticker disclosures. Trajectories are model-illustrative (not measured tick data) and must be interpreted directionally; abnormal-return figures are not claimed as a formal event study.
+          Events marked MEASURED derive trajectory, returns, and volume from real exchange sessions around the disclosure date. Events marked ILLUSTRATIVE lack session coverage and show stylized sketches for verified disclosures only — interpret directionally, not as a formal event study.
         </Text>
       </View>
 
       {/* Primary Event Case with Vector Chart */}
       {ev1 && (
         <View style={{ marginBottom: 3 }}>
-          <Text style={{ fontSize: 6.8, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 1.2 }}>
-            Event Impact Analysis I: {ev1.categoryLabel}
-          </Text>
+          <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 1.2 }}>
+            <Text style={{ fontSize: 6.8, fontFamily: "Helvetica-Bold", color: COLORS.slateDark }}>
+              Event Impact Analysis I: {ev1.categoryLabel}
+            </Text>
+            <Text style={{ fontSize: 5.4, fontFamily: "Helvetica-Bold", color: ev1.measured ? "#15803d" : "#b45309" }}>
+              {ev1.measured ? "● MEASURED SESSIONS" : "○ ILLUSTRATIVE SKETCH"}
+            </Text>
+          </View>
           <EventPriceChart event={ev1} width={532} height={104} currencySymbol={sym} />
 
           {/* 3-Column Event Impact Decomposition */}
@@ -3814,9 +3834,14 @@ const EventBasedPriceMovementPage = ({ data }: { data: ReportData }) => {
       {/* Secondary Event Case with Vector Chart */}
       {ev2 && ev2.id !== ev1?.id && (
         <View style={{ marginBottom: 3 }}>
-          <Text style={{ fontSize: 6.8, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 1.2 }}>
-            Event Impact Analysis II: {ev2.categoryLabel}
-          </Text>
+          <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 1.2 }}>
+            <Text style={{ fontSize: 6.8, fontFamily: "Helvetica-Bold", color: COLORS.slateDark }}>
+              Event Impact Analysis II: {ev2.categoryLabel}
+            </Text>
+            <Text style={{ fontSize: 5.4, fontFamily: "Helvetica-Bold", color: ev2.measured ? "#15803d" : "#b45309" }}>
+              {ev2.measured ? "● MEASURED SESSIONS" : "○ ILLUSTRATIVE SKETCH"}
+            </Text>
+          </View>
           <EventPriceChart event={ev2} width={532} height={104} currencySymbol={sym} />
 
           {/* 3-Column Event Impact Decomposition */}
@@ -3971,7 +3996,7 @@ const CorporateDisclosuresAndCatalystsPage = ({ data }: { data: ReportData }) =>
   const n7 = notes[7];
   const { currency } = data.profile;
   const sym = currency === "INR" ? "Rs. " : currency === "USD" ? "$" : currency === "GBP" ? "£" : currency === "EUR" ? "€" : "";
-  const fv = data.targetPrice;
+  const fv = canonicalValuation(data).targetPrice;
 
   const renderNote = (note?: { title: string; date: string; paragraphs: string[] }) => {
     if (!note) return null;
@@ -4035,10 +4060,10 @@ const CorporateDisclosuresAndCatalystsPage = ({ data }: { data: ReportData }) =>
             <Text style={[S.compactCellHeader, { width: "22%" }]}>Primary Valuation Driver</Text>
           </View>
           {(() => {
-            const ledger = data.assumptionsLedger;
-            const cmp = ledger?.currentPrice ?? data.cmp;
-            const upside = cmp > 0 ? (fv - cmp) / cmp : 0;
-            const currentRating = ledger?.rating ?? data.recommendation;
+            const cvx = canonicalValuation(data);
+            const cmp = cvx.cmp;
+            const upside = cvx.upside;
+            const currentRating = cvx.rating;
             const stanceLabel = currentRating === "BUY" ? "BUY (Base Target)" : currentRating === "SELL" ? "SELL (Base Target)" : "HOLD (Base Target)";
             const upsideStr = `${upside >= 0 ? "+" : ""}${(upside * 100).toFixed(1)}%`;
             return [
@@ -4106,7 +4131,7 @@ const AnalystForecastsSummaryPage = ({ data }: { data: ReportData }) => {
   const { currency } = data.profile;
   const sym = currency === "INR" ? "Rs. " : currency === "USD" ? "$" : currency === "GBP" ? "£" : currency === "EUR" ? "€" : "";
   const models = buildFiveYearStatementModel(data);
-  const fv = data.targetPrice;
+  const fv = canonicalValuation(data).targetPrice;
 
   return (
     <Page size="A4" style={S.page}>
@@ -4953,7 +4978,7 @@ const ComparableCompanyAnalysisPage1 = ({ data }: { data: ReportData }) => {
         })}
         <View style={[S.compactRow, { backgroundColor: "#fef3c7", borderTopWidth: 1, borderTopColor: COLORS.slateDark }]}>
           <Text style={[S.compactCellBold, { width: "26%", color: COLORS.primaryRed }]}>{data.profile.name} ({subjectTicker})</Text>
-          <Text style={[S.compactCellBold, { width: "10%", textAlign: "right" }]}>{(data.cmp / (data.targetPrice || 1)).toFixed(2)}</Text>
+          <Text style={[S.compactCellBold, { width: "10%", textAlign: "right" }]}>{(() => { const cc = canonicalValuation(data); return (cc.cmp / (cc.targetPrice || 1)).toFixed(2); })()}</Text>
           <Text style={[S.compactCellBold, { width: "16%", textAlign: "right" }]}>{data.stockData.pe > 0 ? `${fmtNum(data.stockData.pe, 1)}x` : "N/A (Loss)"}</Text>
           {(() => {
             const latestRatio = data.ratiosByYear && data.ratiosByYear.length > 0 ? data.ratiosByYear[data.ratiosByYear.length - 1] : null;
@@ -5097,7 +5122,7 @@ const ComparableCompanyAnalysisPage1 = ({ data }: { data: ReportData }) => {
         <View style={{ flexDirection: "row", gap: 10 }}>
           {(() => {
             const arch = ledger?.archetype || "MATURE_COMPOUNDER";
-            const verdict = ledger?.rating || data.dcf.verdict || "HOLD";
+            const verdict = canonicalRating(data);
 
             // Calculate peer coverage score
             let totalFields = 0;
@@ -5131,7 +5156,7 @@ const ComparableCompanyAnalysisPage1 = ({ data }: { data: ReportData }) => {
                       Valuation Anchor Governance
                     </Text>
                     <Text style={{ fontSize: 6.6, color: COLORS.textSecondary, lineHeight: 1.35, marginBottom: 2 }}>
-                      Our published target price of {data.profile.currency === "INR" ? "Rs. " : "$"}{fmtNum(data.targetPrice, 2)} remains strictly anchored on our 5-year explicit Discounted Cash Flow (DCF) model and company-specific fundamental drivers.
+                      Our published target price of {data.profile.currency === "INR" ? "Rs. " : "$"}{fmtNum(canonicalValuation(data).targetPrice, 2)} remains strictly anchored on our 5-year explicit Discounted Cash Flow (DCF) model and company-specific fundamental drivers.
                     </Text>
                     <Text style={{ fontSize: 6.6, color: COLORS.textSecondary, lineHeight: 1.35 }}>
                       No subjective multiple expansion or relative valuation premium has been imputed into our published rating.
@@ -6530,10 +6555,11 @@ const AnalystAIDisclosurePage = ({ data }: { data: ReportData }) => (
 const QualityAssuranceChecksumPage = ({ data }: { data: ReportData }) => {
   const ledger = data.assumptionsLedger;
   const qa = data.qaReport;
-  const fv = (ledger ? ledger.fairValue : data.targetPrice) || data.dcf?.intrinsicValue || ((data.cmp || 100) * 1.15);
-  const wacc = ledger ? ledger.wacc : (data.dcf.assumptions?.wacc || 0.095);
+  const cvx = canonicalValuation(data);
+  const fv = cvx.fv;
+  const wacc = canonicalWacc(data);
   const tgr = ledger ? ledger.terminalGrowthRate : (data.dcf.assumptions?.terminalGrowthRate || 0.04);
-  const rating = ledger ? ledger.rating : data.recommendation;
+  const rating = cvx.rating;
   const currency = data.profile.currency || "USD";
   const sym = currency === "INR" ? "Rs. " : "$";
 
@@ -6636,7 +6662,7 @@ const QualityAssuranceChecksumPage = ({ data }: { data: ReportData }) => {
             const st = (id: string) => findCheck(id)?.status || (qa ? "—" : "NOT RUN");
             const rows: [string, string, string, string][] = [
               ["Fair Value / Target", `${sym}${fv.toFixed(2)}`, "6 Document Sections", st("XREF-02")],
-              ["Cost of Capital (WACC)", `${(wacc * 100).toFixed(2)}%`, "DCF, Sensitivity, Drivers", qa ? "Single Source (ledger)" : "NOT RUN"],
+              ["Cost of Capital (WACC)", wacc != null ? `${(wacc * 100).toFixed(2)}%` : "N/M", "DCF, Sensitivity, Drivers", qa ? "Single Source (ledger)" : "NOT RUN"],
               ["Terminal Growth Rate", `${(tgr * 100).toFixed(1)}%`, "Gordon Anchor, Grid Cols", qa ? "Single Source (ledger)" : "NOT RUN"],
               ["Investment Stance", rating, "Cover, Thesis, Header", st("RATING-01")],
               ["Economic Moat", `${ledger?.moatRating || "Narrow"} (${ledger?.moatTrend || "Stable"})`, "Badge, Porter Bridge", qa ? "Derived Output (ledger)" : "NOT RUN"],

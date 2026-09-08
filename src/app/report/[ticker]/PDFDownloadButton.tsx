@@ -1,8 +1,7 @@
 "use client";
 import React, { useState } from "react";
 import type { ReportData } from "@/types/report";
-import { allowConcept } from "@/lib/sector-allowlist";
-import { classifySector } from "@/lib/sectors";
+import { canPublishReport } from "@/lib/canonical";
 import styles from "./report.module.css";
 
 interface Props {
@@ -48,43 +47,13 @@ export default function PDFDownloadButton({ data }: Props) {
     }
   };
 
-  const isBlocked = (data.qaReport && data.qaReport.gateStatus === "BLOCKED") ||
-    (data.finalQAResult && !data.finalQAResult.canPublish);
-
-  const blockedReasons: string[] = [];
-  if (data.qaReport?.gateStatus === "BLOCKED") {
-    for (const c of data.qaReport.checks.filter(c => c.status === "FAIL")) {
-      blockedReasons.push(`${c.id}: ${c.name}`);
-    }
-  }
-  if (data.finalQAResult && !data.finalQAResult.canPublish) {
-    for (const e of data.finalQAResult.errors) {
-      if (!blockedReasons.some(r => r.includes(e.code))) {
-        blockedReasons.push(e.message);
-      }
-    }
-  }
-
-  // Extract leaked concepts from the QA report to allowlist on override
-  const handleForcePublish = () => {
-    const sectorId = classifySector(
-      data.profile.sector,
-      data.profile.industry,
-      data.profile.description
-    ).id;
-    for (const c of data.qaReport?.checks || []) {
-      if (c.status !== "FAIL") continue;
-      // BS-DETECTOR-04 details carry the leaked terms in brackets
-      const m = c.details?.match(/\[([^\]]+)\]/);
-      if (m) {
-        for (const term of m[1].split(",").map((t) => t.trim()).filter(Boolean)) {
-          allowConcept(sectorId, term);
-        }
-      }
-    }
-    // Reload so the gate is re-evaluated on next render
-    window.location.reload();
-  };
+  // Canonical fail-closed gate: missing QA objects block just like failures.
+  // (The old "Force Publish (Override & Remember)" button was removed: it only
+  // allowlisted WARN-level terms, never unblocked real FAILs, and silently
+  // weakened future QA via localStorage with no audit trail.)
+  const gate = canPublishReport(data);
+  const isBlocked = !gate.canPublish;
+  const blockedReasons = gate.reasons;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
@@ -119,15 +88,6 @@ export default function PDFDownloadButton({ data }: Props) {
         <span style={{ color: "#f87171", fontSize: 11, fontWeight: 500, maxWidth: 340, textAlign: "right" }}>
           Export blocked: Internal financial invariants failed audit {blockedReasons.length > 0 ? `(${blockedReasons.slice(0, 2).join("; ")}${blockedReasons.length > 2 ? ` +${blockedReasons.length - 2} more` : ""})` : ""}.
         </span>
-      )}
-      {isBlocked && (
-        <button
-          className={`btn-secondary ${styles.downloadBtn}`}
-          onClick={handleForcePublish}
-          style={{ fontSize: 12 }}
-        >
-          Force Publish (Override &amp; Remember)
-        </button>
       )}
       {error && <span style={{ color: "#ef4444", fontSize: 12 }}>{error}</span>}
     </div>

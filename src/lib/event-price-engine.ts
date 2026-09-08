@@ -241,21 +241,81 @@ export function isDuplicateHeadline(h1: string, h2: string, companyName?: string
 }
 
 /**
- * Builds deterministic, mathematically rigorous event price movement objects
- * from company ticker news items and market pricing data.
+ * Maps an event date onto real exchange sessions. Returns null unless the
+ * window has full coverage (5 pre + event + 10 post sessions with closes,
+ * and ≥10 pre-event volumes for the ADV baseline).
  */
+export function buildMeasuredWindow(
+  sessions: { date: string; close: number | null; volume: number | null }[] | null | undefined,
+  eventDateISO: string
+): {
+  base: number;
+  t0: number;
+  t5: number;
+  volMult: number;
+  byOffset: Record<number, number>;
+  baseDateLabel: string;
+} | null {
+  if (!sessions || sessions.length < 40) return null;
+  const sorted = [...sessions].sort((a, b) => (a.date < b.date ? -1 : 1));
+  let eventIdx = sorted.findIndex((s) => s.date >= eventDateISO);
+  if (eventIdx < 0) eventIdx = sorted.length - 1;
+  // Event session must have a close and sit clear of window edges.
+  if (eventIdx < 21 || eventIdx + 10 >= sorted.length) return null;
+  const needOffsets = [-5, -3, -1, 0, 1, 3, 5, 10];
+  const byOffset: Record<number, number> = {};
+  for (const k of needOffsets) {
+    const c = sorted[eventIdx + k]?.close;
+    if (typeof c !== "number" || !isFinite(c) || c <= 0) return null;
+    byOffset[k] = c;
+  }
+  const preVols = sorted.slice(eventIdx - 20, eventIdx).map((s) => s.volume).filter((v): v is number => typeof v === "number" && isFinite(v) && (v as number) > 0);
+  if (preVols.length < 10) return null;
+  const adv = preVols.reduce((a, b) => a + b, 0) / preVols.length;
+  const evVol = sorted[eventIdx].volume;
+  if (typeof evVol !== "number" || !isFinite(evVol) || evVol <= 0 || adv <= 0) return null;
+  return {
+    base: byOffset[-1],
+    t0: byOffset[0],
+    t5: byOffset[5],
+    volMult: Math.round((evVol / adv) * 10) / 10,
+    byOffset,
+    baseDateLabel: new Date(sorted[eventIdx - 1].date + "T00:00:00Z").toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+  };
+}
+
+/**
+ * Builds event price movement objects from ticker news + market pricing data.
+ *
+ * Two modes per event:
+ * - MEASURED (preferred): `priceLookup` (exchange daily sessions) covers the
+ *   event window — trajectory, returns, volume spike and verdict all derive
+ *   from real closes/volumes and are labeled as measured.
+ * - ILLUSTRATIVE (fallback): no session coverage (or undated item skipped) —
+ *   stylized trajectory, honestly labeled, never presented as measured.
+ */
+export interface EventPriceLookup {
+  sessions: { date: string; close: number | null; volume: number | null }[];
+}
+
 export function buildEventPriceMovements(
   news: TickerNewsItem[] = [],
   stockData: StockData,
-  profile: CompanyProfile
+  profile: CompanyProfile,
+  priceLookup?: EventPriceLookup | null
 ): EventPriceMovement[] {
   const cmp = stockData.currentPrice || 1000;
   const beta = stockData.beta && stockData.beta > 0 ? Math.min(Math.max(stockData.beta, 0.5), 2.2) : 1.0;
   const sym = profile.currency === "INR" ? "Rs. " : "$";
   const results: EventPriceMovement[] = [];
 
-  // Filter valid news items
-  const validNews = (news || []).filter((n) => n && n.title && n.title.trim().length > 10);
+  // Filter valid news items. Undated items are SKIPPED — the old code invented
+  // a publication date (now minus idx*14d), fabricating event chronology.
+  const validNews = (news || []).filter((n) => {
+    if (!n || !n.title || n.title.trim().length <= 10) return false;
+    if (!n.publishedAt || isNaN(new Date(n.publishedAt).getTime())) return false;
+    return true;
+  });
 
   // Clean headlines and deduplicate syndicated stories
   const deduplicatedNews: { item: TickerNewsItem; cleanTitle: string; pubTime: number }[] = [];
@@ -285,12 +345,51 @@ export function buildEventPriceMovements(
 
     selected.forEach(({ item, cleanTitle }, idx) => {
       const { category, label } = categorizeHeadline(cleanTitle);
-      const rawDate = item.publishedAt ? new Date(item.publishedAt) : new Date(Date.now() - (idx + 1) * 14 * 86400000);
+      const rawDate = new Date(item.publishedAt as string);
       const dateKey = rawDate.toISOString().slice(0, 10);
       const dateStr = rawDate.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 
-      // Compute or retrieve preEventPrice for this calendar date
+      // ── Attempt MEASURED path: map the event onto real exchange sessions ──
+      const measured = buildMeasuredWindow(priceLookup?.sessions || null, dateKey);
+
       let preEventPrice: number;
+      let eventDayPrice: number;
+      let postEventPrice: number;
+      let immediateReturnPct: number;
+      let multiDayReturnPct: number;
+      let abnormalReturnPct: number;
+      let volumeMultiplier: number;
+      let trajectory: EventPriceTrajectoryPoint[];
+      let isMeasured = false;
+
+      if (measured) {
+        // Real closes/volumes — verdicts below describe measured market action.
+        isMeasured = true;
+        preEventPrice = measured.base;
+        eventDayPrice = measured.t0;
+        postEventPrice = measured.t5;
+        immediateReturnPct = measured.t0 / measured.base - 1;
+        multiDayReturnPct = measured.t5 / measured.base - 1;
+        abnormalReturnPct = multiDayReturnPct; // flat benchmark; no index series claimed
+        volumeMultiplier = measured.volMult;
+        const days = [-5, -3, -1, 0, 1, 3, 5, 10];
+        trajectory = days.map((day) => {
+          const px = measured.byOffset[day];
+          const norm = (px / measured.base) * 100;
+          return {
+            dayOffset: day,
+            label: day === 0 ? "T0" : day > 0 ? `T+${day}` : `T${day}`,
+            date: px === measured.base && day === -1
+              ? measured.baseDateLabel
+              : new Date(rawDate.getTime() + day * 86400000).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+            price: Math.round(px * 100) / 100,
+            normalizedPrice: Math.round(norm * 100) / 100,
+            benchmarkNormalizedPrice: 100,
+          };
+        });
+      } else {
+      // ── ILLUSTRATIVE fallback (labeled; never presented as measured) ──
+      // Compute or retrieve preEventPrice for this calendar date
       if (dateToPriceMap.has(dateKey)) {
         preEventPrice = dateToPriceMap.get(dateKey)!;
       } else {
@@ -320,7 +419,7 @@ export function buildEventPriceMovements(
       const idxOffset = ((idx % 3) - 1) * 0.005; // slight realistic variation across items
       let shockPct = (0.024 + idxOffset) * betaModifier;
       let postDriftPct = (0.036 + idxOffset * 1.2) * betaModifier;
-      let volumeMultiplier = 2.2 + (idx % 3) * 0.4;
+      volumeMultiplier = 2.2 + (idx % 3) * 0.4;
 
       if (category === "EARNINGS") {
         shockPct = (0.038 + (idx % 2) * 0.006) * betaModifier;
@@ -348,18 +447,18 @@ export function buildEventPriceMovements(
         volumeMultiplier = 2.8;
       }
 
-      const eventDayPrice = Math.round(preEventPrice * (1 + shockPct) * 100) / 100;
-      const postEventPrice = Math.round(preEventPrice * (1 + postDriftPct) * 100) / 100;
+      eventDayPrice = Math.round(preEventPrice * (1 + shockPct) * 100) / 100;
+      postEventPrice = Math.round(preEventPrice * (1 + postDriftPct) * 100) / 100;
 
-      const immediateReturnPct = (eventDayPrice / preEventPrice) - 1;
-      const multiDayReturnPct = (postEventPrice / preEventPrice) - 1;
+      immediateReturnPct = (eventDayPrice / preEventPrice) - 1;
+      multiDayReturnPct = (postEventPrice / preEventPrice) - 1;
       const benchmarkReturnPct = 0.004 * (idx + 1) + 0.003;
-      const abnormalReturnPct = multiDayReturnPct - benchmarkReturnPct;
+      abnormalReturnPct = multiDayReturnPct - benchmarkReturnPct;
 
       // Construct 8-point timeline: T-5, T-3, T-1, T0, T+1, T+3, T+5, T+10
       const days = [-5, -3, -1, 0, 1, 3, 5, 10];
       const preSlope = ((idx % 2 === 0) ? 0.006 : -0.004);
-      const trajectory: EventPriceTrajectoryPoint[] = days.map((day) => {
+      trajectory = days.map((day) => {
         let pFactor = 1.0;
         let bFactor = 1.0;
 
@@ -423,11 +522,11 @@ export function buildEventPriceMovements(
       results.push({
         id: `EPM-${idx + 1}`,
         headline: cleanTitle,
-        publisher: item.publisher || "Corporate Regulatory Filing",
+        publisher: item.publisher || "Source not disclosed",
         eventDate: dateStr,
         category,
         categoryLabel: label,
-        summary: item.summary || `${profile.name} issued a formal public disclosure regarding ${label.toLowerCase()}, prompting active institutional volume repricing.`,
+        summary: item.summary || `${profile.name} disclosed an item classified as ${label.toLowerCase()} (summary not provided by the feed).`,
         preEventPrice,
         eventDayPrice,
         postEventPrice,
@@ -436,13 +535,19 @@ export function buildEventPriceMovements(
         abnormalReturnPct,
         volumeSpikeMultiplier: volumeMultiplier,
         verdict,
+        measured: isMeasured,
         narrative: {
           whatHappened: `On ${dateStr}, ${profile.name} disclosed material operational progress regarding ${label.toLowerCase()}: "${item.title}".`,
-          priceImpact: `The model-illustrative trajectory (anchored on pre-event closes; not measured tick data) implies an immediate ${immediateReturnPct >= 0 ? "+" : ""}${(immediateReturnPct * 100).toFixed(1)}% session move on ${volumeMultiplier.toFixed(1)}x baseline volume, with a stylized 5-day drift of ${multiDayReturnPct >= 0 ? "+" : ""}${(multiDayReturnPct * 100).toFixed(1)}%. Interpret directionally only.`,
-          modelImplication: `Illustrative transmission sketch — supports baseline thesis tracking but must not be read as a measured abnormal-return event study.`,
+          priceImpact: isMeasured
+            ? `Measured exchange sessions show an immediate ${immediateReturnPct >= 0 ? "+" : ""}${(immediateReturnPct * 100).toFixed(1)}% session move on ${volumeMultiplier.toFixed(1)}x 20-day average volume, with a 5-day drift of ${multiDayReturnPct >= 0 ? "+" : ""}${(multiDayReturnPct * 100).toFixed(1)}%.`
+            : `The model-illustrative trajectory (anchored on pre-event closes; not measured tick data) implies an immediate ${immediateReturnPct >= 0 ? "+" : ""}${(immediateReturnPct * 100).toFixed(1)}% session move on ${volumeMultiplier.toFixed(1)}x baseline volume, with a stylized 5-day drift of ${multiDayReturnPct >= 0 ? "+" : ""}${(multiDayReturnPct * 100).toFixed(1)}%. Interpret directionally only.`,
+          modelImplication: isMeasured
+            ? `Observed market reaction is consistent with — not proof of — thesis transmission; direction and magnitude are measured, causality is not claimed.`
+            : `Illustrative transmission sketch — supports baseline thesis tracking but must not be read as a measured abnormal-return event study.`,
         },
         priceTrajectory: trajectory,
       });
+      } // end illustrative fallback (measured path assigns the same bindings above)
     });
   }
   // No synthetic fallback pool: fabricated events with invented shocks, invented
