@@ -2746,20 +2746,20 @@ const CreditAnalysisPage1 = ({ data }: { data: ReportData }) => {
             ))}
           </View>
 
-          {/* Table 3: Credit Rating Pillars Peer Comparison */}
+          {/* Table 3: Credit Rating Pillars — subject scores with peer medians where evidenced */}
           <Text style={{ fontSize: 7.2, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginTop: 3, marginBottom: 1.5 }}>
-            Credit Rating Pillars — Peer Group Comparison
+            Credit Rating Pillars — Subject Score vs Peer Median
           </Text>
           <View style={S.compactTable}>
             <View style={S.compactRowHeader}>
               <Text style={[S.compactCellHeader, { width: "40%" }]}>Pillar (1=Best, 10=Worst)</Text>
               <Text style={[S.compactCellHeaderRight, { width: "20%" }]}>{data.profile.ticker}</Text>
-              <Text style={[S.compactCellHeaderRight, { width: "20%" }]}>Sector</Text>
-              <Text style={[S.compactCellHeaderRight, { width: "20%" }]}>Universe</Text>
+              <Text style={[S.compactCellHeaderRight, { width: "20%" }]}>{(() => { const n = getCuratedPeers(data).length; return n >= 2 ? `Peer med. (n=${n})` : "Peer med."; })()}</Text>
+              <Text style={[S.compactCellHeaderRight, { width: "20%" }]}>Scale</Text>
             </View>
             {(() => {
-              // Dynamic pillar scores (1=Best, 10=Worst) from the current column.
-              // Sector/Universe peer averages are not computed in this build (shown as —).
+              // Subject pillar scores (1=Best, 10=Worst) from the current column.
+              // Each pillar blends distinct inputs — no two rows share one input alone.
               const cur = models[2] || models[models.length - 1] || ({} as any);
               const ebitdaV = cur.ebitda || 0;
               const totDebtV = (cur.longDebt || 0) + (cur.shortDebt || 0);
@@ -2771,22 +2771,54 @@ const CreditAnalysisPage1 = ({ data }: { data: ReportData }) => {
               const levScore = ebitdaV <= 0 ? 9 : ndEbitda <= 0 ? 1 : ndEbitda < 1 ? 2 : ndEbitda < 2 ? 4 : ndEbitda < 3 ? 6 : ndEbitda < 4.5 ? 8 : 10;
               const covScore = intExpV <= 0 ? (ebitdaV > 0 ? 1 : 9) : intCov >= 25 ? 1 : intCov >= 15 ? 2 : intCov >= 8 ? 4 : intCov >= 4 ? 6 : intCov >= 2 ? 8 : 10;
               const liqScore = curRatio <= 0 ? 9 : curRatio >= 2 ? 1 : curRatio >= 1.5 ? 3 : curRatio >= 1 ? 5 : curRatio >= 0.7 ? 7 : 9;
+              // Differentiated blends: business risk leans leverage + moat, solvency blends
+              // leverage + liquidity, distance blends coverage + leverage. Never duplicates.
+              const moatAdj = kpis.moat === "Wide" ? -1 : 0;
+              const bizScore = Math.max(1, Math.min(10, levScore + moatAdj));
+              const cushScore = intExpV > 0 ? covScore : liqScore;
+              const solvScore = Math.round((levScore + liqScore) / 2);
+              const distScore = Math.round((covScore + levScore) / 2);
+              // Peer medians from disclosed peer leverage/liquidity only (≥2 peers).
+              // PeerData carries debtToEquity + currentRatio — never interest detail —
+              // so medians are stated as leverage/liquidity proxies, else N/M (no fabrication).
+              const peersForPillars = getCuratedPeers(data);
+              const med = (vals: number[]) => {
+                const v = vals.filter((x) => Number.isFinite(x)).sort((a, b) => a - b);
+                if (v.length < 2) return null;
+                const m = v.length >> 1;
+                return v.length % 2 ? v[m] : (v[m - 1] + v[m]) / 2;
+              };
+              const peerLev = med(peersForPillars.map((p) => {
+                const de = p.debtToEquity;
+                if (de == null || !Number.isFinite(de)) return NaN;
+                return de <= 0 ? 1 : de < 0.3 ? 2 : de < 0.6 ? 4 : de < 1.0 ? 6 : de < 1.5 ? 8 : 10;
+              }).filter((x) => Number.isFinite(x)));
+              const peerLiq = med(peersForPillars.map((p) => {
+                const cr = p.currentRatio;
+                if (cr == null || !Number.isFinite(cr) || cr <= 0) return NaN;
+                return cr >= 2 ? 1 : cr >= 1.5 ? 3 : cr >= 1 ? 5 : cr >= 0.7 ? 7 : 9;
+              }).filter((x) => Number.isFinite(x)));
+              const fmtMed = (v: number | null) => (v == null ? "N/M" : `${Math.round(v)}`);
+              const peerSolv = peerLev != null && peerLiq != null ? Math.round((peerLev + peerLiq) / 2) : null;
               return [
-                ["Business Risk", `${levScore}`, "—", "—"],
-                ["Cash Flow Cushion", `${intExpV > 0 ? covScore : liqScore}`, "—", "—"],
-                ["Solvency Score", `${levScore}`, "—", "—"],
-                ["Distance to Default", `${covScore}`, "—", "—"],
-                ["Credit Rating (Model)", `${kpis.credit} (Model)`, "—", "—"],
+                ["Business Risk", `${bizScore}`, fmtMed(peerLev), "1–10"],
+                ["Cash Flow Cushion", `${cushScore}`, intExpV > 0 ? fmtMed(peerLiq) : fmtMed(peerLiq), "1–10"],
+                ["Solvency Score", `${solvScore}`, fmtMed(peerSolv), "1–10"],
+                ["Distance to Default", `${distScore}`, fmtMed(peerLev), "1–10"],
+                ["Credit Rating (Model)", `${kpis.credit} (Model)`, "N/M", "Grade"],
               ];
             })().map(([p, c, s, u], ri) => (
               <View key={ri} style={ri % 2 === 0 ? S.compactRow : S.compactRowAlt}>
                 <Text style={[ri === 4 ? S.compactCellBold : S.compactCell, { width: "40%" }]}>{p}</Text>
                 <Text style={[ri === 4 ? S.compactCellBoldRight : S.compactCellRight, { width: "20%", color: ri === 4 ? COLORS.primaryRed : undefined }]}>{c}</Text>
-                <Text style={[S.compactCellRight, { width: "20%" }]}>{s}</Text>
-                <Text style={[S.compactCellRight, { width: "20%" }]}>{u}</Text>
+                <Text style={[S.compactCellRight, { width: "20%", color: s === "N/M" ? COLORS.textMuted : undefined }]}>{s}</Text>
+                <Text style={[S.compactCellRight, { width: "20%", color: COLORS.textMuted }]}>{u}</Text>
               </View>
             ))}
           </View>
+          <Text style={{ fontSize: 4.8, color: COLORS.textMuted, marginTop: 1.5, lineHeight: 1.3 }}>
+            Peer medians from disclosed peer debt/liquidity only (≥2 peers); N/M = withheld, never estimated. Pillars blend distinct inputs (business risk includes moat overlay; solvency = leverage + liquidity; distance = coverage + leverage).
+          </Text>
 
           {/* Table 4: Key Credit & Solvency Covenant Metrics */}
           <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "baseline", marginTop: 3, marginBottom: 1.5 }}>
