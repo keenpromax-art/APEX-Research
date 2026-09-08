@@ -2432,19 +2432,19 @@ const BullsSayBearsSayPage = ({ data }: { data: ReportData }) => {
             <Text style={[S.compactCellHeader, { width: "16%" }]}>Likelihood</Text>
             <Text style={[S.compactCellHeader, { width: "32%" }]}>Estimated Valuation Sensitivity</Text>
           </View>
-          {(pe.catalysts || [
-            { event: "Execution of High-Margin Commercial Order Backlog", horizon: "6-12 Months", probability: "High", impact: "+8% to +12% Fair Value Upside" },
-            { event: "New Molecule Registrations & Commercialization", horizon: "12-18 Months", probability: "Medium", impact: "+5% to +8% Fair Value Upside" },
-            { event: "Raw Material Chemical Intermediate Cost Normalization", horizon: "Ongoing", probability: "Medium", impact: "+3% to +5% Margin Support" },
-            { event: "Spatial Rainfall Deficits & Channel Destocking", horizon: "Ongoing", probability: "Medium", impact: "-4% to -6% Downside Sensitivity" },
-          ]).map((c, ri) => (
+          {(pe.catalysts && pe.catalysts.length > 0 ? pe.catalysts : []).map((c, ri) => (
             <View key={ri} style={ri % 2 === 0 ? S.compactRow : S.compactRowAlt}>
-              <Text style={[S.compactCellBold, { width: "36%" }]}>{c.event}</Text>
-              <Text style={[S.compactCell, { width: "16%" }]}>{c.horizon}</Text>
-              <Text style={[S.compactCell, { width: "16%" }]}>{c.probability.replace(/\s*\(\d+%\)/, "")}</Text>
-              <Text style={[S.compactCell, { width: "32%" }]}>{c.impact}</Text>
+              <Text style={[S.compactCellBold, { width: "36%" }]}>{c.event || "Unnamed catalyst"}</Text>
+              <Text style={[S.compactCell, { width: "16%" }]}>{c.horizon || "Unscheduled"}</Text>
+              <Text style={[S.compactCell, { width: "16%" }]}>{(c.probability || "Unquantified").replace(/\s*\(\d+%\)/, "")}</Text>
+              <Text style={[S.compactCell, { width: "32%" }]}>{c.impact || "Sensitivity not quantified"}</Text>
             </View>
           ))}
+          {(!pe.catalysts || pe.catalysts.length === 0) && (
+            <View style={S.compactRow}>
+              <Text style={[S.compactCell, { width: "100%", color: COLORS.textMuted }]}>No catalysts evidenced — none asserted rather than presenting generic milestones.</Text>
+            </View>
+          )}
         </View>
       </View>
 
@@ -2560,6 +2560,15 @@ const CreditAnalysisPage1 = ({ data }: { data: ReportData }) => {
   return (
     <Page size="A4" style={S.page}>
       <InstitutionalMasthead data={data} sectionTitle="Institutional Credit Analysis" />
+
+      {/* Scope honesty: this page covers reported debt structure, liquidity,
+          maturity split, coverage, and illustrative stress — not agency ratings,
+          facility covenants, or dated maturity ladders (all undisclosed). */}
+      <View style={{ padding: 3.5, backgroundColor: COLORS.offWhite, borderWidth: 0.5, borderColor: COLORS.hairlineLight, marginBottom: 4 }}>
+        <Text style={{ fontSize: 5.4, color: COLORS.textSecondary, lineHeight: 1.3 }}>
+          SCOPE: Grade shown is model-implied from reported leverage/coverage — not an agency rating. Maturity analysis is limited to the reported short/long split; coupons, facilities, and covenants are undisclosed and no claims are made on them.
+        </Text>
+      </View>
 
       <View style={{ flexDirection: "row", gap: 12, marginBottom: 4 }}>
         {/* Left Side: Tables & Chart */}
@@ -2864,27 +2873,17 @@ const CreditAnalysisPage2 = ({ data }: { data: ReportData }) => {
   const { currency } = data.profile;
   const sym = currency === "INR" ? "Rs. " : currency === "USD" ? "$" : currency === "GBP" ? "£" : currency === "EUR" ? "€" : "";
   const latest = data.annualFinancials[data.annualFinancials.length - 1] || ({} as AnnualFinancials);
-  const risks = Array.isArray(pe.keyRisks) && pe.keyRisks.length > 0
+  const sevRank = (s: string) => (s === "High" ? 0 : s === "Low" ? 2 : 1);
+  const risks = (Array.isArray(pe.keyRisks) && pe.keyRisks.length > 0
     ? pe.keyRisks.map(k => ({
         risk: k.risk,
         severity: k.impact === "High" ? "High" : k.impact === "Low" ? "Low" : "Moderate",
         description: k.description,
-        mitigation: k.mitigation || (
-          k.risk.toLowerCase().includes("commodity") || k.risk.toLowerCase().includes("steel") || k.risk.toLowerCase().includes("material")
-            ? "Hedged via fixed-price steel contracts and formulaic pass-through clauses in SECI tenders."
-            : k.risk.toLowerCase().includes("execution") || k.risk.toLowerCase().includes("grid") || k.risk.toLowerCase().includes("site")
-            ? "Mitigated by modular turbine designs, pre-fabricated foundations, and phased BOP billing."
-            : k.risk.toLowerCase().includes("competitive") || k.risk.toLowerCase().includes("price")
-            ? "Defended by 3.15 MW platform cost-efficiency, high PLF metrics, and 15+ GW fleet density."
-            : "Strategic long-term vendor SLAs and strict contractual warranty limits."
-        ),
+        // No keyword-sniffed mitigation injection (turbine/SECI text leaked into
+        // every sector). Unevidenced mitigations are labeled, not invented.
+        mitigation: k.mitigation || "Mitigation not evidenced in available disclosures.",
       }))
-    : [
-        { risk: "Demand & Volume Variability", severity: "Moderate", description: "Revenue sensitivity to end-market demand cycles specific to the company's sector", mitigation: "Diversified customer base and flexible cost structure where evidenced." },
-        { risk: "Input Cost Variability", severity: "Moderate", description: "Key input cost movements relevant to the company's reported cost base", mitigation: "Procurement discipline and contractual pass-throughs where evidenced." },
-        { risk: "Regulatory Change", severity: "Moderate", description: "Sector-relevant regulatory shifts affecting operations or compliance costs", mitigation: "Monitoring and compliance programs proportionate to exposure." },
-        { risk: "Macroeconomic Deceleration", severity: "Low", description: "Broad demand softness deferring customer spending", mitigation: "Balance-sheet flexibility and recurring revenue elements where present." },
-      ];
+    : []).sort((a, b) => sevRank(a.severity) - sevRank(b.severity));
 
   return (
     <Page size="A4" style={S.page}>
@@ -2922,13 +2921,11 @@ const CreditAnalysisPage2 = ({ data }: { data: ReportData }) => {
             <Text style={[S.compactCellHeader, { width: "35%" }]}>Primary Operational Impact</Text>
             <Text style={[S.compactCellHeader, { width: "25%" }]}>Mitigation Strategy</Text>
           </View>
-          {(risks.length >= 5 ? risks.slice(0, 5) : [
-            ...risks,
-            { risk: "Foreign Exchange & Currency Volatility", severity: "Moderate", description: "Cross-currency mismatch on global service delivery and cross-border operations", mitigation: "Systematic forward currency hedging and natural multi-currency balance-sheet offsets" },
-            { risk: "Cybersecurity & Infrastructure Continuity", severity: "Low", description: "Enterprise IT interruptions, system downtime, and distributed network disruption", mitigation: "Redundant cloud architecture, enterprise disaster recovery, and continuous perimeter audits" },
-          ].slice(0, 5)).map((r, ri) => (
+          {(risks.length > 0 ? risks.slice(0, 5) : [
+            { risk: "Demand & Volume Variability", severity: "Moderate", description: "No company-specific risks evidenced — risk assessment requires disclosed operating drivers", mitigation: "Evidence-gated risk identification pending filings" },
+          ]).map((r, ri) => (
             <View key={ri} style={ri % 2 === 0 ? S.compactRow : S.compactRowAlt}>
-              <Text style={[S.compactCellBold, { width: "25%" }]}>{r.risk}</Text>
+              <Text style={[S.compactCellBold, { width: "25%" }]}>R{ri + 1} · {r.risk}</Text>
               <Text style={[S.compactCell, { width: "15%", color: r.severity === "High" ? COLORS.primaryRed : undefined }]}>{r.severity}</Text>
               <Text style={[S.compactCell, { width: "35%" }]}>{r.description}</Text>
               <Text style={[S.compactCell, { width: "25%" }]}>{r.mitigation}</Text>
@@ -4418,6 +4415,36 @@ const AnalystForecastsSummaryPage = ({ data }: { data: ReportData }) => {
         </View>
       </View>
 
+      {/* Assumption Evidence Trail: every major forecast input states its basis */}
+      <View style={{ borderTopWidth: 0.5, borderTopColor: COLORS.hairlineLight, paddingTop: 3, marginBottom: 3 }}>
+        <Text style={{ fontSize: 7.2, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2 }}>
+          Forecast Assumption Evidence Trail
+        </Text>
+        <View style={S.compactTable}>
+          <View style={S.compactRowHeader}>
+            <Text style={[S.compactCellHeader, { width: "24%" }]}>Assumption</Text>
+            <Text style={[S.compactCellHeader, { width: "76%" }]}>Empirical Basis (auditable — challenge any line lacking one)</Text>
+          </View>
+          {(() => {
+            const basis = data.dcf.assumptionBasis || {};
+            const rows: [string, string][] = [
+              ["Revenue growth", basis.revenueGrowth || "Basis not recorded — treat trajectory as judgmental."],
+              ["EBIT margin", basis.ebitMargin || "Basis not recorded — treat trajectory as judgmental."],
+              ["Capex & D&A", basis.capex || "Basis not recorded."],
+              ["Working capital", basis.workingCapital || "Basis not recorded."],
+              ["WACC inputs", basis.wacc || "Basis not recorded."],
+              ["Terminal value", basis.terminal || "Basis not recorded."],
+            ];
+            return rows;
+          })().map(([name, evidence], ri) => (
+            <View key={ri} style={ri % 2 === 0 ? S.compactRow : S.compactRowAlt}>
+              <Text style={[S.compactCellBold, { width: "24%" }]}>{name}</Text>
+              <Text style={[S.compactCell, { width: "76%", color: COLORS.textSecondary }]}>{evidence}</Text>
+            </View>
+          ))}
+        </View>
+      </View>
+
       {/* Multi-Year Key Driver Sensitivity Matrix */}
       <View style={{ borderTopWidth: 0.5, borderTopColor: COLORS.hairlineLight, paddingTop: 4, marginTop: 4, marginBottom: 3 }}>
         <Text style={{ fontSize: 7.5, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2 }}>
@@ -4907,7 +4934,14 @@ const CashFlowDetailedPage = ({ data }: { data: ReportData }) => {
               Operating Cash Generation &amp; Quality of Earnings
             </Text>
             <Text style={{ fontSize: 6.6, color: COLORS.textSecondary, lineHeight: 1.35, textAlign: "justify" }}>
-              {pe.cashFlowCommentary} Cash flow quality remains pristine with high conversion of operating EBITDA into cash from operations. Minimal discrepancy between accounting net earnings and cash generation reflects conservative revenue recognition and disciplined trade credit controls.
+              {pe.cashFlowCommentary} {(() => {
+                const lf = data.annualFinancials[data.annualFinancials.length - 1];
+                const conv = lf && lf.ebitda > 0 ? lf.operatingCashFlow / lf.ebitda : null;
+                if (conv === null) return `Cash conversion cannot be assessed — operating cash flow or EBITDA is undisclosed.`;
+                if (conv >= 0.8) return `Cash conversion is strong at ${(conv * 100).toFixed(0)}% of EBITDA, corroborating earnings quality on a cash basis.`;
+                if (conv >= 0) return `Cash conversion is modest at ${(conv * 100).toFixed(0)}% of EBITDA — working-capital absorption or accruals merit the caution flagged in Data Quality.`;
+                return `Operating cash flow trails EBITDA (negative conversion) — earnings quality is weak on a cash basis and the valuation relies on normalization.`;
+              })()}
             </Text>
           </View>
           <View style={{ flex: 1 }}>
@@ -4966,6 +5000,46 @@ const ComparableCompanyAnalysisPage1 = ({ data }: { data: ReportData }) => {
           These peer companies are selected by the research desk and benchmarked by calendarized fundamentals in descending order.
         </Text>
       )}
+
+      {/* Objective peer-selection criteria + computed relative-valuation verdict */}
+      <View style={{ padding: 3.5, backgroundColor: COLORS.offWhite, borderWidth: 0.5, borderColor: COLORS.hairlineLight, marginBottom: 4 }}>
+        <Text style={{ fontSize: 6.2, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 1.5 }}>
+          Peer Selection Criteria (applied before any company was chosen)
+        </Text>
+        <Text style={{ fontSize: 5.4, color: COLORS.textSecondary, lineHeight: 1.3, marginBottom: 2 }}>
+          1) Same sector/industry taxonomy as {data.profile.sector} / {data.profile.industry}; 2) same listing geography; 3) reported (never estimated) multiples; 4) minimum 3 qualifying peers or no relative conclusion is drawn. Each peer carries a relevance score (sector/industry overlap + size proximity).
+        </Text>
+        {(() => {
+          const med = (vals: (number | null | undefined)[]) => {
+            const v = vals.filter((x): x is number => typeof x === "number" && isFinite(x) && x > 0).sort((a, b) => a - b);
+            if (v.length === 0) return null;
+            const m = v.length >> 1;
+            return v.length % 2 ? v[m] : (v[m - 1] + v[m]) / 2;
+          };
+          if (peers.length < 3) {
+            return (
+              <Text style={{ fontSize: 5.4, color: COLORS.textSecondary, lineHeight: 1.3 }}>
+                Verdict: WITHHELD — only {peers.length} qualifying peer(s); the published rating rests on the DCF alone.
+              </Text>
+            );
+          }
+          const medPE = med(peers.map((p) => p.pe));
+          const medEV = med(peers.map((p) => p.evToEbitda));
+          const sPE = data.stockData.pe > 0 ? data.stockData.pe : null;
+          const lastR = data.ratiosByYear && data.ratiosByYear.length > 0 ? data.ratiosByYear[data.ratiosByYear.length - 1] : null;
+          const sEV = lastR?.evToEbitda && lastR.evToEbitda > 0 ? lastR.evToEbitda : null;
+          const cmpStr = (s: number | null, m: number | null, label: string) => {
+            if (s == null || m == null) return `${label}: subject N/M vs peer median N/M — no read-across`;
+            const d = (s - m) / m;
+            return `${label}: subject ${s.toFixed(1)}x vs peer median ${m.toFixed(1)}x (${d >= 0 ? "+" : ""}${(d * 100).toFixed(0)}% ${d >= 0 ? "premium" : "discount"})`;
+          };
+          return (
+            <Text style={{ fontSize: 5.4, color: COLORS.textSecondary, lineHeight: 1.3 }}>
+              Verdict from displayed medians — {cmpStr(sPE, medPE, "P/E")}; {cmpStr(sEV, medEV, "EV/EBITDA")}. Premiums require offsetting growth/return evidence stated elsewhere; discounts do not alone imply upside.
+            </Text>
+          );
+        })()}
+      </View>
 
       <Text style={{ fontSize: 7.2, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2 }}>
         Valuation Analysis

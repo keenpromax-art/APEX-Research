@@ -284,6 +284,8 @@ export interface DCFResult {
   unadjustedTerminalValue?: number;
   confidence?: "high" | "medium" | "low";
   calibration?: ValuationCalibration;
+  /** Per-assumption evidence trail: assumption name → empirical basis string. */
+  assumptionBasis?: Record<string, string>;
 }
 
 export interface ValuationCalibration {
@@ -503,6 +505,10 @@ export interface EventPriceMovement {
   eventDate: string;
   /** True when trajectory/volumes come from measured exchange sessions. */
   measured?: boolean;
+  /** Benchmark (index) return over the event window, when measured. */
+  benchmarkReturnPct?: number | null;
+  /** True when |abnormal| exceeds ~2σ of trailing volatility. */
+  abnormalSignificant?: boolean;
   category: "EARNINGS" | "CONTRACT_WIN" | "PRODUCT_LAUNCH" | "REGULATORY" | "STRATEGIC_MA" | "CAPEX_EXPANSION" | "GENERAL_CORPORATE";
   categoryLabel: string;
   summary: string;
@@ -692,6 +698,8 @@ export interface ReportData {
   masterReportFacts?: any;
   finalQAResult?: any;
   calibration?: ValuationCalibration;
+  /** Terms the sector sanitizer rewrote (disclosed, QA-gated — never silent). */
+  sanitizerReport?: { rewrittenTerms: string[] };
 }
 
 export interface SearchResult {

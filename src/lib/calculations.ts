@@ -415,10 +415,32 @@ export function computeDCF(
     avgNwcChangePct,
   });
 
+  // Evidence trail: every major assumption records its empirical basis so the
+  // forecast is auditable (not "aggressive relative to evidence" by default).
+  const marginSource =
+    (archetypeProfile?.scenarioMargins?.baseMargin ?? 0) > 0
+      ? `archetype base margin ${(((archetypeProfile?.scenarioMargins?.baseMargin) || 0) * 100).toFixed(1)}%`
+      : latest.ebitMargin > 0.03
+        ? `reported EBIT margin ${(latest.ebitMargin * 100).toFixed(1)}%`
+        : stockData.operatingMargins > 0
+          ? `live operating margin ${(stockData.operatingMargins * 100).toFixed(1)}%`
+          : `14% default (no margin basis — treat with caution)`;
+  const assumptionBasis: Record<string, string> = {
+    revenueGrowth: hasLive
+      ? `55% historical revenue CAGR (${(cagr * 100).toFixed(1)}% over ${Math.max(1, years - 1)}y, winsorized ${(winsorizedCagr * 100).toFixed(1)}%) + 45% live growth (${(liveRevGrowth * 100).toFixed(1)}%, winsorized ${(winsorizedLive * 100).toFixed(1)}%) → base ${(baseGrowth * 100).toFixed(1)}%, fading ×0.90/0.82/0.74/0.66`
+      : `Historical revenue CAGR (${(cagr * 100).toFixed(1)}% over ${Math.max(1, years - 1)}y, winsorized ${(winsorizedCagr * 100).toFixed(1)}%) → base ${(baseGrowth * 100).toFixed(1)}%, fading yearly (no live growth input)`,
+    ebitMargin: `Base from ${marginSource}; explicit margins ramp +1.0/+1.8/+2.4/+2.8/+3.0pp, capped 26–30%`,
+    capex: `Historical capex intensity ${(rawAvgCapexPct * 100).toFixed(1)}% of revenue (clamped 2.5–8.0% → ${(avgCapexPct * 100).toFixed(1)}%)${archetypeProfile?.archetype ? `; ${archetypeProfile.archetype} overlay applied` : ""}; D&A ${(rawAvgDeptPct * 100).toFixed(1)}% (clamped 2.0–6.0%)`,
+    workingCapital: `Revenue-linked change ${(avgNwcChangePct * 100).toFixed(1)}%${archetypeProfile?.archetype === "EARLY_PLATFORM_GROWTH" ? " (platform buffer overlay)" : ""}`,
+    wacc: assumptions.parameterSource || "CAPM blend (parameters undisclosed)",
+    terminal: `4.0% nominal-GDP anchor; TV capped at 25× terminal-year FCFF${isTvCapped ? " (CAP ACTIVE — see diagnostics)" : " (not binding)"}`,
+  };
+
   return {
     status,
     diagnostics,
     assumptions,
+    assumptionBasis,
     projections,
     sumPvFcff,
     terminalYearFcff,

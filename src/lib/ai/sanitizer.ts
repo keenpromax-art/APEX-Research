@@ -94,12 +94,18 @@ export const SEMANTIC_BLEED_RULES: { sectors: string[]; blocked: string[] }[] = 
 /**
  * Universal Sector Semantic Bleed Sanitizer
  * Recursively scrubs out-of-sector keywords and forbidden concepts from any narrative object or string.
+ *
+ * IMPORTANT: scrubbing is disclosed, not silent. Pass a collector array as the
+ * 5th argument to record every rewritten term; the QA gate (SANITIZE-01) fails
+ * reports whose narrative required material rewriting — otherwise QA would
+ * certify text it never actually saw.
  */
 export function sanitizeSectorBleed<T>(
   data: T,
   sector?: string,
   industry?: string,
-  description?: string
+  description?: string,
+  rewriteLog?: string[]
 ): T {
   if (!data) return data;
   const sectorLower = `${sector || ""} ${industry || ""} ${description || ""}`.toLowerCase();
@@ -133,6 +139,7 @@ export function sanitizeSectorBleed<T>(
       const regex = new RegExp(`(^|[^a-zA-Z0-9])${escaped}([^a-zA-Z0-9]|$)`, "gi");
       const replacement = BLEED_REPLACEMENTS[term] || "operating capacity";
       result = result.replace(regex, (match, prefix, suffix) => {
+        if (rewriteLog && !rewriteLog.includes(term)) rewriteLog.push(term);
         return `${prefix}${replacement}${suffix}`;
       });
     }

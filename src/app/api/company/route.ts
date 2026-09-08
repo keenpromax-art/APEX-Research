@@ -37,18 +37,28 @@ export async function GET(request: NextRequest) {
 
     // Measured event-study sessions: one chart fetch spanning all news windows
     // so event trajectories derive from real closes (null-tolerant fallback).
-    let eventPriceLookup: { sessions: { date: string; close: number | null; volume: number | null }[] } | null = null;
+    // A benchmark index series rides along for market-model abnormal returns.
+    let eventPriceLookup: { sessions: { date: string; close: number | null; volume: number | null }[]; marketSessions?: { date: string; close: number | null; volume: number | null }[] | null; marketSymbol?: string } | null = null;
     try {
       const dated = tickerNews
         .filter((n) => n.publishedAt && !isNaN(new Date(n.publishedAt).getTime()))
         .map((n) => new Date(n.publishedAt as string).getTime());
       if (dated.length > 0) {
-        const sessions = await fetchDailyPriceHistory(
-          symbol,
-          (Math.min(...dated) - 70 * 86400000) / 1000,
-          (Math.max(Date.now(), Math.max(...dated)) + 20 * 86400000) / 1000
-        );
-        if (sessions && sessions.length > 0) eventPriceLookup = { sessions };
+        const fromSec = (Math.min(...dated) - 70 * 86400000) / 1000;
+        const toSec = (Math.max(Date.now(), Math.max(...dated)) + 20 * 86400000) / 1000;
+        const upSym = symbol.toUpperCase();
+        const marketSymbol = (upSym.endsWith(".NS") || upSym.endsWith(".BO")) ? "^NSEI" : "^GSPC";
+        const [sessions, marketSessions] = await Promise.all([
+          fetchDailyPriceHistory(symbol, fromSec, toSec),
+          fetchDailyPriceHistory(marketSymbol, fromSec, toSec),
+        ]);
+        if (sessions && sessions.length > 0) {
+          eventPriceLookup = {
+            sessions,
+            marketSessions: marketSessions && marketSessions.length > 0 ? marketSessions : null,
+            marketSymbol,
+          };
+        }
       }
     } catch (priceErr) {
       console.warn("Event price history fetch failed (illustrative fallback):", priceErr);

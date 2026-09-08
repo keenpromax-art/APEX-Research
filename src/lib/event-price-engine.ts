@@ -241,6 +241,36 @@ export function isDuplicateHeadline(h1: string, h2: string, companyName?: string
 }
 
 /**
+ * Market-model abnormal return over the event window: stock 5-day return minus
+ * beta × index 5-day return, with a ~2σ significance flag against trailing
+ * 20-session volatility. Returns null without session coverage — never modeled.
+ */
+export function buildMarketAbnormal(
+  marketSessions: { date: string; close: number | null }[] | null | undefined,
+  eventDateISO: string
+): { mkt5: number; sigma5: number } | null {
+  if (!marketSessions || marketSessions.length < 40) return null;
+  const sorted = [...marketSessions].sort((a, b) => (a.date < b.date ? -1 : 1));
+  let eventIdx = sorted.findIndex((s) => s.date >= eventDateISO);
+  if (eventIdx < 0) eventIdx = sorted.length - 1;
+  if (eventIdx < 21 || eventIdx + 5 >= sorted.length) return null;
+  const c = (i: number) => sorted[i]?.close;
+  const base = c(eventIdx - 1);
+  const t5 = c(eventIdx + 5);
+  if (typeof base !== "number" || typeof t5 !== "number" || base <= 0) return null;
+  const rets: number[] = [];
+  for (let i = eventIdx - 20; i < eventIdx; i++) {
+    const p0 = c(i - 1);
+    const p1 = c(i);
+    if (typeof p0 === "number" && typeof p1 === "number" && p0 > 0) rets.push(p1 / p0 - 1);
+  }
+  if (rets.length < 10) return null;
+  const mean = rets.reduce((a, b) => a + b, 0) / rets.length;
+  const variance = rets.reduce((a, b) => a + (b - mean) * (b - mean), 0) / rets.length;
+  return { mkt5: t5 / base - 1, sigma5: Math.sqrt(variance) * Math.sqrt(5) };
+}
+
+/**
  * Maps an event date onto real exchange sessions. Returns null unless the
  * window has full coverage (5 pre + event + 10 post sessions with closes,
  * and ≥10 pre-event volumes for the ADV baseline).
@@ -296,6 +326,9 @@ export function buildMeasuredWindow(
  */
 export interface EventPriceLookup {
   sessions: { date: string; close: number | null; volume: number | null }[];
+  /** Benchmark index sessions for market-model abnormal returns (optional). */
+  marketSessions?: { date: string; close: number | null; volume: number | null }[] | null;
+  marketSymbol?: string;
 }
 
 export function buildEventPriceMovements(
@@ -358,6 +391,8 @@ export function buildEventPriceMovements(
       let immediateReturnPct: number;
       let multiDayReturnPct: number;
       let abnormalReturnPct: number;
+      let benchmarkReturnPct: number | null = null;
+      let abnormalSignificant = false;
       let volumeMultiplier: number;
       let trajectory: EventPriceTrajectoryPoint[];
       let isMeasured = false;
@@ -370,8 +405,16 @@ export function buildEventPriceMovements(
         postEventPrice = measured.t5;
         immediateReturnPct = measured.t0 / measured.base - 1;
         multiDayReturnPct = measured.t5 / measured.base - 1;
-        abnormalReturnPct = multiDayReturnPct; // flat benchmark; no index series claimed
-        volumeMultiplier = measured.volMult;
+        // Market-model abnormal return vs benchmark index (when available);
+        // otherwise abnormal equals the raw drift and is labeled as such.
+        const mkt = buildMarketAbnormal(priceLookup?.marketSessions, dateKey);
+        if (mkt) {
+          benchmarkReturnPct = beta * mkt.mkt5;
+          abnormalReturnPct = multiDayReturnPct - benchmarkReturnPct;
+          abnormalSignificant = mkt.sigma5 > 0 && Math.abs(abnormalReturnPct) > 2 * mkt.sigma5;
+        } else {
+          abnormalReturnPct = multiDayReturnPct;
+        }
         const days = [-5, -3, -1, 0, 1, 3, 5, 10];
         trajectory = days.map((day) => {
           const px = measured.byOffset[day];
@@ -533,13 +576,15 @@ export function buildEventPriceMovements(
         immediateReturnPct,
         multiDayReturnPct,
         abnormalReturnPct,
+        benchmarkReturnPct,
+        abnormalSignificant,
         volumeSpikeMultiplier: volumeMultiplier,
         verdict,
         measured: isMeasured,
         narrative: {
           whatHappened: `On ${dateStr}, ${profile.name} disclosed material operational progress regarding ${label.toLowerCase()}: "${item.title}".`,
           priceImpact: isMeasured
-            ? `Measured exchange sessions show an immediate ${immediateReturnPct >= 0 ? "+" : ""}${(immediateReturnPct * 100).toFixed(1)}% session move on ${volumeMultiplier.toFixed(1)}x 20-day average volume, with a 5-day drift of ${multiDayReturnPct >= 0 ? "+" : ""}${(multiDayReturnPct * 100).toFixed(1)}%.`
+            ? `Measured exchange sessions show an immediate ${immediateReturnPct >= 0 ? "+" : ""}${(immediateReturnPct * 100).toFixed(1)}% session move on ${volumeMultiplier.toFixed(1)}x 20-day average volume, with a 5-day drift of ${multiDayReturnPct >= 0 ? "+" : ""}${(multiDayReturnPct * 100).toFixed(1)}%${benchmarkReturnPct !== null ? ` (${(abnormalReturnPct >= 0 ? "+" : "")}${(abnormalReturnPct * 100).toFixed(1)}% abnormal vs benchmark${abnormalSignificant ? ", significant at ~2σ" : ", not significant"})` : " (no benchmark coverage)"}.`
             : `The model-illustrative trajectory (anchored on pre-event closes; not measured tick data) implies an immediate ${immediateReturnPct >= 0 ? "+" : ""}${(immediateReturnPct * 100).toFixed(1)}% session move on ${volumeMultiplier.toFixed(1)}x baseline volume, with a stylized 5-day drift of ${multiDayReturnPct >= 0 ? "+" : ""}${(multiDayReturnPct * 100).toFixed(1)}%. Interpret directionally only.`,
           modelImplication: isMeasured
             ? `Observed market reaction is consistent with — not proof of — thesis transmission; direction and magnitude are measured, causality is not claimed.`

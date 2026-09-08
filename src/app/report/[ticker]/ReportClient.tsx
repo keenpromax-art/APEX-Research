@@ -477,12 +477,15 @@ export default function ReportClient({ ticker }: Props) {
         }
       }
 
-      // Universal sector semantic bleed scrubbing
+      // Universal sector semantic bleed scrubbing — rewrites are LOGGED, not
+      // silent: SANITIZE-01 fails reports that needed material rewriting.
+      const bleedRewriteLog: string[] = [];
       const bleedCleanedAiAnalysis = sanitizeSectorBleed(
         aiAnalysis,
         companyData.profile.sector,
         companyData.profile.industry,
-        companyData.profile.description
+        companyData.profile.description,
+        bleedRewriteLog
       );
 
       // Sanitize AI narrative fields against MasterReportFacts and lock canonical moat
@@ -518,6 +521,7 @@ export default function ReportClient({ ticker }: Props) {
         assumptionsLedger,
         masterReportFacts,
         calibration: companyData.calibration || dcf.calibration,
+        sanitizerReport: { rewrittenTerms: bleedRewriteLog },
       };
 
       const qaReport = validateReportIntegrity(report);

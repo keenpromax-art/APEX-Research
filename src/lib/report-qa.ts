@@ -627,6 +627,44 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
     });
   }
 
+  // SANITIZE-01: Sanitizer Rewrite Disclosure. The sector sanitizer runs BEFORE
+  // QA — without this check, QA would certify text it never saw. Material
+  // rewriting (≥2 distinct foreign-sector terms scrubbed) proves the narrative
+  // was contaminated at generation time and blocks publication; a single
+  // rewrite warns. Absent sanitizer metadata counts as clean (legacy path).
+  const rewrittenTerms = Array.from(
+    new Set(((data as any).sanitizerReport?.rewrittenTerms || []) as string[])
+  );
+  if (rewrittenTerms.length >= 2) {
+    checks.push({
+      id: "SANITIZE-01",
+      category: "KEYWORD_BLOCKLIST",
+      name: "Sanitizer Rewrite Disclosure",
+      status: "FAIL",
+      details: `FATAL PUBLICATION BLOCK: Sector sanitizer rewrote ${rewrittenTerms.length} distinct out-of-sector terms pre-QA: [${rewrittenTerms.slice(0, 8).join(", ")}]. The narrative was contaminated at generation — fix the template/prompt, not the output.`,
+      expected: "Zero rewritten terms",
+      actual: `${rewrittenTerms.length} rewritten term(s)`,
+    });
+  } else if (rewrittenTerms.length === 1) {
+    checks.push({
+      id: "SANITIZE-01",
+      category: "KEYWORD_BLOCKLIST",
+      name: "Sanitizer Rewrite Disclosure",
+      status: "WARN",
+      details: `Sector sanitizer rewrote 1 out-of-sector term pre-QA: [${rewrittenTerms[0]}]. Below the block threshold — review manually.`,
+      expected: "Zero rewritten terms",
+      actual: "1 rewritten term",
+    });
+  } else {
+    checks.push({
+      id: "SANITIZE-01",
+      category: "KEYWORD_BLOCKLIST",
+      name: "Sanitizer Rewrite Disclosure",
+      status: "PASS",
+      details: `No sector-sanitizer rewrites recorded; QA audited the as-generated text.`,
+    });
+  }
+
   // ============================================================
   // BS-DETECTOR CROSS-VALIDATION RULES
   // These catch the "Frankenstein Architecture" failures where
