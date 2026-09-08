@@ -49,18 +49,22 @@ const safeFix = (v: unknown, d = 2, fallback = "—"): string => {
 // template so cross-sector boilerplate (telecom/FMCG/renewables) can never
 // leak into another sector's narrative and trip the publication gate.
 // ─────────────────────────────────────────────────────────────
-function buildSectorGuardrail(profile: CompanyProfile): string {
+export function buildSectorGuardrail(profile: CompanyProfile): string {
   // Priority 1: hard CompanyOntology is the single authority (not a forked keyword list).
+  // NOTE: the FULL forbidden list is emitted — a previous slice(0, 24) truncation
+  // hid tail terms (tower tenancy, subscriber churn, arpu, ...) from the model,
+  // which then emitted them innocently and tripped SANITIZE-01. Never truncate.
   const onto = buildCompanyOntology(profile);
   const kpis = onto.kpis.slice(0, 10).join("; ");
-  const forbidden = onto.forbiddenConcepts.slice(0, 24).join(", ") || "none";
+  const forbidden = onto.forbiddenConcepts.join(", ") || "none";
   const required = onto.requiredConcepts.slice(0, 8).join(", ");
   const drivers = onto.revenueDrivers.join("; ");
-  return `Company Ontology Guardrail (authoritative ${onto.ontologyVersion} — violations block publication):
+  return `Company Ontology Guardrail (authoritative ${onto.ontologyVersion} — violations BLOCK publication, the report is rejected):
+- REJECTION RULE: if you write ANY of the STRICTLY FORBIDDEN terms below (in any form, including inside compound phrases), the entire report FAILS audit and is discarded. When tempted by a forbidden term, use the sector's own KPIs instead.
 - Ontology: ${onto.sectorName} (${onto.sectorId}) / ${onto.subSector}; operating archetype ${onto.operatingArchetype} / ${onto.financialArchetype}; segments: ${onto.segments.join(", ")}.
 - Revenue drivers (forecast ONLY via these): ${drivers}. Valuation lens: ${onto.valuationMethods.join(", ")}; margin metric: ${onto.standardMarginMetric}.
 - Use ONLY these KPIs: ${kpis}. REQUIRED concepts (must evidence ≥2): ${required}.
-- STRICTLY FORBIDDEN terms (never mention in any form): ${forbidden}.
+- STRICTLY FORBIDDEN terms (never mention in any form — complete list): ${forbidden}.
 - Never apply another sector's template (telecom carrier, FMCG, pharma, banking, energy, renewables). Internet platforms must not mention spectrum auctions, tower tenancies, telecom subscriber churn, or packaged-goods distribution. Telecom tariff/subscriber ARPU must not be confused with digital-advertising ARPU per DAU/MAU. Every material number must carry source/period/currency/units provenance or be omitted.`;
 }
 
@@ -464,6 +468,9 @@ Tasks:
 1. Synthesize 3-4 high-impact corporate developments. For each event, evaluate the exact strategic takeaway: how does it impact revenue velocity, gross margins, order book backlog execution, or competitive defense?
 2. Formulate 4 concrete forward catalysts across 3-12 month horizons with explicit probability estimates and projected fair value upside/downside impact.
 
+${buildSectorGuardrail(profile)}
+Describe every development and catalyst ONLY with the guardrail KPIs above — never import another sector's vocabulary.
+
 Return a valid JSON object matching this structure EXACTLY:
 {
   "recentNewsAnalysis": [
@@ -641,7 +648,7 @@ async function runForensicFinancialAnalyst(
   const roe = formatPct(latest.netIncome / (latest.totalEquity || 1));
 
   const prompt = `You are a Senior Forensic Accounting Auditor and Chartered Financial Analyst (CFA).
-Dissect the multi-year financial performance, earnings quality, and 5-Stage DuPont ROE trajectory for ${profile.name}:
+Dissect the multi-year financial performance, earnings quality, and 5-Stage DuPont ROE trajectory for ${profile.name} (${profile.ticker} — Sector: ${profile.sector} | Industry: ${profile.industry}):
 
 5-Year Financial Statement History:
 ${summaryData}
@@ -660,6 +667,9 @@ Latest Balance Sheet: Assets = ${formatLargeNum(latest.totalAssets, profile.curr
 Directives:
 - Write with forensic precision, dissecting cash conversion quality, accrual divergence, working capital float, and operational leverage.
 - Avoid vague commentary; cite the exact multi-year numbers and percentage changes from the input data.
+
+${buildSectorGuardrail(profile)}
+Use ONLY the guardrail KPIs above — a financial-statement footnote never justifies importing another sector's template vocabulary.
 
 Return a valid JSON object matching this structure EXACTLY:
 {
@@ -804,6 +814,9 @@ Directives:
 2. Evaluate board governance structure, accounting transparency, audit oversight, and alignment with minority shareholders.
 3. Review 5-year cumulative capital deployment across dividends, repurchases, and balance sheet deleveraging.
 
+${buildSectorGuardrail(profile)}
+Company: ${profile.name} (${profile.ticker} — Sector: ${profile.sector} | Industry: ${profile.industry}). Ground every judgment in this sector's guardrail KPIs — never borrow another sector's metrics or jargon.
+
 Return a valid JSON object matching this structure EXACTLY:
 {
   "managementCommentary": "2 detailed paragraphs evaluating executive leadership capability, strategic clarity, operational turnaround execution, and incentive compensation alignment.",
@@ -929,7 +942,8 @@ VERIFICATION AUDIT PROTOCOL:
 2. Check Recommendation Consistency: Does the thesis verdict match the model verdict (${verdict})?
 3. Check Solvency Accuracy: Is the debt commentary consistent with net debt of ${formatLargeNum(netDebt, cur)} (Net Debt/EBITDA ${netDebtToEbitda.toFixed(2)}x)?
 4. Check Anti-Hallucination & Cross-Persona Contradictions: Are growth drivers, market position, or risk factors contradictory across personas?
-5. Assign an Integrity Score (0-100) and list any corrections applied or verified.
+5. Check Sector-Template Contamination: Does any sample use another sector's vocabulary (telecom carrier terms like spectrum/subscriber/ARPU/tower for non-carriers; banking CASA/NIM/loan-book for non-banks; FMCG copra/packaged-goods for non-FMCG; wafer/refinery/clinical-trial terms outside their sectors)? Flag EVERY offending term explicitly in observations.
+6. Assign an Integrity Score (0-100) and list any corrections applied or verified.
 
 OUTPUT FORMAT (RAW JSON ONLY, NO MARKDOWN):
 {
@@ -1027,6 +1041,9 @@ ${newsList}
 COMPANY CONTEXT:
 - Sector: ${profile.sector || "General"} | Industry: ${profile.industry || "Diversified"}
 - CMP: ${stockData.currentPrice} ${profile.currency || "USD"}
+
+${buildSectorGuardrail(profile)}
+Brief ONLY with the guardrail KPIs above — headlines or sentiment must never introduce another sector's vocabulary.
 
 Provide a structured briefing:
 1. executiveNewsSummary: 3-4 professional institutional sentences summarizing media narrative and operational tone.
