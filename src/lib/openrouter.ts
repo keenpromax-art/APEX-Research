@@ -27,6 +27,7 @@ import {
   SUPPORTED_PROVIDERS,
   CustomKeyConfig,
   RateLimitError,
+  PausedForRateLimitError,
   classifyLlmFailure,
   type LlmFailureKind,
 } from "./ai-providers";
@@ -70,25 +71,45 @@ interface OpenRouterMessage {
 // Automatically handles custom keys (NVIDIA, Gemini, Groq, OpenAI, OpenRouter)
 // Throws RateLimitError (with machine-readable `kind`) when the key cannot serve.
 // pacing: free-tier keys throttle per-minute bursts, so concurrent agents share
-// a process-wide gate (max 2 in flight, >=1.2s between starts) instead of firing
-// 8 parallel requests that collectively 429 the key.
+// a process-wide gate (1 at a time, >=5s between starts, adaptive cooldown that
+// grows on every observed 429) instead of firing parallel requests that
+// collectively 429 the key. Slow by design — eventual success over fast failure.
 // ─────────────────────────────────────────────────────────────
-const LLM_MAX_CONCURRENT = 2;
-const LLM_MIN_GAP_MS = 1200;
-const LLM_MAX_HTTP_ATTEMPTS = 6;
+const LLM_MAX_CONCURRENT = 1;
+const LLM_MIN_GAP_MS = 5000;
+const LLM_MAX_HTTP_ATTEMPTS = 10;
+const LLM_REQUEST_TIMEOUT_MS = 45000;
 
 let llmGateInFlight = 0;
 let llmGateLastStart = 0;
+// Adaptive circuit breaker: every observed 429 pushes the next-start horizon
+// further out (15s, +10s per consecutive throttle, max 60s). Success resets it.
+// This is what makes a whole report eventually succeed instead of dying fast.
+let llmGateCooldownUntil = 0;
+let llmConsecutiveThrottles = 0;
 
 function llmSleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, Math.max(0, ms)));
+}
+
+function recordLlmThrottle(): void {
+  llmConsecutiveThrottles++;
+  const backoff = Math.min(60000, 15000 + (llmConsecutiveThrottles - 1) * 10000);
+  llmGateCooldownUntil = Math.max(llmGateCooldownUntil, Date.now() + backoff);
+}
+
+function recordLlmSuccess(): void {
+  llmConsecutiveThrottles = 0;
+  llmGateCooldownUntil = 0;
 }
 
 /** Admits one LLM HTTP attempt; caller MUST invoke the returned releaser. */
 async function acquireLlmSlot(): Promise<() => void> {
   for (;;) {
     const now = Date.now();
-    if (llmGateInFlight < LLM_MAX_CONCURRENT && now - llmGateLastStart >= LLM_MIN_GAP_MS) {
+    const cooldownWait = Math.max(0, llmGateCooldownUntil - now);
+    const gapWait = Math.max(0, LLM_MIN_GAP_MS - (now - llmGateLastStart));
+    if (llmGateInFlight < LLM_MAX_CONCURRENT && cooldownWait === 0 && gapWait === 0) {
       llmGateInFlight++;
       llmGateLastStart = Date.now();
       let released = false;
@@ -99,7 +120,7 @@ async function acquireLlmSlot(): Promise<() => void> {
         }
       };
     }
-    await llmSleep(150);
+    await llmSleep(250);
   }
 }
 
@@ -111,7 +132,7 @@ function rateLimitUserMessage(providerName: string, isCustom: boolean, kind: Llm
     return `Your ${providerName} key is out of credits/quota — every model on it fails the same way, so switching models won't help. Top up the account or use a provider with an active free tier, then resume.`;
   }
   if (isCustom) {
-    return `Rate limit reached on your custom ${providerName} key (HTTP 429). Free-tier keys allow roughly 20 requests/min and one report issues ~8 — wait about 60 seconds, then Save & Resume. Switching to NVIDIA NIM or Groq free tiers also helps.`;
+    return `Rate limit reached on your custom ${providerName} key (HTTP 429). Free-tier keys allow roughly 20 requests/min and one full report issues ~8 slowly-paced requests — wait about 60 seconds, then Save & Resume (it auto-cools-down first). If throttling persists across different models, the key has likely hit its DAILY free-tier allowance: switch model/provider (NVIDIA NIM or Groq free tiers) or wait for the daily reset.`;
   }
   return "Rate limit exceeded on default server OpenRouter key. Please provide a custom API key from OpenRouter, NVIDIA NIM, Google Gemini, Groq, or OpenAI to proceed.";
 }
@@ -182,14 +203,15 @@ async function callOpenRouterWithFailover(
 
   for (const model of candidateModels) {
     if (httpAttempts >= LLM_MAX_HTTP_ATTEMPTS) break;
-    // One paced retry for throttle responses; other errors fail over immediately.
-    for (let attempt = 0; attempt < 2; attempt++) {
+    // Slow-but-sure: up to 4 paced tries per model on throttle responses
+    // (3s/6s/12s backoff + adaptive gate cooldown). Other errors fail over fast.
+    for (let attempt = 0; attempt < 4; attempt++) {
       if (httpAttempts >= LLM_MAX_HTTP_ATTEMPTS) break;
       const release = await acquireLlmSlot();
       try {
         httpAttempts++;
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 25000); // 25s timeout
+        const timeout = setTimeout(() => controller.abort(), LLM_REQUEST_TIMEOUT_MS);
 
         const res = await fetch(baseUrl, {
           method: "POST",
@@ -227,9 +249,10 @@ async function callOpenRouterWithFailover(
               rateLimitUserMessage(providerMeta.name, isCustom, kind),
               kind
             );
+            recordLlmThrottle();
             // Paced retry on the same model before failing over.
-            if (attempt === 0 && httpAttempts < LLM_MAX_HTTP_ATTEMPTS) {
-              await llmSleep(1200 * Math.pow(2, attempt) + Math.floor(Math.random() * 400));
+            if (attempt < 3 && httpAttempts < LLM_MAX_HTTP_ATTEMPTS) {
+              await llmSleep(3000 * Math.pow(2, attempt) + Math.floor(Math.random() * 800));
               continue;
             }
             break;
@@ -241,6 +264,7 @@ async function callOpenRouterWithFailover(
         const json = await res.json();
         const content = json.choices?.[0]?.message?.content || "";
         if (content && content.trim().length > 0) {
+          recordLlmSuccess();
           return content.trim();
         }
         lastError = new Error(`[${providerMeta.name}] ${model} returned empty content.`);
@@ -1065,7 +1089,7 @@ Output RAW JSON ONLY:
 }
 
 export interface AgentProgressEvent {
-  type: "agent_start" | "agent_verifying" | "agent_complete" | "agent_error";
+  type: "agent_start" | "agent_verifying" | "agent_complete" | "agent_error" | "agent_paused";
   agentId: string;
   name: string;
   role: string;
@@ -1074,6 +1098,49 @@ export interface AgentProgressEvent {
   durationMs?: number;
   councilMessage?: string;
   councilAuditNote?: string;
+  /** Raw agent result, sent on agent_complete so the client can checkpoint it. */
+  result?: unknown;
+  /** Pause-and-resume fields (agent_paused only). */
+  waitMs?: number;
+  pauseAttempt?: number;
+}
+
+/**
+ * Checkpoint state: raw per-agent results keyed by agent id. Opaque to the
+ * client — it stores what the server sends and returns it verbatim to resume.
+ */
+export type AgentCheckpointState = Partial<Record<string, unknown>>;
+
+const CHECKPOINT_AGENT_IDS = ["strategist", "news", "moat", "forensic", "credit", "governance", "news_summary"] as const;
+type CheckpointAgentId = (typeof CHECKPOINT_AGENT_IDS)[number];
+
+/** Validity gates: a resumed slice counts only if it holds real agent output. */
+function isValidCheckpointSlice(agentId: string, slice: unknown): boolean {
+  if (!slice || typeof slice !== "object") return false;
+  const s = slice as Record<string, unknown>;
+  const nonEmptyString = (v: unknown, min = 50) => typeof v === "string" && v.trim().length >= min;
+  const nonEmptyArray = (v: unknown) => Array.isArray(v) && v.length > 0;
+  switch (agentId) {
+    case "strategist":
+      return nonEmptyString(s.investmentThesis) && nonEmptyString(s.companyOverview, 20);
+    case "news":
+      return nonEmptyArray(s.recentNewsAnalysis) || nonEmptyArray(s.catalysts);
+    case "moat":
+      return typeof s.moatSources === "object" && s.moatSources !== null &&
+        nonEmptyString((s.moatSources as Record<string, unknown>).switchingCosts, 20);
+    case "forensic":
+      return nonEmptyString(s.revenueCommentary) && nonEmptyString(s.dupontCommentary, 20);
+    case "credit":
+      return typeof s.creditAnalysisCommentary === "object" && s.creditAnalysisCommentary !== null &&
+        nonEmptyString((s.creditAnalysisCommentary as Record<string, unknown>).financialHealth, 20);
+    case "governance":
+      return nonEmptyString(s.managementCommentary) && nonEmptyString(s.governanceCommentary, 20);
+    case "news_summary":
+      return typeof s.newsSummary === "object" && s.newsSummary !== null &&
+        nonEmptyString((s.newsSummary as Record<string, unknown>).executiveNewsSummary, 20);
+    default:
+      return false;
+  }
 }
 
 export const AI_AGENT_PERSONAS = [
@@ -1100,7 +1167,8 @@ export async function generateAIAnalysis(
   news?: TickerNewsItem[],
   onProgress?: (event: AgentProgressEvent) => void,
   customConfig?: CustomKeyConfig | null,
-  precomputedLedger?: AssumptionsLedger | null
+  precomputedLedger?: AssumptionsLedger | null,
+  resumeFrom?: AgentCheckpointState | null
 ): Promise<AIAnalysis> {
   // Always build the deep PE foundation first (100% deterministic & sector-tailored).
   // The canonical ledger (when precomputed) harmonizes moat pillars/narrative.
@@ -1108,133 +1176,146 @@ export async function generateAIAnalysis(
 
   let completedCount = 0;
   const total = AI_AGENT_PERSONAS.length;
+  // Checkpoint/resume: raw per-agent results accumulate here as agents finish.
+  // A resumed run passes prior results in and skips those LLM calls entirely.
+  const partial: AgentCheckpointState = {};
+  const resumeState: AgentCheckpointState =
+    resumeFrom && typeof resumeFrom === "object" ? resumeFrom : {};
 
-  const runWithCheckpoint = async <T>(
-    meta: (typeof AI_AGENT_PERSONAS)[number],
-    fn: () => Promise<T>,
-    auditVerifier: () => string
-  ): Promise<T | null> => {
+  interface AgentDef {
+    id: (typeof CHECKPOINT_AGENT_IDS)[number];
+    meta: (typeof AI_AGENT_PERSONAS)[number];
+    run: () => Promise<any>;
+    auditNote: () => string;
+  }
+
+  const agentDefs: AgentDef[] = [
+    { id: "strategist", meta: AI_AGENT_PERSONAS[0], run: () => runLeadEquityStrategist(profile, stockData, dcf, annualFinancials, customConfig), auditNote: () => `Agent complete — queued for council audit (target vs DCF ledger check pending).` },
+    { id: "news", meta: AI_AGENT_PERSONAS[1], run: () => runNewsIntelligenceAnalyst(profile, stockData, annualFinancials, news, customConfig), auditNote: () => "Agent complete — queued for council audit (catalyst authentication pending)." },
+    { id: "moat", meta: AI_AGENT_PERSONAS[2], run: () => runMoatAndStrategyAnalyst(profile, stockData, annualFinancials, dcf, customConfig), auditNote: () => `Agent complete — queued for council audit (moat-spread validation pending).` },
+    { id: "forensic", meta: AI_AGENT_PERSONAS[3], run: () => runForensicFinancialAnalyst(profile, annualFinancials, customConfig), auditNote: () => "Agent complete — queued for council audit (DuPont reconciliation pending)." },
+    { id: "credit", meta: AI_AGENT_PERSONAS[4], run: () => runCreditSolvencyAnalyst(profile, annualFinancials, stockData, customConfig), auditNote: () => "Agent complete — queued for council audit (solvency cross-check pending)." },
+    { id: "governance", meta: AI_AGENT_PERSONAS[5], run: () => runGovernanceCapitalAnalyst(profile, stockData, annualFinancials, dcf, customConfig), auditNote: () => "Agent complete — queued for council audit (stewardship review pending)." },
+    { id: "news_summary", meta: AI_AGENT_PERSONAS[6], run: () => runNewsSummaryDesk(profile, stockData, annualFinancials, news, customConfig), auditNote: () => "Agent complete — queued for council audit (news cross-check pending)." },
+  ];
+
+  const runOneAgent = async <T>(def: {
+    id: (typeof CHECKPOINT_AGENT_IDS)[number];
+    meta: (typeof AI_AGENT_PERSONAS)[number];
+    run: () => Promise<T>;
+    auditNote: () => string;
+  }): Promise<T | null> => {
+    const priorRaw: unknown = resumeState[def.id];
+    if (isValidCheckpointSlice(def.id, priorRaw)) {
+      const prior = priorRaw as T;
+      completedCount++;
+      onProgress?.({
+        type: "agent_complete",
+        agentId: def.meta.id,
+        name: def.meta.name,
+        role: def.meta.role,
+        completed: completedCount,
+        total,
+        durationMs: 0,
+        councilAuditNote: `Resumed from checkpoint — skipped LLM call, prior ${def.meta.name} result reused.`,
+        result: prior,
+      });
+      partial[def.id] = prior;
+      return prior;
+    }
     const t0 = Date.now();
     onProgress?.({
       type: "agent_start",
-      agentId: meta.id,
-      name: meta.name,
-      role: meta.role,
+      agentId: def.meta.id,
+      name: def.meta.name,
+      role: def.meta.role,
       completed: completedCount,
       total,
     });
-    try {
-      const res = await fn();
-      
-      // Step 1: Immediately send to Council for verification
-      onProgress?.({
-        type: "agent_verifying",
-        agentId: meta.id,
-        name: meta.name,
-        role: meta.role,
-        completed: completedCount,
-        total,
-        councilMessage: `Council auditing ${meta.name}'s findings...`,
-      });
-
-      // Brief simulated verification validation cycle
-      const auditNote = auditVerifier();
-
-      completedCount++;
-      onProgress?.({
-        type: "agent_complete",
-        agentId: meta.id,
-        name: meta.name,
-        role: meta.role,
-        completed: completedCount,
-        total,
-        durationMs: Date.now() - t0,
-        councilAuditNote: auditNote,
-      });
-      return res;
-    } catch (err) {
-      if (err instanceof RateLimitError) throw err;
-      console.warn(`Agent ${meta.name} fallback applied:`, err);
-      // Honest checkpoint: the agent failed — never emit a "Verified" audit note.
-      const auditNote = `UNVERIFIED — ${meta.name} failed; deterministic fallback used, council review pending.`;
-      completedCount++;
-      onProgress?.({
-        type: "agent_complete",
-        agentId: meta.id,
-        name: meta.name,
-        role: meta.role,
-        completed: completedCount,
-        total,
-        durationMs: Date.now() - t0,
-        councilAuditNote: auditNote,
-      });
-      return null;
+    let pauses = 0;
+    for (;;) {
+      try {
+        const res = await def.run();
+        onProgress?.({
+          type: "agent_verifying",
+          agentId: def.meta.id,
+          name: def.meta.name,
+          role: def.meta.role,
+          completed: completedCount,
+          total,
+          councilMessage: `Council auditing ${def.meta.name}'s findings...`,
+        });
+        const auditNote = def.auditNote();
+        completedCount++;
+        onProgress?.({
+          type: "agent_complete",
+          agentId: def.meta.id,
+          name: def.meta.name,
+          role: def.meta.role,
+          completed: completedCount,
+          total,
+          durationMs: Date.now() - t0,
+          councilAuditNote: auditNote,
+          result: res,
+        });
+        partial[def.id] = res;
+        return res;
+      } catch (err) {
+        if (err instanceof RateLimitError && err.kind === "rate_limited" && pauses < 2) {
+          pauses++;
+          const waitMs = pauses === 1 ? 30000 : 60000;
+          onProgress?.({
+            type: "agent_paused",
+            agentId: def.meta.id,
+            name: def.meta.name,
+            role: def.meta.role,
+            completed: completedCount,
+            total,
+            durationMs: Date.now() - t0,
+            waitMs,
+            pauseAttempt: pauses,
+            councilAuditNote: `Rate limited — pausing ${waitMs / 1000}s with ${completedCount} agent(s) banked. ${def.meta.name} resumes automatically; nothing restarts.`,
+          });
+          await llmSleep(waitMs);
+          continue;
+        }
+        if (err instanceof RateLimitError) {
+          if (err.kind !== "rate_limited") throw err;
+          throw new PausedForRateLimitError(err.provider, err.statusCode,
+            `${err.message} Paused with ${completedCount} of ${CHECKPOINT_AGENT_IDS.length} agents complete — resume continues with ${def.meta.name}; finished work is kept.`,
+            { ...partial }, completedCount, CHECKPOINT_AGENT_IDS.length, def.id);
+        }
+        console.warn(`Agent ${def.meta.name} fallback applied:`, err);
+        const auditNote = `UNVERIFIED — ${def.meta.name} failed; deterministic fallback used, council review pending.`;
+        completedCount++;
+        onProgress?.({
+          type: "agent_complete",
+          agentId: def.meta.id,
+          name: def.meta.name,
+          role: def.meta.role,
+          completed: completedCount,
+          total,
+          durationMs: Date.now() - t0,
+          councilAuditNote: auditNote,
+          result: null,
+        });
+        return null;
+      }
     }
   };
 
   try {
-    // Run all specialized AI agents in parallel; as each completes,
-    // it is immediately routed to Council for direct verification
-    const [
-      agent1Result,
-      agent2Result,
-      agent3Result,
-      agent4Result,
-      agent5Result,
-      agent6Result,
-      agent7Result,
-    ] = await Promise.allSettled([
-      runWithCheckpoint(
-        AI_AGENT_PERSONAS[0],
-        () => runLeadEquityStrategist(profile, stockData, dcf, annualFinancials, customConfig),
-        () => `Agent complete — queued for council audit (target vs DCF ledger check pending).`
-      ),
-      runWithCheckpoint(
-        AI_AGENT_PERSONAS[1],
-        () => runNewsIntelligenceAnalyst(profile, stockData, annualFinancials, news, customConfig),
-        () => "Agent complete — queued for council audit (catalyst authentication pending)."
-      ),
-      runWithCheckpoint(
-        AI_AGENT_PERSONAS[2],
-        () => runMoatAndStrategyAnalyst(profile, stockData, annualFinancials, dcf, customConfig),
-        () => `Agent complete — queued for council audit (moat-spread validation pending).`
-      ),
-      runWithCheckpoint(
-        AI_AGENT_PERSONAS[3],
-        () => runForensicFinancialAnalyst(profile, annualFinancials, customConfig),
-        () => "Agent complete — queued for council audit (DuPont reconciliation pending)."
-      ),
-      runWithCheckpoint(
-        AI_AGENT_PERSONAS[4],
-        () => runCreditSolvencyAnalyst(profile, annualFinancials, stockData, customConfig),
-        () => "Agent complete — queued for council audit (solvency cross-check pending)."
-      ),
-      runWithCheckpoint(
-        AI_AGENT_PERSONAS[5],
-        () => runGovernanceCapitalAnalyst(profile, stockData, annualFinancials, dcf, customConfig),
-        () => "Agent complete — queued for council audit (stewardship review pending)."
-      ),
-      runWithCheckpoint(
-        AI_AGENT_PERSONAS[6],
-        () => runNewsSummaryDesk(profile, stockData, annualFinancials, news, customConfig),
-        () => "Agent complete — queued for council audit (news cross-check pending)."
-      ),
-    ]);
-
-    // If any persona hit a RateLimitError, bubble it up immediately
-    for (const res of [agent1Result, agent2Result, agent3Result, agent4Result, agent5Result, agent6Result, agent7Result]) {
-      if (res.status === "rejected" && res.reason instanceof RateLimitError) {
-        throw res.reason;
-      }
-    }
-
-    const a1 = agent1Result.status === "fulfilled" ? agent1Result.value : null;
-    const a2 = agent2Result.status === "fulfilled" ? agent2Result.value : null;
-    const a3 = agent3Result.status === "fulfilled" ? agent3Result.value : null;
-    const a4 = agent4Result.status === "fulfilled" ? agent4Result.value : null;
-    const a5 = agent5Result.status === "fulfilled" ? agent5Result.value : null;
-    const a6 = agent6Result.status === "fulfilled" ? agent6Result.value : null;
-    const a7 = agent7Result.status === "fulfilled" ? agent7Result.value : null;
+    // Sequential checkpointed agents: each runs only without a valid checkpoint;
+    // throttling pauses the run with finished work banked, never discarding it.
+    // Sequential checkpointed execution: each agent runs only when no valid
+    // checkpoint exists; throttling pauses (never discards) finished work.
+    const a1 = await runOneAgent(agentDefs[0]);
+    const a2 = await runOneAgent(agentDefs[1]);
+    const a3 = await runOneAgent(agentDefs[2]);
+    const a4 = await runOneAgent(agentDefs[3]);
+    const a5 = await runOneAgent(agentDefs[4]);
+    const a6 = await runOneAgent(agentDefs[5]);
+    const a7 = await runOneAgent(agentDefs[6]);
 
     const assembled: AIAnalysis = {
       ...peBase,
@@ -1285,12 +1366,26 @@ export async function generateAIAnalysis(
       newsSummary: a7?.newsSummary || peBase.newsSummary,
     };
 
-    // Agent 8: Council Quality & Audit Verification Officer (Synthesizes, cross-checks and audits)
-    const verificationAudit = await runWithCheckpoint(
-      AI_AGENT_PERSONAS[7],
-      () => runCouncilVerificationOfficer(profile, stockData, annualFinancials, dcf, assembled, customConfig),
-      () => "Council audit checkpoint reached — see verification audit status (VERIFIED / CORRECTED / FLAGGED)."
-    );
+    // Agent 8: Council verifier. A throttled verifier must NEVER discard 7
+    // finished agents — return the assembled dossier with a FLAGGED audit.
+    let verificationAudit;
+    try {
+      const vMeta = AI_AGENT_PERSONAS[7];
+      const t0v = Date.now();
+      onProgress?.({ type: "agent_start", agentId: vMeta.id, name: vMeta.name, role: vMeta.role, completed: completedCount, total });
+      const vRes = await runCouncilVerificationOfficer(profile, stockData, annualFinancials, dcf, assembled, customConfig);
+      onProgress?.({ type: "agent_verifying", agentId: vMeta.id, name: vMeta.name, role: vMeta.role, completed: completedCount, total, councilMessage: `Council auditing ${vMeta.name}'s findings...` });
+      completedCount++;
+      onProgress?.({ type: "agent_complete", agentId: vMeta.id, name: vMeta.name, role: vMeta.role, completed: completedCount, total, durationMs: Date.now() - t0v, councilAuditNote: "Council audit checkpoint reached — see verification audit status (VERIFIED / CORRECTED / FLAGGED)." });
+      verificationAudit = vRes;
+    } catch (err) {
+      if (err instanceof RateLimitError) {
+        console.warn("Verifier throttled — returning assembled dossier with FLAGGED council audit.");
+      } else {
+        console.warn("Verifier failed — returning assembled dossier with FLAGGED council audit:", err);
+      }
+      verificationAudit = null;
+    }
 
     return {
       ...assembled,

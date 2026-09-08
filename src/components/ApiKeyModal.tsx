@@ -99,8 +99,14 @@ export default function ApiKeyModal({
   const failureKind = rateLimitInfo?.kind || "rate_limited";
   const savedKeyActive = Boolean((currentConfig || loadSavedAiConfig())?.apiKey);
   const usingCustomKey = savedKeyActive;
+  const isPaused = Boolean(isRateLimitTriggered && (rateLimitInfo as any)?.paused);
+  const pausedDone = (rateLimitInfo as any)?.completed ?? 0;
+  const pausedTotal = (rateLimitInfo as any)?.total ?? 7;
+  const pausedNext = (rateLimitInfo as any)?.nextAgent;
   const modalTitle = !isRateLimitTriggered
     ? "AI Model Provider & API Key Settings"
+    : isPaused
+    ? "Paused — Progress Saved"
     : failureKind === "invalid_key"
     ? "Invalid API Key"
     : failureKind === "key_exhausted"
@@ -110,12 +116,14 @@ export default function ApiKeyModal({
     : "Server Rate Limit Exceeded";
   const modalCopy = !isRateLimitTriggered
     ? "The website uses the server's default API key. You can connect your own custom provider key at any time for unlimited personal throughput."
+    : isPaused
+    ? `${pausedDone} of ${pausedTotal} agents already finished and their work is banked. Saving resumes with ${pausedNext || "the next agent"} — finished agents are skipped, nothing restarts. If throttling persists, wait ~60s (free-tier per-minute quota) before resuming.`
     : failureKind === "invalid_key"
     ? "The provider rejected this API key (401). Re-check the key value, use Test Key Connection, then save again — retrying the same key will fail identically."
     : failureKind === "key_exhausted"
     ? "This key is out of credits/quota, so every model on it fails the same way — switching models won't help. Top up the account or pick a provider with an active free tier, then resume."
     : usingCustomKey
-    ? "Your custom key was throttled (HTTP 429). Free-tier keys allow roughly 20 requests/min and one full report issues ~8 paced requests. Wait about 60 seconds (resuming auto-cools-down 10s), or switch to NVIDIA NIM / Groq free tiers."
+    ? "Your custom key was throttled (HTTP 429). Free-tier keys allow roughly 20 requests/min and one full report issues ~8 slowly-paced requests. Wait about 60 seconds (resuming auto-cools-down 30s), or switch to NVIDIA NIM / Groq free tiers."
     : "The default institutional server key reached its request quota. Supply an API key from any supported provider to resume immediate analysis.";
 
   const handleProviderSelect = (p: SupportedProvider) => {
@@ -246,7 +254,7 @@ export default function ApiKeyModal({
                   "Server OpenRouter free-tier rate limit reached. Connect your NVIDIA, Gemini, Groq, or OpenRouter key to continue."}
                 {failureKind !== "invalid_key" && failureKind !== "key_exhausted" && (
                   <div style={{ marginTop: 4, fontSize: "0.78rem", opacity: 0.85 }}>
-                    Saving resumes automatically after a 10s cooldown. If it throttles again, wait ~60s (free-tier per-minute quota) before retrying.
+                    Saving resumes automatically after a 30s cooldown, and generation itself runs slowly on purpose (one request at a time). If it throttles again, wait ~60s (free-tier per-minute quota) before retrying — or switch model/provider.
                   </div>
                 )}
               </div>

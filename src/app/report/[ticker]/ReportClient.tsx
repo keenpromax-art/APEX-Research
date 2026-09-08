@@ -59,7 +59,16 @@ export default function ReportClient({ ticker }: Props) {
   const [customKeyConfig, setCustomKeyConfig] = useState<CustomKeyConfig | null>(null);
   const [isApiKeyModalOpen, setIsApiKeyModalOpen] = useState(false);
   const [isRateLimitTriggered, setIsRateLimitTriggered] = useState(false);
-  const [rateLimitInfo, setRateLimitInfo] = useState<{ provider?: string; message?: string; kind?: string } | null>(null);
+  const [rateLimitInfo, setRateLimitInfo] = useState<{ provider?: string; message?: string; kind?: string; paused?: boolean; completed?: number; total?: number; nextAgent?: string } | null>(null);
+  // Checkpoint stash: finished agents' raw results accumulate here during the
+  // run. Any interruption (pause, throttle, network drop) resumes from these
+  // instead of restarting all 7 agents from zero.
+  const resumeRef = useRef<{ ticker: string; partial: Record<string, unknown> } | null>(null);
+  const stashCheckpoint = (agentId: string, result: unknown) => {
+    if (result === null || result === undefined) return;
+    const prev = resumeRef.current?.ticker === ticker ? resumeRef.current.partial : {};
+    resumeRef.current = { ticker, partial: { ...prev, [agentId]: result } };
+  };
   // Pending resume-after-cooldown timer (cleared on unmount so a stray
   // re-run never fires another 8-request burst against the user's key).
   const resumeTimer = useRef<number | null>(null);
@@ -125,6 +134,7 @@ export default function ReportClient({ ticker }: Props) {
 
       let aiAnalysis = null;
       let rateLimitEncountered = false;
+      let pausedEncountered = false;
 
       const activeConfig = customKeyConfig || loadSavedAiConfig();
       const reqHeaders: Record<string, string> = {
@@ -151,6 +161,9 @@ export default function ReportClient({ ticker }: Props) {
             news: companyData.news,
             customKeyConfig: activeConfig,
             assumptionsLedger: earlyLedger,
+            // Resume-from-checkpoint: banked agents are skipped server-side.
+            // Sent only for this ticker; cleared on full success.
+            resumeFrom: resumeRef.current?.ticker === ticker ? resumeRef.current.partial : undefined,
           }),
         });
 
@@ -210,6 +223,38 @@ export default function ReportClient({ ticker }: Props) {
                         ? "⚠️ Key out of credits. Top up or switch provider to resume."
                         : "⚠️ Rate limit reached on AI key. Cool down, then resume.",
                     }));
+                  } else if (event.type === "agent_paused") {
+                    // Server-side pause: throttled agent waits and retries by itself.
+                    // Finished agents are banked server-side; nothing is lost.
+                    setState(s => ({
+                      ...s,
+                      message: event.councilAuditNote || `${event.name} paused on rate limit — waiting, then resuming automatically…`,
+                      agentCheckpoints: currentCheckpoints,
+                    }));
+                  } else if (event.type === "rate_paused") {
+                    // Run paused with checkpoint: stash the banked agents and halt.
+                    // Resume sends them back; the server continues with nextAgent.
+                    pausedEncountered = true;
+                    if (event.partial && typeof event.partial === "object") {
+                      resumeRef.current = { ticker, partial: event.partial };
+                    }
+                    const done = event.completed ?? 0;
+                    const tot = event.total ?? 7;
+                    setRateLimitInfo({
+                      provider: event.provider || "AI Provider",
+                      message: event.message || `Paused with ${done}/${tot} agents complete. Resume continues where it stopped.`,
+                      kind: event.kind || "rate_limited",
+                      paused: true,
+                      completed: done,
+                      total: tot,
+                      nextAgent: event.nextAgent,
+                    });
+                    setIsRateLimitTriggered(true);
+                    setIsApiKeyModalOpen(true);
+                    setState(s => ({
+                      ...s,
+                      message: `⏸️ Paused — ${done}/${tot} agents banked. Resume continues from ${event.nextAgent || "where it stopped"}.`,
+                    }));
                   } else if (event.type === "agent_start") {
                     currentCheckpoints = currentCheckpoints.map(cp => {
                       if (cp.id === event.agentId) return { ...cp, status: "running" as const };
@@ -235,6 +280,11 @@ export default function ReportClient({ ticker }: Props) {
                   } else if (event.type === "agent_complete") {
                     const completed = event.completed;
                     const total = event.total || currentCheckpoints.length;
+                    // Bank this agent's raw result: any later interruption resumes
+                    // from it instead of re-running the LLM call.
+                    if (event.agentId && event.result !== null && event.result !== undefined) {
+                      stashCheckpoint(event.agentId, event.result);
+                    }
                     currentCheckpoints = currentCheckpoints.map(cp =>
                       cp.id === event.agentId
                         ? {
@@ -258,6 +308,8 @@ export default function ReportClient({ ticker }: Props) {
                     }));
                   } else if (event.type === "done") {
                     aiAnalysis = event.aiAnalysis;
+                    // Full success: checkpoint fulfilled, clear it.
+                    resumeRef.current = null;
                   }
                 } catch (e) {
                   console.warn("Error parsing stream chunk:", e);
@@ -268,14 +320,58 @@ export default function ReportClient({ ticker }: Props) {
         } else if (analyzeRes.ok) {
           const aiData = await analyzeRes.json();
           aiAnalysis = aiData.aiAnalysis;
+          resumeRef.current = null;
+        } else {
+          // Non-streaming failure: RATE_PAUSED keeps banked agents for resume;
+          // RATE_LIMIT_EXCEEDED opens the key modal instead of silent fallback.
+          try {
+            const errData = await analyzeRes.json();
+            if (errData?.error === "RATE_PAUSED") {
+              pausedEncountered = true;
+              if (errData.partial && typeof errData.partial === "object") {
+                resumeRef.current = { ticker, partial: errData.partial };
+              }
+              const done = errData.completed ?? 0;
+              const tot = errData.total ?? 7;
+              setRateLimitInfo({
+                provider: errData.provider || "AI Provider",
+                message: errData.message || `Paused with ${done}/${tot} agents complete.`,
+                kind: errData.kind || "rate_limited",
+                paused: true,
+                completed: done,
+                total: tot,
+                nextAgent: errData.nextAgent,
+              });
+              setIsRateLimitTriggered(true);
+              setIsApiKeyModalOpen(true);
+              setState(s => ({
+                ...s,
+                message: `⏸️ Paused — ${done}/${tot} agents banked. Resume continues from ${errData.nextAgent || "where it stopped"}.`,
+              }));
+            } else if (errData?.error === "RATE_LIMIT_EXCEEDED") {
+              rateLimitEncountered = true;
+              setRateLimitInfo({
+                provider: errData.provider || "AI Provider",
+                message: errData.message || "Rate limit reached on AI key.",
+                kind: errData.kind || "rate_limited",
+              });
+              setIsRateLimitTriggered(true);
+              setIsApiKeyModalOpen(true);
+            }
+          } catch {}
         }
       } catch (e) {
         console.warn("AI analysis network issue, utilizing fallback template:", e);
       }
 
-      // If rate limit was encountered, halt execution and let user provide custom key in modal
+      // Halt on throttle/pause: finished agents are banked in resumeRef, and the
+      // modal's Save & Resume continues from them instead of starting over.
       if (rateLimitEncountered) {
         console.warn("AI generation halted due to rate limit.");
+        return;
+      }
+      if (pausedEncountered) {
+        console.warn("AI generation paused — checkpoint banked, awaiting resume.");
         return;
       }
 
@@ -448,17 +544,17 @@ export default function ReportClient({ ticker }: Props) {
     if (shouldRetry || isRateLimitTriggered) {
       // Cool down before resuming: free-tier keys throttle per-minute bursts, and
       // an instant full re-run re-triggers the same 429 window that just failed.
-      // 10s pacing + server-side request gate keeps the resume inside quota.
+      // 30s pacing + server-side serial gate keeps the resume inside quota.
       setState(s => ({
         ...s,
         step: "generating_ai",
-        message: "Cooling down 10s to respect provider rate limits before resuming…",
+        message: "Cooling down 30s to respect provider rate limits before resuming…",
       }));
       if (resumeTimer.current !== null) window.clearTimeout(resumeTimer.current);
       resumeTimer.current = window.setTimeout(() => {
         resumeTimer.current = null;
         generateReport();
-      }, 10000);
+      }, 30000);
     }
   };
 

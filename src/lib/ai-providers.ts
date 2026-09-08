@@ -149,6 +149,35 @@ export class RateLimitError extends Error {
 export type LlmFailureKind = "rate_limited" | "key_exhausted" | "invalid_key" | "other";
 
 /**
+ * Thrown when a multi-agent run must pause on provider throttling WITHOUT
+ * losing completed work. Carries the finished agents' raw results so the next
+ * request resumes exactly where this one stopped instead of starting over.
+ */
+export class PausedForRateLimitError extends RateLimitError {
+  public readonly partial: Record<string, unknown>;
+  public readonly completedAgents: number;
+  public readonly totalAgents: number;
+  public readonly nextAgentId?: string;
+
+  constructor(
+    provider: string,
+    statusCode: number,
+    message: string,
+    partial: Record<string, unknown>,
+    completedAgents: number,
+    totalAgents: number,
+    nextAgentId?: string
+  ) {
+    super(provider, statusCode, message, "rate_limited");
+    this.name = "PausedForRateLimitError";
+    this.partial = partial;
+    this.completedAgents = completedAgents;
+    this.totalAgents = totalAgents;
+    this.nextAgentId = nextAgentId;
+  }
+}
+
+/**
  * Classifies an LLM HTTP failure so the caller can respond correctly:
  * - invalid_key: wrong/revoked key — retrying or failing over is pointless.
  * - key_exhausted: out of credits/quota — every model on the key fails the same way.

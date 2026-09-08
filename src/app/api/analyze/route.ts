@@ -4,11 +4,14 @@
 // ============================================================
 import { NextRequest, NextResponse } from "next/server";
 import { generateAIAnalysis, RateLimitError } from "@/lib/openrouter";
+import { PausedForRateLimitError } from "@/lib/ai-providers";
 import type { SupportedProvider, CustomKeyConfig } from "@/lib/ai-providers";
 import type { CompanyProfile, StockData, AnnualFinancials, DCFResult, TickerNewsItem } from "@/types/report";
 
 export const runtime = "nodejs";
-export const maxDuration = 120; // Multi-persona AI synthesis can take up to 2 mins
+// Slow-but-sure synthesis: 7 personas run fully serialized with 5s+ gaps and
+// deep 429 backoff, so a complete report can take several minutes by design.
+export const maxDuration = 300;
 
 export async function POST(request: NextRequest) {
   // Extract custom API key headers if supplied by the client
@@ -24,6 +27,8 @@ export async function POST(request: NextRequest) {
     news?: TickerNewsItem[];
     customKeyConfig?: CustomKeyConfig;
     assumptionsLedger?: any;
+    // Checkpoint resume: raw per-agent results from an interrupted run.
+    resumeFrom?: Record<string, unknown> | null;
   };
 
   try {
@@ -64,6 +69,9 @@ export async function POST(request: NextRequest) {
   // Canonical ledger (when the client computed it pre-synthesis) threads the
   // authoritative moat/rating into deterministic narratives for harmonization.
   const ledgerForAnalysis = (body as any).assumptionsLedger || undefined;
+  const resumeFrom = ((body as any).resumeFrom && typeof (body as any).resumeFrom === "object")
+    ? (body as any).resumeFrom as Record<string, unknown>
+    : undefined;
 
   if (!profile || !stockData || !annualFinancials?.length || !dcf) {
     return NextResponse.json(
@@ -95,13 +103,27 @@ export async function POST(request: NextRequest) {
             news,
             (event) => send(event),
             customConfig,
-            ledgerForAnalysis
+            ledgerForAnalysis,
+            resumeFrom
           );
 
           send({ type: "done", aiAnalysis });
         } catch (error) {
           console.error("AI analysis error in stream:", error);
-          if (error instanceof RateLimitError) {
+          if (error instanceof PausedForRateLimitError) {
+            // Paused, not failed: finished agents' results travel back so the
+            // client resumes exactly where this run stopped.
+            send({
+              type: "rate_paused",
+              partial: error.partial,
+              completed: error.completedAgents,
+              total: error.totalAgents,
+              nextAgent: error.nextAgentId,
+              provider: error.provider,
+              kind: error.kind,
+              message: error.message,
+            });
+          } else if (error instanceof RateLimitError) {
             send({
               type: "rate_limit",
               provider: error.provider,
@@ -139,12 +161,28 @@ export async function POST(request: NextRequest) {
       news,
       undefined,
       customConfig,
-      ledgerForAnalysis
+      ledgerForAnalysis,
+      resumeFrom
     );
 
     return NextResponse.json({ aiAnalysis });
   } catch (error) {
     console.error("AI analysis error:", error);
+    if (error instanceof PausedForRateLimitError) {
+      return NextResponse.json(
+        {
+          error: "RATE_PAUSED",
+          partial: error.partial,
+          completed: error.completedAgents,
+          total: error.totalAgents,
+          nextAgent: error.nextAgentId,
+          provider: error.provider,
+          kind: error.kind,
+          message: error.message,
+        },
+        { status: 429 }
+      );
+    }
     if (error instanceof RateLimitError) {
       return NextResponse.json(
         {
