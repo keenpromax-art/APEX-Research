@@ -134,13 +134,54 @@ export class RateLimitError extends Error {
   public readonly isRateLimit = true;
   public readonly provider: string;
   public readonly statusCode: number;
+  /** Machine-readable failure class so UI can show the right remedy. */
+  public readonly kind: LlmFailureKind;
 
-  constructor(provider: string, statusCode: number, message: string) {
+  constructor(provider: string, statusCode: number, message: string, kind: LlmFailureKind = "rate_limited") {
     super(message);
     this.name = "RateLimitError";
     this.provider = provider;
     this.statusCode = statusCode;
+    this.kind = kind;
   }
+}
+
+export type LlmFailureKind = "rate_limited" | "key_exhausted" | "invalid_key" | "other";
+
+/**
+ * Classifies an LLM HTTP failure so the caller can respond correctly:
+ * - invalid_key: wrong/revoked key — retrying or failing over is pointless.
+ * - key_exhausted: out of credits/quota — every model on the key fails the same way.
+ * - rate_limited: per-minute/per-model throttle — paced retry or model failover helps.
+ * - other: model errors (404/500/timeout) — model failover helps, no quota burned.
+ */
+export function classifyLlmFailure(status: number, responseText: string): LlmFailureKind {
+  const lower = (responseText || "").toLowerCase();
+  if (
+    status === 401 ||
+    lower.includes("invalid api key") ||
+    lower.includes("incorrect api key") ||
+    lower.includes("invalid_api_key") ||
+    lower.includes("unauthorized") ||
+    lower.includes("authentication failed") ||
+    lower.includes("invalid authentication")
+  ) {
+    return "invalid_key";
+  }
+  if (
+    status === 402 ||
+    (lower.includes("insufficient") && lower.includes("credit")) ||
+    lower.includes("credits exceeded") ||
+    lower.includes("out of credits") ||
+    lower.includes("payment required") ||
+    lower.includes("top up") ||
+    lower.includes("top-up") ||
+    (lower.includes("billing") && lower.includes("quota"))
+  ) {
+    return "key_exhausted";
+  }
+  if (isRateLimitResponse(status, responseText)) return "rate_limited";
+  return "other";
 }
 
 /**

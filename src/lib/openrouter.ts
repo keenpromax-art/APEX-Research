@@ -27,7 +27,8 @@ import {
   SUPPORTED_PROVIDERS,
   CustomKeyConfig,
   RateLimitError,
-  isRateLimitResponse,
+  classifyLlmFailure,
+  type LlmFailureKind,
 } from "./ai-providers";
 
 export { RateLimitError };
@@ -67,8 +68,53 @@ interface OpenRouterMessage {
 // Multi-Model Failover Mechanism with Resilient Timeouts & Multi-Provider Support
 // Prioritizes specialized financial & frontier reasoning models
 // Automatically handles custom keys (NVIDIA, Gemini, Groq, OpenAI, OpenRouter)
-// Throws RateLimitError when 429/quota exhaustion occurs
+// Throws RateLimitError (with machine-readable `kind`) when the key cannot serve.
+// pacing: free-tier keys throttle per-minute bursts, so concurrent agents share
+// a process-wide gate (max 2 in flight, >=1.2s between starts) instead of firing
+// 8 parallel requests that collectively 429 the key.
 // ─────────────────────────────────────────────────────────────
+const LLM_MAX_CONCURRENT = 2;
+const LLM_MIN_GAP_MS = 1200;
+const LLM_MAX_HTTP_ATTEMPTS = 6;
+
+let llmGateInFlight = 0;
+let llmGateLastStart = 0;
+
+function llmSleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, Math.max(0, ms)));
+}
+
+/** Admits one LLM HTTP attempt; caller MUST invoke the returned releaser. */
+async function acquireLlmSlot(): Promise<() => void> {
+  for (;;) {
+    const now = Date.now();
+    if (llmGateInFlight < LLM_MAX_CONCURRENT && now - llmGateLastStart >= LLM_MIN_GAP_MS) {
+      llmGateInFlight++;
+      llmGateLastStart = Date.now();
+      let released = false;
+      return () => {
+        if (!released) {
+          released = true;
+          llmGateInFlight = Math.max(0, llmGateInFlight - 1);
+        }
+      };
+    }
+    await llmSleep(150);
+  }
+}
+
+function rateLimitUserMessage(providerName: string, isCustom: boolean, kind: LlmFailureKind): string {
+  if (kind === "invalid_key") {
+    return `Invalid API key for ${providerName} (rejected with 401). Re-check the key, use Test Key Connection, then save again.`;
+  }
+  if (kind === "key_exhausted") {
+    return `Your ${providerName} key is out of credits/quota — every model on it fails the same way, so switching models won't help. Top up the account or use a provider with an active free tier, then resume.`;
+  }
+  if (isCustom) {
+    return `Rate limit reached on your custom ${providerName} key (HTTP 429). Free-tier keys allow roughly 20 requests/min and one report issues ~8 — wait about 60 seconds, then Save & Resume. Switching to NVIDIA NIM or Groq free tiers also helps.`;
+  }
+  return "Rate limit exceeded on default server OpenRouter key. Please provide a custom API key from OpenRouter, NVIDIA NIM, Google Gemini, Groq, or OpenAI to proceed.";
+}
 async function callOpenRouterWithFailover(
   messages: OpenRouterMessage[],
   maxTokens = 2500,
@@ -131,63 +177,94 @@ async function callOpenRouterWithFailover(
   }
 
   let lastError: Error | null = null;
-  let encounteredRateLimit = false;
+  let lastKind: LlmFailureKind = "other";
+  let httpAttempts = 0;
 
   for (const model of candidateModels) {
-    try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 25000); // 25s timeout
+    if (httpAttempts >= LLM_MAX_HTTP_ATTEMPTS) break;
+    // One paced retry for throttle responses; other errors fail over immediately.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      if (httpAttempts >= LLM_MAX_HTTP_ATTEMPTS) break;
+      const release = await acquireLlmSlot();
+      try {
+        httpAttempts++;
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 25000); // 25s timeout
 
-      const res = await fetch(baseUrl, {
-        method: "POST",
-        headers: baseHeaders,
-        body: JSON.stringify({
-          model,
-          messages,
-          temperature,
-          max_tokens: maxTokens,
-        }),
-        signal: controller.signal,
-      });
+        const res = await fetch(baseUrl, {
+          method: "POST",
+          headers: baseHeaders,
+          body: JSON.stringify({
+            model,
+            messages,
+            temperature,
+            max_tokens: maxTokens,
+          }),
+          signal: controller.signal,
+        });
 
-      clearTimeout(timeout);
+        clearTimeout(timeout);
 
-      if (!res.ok) {
-        const errText = await res.text();
-        console.warn(`[${providerMeta.name}] Model ${model} returned HTTP ${res.status}: ${errText.slice(0, 100)}`);
+        if (!res.ok) {
+          const errText = await res.text();
+          console.warn(`[${providerMeta.name}] Model ${model} returned HTTP ${res.status}: ${errText.slice(0, 100)}`);
 
-        if (isRateLimitResponse(res.status, errText)) {
-          encounteredRateLimit = true;
-          if (isCustom) {
+          const kind = classifyLlmFailure(res.status, errText);
+          lastKind = kind;
+          if (kind === "invalid_key" || kind === "key_exhausted") {
+            // Retrying or failing over is pointless — same key fails identically.
             throw new RateLimitError(
               providerMeta.name,
               res.status,
-              `Rate limit / quota exceeded on your custom ${providerMeta.name} key (HTTP ${res.status}).`
+              rateLimitUserMessage(providerMeta.name, isCustom, kind),
+              kind
             );
           }
+          if (kind === "rate_limited") {
+            lastError = new RateLimitError(
+              providerMeta.name,
+              res.status,
+              rateLimitUserMessage(providerMeta.name, isCustom, kind),
+              kind
+            );
+            // Paced retry on the same model before failing over.
+            if (attempt === 0 && httpAttempts < LLM_MAX_HTTP_ATTEMPTS) {
+              await llmSleep(1200 * Math.pow(2, attempt) + Math.floor(Math.random() * 400));
+              continue;
+            }
+            break;
+          }
+          lastError = new Error(`[${providerMeta.name}] ${model} HTTP ${res.status}: ${errText.slice(0, 120)}`);
+          break;
         }
-        continue;
-      }
 
-      const json = await res.json();
-      const content = json.choices?.[0]?.message?.content || "";
-      if (content && content.trim().length > 0) {
-        return content.trim();
+        const json = await res.json();
+        const content = json.choices?.[0]?.message?.content || "";
+        if (content && content.trim().length > 0) {
+          return content.trim();
+        }
+        lastError = new Error(`[${providerMeta.name}] ${model} returned empty content.`);
+        break;
+      } catch (err: unknown) {
+        if (err instanceof RateLimitError) throw err;
+        lastError = err instanceof Error ? err : new Error(String(err));
+        console.warn(`[${providerMeta.name}] Model ${model} attempt failed: ${lastError.message}`);
+        break;
+      } finally {
+        release();
       }
-    } catch (err: unknown) {
-      if (err instanceof RateLimitError) throw err;
-      lastError = err instanceof Error ? err : new Error(String(err));
-      console.warn(`[${providerMeta.name}] Model ${model} attempt failed: ${lastError.message}`);
     }
   }
 
-  if (encounteredRateLimit) {
+  if (lastError instanceof RateLimitError) {
+    throw lastError;
+  }
+  if (lastKind === "rate_limited") {
     throw new RateLimitError(
       providerMeta.name,
       429,
-      isCustom
-        ? `Rate limit exceeded on your custom ${providerMeta.name} key. Please check your quota or switch to another provider.`
-        : "Rate limit exceeded on default server OpenRouter key. Please provide a custom API key from OpenRouter, NVIDIA NIM, Google Gemini, Groq, or OpenAI to proceed."
+      rateLimitUserMessage(providerMeta.name, isCustom, "rate_limited"),
+      "rate_limited"
     );
   }
 

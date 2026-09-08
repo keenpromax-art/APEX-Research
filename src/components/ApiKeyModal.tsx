@@ -38,7 +38,7 @@ interface ApiKeyModalProps {
   onClose: () => void;
   onSave: (config: CustomKeyConfig | null, retryAnalysis?: boolean) => void;
   isRateLimitTriggered?: boolean;
-  rateLimitInfo?: { provider?: string; message?: string } | null;
+  rateLimitInfo?: { provider?: string; message?: string; kind?: string } | null;
   currentConfig?: CustomKeyConfig | null;
 }
 
@@ -93,6 +93,30 @@ export default function ApiKeyModal({
   if (!isOpen) return null;
 
   const currentProviderMeta = SUPPORTED_PROVIDERS[activeProvider];
+
+  // Accurate header for the actual failure: the old copy always blamed the
+  // server key, even when the user's own custom key was the one throttled.
+  const failureKind = rateLimitInfo?.kind || "rate_limited";
+  const savedKeyActive = Boolean((currentConfig || loadSavedAiConfig())?.apiKey);
+  const usingCustomKey = savedKeyActive;
+  const modalTitle = !isRateLimitTriggered
+    ? "AI Model Provider & API Key Settings"
+    : failureKind === "invalid_key"
+    ? "Invalid API Key"
+    : failureKind === "key_exhausted"
+    ? "Custom Key Out of Credits"
+    : usingCustomKey
+    ? "Custom Key Rate Limit Exceeded"
+    : "Server Rate Limit Exceeded";
+  const modalCopy = !isRateLimitTriggered
+    ? "The website uses the server's default API key. You can connect your own custom provider key at any time for unlimited personal throughput."
+    : failureKind === "invalid_key"
+    ? "The provider rejected this API key (401). Re-check the key value, use Test Key Connection, then save again — retrying the same key will fail identically."
+    : failureKind === "key_exhausted"
+    ? "This key is out of credits/quota, so every model on it fails the same way — switching models won't help. Top up the account or pick a provider with an active free tier, then resume."
+    : usingCustomKey
+    ? "Your custom key was throttled (HTTP 429). Free-tier keys allow roughly 20 requests/min and one full report issues ~8 paced requests. Wait about 60 seconds (resuming auto-cools-down 10s), or switch to NVIDIA NIM / Groq free tiers."
+    : "The default institutional server key reached its request quota. Supply an API key from any supported provider to resume immediate analysis.";
 
   const handleProviderSelect = (p: SupportedProvider) => {
     setActiveProvider(p);
@@ -198,14 +222,10 @@ export default function ApiKeyModal({
             </div>
             <div className={styles.headerText}>
               <h3>
-                {isRateLimitTriggered
-                  ? "Server Rate Limit Exceeded"
-                  : "AI Model Provider & API Key Settings"}
+                {modalTitle}
               </h3>
               <p>
-                {isRateLimitTriggered
-                  ? "The default institutional server key reached its request quota. Supply an API key from any supported provider to resume immediate analysis."
-                  : "The website uses the server's default API key. You can connect your own custom provider key at any time for unlimited personal throughput."}
+                {modalCopy}
               </p>
             </div>
           </div>
@@ -221,9 +241,14 @@ export default function ApiKeyModal({
             <div className={styles.rateLimitBanner}>
               <span className={styles.bannerIcon}>🚨</span>
               <div className={styles.bannerText}>
-                <strong>Rate Limit Active:</strong>
+                <strong>{failureKind === "invalid_key" ? "Invalid Key:" : failureKind === "key_exhausted" ? "Out of Credits:" : "Rate Limit Active:"}</strong>
                 {rateLimitInfo?.message ||
                   "Server OpenRouter free-tier rate limit reached. Connect your NVIDIA, Gemini, Groq, or OpenRouter key to continue."}
+                {failureKind !== "invalid_key" && failureKind !== "key_exhausted" && (
+                  <div style={{ marginTop: 4, fontSize: "0.78rem", opacity: 0.85 }}>
+                    Saving resumes automatically after a 10s cooldown. If it throttles again, wait ~60s (free-tier per-minute quota) before retrying.
+                  </div>
+                )}
               </div>
             </div>
           )}

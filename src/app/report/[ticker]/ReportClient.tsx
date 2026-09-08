@@ -1,5 +1,5 @@
 "use client";
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import ProgressTracker from "@/components/ProgressTracker";
@@ -59,7 +59,18 @@ export default function ReportClient({ ticker }: Props) {
   const [customKeyConfig, setCustomKeyConfig] = useState<CustomKeyConfig | null>(null);
   const [isApiKeyModalOpen, setIsApiKeyModalOpen] = useState(false);
   const [isRateLimitTriggered, setIsRateLimitTriggered] = useState(false);
-  const [rateLimitInfo, setRateLimitInfo] = useState<{ provider?: string; message?: string } | null>(null);
+  const [rateLimitInfo, setRateLimitInfo] = useState<{ provider?: string; message?: string; kind?: string } | null>(null);
+  // Pending resume-after-cooldown timer (cleared on unmount so a stray
+  // re-run never fires another 8-request burst against the user's key).
+  const resumeTimer = useRef<number | null>(null);
+  useEffect(() => {
+    return () => {
+      if (resumeTimer.current !== null) {
+        window.clearTimeout(resumeTimer.current);
+        resumeTimer.current = null;
+      }
+    };
+  }, []);
 
   useEffect(() => {
     const saved = loadSavedAiConfig();
@@ -187,12 +198,17 @@ export default function ReportClient({ ticker }: Props) {
                     setRateLimitInfo({
                       provider: event.provider || "AI Provider",
                       message: event.message || "Rate limit reached on AI key. Please add your own custom API key to continue.",
+                      kind: event.kind || "rate_limited",
                     });
                     setIsRateLimitTriggered(true);
                     setIsApiKeyModalOpen(true);
                     setState(s => ({
                       ...s,
-                      message: "⚠️ Rate limit reached on server AI key. Add a custom key to resume.",
+                      message: event.kind === "invalid_key"
+                        ? "⚠️ API key rejected. Check the key and try again."
+                        : event.kind === "key_exhausted"
+                        ? "⚠️ Key out of credits. Top up or switch provider to resume."
+                        : "⚠️ Rate limit reached on AI key. Cool down, then resume.",
                     }));
                   } else if (event.type === "agent_start") {
                     currentCheckpoints = currentCheckpoints.map(cp => {
@@ -227,7 +243,7 @@ export default function ReportClient({ ticker }: Props) {
                             completedAt: Date.now(),
                             durationMs: event.durationMs,
                             verifiedByCouncil: true,
-                            councilAuditNote: event.councilAuditNote || "✓ Verified by Council Desk",
+                            councilAuditNote: event.councilAuditNote || "Agent complete — council audit pending",
                           }
                         : cp
                     );
@@ -237,7 +253,7 @@ export default function ReportClient({ ticker }: Props) {
                       progress: newProgress,
                       message: event.councilAuditNote
                         ? `${event.councilAuditNote}`
-                        : `Council Verified: ${event.name} (${completed}/${total} verified)`,
+                        : `Agent complete: ${event.name} (${completed}/${total}), council audit pending`,
                       agentCheckpoints: currentCheckpoints,
                     }));
                   } else if (event.type === "done") {
@@ -269,13 +285,13 @@ export default function ReportClient({ ticker }: Props) {
         aiAnalysis = generatePlaceholderAnalysis(companyData);
 
         const fallbackCouncilNotes: Record<string, string> = {
-          strategist: `✓ Council Verified: Target price aligned with DCF intrinsic ledger (₹${companyData.dcf.intrinsicValue}).`,
-          news: "✓ Council Verified: Intelligence confirmed against verified regulatory announcements.",
-          moat: `✓ Council Verified: Economic spread validated against capital hurdle (WACC ${(companyData.dcf.assumptions.wacc * 100).toFixed(1)}%).`,
-          forensic: "✓ Council Verified: 5-Stage DuPont identities mathematically reconciled with reported ROE.",
-          credit: "✓ Council Verified: Solvency covenants and debt profile audited against balance sheet.",
-          governance: "✓ Council Verified: Board stewardship & capital deployment discipline verified.",
-          verifier: "✓ Council Certified: Institutional verification passed with zero contradictions.",
+          strategist: `Agent complete — queued for council audit (target vs DCF ledger check pending).`,
+          news: "Agent complete — queued for council audit (catalyst authentication pending).",
+          moat: `Agent complete — queued for council audit (moat-spread validation pending).`,
+          forensic: "Agent complete — queued for council audit (DuPont reconciliation pending).",
+          credit: "Agent complete — queued for council audit (solvency cross-check pending).",
+          governance: "Agent complete — queued for council audit (stewardship review pending).",
+          verifier: "Council audit checkpoint reached — see verification audit status.",
         };
 
         // Transition checkpoints sequentially with direct Council verification step
@@ -294,8 +310,9 @@ export default function ReportClient({ ticker }: Props) {
             }));
             await new Promise(r => setTimeout(r, 140));
 
-            // Step B: Mark verified by Council
-            const note = fallbackCouncilNotes[currentCheckpoints[i].id] || "✓ Verified by Council Desk";
+            // Step B: Mark agent complete (council audit itself runs server-side;
+            // completion here means the fallback step finished, not that it verified).
+            const note = fallbackCouncilNotes[currentCheckpoints[i].id] || "Agent complete — council audit pending";
             currentCheckpoints[i] = {
               ...currentCheckpoints[i],
               status: "complete",
@@ -314,7 +331,8 @@ export default function ReportClient({ ticker }: Props) {
           }
         }
       } else {
-        // Ensure all checkpoints are marked complete and verified by council
+        // All streamed agents finished — mark pipeline complete. Final audit
+        // outcome is shown in the verification panel, not assumed here.
         currentCheckpoints = currentCheckpoints.map(cp => ({
           ...cp,
           status: "complete" as const,
@@ -323,7 +341,7 @@ export default function ReportClient({ ticker }: Props) {
         setState(s => ({
           ...s,
           progress: 85,
-          message: "All 7 AI Analysts & Council Verification Checkpoints certified.",
+          message: "All 7 AI Analysts finished — see council verification audit for outcome.",
           agentCheckpoints: currentCheckpoints,
         }));
       }
@@ -428,7 +446,19 @@ export default function ReportClient({ ticker }: Props) {
     setCustomKeyConfig(newConfig);
     setIsRateLimitTriggered(false);
     if (shouldRetry || isRateLimitTriggered) {
-      generateReport();
+      // Cool down before resuming: free-tier keys throttle per-minute bursts, and
+      // an instant full re-run re-triggers the same 429 window that just failed.
+      // 10s pacing + server-side request gate keeps the resume inside quota.
+      setState(s => ({
+        ...s,
+        step: "generating_ai",
+        message: "Cooling down 10s to respect provider rate limits before resuming…",
+      }));
+      if (resumeTimer.current !== null) window.clearTimeout(resumeTimer.current);
+      resumeTimer.current = window.setTimeout(() => {
+        resumeTimer.current = null;
+        generateReport();
+      }, 10000);
     }
   };
 

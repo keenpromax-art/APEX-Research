@@ -106,6 +106,7 @@ export async function POST(request: NextRequest) {
               type: "rate_limit",
               provider: error.provider,
               statusCode: error.statusCode,
+              kind: error.kind,
               message: error.message,
             });
           } else {
@@ -150,6 +151,7 @@ export async function POST(request: NextRequest) {
           error: "RATE_LIMIT_EXCEEDED",
           provider: error.provider,
           statusCode: error.statusCode,
+          kind: error.kind,
           message: error.message,
         },
         { status: 429 }
