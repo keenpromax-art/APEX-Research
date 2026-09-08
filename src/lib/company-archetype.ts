@@ -376,7 +376,7 @@ export function classifyArchetype(
   } else if (archetype === "CYCLICAL_CAPITAL_INTENSIVE") {
     if (netDebt <= 0 && netIncome > 0) {
       capitalAllocationLabel = "Disciplined Post-Deleveraging Reinvestment";
-      capitalAllocationDescription = `Following comprehensive debt restructuring and full balance sheet deleveraging to a net-cash position, management has transitioned from historical capital conservation to disciplined capacity expansion. While historical distributions were zero under debt covenants, expanded operating cash flows and pristine net-cash liquidity establish the foundation for forward dividend initiation alongside selective manufacturing cluster capex.`;
+      capitalAllocationDescription = `Following comprehensive debt restructuring and full balance sheet deleveraging to a net-cash position, management has transitioned from historical capital conservation to disciplined capacity expansion. While historical distributions were zero under debt covenants, expanded operating cash flows and net-cash liquidity establish the foundation for forward dividend initiation alongside selective manufacturing cluster capex.`;
     } else {
       capitalAllocationLabel = "Disciplined Capital Investment";
       capitalAllocationDescription = `Management balances substantial multi-year project capex with disciplined balance sheet deleveraging. Free cash flows are channeled through prudent capital budgeting hurdles, maintaining leverage within target covenants while providing measured shareholder dividend distributions.`;

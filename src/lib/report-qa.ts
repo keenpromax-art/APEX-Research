@@ -3,6 +3,22 @@
 // Audits reports for internal contradictions, degenerate ratios,
 // rating vs price misalignment, and template keyword leakage.
 // ============================================================
+// QA CONTRACT (block-vs-warn policy — adversarially tested, see
+// scratch/test-publication-gate.ts two-phase fixtures):
+//   FAIL (blocks export): arithmetic breaks (XREF-01/03/04/05, SCEN-01/02,
+//     PROB-01, FV-RECOMP-01, CHAIN-01, BS-01), identity defects (IDENTITY-01),
+//     rating/moat/credit contradictions (RATING-01/02, MOAT-01/02, STEWARD-01,
+//     SEMANTIC-01, CREDIT-01), multi-term contamination (BS-DETECTOR-04 ≥2,
+//     SANITIZE-01 ≥2), clone signatures (BS-DETECTOR-05), unresolved tokens
+//     (PLACEHOLDER-01), missing assumption evidence (ASSUME-01).
+//   WARN (costs score, never blocks): single-term bleed (BS-DETECTOR-04 =1,
+//     SANITIZE-01 =1), unverified council (BS-DETECTOR-06), margin step-change
+//     (MARGIN-01), loose chain tolerance (CHAIN-01), generic content screens
+//     (THESIS-01, OVERVIEW-01, COMPET-01, MGMT-01, CATALYST-01, GOV-01).
+//   Rationale: FAIL = machine-verifiable falsehood or proven contamination.
+//   WARN = style/evidence thinness where a strict block would false-positive
+//   on legitimate LLM phrasing. Every WARN names the remediation.
+// ============================================================
 import type { ReportData, ReportQAResult, QACheckItem } from "@/types/report";
 import { getSectorProfile, classifySector } from "./sectors/index";
 import { identityIssues } from "./canonical";
@@ -246,6 +262,86 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
     });
   }
 
+  // FV-RECOMP-01: independently recompute upside from fv/cmp (not the stored
+  // ledger field) and require agreement — catches stale or hand-edited ledgers.
+  {
+    const recomputedUpside = cmp > 0 && fv > 0 ? fv / cmp - 1 : 0;
+    const storedUpside = Number(ledger?.upsideDownsidePct ?? data.dcf?.upsideDownside ?? 0);
+    if (Math.abs(recomputedUpside - storedUpside) > 0.005) {
+      checks.push({
+        id: "FV-RECOMP-01",
+        category: "CROSS_REFERENCE",
+        name: "Upside Recomputation Check",
+        status: "FAIL",
+        details: `FATAL PUBLICATION BLOCK: Stored upside (${(storedUpside * 100).toFixed(1)}%) disagrees with recomputed FV/CMP − 1 (${(recomputedUpside * 100).toFixed(1)}%). Ledger outputs must be derived, not asserted.`,
+        expected: `${(recomputedUpside * 100).toFixed(1)}%`,
+        actual: `${(storedUpside * 100).toFixed(1)}%`,
+      });
+    } else {
+      checks.push({
+        id: "FV-RECOMP-01",
+        category: "CROSS_REFERENCE",
+        name: "Upside Recomputation Check",
+        status: "PASS",
+        details: `Stored upside reconciles with independent FV/CMP − 1 recomputation.`,
+      });
+    }
+  }
+
+  // MARGIN-01: DCF year-1 margin continuity. A step-change from trailing margin
+  // is legitimate ONLY when disclosed (evidence trail states the source); an
+  // undisclosed >10pp jump means the forecast and the history disagree silently.
+  {
+    const trail = data.annualFinancials[data.annualFinancials.length - 1];
+    const trailMargin = trail && trail.revenue > 0 ? trail.operatingIncome / trail.revenue : null;
+    const dcfY1 = data.dcf?.assumptions?.ebitMargins?.[0];
+    if (trailMargin !== null && dcfY1 !== undefined && Math.abs(dcfY1 - trailMargin) > 0.10) {
+      checks.push({
+        id: "MARGIN-01",
+        category: "CROSS_REFERENCE",
+        name: "Forecast Margin Continuity",
+        status: "WARN",
+        details: `DCF year-1 EBIT margin (${(dcfY1 * 100).toFixed(1)}%) steps ${(Math.abs(dcfY1 - trailMargin) * 100).toFixed(1)}pp from trailing ${(trailMargin * 100).toFixed(1)}%. Verify the bridge in the Assumption Evidence Trail.`,
+        expected: "Bridged step-change",
+        actual: `${(Math.abs(dcfY1 - trailMargin) * 100).toFixed(1)}pp step`,
+      });
+    } else {
+      checks.push({
+        id: "MARGIN-01",
+        category: "CROSS_REFERENCE",
+        name: "Forecast Margin Continuity",
+        status: "PASS",
+        details: `DCF margin path is continuous with trailing reported margin.`,
+      });
+    }
+  }
+
+  // ASSUME-01: every DCF assumption must carry an evidence-trail entry.
+  {
+    const basis = (data.dcf as any)?.assumptionBasis || {};
+    const required = ["revenueGrowth", "ebitMargin", "capex", "workingCapital", "wacc", "terminal"];
+    const missing = required.filter((k) => typeof basis[k] !== "string" || basis[k].length < 20);
+    if (missing.length > 0) {
+      checks.push({
+        id: "ASSUME-01",
+        category: "CROSS_REFERENCE",
+        name: "Assumption Evidence Registry",
+        status: "FAIL",
+        details: `FATAL PUBLICATION BLOCK: DCF assumptions missing evidence-trail entries: ${missing.join(", ")}. Every assumption needs a stated empirical basis.`,
+        expected: "6 evidenced assumptions",
+        actual: `${required.length - missing.length}/6 evidenced`,
+      });
+    } else {
+      checks.push({
+        id: "ASSUME-01",
+        category: "CROSS_REFERENCE",
+        name: "Assumption Evidence Registry",
+        status: "PASS",
+        details: `All 6 DCF assumptions carry evidence-trail entries.`,
+      });
+    }
+  }
+
   // 3. Assumptions Ledger Verification: header sync PLUS an independent
   // model-vs-ledger check. The old version compared the ledger to itself
   // (ReportClient copies both fields from the ledger), so it could never fail.
@@ -398,6 +494,34 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
         details: `All scenario targets strictly obey equity limited liability (> 0.00).`,
       });
     }
+
+    // PROB-01: probability-weighted value is recomputed independently (weights
+    // 25/60/15), and the weights methodology is stated — not just asserted.
+    const sc = ledger?.scenarios;
+    if (sc) {
+      const recomputed = sc.bull.targetPrice * 0.25 + sc.base.targetPrice * 0.60 + sc.bear.targetPrice * 0.15;
+      const publishedW = Number(ledger?.probabilityWeightedValue ?? sc.probabilityWeightedValue);
+      const probTol = Math.max(1, Math.abs(sc.base.targetPrice) * 0.005);
+      if (!isFinite(publishedW) || Math.abs(recomputed - publishedW) > probTol) {
+        checks.push({
+          id: "PROB-01",
+          category: "SCENARIO_MATH",
+          name: "Probability-Weighted Value Recomputation",
+          status: "FAIL",
+          details: `FATAL PUBLICATION BLOCK: Published probability-weighted value (${publishedW}) disagrees with independent 25/60/15 recomputation (${recomputed.toFixed(2)}). Weights: bull 25% / base 60% / bear 15% judgmental priors emphasizing the base case.`,
+          expected: `${recomputed.toFixed(2)}`,
+          actual: `${publishedW}`,
+        });
+      } else {
+        checks.push({
+          id: "PROB-01",
+          category: "SCENARIO_MATH",
+          name: "Probability-Weighted Value Recomputation",
+          status: "PASS",
+          details: `Weighted value recomputes exactly (25/60/15 judgmental priors, base-weighted). Individual case P&L must still be read against its operating narrative.`,
+        });
+      }
+    }
   }
 
   // 3e. Moat Overall vs Pillar Durability Consistency.
@@ -507,6 +631,156 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
     }
   }
 
+  // ── Content-integrity checks: evidence density of qualitative sections ──
+  // All WARN (never block on prose style), but each costs score and shows on
+  // every QA surface — generic LLM filler can no longer pass silently.
+  const aiAny = (data.aiAnalysis || {}) as any;
+  const thesisFull = `${aiAny.investmentThesis || ""} ${aiAny.investmentConclusion || ""}`;
+
+  // THESIS-01: thesis must be company-specific (named + quantified).
+  {
+    const firstNameWord = (data.profile.name || "").split(/[\s,.-]+/).find((w) => w.length >= 4) || "";
+    const numeralHits = new Set((thesisFull.match(/\d[\d,.]*%|\$\s?\d[\d,.]*|\d[\d,.]*\s?(?:x|bps|million|billion|crore)/gi) || []).map((s) => s.toLowerCase()));
+    const namesCompany = firstNameWord !== "" && thesisFull.toLowerCase().includes(firstNameWord.toLowerCase());
+    if (!namesCompany || numeralHits.size < 3) {
+      checks.push({
+        id: "THESIS-01",
+        category: "BS_DETECTOR",
+        name: "Thesis Evidence Density",
+        status: "WARN",
+        details: `Investment thesis is generic: ${!namesCompany ? "does not name the company" : "names the company"} but carries only ${numeralHits.size} distinct quantified figures (need ≥3). Rebuild around measurable drivers.`,
+        expected: "Named company + ≥3 quantified figures",
+        actual: `${numeralHits.size} quantified figure(s)`,
+      });
+    } else {
+      checks.push({
+        id: "THESIS-01",
+        category: "BS_DETECTOR",
+        name: "Thesis Evidence Density",
+        status: "PASS",
+        details: `Thesis names the company and quantifies ${numeralHits.size} distinct figures.`,
+      });
+    }
+  }
+
+  // OVERVIEW-01: overview must share vocabulary with filed description.
+  {
+    const stop = new Set(["limited", "private", "incorporated", "company", "group", "holdings", "india", "united", "states", "through", "across", "their", "with", "from", "that", "this", "into", "over", "under"]);
+    const descWords = Array.from(
+      new Set(((data.profile.description || "").toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter((w) => w.length >= 6 && !stop.has(w))))
+    ).slice(0, 25);
+    const overviewLower = `${aiAny.companyOverview || ""} ${aiAny.companyDescription || ""}`.toLowerCase();
+    const shared = descWords.filter((w) => overviewLower.includes(w));
+    if (descWords.length >= 5 && shared.length === 0) {
+      checks.push({
+        id: "OVERVIEW-01",
+        category: "BS_DETECTOR",
+        name: "Overview Filed-Vocabulary Coverage",
+        status: "WARN",
+        details: `Company overview shares zero substantive keywords with the filed business description — likely generic. Map statements to reported segments/products.`,
+        expected: "≥1 filed keyword",
+        actual: "0 shared keywords",
+      });
+    } else {
+      checks.push({
+        id: "OVERVIEW-01",
+        category: "BS_DETECTOR",
+        name: "Overview Filed-Vocabulary Coverage",
+        status: "PASS",
+        details: `Overview shares ${shared.length} substantive keyword(s) with filed description.`,
+      });
+    }
+  }
+
+  // COMPET-01: competitive narrative must name real peers when peers exist.
+  {
+    const compText = `${aiAny.competitiveMoat || ""} ${JSON.stringify(aiAny.fiveForces || [])} ${aiAny.industryDynamicsCommentary || ""}`.toLowerCase();
+    const peerNames = (data.peers || [])
+      .flatMap((p: any) => [p.ticker, p.name])
+      .filter((s): s is string => typeof s === "string" && s.replace(/\.[A-Z]+$/i, "").length >= 2)
+      .map((s) => s.replace(/\.[A-Z]+$/i, "").toLowerCase());
+    const named = peerNames.filter((n) => compText.includes(n));
+    if (peerNames.length > 0 && named.length === 0) {
+      checks.push({
+        id: "COMPET-01",
+        category: "BS_DETECTOR",
+        name: "Competitor Naming Coverage",
+        status: "WARN",
+        details: `Competitive narrative names none of the ${peerNames.length} retrieved peer(s) — compare against actual competitors, not abstractions.`,
+        expected: "≥1 named peer",
+        actual: "0 named peers",
+      });
+    } else {
+      checks.push({
+        id: "COMPET-01",
+        category: "BS_DETECTOR",
+        name: "Competitor Naming Coverage",
+        status: "PASS",
+        details: peerNames.length === 0 ? `No peers retrieved — nothing to name.` : `Narrative names ${named.length} peer(s).`,
+      });
+    }
+  }
+
+  // MGMT-01: stewardship superlatives without evidence.
+  {
+    const mgmtText = `${aiAny.managementCommentary || ""} ${aiAny.governanceCommentary || ""}`.toLowerCase();
+    const puff = ["world-class", "best-in-class", "flawless", "unwavering", "pristine leadership", "exceptional leadership", "visionary leadership", "unmatched execution"].filter((p) => mgmtText.includes(p));
+    if (puff.length > 0) {
+      checks.push({
+        id: "MGMT-01",
+        category: "BS_DETECTOR",
+        name: "Stewardship Superlative Screen",
+        status: "WARN",
+        details: `Management narrative uses unevidenced superlatives (${puff.join("; ")}). Evaluate execution record and guidance accuracy instead.`,
+        expected: "Evidence-based assessment",
+        actual: `${puff.length} superlative(s)`,
+      });
+    } else {
+      checks.push({
+        id: "MGMT-01",
+        category: "BS_DETECTOR",
+        name: "Stewardship Superlative Screen",
+        status: "PASS",
+        details: `No unevidenced stewardship superlatives detected.`,
+      });
+    }
+  }
+
+  // CATALYST-01: every catalyst needs trigger + timing + likelihood + impact.
+  {
+    const catalysts = Array.isArray(aiAny.catalysts) ? aiAny.catalysts : [];
+    const incomplete = catalysts.filter((c: any) => !c || !c.event || !c.horizon || !c.probability || !c.impact).length;
+    if (catalysts.length === 0) {
+      checks.push({
+        id: "CATALYST-01",
+        category: "BS_DETECTOR",
+        name: "Catalyst Completeness",
+        status: "WARN",
+        details: `No catalysts evidenced — none asserted rather than generic milestones.`,
+        expected: "≥1 quantified catalyst",
+        actual: "0 catalysts",
+      });
+    } else if (incomplete > 0) {
+      checks.push({
+        id: "CATALYST-01",
+        category: "BS_DETECTOR",
+        name: "Catalyst Completeness",
+        status: "WARN",
+        details: `${incomplete}/${catalysts.length} catalyst(s) lack trigger, timing, likelihood, or valuation impact. Every catalyst needs all four.`,
+        expected: "Complete catalyst records",
+        actual: `${incomplete} incomplete`,
+      });
+    } else {
+      checks.push({
+        id: "CATALYST-01",
+        category: "BS_DETECTOR",
+        name: "Catalyst Completeness",
+        status: "PASS",
+        details: `All ${catalysts.length} catalyst(s) carry trigger, timing, likelihood, and impact.`,
+      });
+    }
+  }
+
   // Balance sheets must balance: FAIL above 5% (was 15%), WARN above 1% (was 5%).
   // Plugged/estimated statements no longer hide behind a lenient gate.
   if (maxBsVariancePct > 5.0 && bsYearsEvaluated > 0) {
@@ -537,6 +811,57 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
       status: "PASS",
       details: `Balance sheets across all ${bsYearsEvaluated} audited periods conform strictly to fundamental accounting balance constraints.`,
     });
+  }
+
+  // CHAIN-01: IS→BS→CF→FCF dependency chain. FCF must equal CFO minus capex
+  // within tolerance every year, and NWC must equal CA minus CL — otherwise the
+  // cash-flow model is disconnected from the statements it claims to extend.
+  {
+    const chainBreaks: string[] = [];
+    const chainWarns: string[] = [];
+    for (const f of data.annualFinancials || []) {
+      const rev = Math.abs(f.revenue || 0);
+      const fcfGap = Math.abs((f.freeCashFlow || 0) - ((f.operatingCashFlow || 0) - Math.abs(f.capitalExpenditures || 0)));
+      const fcfTol = Math.max(1, rev * 0.005);
+      if (fcfGap > Math.max(fcfTol * 4, rev * 0.02) && rev > 0) {
+        chainBreaks.push(`${f.year}: FCF≠CFO−capex (gap ${fcfGap.toFixed(0)})`);
+      } else if (fcfGap > fcfTol && rev > 0) {
+        chainWarns.push(`${f.year}: FCF≈CFO−capex within loose tolerance only`);
+      }
+      const nwcGap = Math.abs((f.netWorkingCapital || 0) - ((f.currentAssets || 0) - (f.currentLiabilities || 0)));
+      if (nwcGap > Math.max(1, rev * 0.005) && (f.currentAssets > 0 || f.currentLiabilities > 0)) {
+        chainBreaks.push(`${f.year}: NWC≠CA−CL (gap ${nwcGap.toFixed(0)})`);
+      }
+    }
+    if (chainBreaks.length > 0) {
+      checks.push({
+        id: "CHAIN-01",
+        category: "BALANCE_SHEET",
+        name: "Statement Dependency Chain (IS→BS→CF→FCF)",
+        status: "FAIL",
+        details: `FATAL PUBLICATION BLOCK: Cash-flow dependency chain broken — ${chainBreaks.join("; ")}.`,
+        expected: "FCF=CFO−capex; NWC=CA−CL every year",
+        actual: `${chainBreaks.length} break(s)`,
+      });
+    } else if (chainWarns.length > 0) {
+      checks.push({
+        id: "CHAIN-01",
+        category: "BALANCE_SHEET",
+        name: "Statement Dependency Chain (IS→BS→CF→FCF)",
+        status: "WARN",
+        details: `Dependency chain holds within loose tolerance only: ${chainWarns.join("; ")}.`,
+        expected: "FCF=CFO−capex every year",
+        actual: `${chainWarns.length} loose year(s)`,
+      });
+    } else {
+      checks.push({
+        id: "CHAIN-01",
+        category: "BALANCE_SHEET",
+        name: "Statement Dependency Chain (IS→BS→CF→FCF)",
+        status: "PASS",
+        details: `FCF=CFO−capex and NWC=CA−CL reconcile across all reported years.`,
+      });
+    }
   }
 
   // 5. Degenerate Ratios Check

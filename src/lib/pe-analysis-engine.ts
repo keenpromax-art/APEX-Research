@@ -87,6 +87,22 @@ export function generatePEFirmAnalysis(input: PEAnalysisInput): AIAnalysis {
     if (pe > 0 && netIncome > 0) {
       parts.push(`At ${pe.toFixed(1)}x trailing earnings, the market prices ${netMargin >= 0.15 ? "a premium compounding multiple that demands sustained margin defense" : "a moderate multiple that leaves room for re-rating on margin recovery"}.`);
     }
+    const rdPct = rev > 0 ? (latest.researchDevelopment || 0) / rev : 0;
+    const capexPct = rev > 0 ? Math.abs(latest.capitalExpenditures || 0) / rev : 0;
+    if (rdPct >= 0.02 || capexPct >= 0.03) {
+      const bits: string[] = [];
+      if (rdPct >= 0.02) bits.push(`R&D at ${(rdPct * 100).toFixed(1)}% of revenue`);
+      if (capexPct >= 0.03) bits.push(`capex at ${(capexPct * 100).toFixed(1)}% of revenue`);
+      parts.push(`Reinvestment intensity (${bits.join(" and ")}) frames growth as bought, not free — judge it against the revenue CAGR above.`);
+    }
+    if (ebitda > 0 && latest.operatingCashFlow !== undefined) {
+      const conv = latest.operatingCashFlow / ebitda;
+      parts.push(
+        conv >= 0.8
+          ? `Operating cash conversion of ${(conv * 100).toFixed(0)}% of EBITDA corroborates earnings quality.`
+          : `Operating cash conversion of ${(conv * 100).toFixed(0)}% of EBITDA trails earnings — working-capital absorption qualifies the cash story.`
+      );
+    }
     return parts.join(" ");
   };
 
@@ -599,7 +615,7 @@ export function generatePEFirmAnalysis(input: PEAnalysisInput): AIAnalysis {
   // ─────────────────────────────────────────────────────────────────────────────
   // AGENT 6: ENTERPRISE RISKS & DOWNSIDE MITIGATIONS
   // ─────────────────────────────────────────────────────────────────────────────
-  let enterpriseRiskCommentary: { risk: string; severity: string; description: string; mitigation: string }[] = [];
+  let enterpriseRiskCommentary: { risk: string; severity: string; description: string; mitigation: string; horizon?: string; valuationSensitivity?: string }[] = [];
 
   if (sectorType === "platform_gig_economy") {
     enterpriseRiskCommentary = [
@@ -651,10 +667,10 @@ export function generatePEFirmAnalysis(input: PEAnalysisInput): AIAnalysis {
     ];
   } else if (sectorType === "auto_manufacturing") {
     enterpriseRiskCommentary = [
-      { risk: "EV Price War & ASP Erosion", severity: "High", description: "China-led discounting and legacy-OEM EV pushes compress transaction prices faster than manufacturing cost-down, squeezing automotive gross margin ex-credits.", mitigation: "Model-mix discipline, cost-down cadence (gigacasting, vertical integration), and geographic diversification." },
-      { risk: "China Concentration", severity: "High", description: "Shanghai output and Chinese demand swings drive delivery volatility amid intense local competition (BYD et al.) and policy shifts.", mitigation: "Multi-region plant footprint and export flexibility; localized supply chains." },
-      { risk: "Battery Cost & Technology Ramp", severity: "Medium", description: "Lithium/cell cost swings and 4680-class ramp delays can stall unit-cost targets.", mitigation: "Multi-supplier cell strategy plus in-house pack integration; contractual pass-throughs where available." },
-      { risk: "Autonomy Regulation & Safety Liability", severity: "Medium", description: "FSD/robotaxi timelines depend on regulators; incidents invite scrutiny, recalls, and liability.", mitigation: "Staged deployment with safety-case disclosure; no autonomy revenue recognized before regulatory clearance." },
+      { risk: "EV Price War & ASP Erosion", severity: "High", description: "China-led discounting and legacy-OEM EV pushes compress transaction prices faster than manufacturing cost-down, squeezing automotive gross margin ex-credits.", mitigation: "Model-mix discipline, cost-down cadence (gigacasting, vertical integration), and geographic diversification.", horizon: "Ongoing", valuationSensitivity: "1pp of auto gross margin ≈ material fair-value swing — see sensitivity matrix" },
+      { risk: "China Concentration", severity: "High", description: "Shanghai output and Chinese demand swings drive delivery volatility amid intense local competition (BYD et al.) and policy shifts.", mitigation: "Multi-region plant footprint and export flexibility; localized supply chains.", horizon: "6-18 Months", valuationSensitivity: "Delivery miss transmits ~1:1 into revenue and operating leverage" },
+      { risk: "Battery Cost & Technology Ramp", severity: "Medium", description: "Lithium/cell cost swings and 4680-class ramp delays can stall unit-cost targets.", mitigation: "Multi-supplier cell strategy plus in-house pack integration; contractual pass-throughs where available.", horizon: "12-24 Months", valuationSensitivity: "Unit-cost overrun compresses ex-credit margin" },
+      { risk: "Autonomy Regulation & Safety Liability", severity: "Medium", description: "FSD/robotaxi timelines depend on regulators; incidents invite scrutiny, recalls, and liability.", mitigation: "Staged deployment with safety-case disclosure; no autonomy revenue recognized before regulatory clearance.", horizon: "12-24 Months", valuationSensitivity: "Binary optionality — excluded from base-case DCF" },
     ];
   } else {
     enterpriseRiskCommentary = [
@@ -790,7 +806,7 @@ export function generatePEFirmAnalysis(input: PEAnalysisInput): AIAnalysis {
   let swotWeaknesses: string[];
   let swotOpportunities: string[];
   let swotThreats: string[];
-  let keyRisks: { risk: string; description: string; impact: "High" | "Medium" | "Low"; mitigation?: string }[];
+  let keyRisks: { risk: string; description: string; impact: "High" | "Medium" | "Low"; mitigation?: string; horizon?: string; valuationSensitivity?: string }[];
 
   if (archProfile.archetype === "DISTRESSED" && sectorType === "telecom") {
     swotStrengths = [
@@ -956,9 +972,9 @@ export function generatePEFirmAnalysis(input: PEAnalysisInput): AIAnalysis {
       "Macro ad-spend retrenchment compressing auction density and price realization.",
     ];
     keyRisks = [
-      { risk: "Ad-Spend Cyclicality", description: "Macro downturns compress advertiser budgets and average price per ad even as user engagement holds.", impact: "High", mitigation: "Performance-based formats and diversified advertiser breadth sustaining auction density" },
-      { risk: "Privacy & Antitrust Regulation", description: "OS-level privacy changes and competition rulings can degrade targeting, measurement, and distribution.", impact: "High", mitigation: "First-party signal scale and on-device measurement investment" },
-      { risk: "AI Capex & Reality Labs Drag", description: "Data-center buildouts and sustained Reality Labs losses can weigh on consolidated margins and FCF.", impact: "Medium", mitigation: "Phased capex tied to advertiser ROI with explicit Reality Labs loss discipline" },
+      { risk: "Ad-Spend Cyclicality", description: "Macro downturns compress advertiser budgets and average price per ad even as user engagement holds.", impact: "High", mitigation: "Performance-based formats and diversified advertiser breadth sustaining auction density", horizon: "Ongoing", valuationSensitivity: "Ad-price softness transmits directly into ARPU and fair value" },
+      { risk: "Privacy & Antitrust Regulation", description: "OS-level privacy changes and competition rulings can degrade targeting, measurement, and distribution.", impact: "High", mitigation: "First-party signal scale and on-device measurement investment", horizon: "12-24 Months", valuationSensitivity: "Targeting degradation impairs pricing power structurally" },
+      { risk: "AI Capex & Reality Labs Drag", description: "Data-center buildouts and sustained Reality Labs losses can weigh on consolidated margins and FCF.", impact: "Medium", mitigation: "Phased capex tied to advertiser ROI with explicit Reality Labs loss discipline", horizon: "12-24 Months", valuationSensitivity: "Capex intensity compresses FCF conversion" },
     ];
   } else {
     swotStrengths = [

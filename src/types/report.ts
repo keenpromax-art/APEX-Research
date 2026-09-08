@@ -394,7 +394,7 @@ export interface AIAnalysis {
   swotWeaknesses: string[];
   swotOpportunities: string[];
   swotThreats: string[];
-  keyRisks: { risk: string; description: string; impact: "High" | "Medium" | "Low"; mitigation?: string }[];
+  keyRisks: { risk: string; description: string; impact: "High" | "Medium" | "Low"; mitigation?: string; horizon?: string; valuationSensitivity?: string }[];
   investmentConclusion: string;
   competitiveMoat?: string;
   summary?: string;

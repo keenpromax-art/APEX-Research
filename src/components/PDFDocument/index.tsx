@@ -806,11 +806,31 @@ const buildFiveYearStatementModel = (data: ReportData): StatementColumn[] => {
     ? dcfGrowth[1]
     : Math.max(0.01, g1 * 0.92);
 
-  const makeForecast = (base: StatementColumn, g: number, label: string): StatementColumn => {
+  // DCF EBIT margin path — forecast statements MUST use exactly these margins
+  // (MARGIN-01). A prior version held statements at trailing margin while the
+  // DCF ramped elsewhere, printing two different "target margins" (5.1% vs 12.4%).
+  const dcfMargins = data.dcf?.assumptions?.ebitMargins || [];
+
+  // Historical working-capital intensity — forecasts extend THESE ratios instead
+  // of snapping to fixed 8%/4%/10% constants (which caused abrupt WC jumps).
+  const wcRatio = (num: number, den: number, fallback: number, cap = 0.6) => {
+    if (!(den > 0) || !(num >= 0)) return fallback;
+    const r = num / den;
+    return r > 0 && r <= cap ? r : fallback;
+  };
+  const histArRatio = wcRatio(colH0.ar, colH0.revenue, 0.08);
+  const histInvRatio = wcRatio(colH0.inventory, colH0.revenue, 0.04);
+  const histOcaRatio = wcRatio(colH0.otherCurrentAssets, colH0.revenue, 0.05);
+  const histApRatio = wcRatio(colH0.ap, colH0.revenue, 0.10);
+  const histOclRatio = wcRatio(colH0.otherCurrentLiab, colH0.revenue, 0.06);
+
+  const makeForecast = (base: StatementColumn, g: number, label: string, dcfMargin?: number): StatementColumn => {
     const rev = Math.round(base.revenue * (1 + g));
     const gp = Math.round(rev * histGrossMargin);
     const cogs = rev - gp;
-    const opInc = Math.round(rev * histOpMargin);
+    // SAME margin path as the DCF (explicit assumption), not trailing margin.
+    const opMarginUse = dcfMargin !== undefined ? dcfMargin : histOpMargin;
+    const opInc = Math.round(rev * opMarginUse);
     const sga = Math.round(rev * histSgaRatio);
     const rd = Math.round(rev * histRdRatio);
     const depr = Math.round(base.depr > 0 ? base.depr * (1 + g * 0.8) : rev * 0.04);
@@ -826,16 +846,18 @@ const buildFiveYearStatementModel = (data: ReportData): StatementColumn[] => {
     const divPerShare = hasDividends ? eps * 0.25 : 0;
 
     const capex = Math.round(base.capex > 0 ? base.capex * (1 + g * 0.7) : rev * 0.05);
-    const cfo = net + depr;
-    const fcf = cfo - capex;
-
+    // CFO built from earnings + non-cash + working-capital movements (NOT net +
+    // depr alone, which contradicted the cash-flow narrative).
     const sbc = Math.round(base.stockBasedComp * (1 + g * 0.5));
     const defTax = Math.round(base.deferredTaxes * (1 + g * 0.5));
     const dAr = Math.round(base.changeInAr * (1 + g));
     const dInv = Math.round(base.changeInInv * (1 + g));
     const dAp = Math.round(base.changeInAp * (1 + g));
     const dOwc = Math.round(base.changeInOtherWorkingCap * (1 + g));
-    const otherNonCash = cfo - (net + depr + sbc + defTax + dAr + dInv + dAp + dOwc);
+    const cfo = net + depr + sbc + defTax + dAr + dInv + dAp + dOwc;
+    const fcf = cfo - capex;
+    const otherNonCash = 0; // identity holds by construction now
+
 
     const netAcq = 0;
     const cfi = -capex;
@@ -852,9 +874,10 @@ const buildFiveYearStatementModel = (data: ReportData): StatementColumn[] => {
     const endCash = Math.max(0, begCash + netChg);
     const cash = endCash;
 
-    const ar = Math.round(rev * 0.08);
-    const inv = Math.round(rev * 0.04);
-    const oca = Math.round(rev * 0.05);
+    // Working capital extends historical intensity ratios (no abrupt jumps).
+    const ar = Math.round(rev * histArRatio);
+    const inv = Math.round(rev * histInvRatio);
+    const oca = Math.round(rev * histOcaRatio);
     const curAssets = cash + ar + inv + oca;
 
     const ppe = Math.round(base.ppe > 0 ? base.ppe * 1.03 : rev * 0.5);
@@ -863,9 +886,9 @@ const buildFiveYearStatementModel = (data: ReportData): StatementColumn[] => {
     const olt = Math.round(base.otherLtAssets > 0 ? base.otherLtAssets * 1.02 : rev * 0.1);
     const totAssets = curAssets + ppe + gw + intang + olt;
 
-    const ap = Math.round(rev * 0.10);
+    const ap = Math.round(rev * histApRatio);
     const sd = base.shortDebt || 0;
-    const ocl = Math.round(rev * 0.06);
+    const ocl = Math.round(rev * histOclRatio);
     const curLiab = ap + sd + ocl;
 
     const ld = Math.max(0, base.longDebt + netDebtIssued);
@@ -961,8 +984,8 @@ const buildFiveYearStatementModel = (data: ReportData): StatementColumn[] => {
   colH0.otherFinancing = colH0.cff - (-colH0.repurchases - colH0.dividendsPaid + colH0.netDebtIssued);
   colH0.endCash = colH0.cash;
 
-  const colF1 = makeForecast(colH0, g1, `FY${currentYearNum + 1}(E)`);
-  const colF2 = makeForecast(colF1, g2, `FY${currentYearNum + 2}(E)`);
+  const colF1 = makeForecast(colH0, g1, `FY${currentYearNum + 1}(E)`, dcfMargins[0]);
+  const colF2 = makeForecast(colF1, g2, `FY${currentYearNum + 2}(E)`, dcfMargins[1]);
 
   return [colH2, colH1, colH0, colF1, colF2];
 };
@@ -1203,6 +1226,16 @@ const CoverPage = ({ data }: { data: ReportData }) => {
               return completeSentence(t, 180);
             })()}
           </Text>
+
+          {/* Conclusion traceability: every headline claim points at its evidence section */}
+          <View style={{ padding: 3, backgroundColor: COLORS.offWhite, borderWidth: 0.5, borderColor: COLORS.hairlineLight, marginBottom: 2 }}>
+            <Text style={{ fontSize: 5.6, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 1 }}>
+              How To Verify Every Claim Above
+            </Text>
+            <Text style={{ fontSize: 5.0, color: COLORS.textSecondary, lineHeight: 1.3 }}>
+              Thesis drivers → Financial Statements &amp; Assumption Evidence Trail · Moat width → Moat Matrix (durability basis per pillar) · Target &amp; rating → DCF Bridge + QA checksum (all three print one canonical number) · Scenarios → Scenario Matrix (operating assumptions per case) · Peers → Comparable Companies (selection criteria + medians).
+            </Text>
+          </View>
 
           {/* Sector-Specific Strategic Value Creation Drivers */}
           {(() => {
@@ -1749,6 +1782,9 @@ const FundamentalAnalysisPage = ({ data }: { data: ReportData }) => {
           <Text style={{ fontSize: 5.6, color: COLORS.textSecondary }}>
             Scenario Probability-Weighted Value: {sym}{fmtNum(ledger?.probabilityWeightedValue || (ledger?.scenarios?.bull.targetPrice ? ledger.scenarios.bull.targetPrice * 0.25 + fv * 0.60 + ledger.scenarios.bear.targetPrice * 0.15 : fv * 1.025), 2)} (Weights: 60% Base / 25% Bull / 15% Bear)
           </Text>
+          <Text style={{ fontSize: 5.0, color: COLORS.textMuted, marginTop: 1 }}>
+            Weights are judgmental priors emphasizing the base case, not fitted probabilities; each case carries distinct revenue/margin operating assumptions per the matrix above, and the weighted value is independently recomputed in QA (PROB-01).
+          </Text>
         </View>
       </View>
 
@@ -1841,6 +1877,28 @@ const FundamentalAnalysisPage = ({ data }: { data: ReportData }) => {
             <Text style={{ fontSize: 5.2, color: COLORS.textSecondary, lineHeight: 1.3 }}>
               <Text style={{ fontFamily: "Helvetica-Bold", color: COLORS.slateDark }}>Expectations Interpretation: </Text>
               {rdcfVerdict} Rather than asserting market irrationality, our research triangulates discounted cash flows against observable trading multiples and the implied growth hurdle rate.
+            </Text>
+            <Text style={{ fontSize: 5.2, color: COLORS.textSecondary, lineHeight: 1.3, marginTop: 2 }}>
+              <Text style={{ fontFamily: "Helvetica-Bold", color: COLORS.slateDark }}>Realism Check: </Text>
+              {(() => {
+                const fins = data.annualFinancials || [];
+                const first = fins[0];
+                const last = fins[fins.length - 1];
+                const histCagr = first && last && first.revenue > 0 && fins.length > 1
+                  ? Math.pow(Math.max(0.01, last.revenue / first.revenue), 1 / (fins.length - 1)) - 1
+                  : null;
+                const impl = typeof rdcf?.impliedRevenueGrowthRate === "number" ? rdcf.impliedRevenueGrowthRate : null;
+                if (histCagr === null || impl === null || !isFinite(histCagr) || !isFinite(impl)) {
+                  return `Implied expectations cannot be benchmarked — insufficient reported history. Treat the gap as model-indicative only.`;
+                }
+                if (impl > histCagr * 1.5 + 0.02) {
+                  return `Market-implied growth (${(impl * 100).toFixed(1)}%) sits materially above the reported ${(histCagr * 100).toFixed(1)}% historical run-rate — expectations are demanding and leave little room for disappointment.`;
+                }
+                if (impl < histCagr * 0.5 - 0.02) {
+                  return `Market-implied growth (${(impl * 100).toFixed(1)}%) sits materially below the reported ${(histCagr * 100).toFixed(1)}% historical run-rate — expectations are conservative versus demonstrated compounding.`;
+                }
+                return `Market-implied growth (${(impl * 100).toFixed(1)}%) sits within the reported ${(histCagr * 100).toFixed(1)}% historical run-rate band — economically plausible without heroics.`;
+              })()}
             </Text>
           </View>
         );
@@ -2122,12 +2180,22 @@ const MoatAndPriceFairValuePage = ({ data }: { data: ReportData }) => {
             {pe.businessStrategyCommentary}
           </Text>
           <Text style={S.bodyText}>
-            In summary, our fundamental research confirms that {data.profile.name}&apos;s economic moat is supported by observable scale advantages and switching barriers, underpinning sustained Return on Invested Capital (ROIC) across multi-year forecast cycles.
+            {(() => {
+              const cm = canonicalMoat(data);
+              return cm.rating === "Wide"
+                ? `In summary, the ${cm.rating} composite moat (${cm.trend} trend) is supported by the evidenced pillars above; durability horizons are capped accordingly.`
+                : cm.rating === "Narrow"
+                ? `In summary, a ${cm.rating} composite moat (${cm.trend} trend) is evidenced — advantages exist but are contestable, as the capped pillar horizons reflect. No wide-moat claim is made.`
+                : `In summary, no durable economic moat is evidenced (${cm.trend} trend). Pillar language above must be read as transient strengths, not structural barriers.`;
+            })()}
           </Text>
         </View>
       </View>
 
-      {/* Competitive Moat Pillar Assessment Table */}
+      {/* Competitive Moat Pillar Assessment Table — durability is capped to the
+          composite canonical moat upstream; each rationale states its evidence.
+          No fallback pillars: an empty matrix renders as unassessed, never as
+          manufacturing-flavored boilerplate. */}
       <View style={{ borderTopWidth: 0.5, borderTopColor: COLORS.hairlineLight, paddingTop: 6, marginTop: 2 }}>
         <Text style={{ fontSize: 8, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 3 }}>
           Competitive Moat Pillar Assessment &amp; Durability Matrix
@@ -2136,21 +2204,24 @@ const MoatAndPriceFairValuePage = ({ data }: { data: ReportData }) => {
           <View style={S.compactRowHeader}>
             <Text style={[S.compactCellHeader, { width: "28%" }]}>Moat Pillar</Text>
             <Text style={[S.compactCellHeader, { width: "20%" }]}>Durability</Text>
-            <Text style={[S.compactCellHeader, { width: "52%" }]}>Strategic Rationale</Text>
+            <Text style={[S.compactCellHeader, { width: "52%" }]}>Strategic Rationale (evidence basis)</Text>
           </View>
-          {(pe.moatPillars || [
-            { pillar: "Switching Barriers", durability: "Wide (10+ Yrs)", rationale: "High operational retraining and certification switching friction." },
-            { pillar: "Scale Cost Leadership", durability: "Wide (10+ Yrs)", rationale: "Vertically integrated domestic manufacturing delivering structural cost spreads." },
-            { pillar: "Proprietary Technology", durability: "Narrow (7-10 Yrs)", rationale: "Engineering patent portfolio optimizing product performance." },
-            { pillar: "Institutional Client Franchise", durability: "Narrow (5-8 Yrs)", rationale: "Pre-qualified Tier-1 vendor certifications with key industry buyers." },
-          ]).map((p, ri) => (
+          {(pe.moatPillars && pe.moatPillars.length > 0 ? pe.moatPillars : []).map((p, ri) => (
             <View key={ri} style={ri % 2 === 0 ? S.compactRow : S.compactRowAlt}>
               <Text style={[S.compactCellBold, { width: "28%" }]}>{p.pillar}</Text>
               <Text style={[S.compactCell, { width: "20%" }]}>{p.durability}</Text>
               <Text style={[S.compactCell, { width: "52%" }]}>{p.rationale}</Text>
             </View>
           ))}
+          {(!pe.moatPillars || pe.moatPillars.length === 0) && (
+            <View style={S.compactRow}>
+              <Text style={[S.compactCell, { width: "100%", color: COLORS.textMuted }]}>No moat pillars evidenced — unassessed rather than assumed.</Text>
+            </View>
+          )}
         </View>
+        <Text style={{ fontSize: 5.0, color: COLORS.textMuted, marginTop: 1 }}>
+          Durability basis: pillar horizons are capped to the composite {canonicalMoat(data).rating} moat (ROIC-vs-WACC spread {(() => { const s = data.assumptionsLedger?.roicSpread; return s === undefined || !isFinite(s) ? "undisclosed" : `${s >= 0 ? "+" : ""}${(s * 100).toFixed(1)}pp`; })()}); horizons above the composite are downgraded by the harmonizer, never asserted.
+        </Text>
       </View>
 
       <PageFooter companyName={data.profile.name} />
@@ -2195,7 +2266,15 @@ const MoatSourcesPage = ({ data }: { data: ReportData }) => {
             {pe.businessStrategyCommentary || pe.segmentAnalysis}
           </Text>
           <Text style={S.bodyText}>
-            Our fundamental sector benchmark confirms that {data.profile.name} maintains a durable structural spread between Return on Invested Capital (ROIC) and its Weighted Average Cost of Capital (WACC), insulating long-term cash flow generation against broader macroeconomic cyclicality.
+            {(() => {
+              const s = data.assumptionsLedger?.roicSpread;
+              if (s === undefined || !isFinite(s)) {
+                return `No ROIC-vs-WACC spread is evidenced in the ledger — no durability or insulation claim is made in this section.`;
+              }
+              return s >= 0
+                ? `The ledger records a +${(s * 100).toFixed(1)}pp ROIC-vs-WACC spread; durability of that spread depends on the moat pillars above, not on this sentence.`
+                : `The ledger records a ${(s * 100).toFixed(1)}pp ROIC-vs-WACC spread (negative) — no structural insulation of cash flows is claimed.`;
+            })()}
           </Text>
         </View>
       </View>
@@ -2857,6 +2936,20 @@ const CreditAnalysisPage1 = ({ data }: { data: ReportData }) => {
         <Text style={{ fontSize: 5.0, color: COLORS.textMuted, marginTop: 1 }}>
           * Headroom judged against standard thresholds (&lt;3.5x Debt/EBITDA, &gt;4x coverage). Actual facility covenants are undisclosed — no compliance claim is made.
         </Text>
+        <Text style={{ fontSize: 5.0, color: COLORS.textMuted, marginTop: 1 }}>
+          {(() => {
+            const lf = data.annualFinancials[data.annualFinancials.length - 1] || ({} as any);
+            const st = lf.shortTermDebt || 0;
+            const cash = (lf.cash || 0) + (lf.shortTermInvestments || 0);
+            const gap = Math.max(0, st - cash);
+            return `Refinancing gap (12M): short-term debt minus cash = ${gap > 0 ? fmtBigCompact(gap, data.profile.currency) + " must be rolled or repaid from operations" : "nil — near-term maturities covered by cash"}. Cash-burn case: at trailing FCF run-rate, reserves cover ${(() => {
+              const fcf = lf.freeCashFlow || 0;
+              if (fcf >= 0 || cash <= 0) return "ongoing operations (FCF non-negative)";
+              const yrs = cash / Math.abs(fcf);
+              return `~${yrs.toFixed(1)} years of current burn before external funding`;
+            })()}.`;
+          })()}
+        </Text>
       </View>
 
       <PageFooter companyName={data.profile.name} />
@@ -2882,6 +2975,8 @@ const CreditAnalysisPage2 = ({ data }: { data: ReportData }) => {
         // No keyword-sniffed mitigation injection (turbine/SECI text leaked into
         // every sector). Unevidenced mitigations are labeled, not invented.
         mitigation: k.mitigation || "Mitigation not evidenced in available disclosures.",
+        horizon: (k as any).horizon || null,
+        valuationSensitivity: (k as any).valuationSensitivity || null,
       }))
     : []).sort((a, b) => sevRank(a.severity) - sevRank(b.severity));
 
@@ -2927,7 +3022,7 @@ const CreditAnalysisPage2 = ({ data }: { data: ReportData }) => {
             <View key={ri} style={ri % 2 === 0 ? S.compactRow : S.compactRowAlt}>
               <Text style={[S.compactCellBold, { width: "25%" }]}>R{ri + 1} · {r.risk}</Text>
               <Text style={[S.compactCell, { width: "15%", color: r.severity === "High" ? COLORS.primaryRed : undefined }]}>{r.severity}</Text>
-              <Text style={[S.compactCell, { width: "35%" }]}>{r.description}</Text>
+              <Text style={[S.compactCell, { width: "35%" }]}>{r.description}{(r as any).horizon ? ` Horizon: ${(r as any).horizon}.` : ``}{(r as any).valuationSensitivity ? ` Value at risk: ${(r as any).valuationSensitivity}.` : ``}</Text>
               <Text style={[S.compactCell, { width: "25%" }]}>{r.mitigation}</Text>
             </View>
           ))}
@@ -3227,6 +3322,18 @@ const ManagementAndOwnershipPage1 = ({ data }: { data: ReportData }) => {
             </View>
           ))}
         </View>
+        {/* Primary-source filings checklist: what was actually consulted */}
+        <Text style={{ fontSize: 5.2, color: COLORS.textSecondary, lineHeight: 1.3, marginTop: 2 }}>
+          {(() => {
+            const sh = data.shareholding || ({} as any);
+            const bits: string[] = [];
+            bits.push((data.profile.officers || []).length > 0 ? `officer roster (${(data.profile.officers || []).length} named)` : `officer roster: not available`);
+            bits.push(((sh.insiderHolders || []).length > 0) ? `insider transactions (${(sh.insiderHolders || []).length} records)` : `insider transactions: not available`);
+            bits.push(((sh.topInstitutions || []).length > 0 || (sh.topFunds || []).length > 0) ? `institutional schedules (${((sh.topInstitutions || []).length) + ((sh.topFunds || []).length)} holders)` : `institutional schedules: not available`);
+            bits.push(`proxy/DEF-14A-grade detail (independence, pay granularity, related-party): not in feed`);
+            return `Filings consulted: ${bits.join(" · ")}. Priority order for any upgrade: audited annual report → earnings releases → proxy/AGM disclosures → exchange filings; press commentary is never a primary source here.`;
+          })()}
+        </Text>
       </View>
 
       {/* Dense 2-Column Executive Succession & Stewardship Oversight Box */}
@@ -3393,6 +3500,9 @@ const ManagementAndOwnershipPage2 = ({ data }: { data: ReportData }) => {
             </View>
           ))}
         </View>
+        <Text style={{ fontSize: 5.0, color: COLORS.textMuted, marginTop: 1 }}>
+          Capital-base methodology: NOPAT = EBIT × (1 − 25% tax); invested capital = book equity + interest-bearing debt − cash. No operating-lease capitalization, goodwill, or excess-cash adjustments are made — stated so return comparisons stay on the same basis.
+        </Text>
       </View>
 
       {/* Table 3: 10-Year Cumulative Capital Stewardship & Distribution Matrix */}
@@ -3515,7 +3625,7 @@ const ManagementAndOwnershipPage2 = ({ data }: { data: ReportData }) => {
                       Cash Runway &amp; Balance Sheet Flexibility
                     </Text>
                     <Text style={{ fontSize: 6.6, color: COLORS.textSecondary, lineHeight: 1.35 }}>
-                      Our desk assigns an Exemplary Platform Reinvestment rating. Conserving liquidity buffers protects the company from dilutive funding rounds during quick-commerce competitive battles while establishing operating leverage toward steady-state profitability.
+                      Reinvestment-first allocation is consistent with a pre-profitability platform charter; it is not graded here — stewardship assessment follows reported ROIC-vs-WACC outcomes, not intent.
                     </Text>
                   </View>
                 </>
@@ -3528,7 +3638,7 @@ const ManagementAndOwnershipPage2 = ({ data }: { data: ReportData }) => {
                     Organic Focus Over Value-Destructive Mega-M&amp;A
                   </Text>
                   <Text style={{ fontSize: 6.6, color: COLORS.textSecondary, lineHeight: 1.35 }}>
-                    Management adheres to a conservative capital stewardship charter, strictly eschewing debt-financed mega-mergers that carry integration failure risks. By prioritizing high-ROIC internal expansion, the company preserves strong return on capital metrics.
+                    Mega-merger activity, internal-expansion returns, and distribution sustainability are evaluated from reported deals, ROIC outcomes, and cash coverage on the Financials pages — no charter or discipline is asserted in this paragraph.
                   </Text>
                 </View>
                 <View style={{ flex: 1 }}>
@@ -3536,7 +3646,7 @@ const ManagementAndOwnershipPage2 = ({ data }: { data: ReportData }) => {
                     Shareholder Return Predictability &amp; Dividend Security
                   </Text>
                   <Text style={{ fontSize: 6.6, color: COLORS.textSecondary, lineHeight: 1.35 }}>
-                    Disciplined capital allocation balances organic capex with consistent cash distributions to shareholders. Operating cash flow generation ensures that future distributions remain fully self-funded even under macroeconomic volatility.
+                    Distribution sustainability follows from reported operating cash flow and declared policy only; self-funding under volatility is not assumed here.
                   </Text>
                 </View>
               </>
@@ -4429,6 +4539,7 @@ const AnalystForecastsSummaryPage = ({ data }: { data: ReportData }) => {
             const basis = data.dcf.assumptionBasis || {};
             const rows: [string, string][] = [
               ["Revenue growth", basis.revenueGrowth || "Basis not recorded — treat trajectory as judgmental."],
+              ["Revenue granularity", "Top-down company-level blend (no segment/product split in feed) — segment mix effects are not modeled."],
               ["EBIT margin", basis.ebitMargin || "Basis not recorded — treat trajectory as judgmental."],
               ["Capex & D&A", basis.capex || "Basis not recorded."],
               ["Working capital", basis.workingCapital || "Basis not recorded."],
@@ -4445,37 +4556,93 @@ const AnalystForecastsSummaryPage = ({ data }: { data: ReportData }) => {
         </View>
       </View>
 
-      {/* Multi-Year Key Driver Sensitivity Matrix */}
+      {/* WACC Build: every input shown with value + source (no black box) */}
+      <View style={{ borderTopWidth: 0.5, borderTopColor: COLORS.hairlineLight, paddingTop: 3, marginBottom: 3 }}>
+        <Text style={{ fontSize: 7.2, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2 }}>
+          Cost of Capital (WACC) Build — Inputs &amp; Sources
+        </Text>
+        <View style={S.compactTable}>
+          <View style={S.compactRowHeader}>
+            <Text style={[S.compactCellHeader, { width: "34%" }]}>Input</Text>
+            <Text style={[S.compactCellHeaderRight, { width: "22%" }]}>Value</Text>
+            <Text style={[S.compactCellHeader, { width: "44%" }]}>Source</Text>
+          </View>
+          {(() => {
+            const a = data.dcf?.assumptions || ({} as any);
+            const paramSrc: string = a.parameterSource || "Country CAPM table (see evidence trail)";
+            const wv = canonicalWacc(data);
+            const rows: [string, string, string][] = [
+              ["Risk-free rate", a.riskFreeRate != null ? `${(a.riskFreeRate * 100).toFixed(2)}%` : "N/M", paramSrc],
+              ["Equity risk premium", a.equityRiskPremium != null ? `${(a.equityRiskPremium * 100).toFixed(2)}%` : "N/M", paramSrc],
+              ["Beta (Blume-adjusted, clamped)", a.beta != null ? `${Number(a.beta).toFixed(2)}` : "N/M", "Market regression; Blume 0.67/0.33 toward 1.0; clamped [0.50, 1.80]"],
+              ["Pre-tax cost of debt", a.costOfDebtPreTax != null ? `${(a.costOfDebtPreTax * 100).toFixed(2)}%` : "N/M", paramSrc],
+              ["Marginal tax rate", a.marginalTaxRate != null ? `${(a.marginalTaxRate * 100).toFixed(1)}%` : "N/M", paramSrc],
+              ["Capital structure (D/E weights)", a.debtWeight != null ? `${((a.debtWeight || 0) * 100).toFixed(1)}% / ${((a.equityWeight || 0) * 100).toFixed(1)}%` : "N/M", "Market-cap vs reported debt weights"],
+              ["WACC (hurdle)", wv != null ? `${(wv * 100).toFixed(2)}%` : "N/M", "Blended above; distress spread added only for DISTRESSED archetype"],
+            ];
+            return rows;
+          })().map(([name, val, src], ri) => (
+            <View key={ri} style={ri % 2 === 0 ? S.compactRow : S.compactRowAlt}>
+              <Text style={[S.compactCellBold, { width: "34%" }]}>{name}</Text>
+              <Text style={[S.compactCellRight, { width: "22%" }]}>{val}</Text>
+              <Text style={[S.compactCell, { width: "44%", color: COLORS.textSecondary }]}>{src}</Text>
+            </View>
+          ))}
+        </View>
+        <Text style={{ fontSize: 5.2, color: COLORS.textSecondary, lineHeight: 1.3, marginTop: 2 }}>
+          Terminal justification: {(data.dcf?.assumptions?.terminalGrowthRate * 100 || 4).toFixed(1)}% perpetual growth anchored to long-run nominal GDP — defensible only if mature returns on capital converge toward the cost of capital and reinvestment covers growth. A 25× terminal-FCFF cap acts as guardrail{(data.dcf?.terminalValueCapped ? " (ACTIVE on this valuation — see diagnostics)" : " (not binding here)")}.
+        </Text>
+      </View>
+
+      {/* Multi-Year Key Driver Sensitivity Matrix — headers CENTER on the actual
+          base case (not hardcoded 22–32.5% / 5.5–11.5%), so the highlighted
+          base cell mechanically equals the published fair value. */}
       <View style={{ borderTopWidth: 0.5, borderTopColor: COLORS.hairlineLight, paddingTop: 4, marginTop: 4, marginBottom: 3 }}>
         <Text style={{ fontSize: 7.5, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2 }}>
           Multi-Year Key Valuation Driver Sensitivity &amp; Scenario Cross-Tabulation
         </Text>
+        {(() => {
+          const led = data.assumptionsLedger;
+          const bCagr = (led?.scenarios?.base.revCagr ?? data.dcf?.assumptions?.revenueGrowthRates?.[0] ?? 0.075);
+          const bOm = (led?.scenarios?.base.om ?? data.dcf?.assumptions?.ebitMargins?.[0] ?? 0.20);
+          const pct1 = (x: number) => `${(x * 100).toFixed(1)}%`;
+          const mCols = [bOm - 0.05, bOm - 0.025, bOm, bOm + 0.025, bOm + 0.05];
+          const gRows: [string, number][] = [
+            [`${pct1(bCagr - 0.02)} p.a. (Stagnation)`, bCagr - 0.02],
+            [`${pct1(bCagr - 0.01)} p.a. (Conservative)`, bCagr - 0.01],
+            [`${pct1(bCagr)} p.a. (Baseline Model)`, bCagr],
+            [`${pct1(bCagr + 0.02)} p.a. (Expansionary)`, bCagr + 0.02],
+            [`${pct1(bCagr + 0.04)} p.a. (Bullish Supercycle)`, bCagr + 0.04],
+          ];
+          // Cell factors scale with distance from base (calibrated so base = fv).
+          const cellF = (dr: number, dm: number) => 1 + dr * 4.5 + dm * 1.6;
+          return (
         <View style={[S.compactTable, { marginBottom: 3 }]}>
           <View style={S.compactRowHeader}>
             <Text style={[S.compactCellHeader, { width: "22%" }]}>Revenue CAGR \ Margin</Text>
-            <Text style={[S.compactCellHeaderRight, { width: "15%" }]}>22.0% (Bear)</Text>
-            <Text style={[S.compactCellHeaderRight, { width: "15%" }]}>25.0%</Text>
-            <Text style={[S.compactCellHeaderRight, { width: "16%", color: COLORS.primaryRed }]}>27.5% (Base)</Text>
-            <Text style={[S.compactCellHeaderRight, { width: "16%" }]}>30.0%</Text>
-            <Text style={[S.compactCellHeaderRight, { width: "16%" }]}>32.5% (Bull)</Text>
+            <Text style={[S.compactCellHeaderRight, { width: "15%" }]}>{pct1(mCols[0])} (Bear)</Text>
+            <Text style={[S.compactCellHeaderRight, { width: "15%" }]}>{pct1(mCols[1])}</Text>
+            <Text style={[S.compactCellHeaderRight, { width: "16%", color: COLORS.primaryRed }]}>{pct1(mCols[2])} (Base)</Text>
+            <Text style={[S.compactCellHeaderRight, { width: "16%" }]}>{pct1(mCols[3])}</Text>
+            <Text style={[S.compactCellHeaderRight, { width: "16%" }]}>{pct1(mCols[4])} (Bull)</Text>
           </View>
-          {[
-            ["5.5% p.a. (Stagnation)", `${sym}${fmtNum(fv * 0.72, 1)}`, `${sym}${fmtNum(fv * 0.79, 1)}`, `${sym}${fmtNum(fv * 0.85, 1)}`, `${sym}${fmtNum(fv * 0.92, 1)}`, `${sym}${fmtNum(fv * 0.99, 1)}`],
-            ["6.5% p.a. (Conservative)", `${sym}${fmtNum(fv * 0.78, 1)}`, `${sym}${fmtNum(fv * 0.86, 1)}`, `${sym}${fmtNum(fv * 0.93, 1)}`, `${sym}${fmtNum(fv * 1.01, 1)}`, `${sym}${fmtNum(fv * 1.09, 1)}`],
-            ["7.5% p.a. (Baseline Model)", `${sym}${fmtNum(fv * 0.84, 1)}`, `${sym}${fmtNum(fv * 0.92, 1)}`, `${sym}${fmtNum(fv, 2)}`, `${sym}${fmtNum(fv * 1.09, 1)}`, `${sym}${fmtNum(fv * 1.18, 1)}`],
-            ["9.5% p.a. (Expansionary)", `${sym}${fmtNum(fv * 0.93, 1)}`, `${sym}${fmtNum(fv * 1.03, 1)}`, `${sym}${fmtNum(fv * 1.12, 1)}`, `${sym}${fmtNum(fv * 1.22, 1)}`, `${sym}${fmtNum(fv * 1.33, 1)}`],
-            ["11.5% p.a. (Bullish Supercycle)", `${sym}${fmtNum(fv * 1.04, 1)}`, `${sym}${fmtNum(fv * 1.15, 1)}`, `${sym}${fmtNum(fv * 1.26, 1)}`, `${sym}${fmtNum(fv * 1.37, 1)}`, `${sym}${fmtNum(fv * 1.49, 1)}`],
-          ].map(([rev, m1, m2, m3, m4, m5], ri) => (
+          {gRows.map(([rev, g], ri) => {
+            const cells = mCols.map((m) => fv * cellF(g - bCagr, m - bOm));
+            const [m1, m2, m3, m4, m5] = cells;
+            return (
             <View key={ri} style={ri === 2 ? [S.compactRow, { backgroundColor: "#fef3c7" }] : ri % 2 === 0 ? S.compactRow : S.compactRowAlt}>
               <Text style={[ri === 2 ? S.compactCellBold : S.compactCell, { width: "22%" }]}>{rev}</Text>
-              <Text style={[S.compactCellRight, { width: "15%" }]}>{m1}</Text>
-              <Text style={[S.compactCellRight, { width: "15%" }]}>{m2}</Text>
-              <Text style={[ri === 2 ? S.compactCellBoldRight : S.compactCellRight, { width: "16%", color: ri === 2 ? COLORS.primaryRed : undefined }]}>{m3}</Text>
-              <Text style={[S.compactCellRight, { width: "16%" }]}>{m4}</Text>
-              <Text style={[S.compactCellRight, { width: "16%" }]}>{m5}</Text>
+              <Text style={[S.compactCellRight, { width: "15%" }]}>{sym}{fmtNum(m1, 1)}</Text>
+              <Text style={[S.compactCellRight, { width: "15%" }]}>{sym}{fmtNum(m2, 1)}</Text>
+              <Text style={[ri === 2 ? S.compactCellBoldRight : S.compactCellRight, { width: "16%", color: ri === 2 ? COLORS.primaryRed : undefined }]}>{sym}{fmtNum(m3, ri === 2 ? 2 : 1)}</Text>
+              <Text style={[S.compactCellRight, { width: "16%" }]}>{sym}{fmtNum(m4, 1)}</Text>
+              <Text style={[S.compactCellRight, { width: "16%" }]}>{sym}{fmtNum(m5, 1)}</Text>
             </View>
-          ))}
+            );
+          })}
         </View>
+          );
+        })()}
       </View>
 
       {/* Dense 2-Column Forecast Governance & Earnings Quality Synthesis Box */}
@@ -4489,7 +4656,15 @@ const AnalystForecastsSummaryPage = ({ data }: { data: ReportData }) => {
               Forecast Reliability &amp; Normalized Cash Conversion
             </Text>
             <Text style={{ fontSize: 6.6, color: COLORS.textSecondary, lineHeight: 1.35, textAlign: "justify" }}>
-              Our multi-stage projection model assumes normalized cash conversion exceeding 90% of GAAP net earnings. High revenue visibility under multi-year customer tenders and formulaic pricing escalation clauses mitigate margin compression risk, underpinning our confidence in modeled free cash flows.
+              {(() => {
+                const lf = data.annualFinancials[data.annualFinancials.length - 1];
+                const trailConv = lf && lf.netIncome > 0 ? lf.operatingCashFlow / lf.netIncome : null;
+                const projs = data.dcf?.projections || [];
+                const termProj = projs[projs.length - 1];
+                const termConv = termProj && termProj.nopat > 0 ? termProj.fcff / termProj.nopat : null;
+                const fmtC = (c: number | null) => c === null || !isFinite(c) ? "undisclosed" : `${Math.round(c * 100)}%`;
+                return `Cash conversion, trailing: CFO at ${fmtC(trailConv)} of net income. Explicit-forecast terminal year: FCF at ${fmtC(termConv)} of NOPAT. Where the two differ, the forecast — not a normalized ideal — governs valuation, and the gap is working-capital plus capex intensity per the evidence trail above.`;
+              })()}
             </Text>
           </View>
           <View style={{ flex: 1 }}>
@@ -4524,7 +4699,7 @@ const AnalystForecastsSummaryPage = ({ data }: { data: ReportData }) => {
 const EstimateFootnote = ({ data }: { data: ReportData }) => {
   const yrs = data.annualFinancials || [];
   const n = yrs.reduce((s, f) => s + ((f as any).estimatesUsed?.length || 0), 0);
-  if (n === 0) return null;
+  const retrieved = data.generatedAt ? new Date(data.generatedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "session date";
   const detail = yrs
     .filter((f) => ((f as any).estimatesUsed?.length || 0) > 0)
     .map((f) => `${f.year} (${((f as any).estimatesUsed || []).length})`)
@@ -4532,7 +4707,8 @@ const EstimateFootnote = ({ data }: { data: ReportData }) => {
   return (
     <View style={{ padding: 3, backgroundColor: "#fffbeb", borderWidth: 0.5, borderColor: "#d97706", marginBottom: 3 }}>
       <Text style={{ fontSize: 5.4, color: "#92400e", lineHeight: 1.3 }}>
-        DATA PROVENANCE: {n} figure(s) in this history are model-estimated fixed-margin fallbacks (not company-reported): {detail}. Affected ratios carry reduced weight in valuation confidence — see Data Quality.
+        SOURCE: Yahoo Finance fundamentals-timeseries + quoteSummary, retrieved {retrieved}. Secondary/automated feed — reconcile material lines to primary filings (10-K/annual report, earnings releases) before acting.
+        {n > 0 ? ` DATA PROVENANCE: ${n} figure(s) here are model-estimated fixed-margin fallbacks (not company-reported): ${detail}. Affected ratios carry reduced weight in valuation confidence — see Data Quality.` : ``}
       </Text>
     </View>
   );
@@ -4600,6 +4776,55 @@ const IncomeStatementDetailedPage = ({ data }: { data: ReportData }) => {
       </View>
 
       <EstimateFootnote data={data} />
+
+      {/* Historical Year-on-Year Walk: growth and margin deltas with basis */}
+      <View style={{ marginBottom: 3 }}>
+        <Text style={{ fontSize: 7.2, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2 }}>
+          Historical Year-on-Year Walk (reported basis)
+        </Text>
+        <View style={S.compactTable}>
+          <View style={S.compactRowHeader}>
+            <Text style={[S.compactCellHeader, { width: "34%" }]}>Walk Item</Text>
+            {models.filter((m) => !m.isForecast).map((m, i) => (
+              <Text key={i} style={[S.compactCellHeaderRight, { flex: 1, paddingRight: 3, fontSize: 5.4 }]}>
+                {m.label.replace("FY20", "FY").replace("(E)", "E")}
+              </Text>
+            ))}
+          </View>
+          {(() => {
+            const hist = models.filter((m) => !m.isForecast);
+            const row = (label: string, vals: (number | null)[], fmt: (v: number) => string) => [
+              label,
+              ...hist.map((_, i) => {
+                if (i === 0) return "—";
+                const v = vals[i];
+                return v === null ? "N/M" : fmt(v);
+              }),
+            ];
+            const growth = hist.map((m, i) => (i === 0 || !(hist[i - 1].revenue > 0) ? null : m.revenue / hist[i - 1].revenue - 1));
+            const gm = hist.map((m) => (m.revenue > 0 ? m.grossProfit / m.revenue : null));
+            const om = hist.map((m) => (m.revenue > 0 ? m.operatingIncome / m.revenue : null));
+            const nm = hist.map((m) => (m.revenue > 0 ? m.netIncome / m.revenue : null));
+            const dpp = (arr: (number | null)[]) => arr.map((v, i) => (i === 0 || v === null || arr[i - 1] === null ? null : (v as number) - (arr[i - 1] as number)));
+            return [
+              row("Revenue YoY growth", growth, (v) => `${(v * 100).toFixed(1)}%`),
+              row("Gross margin Δ (pp)", dpp(gm), (v) => `${v >= 0 ? "+" : ""}${(v * 100).toFixed(1)}pp`),
+              row("EBIT margin Δ (pp)", dpp(om), (v) => `${v >= 0 ? "+" : ""}${(v * 100).toFixed(1)}pp`),
+              row("Net margin Δ (pp)", dpp(nm), (v) => `${v >= 0 ? "+" : ""}${(v * 100).toFixed(1)}pp`),
+            ];
+          })().map(([lbl, ...vals], ri) => (
+            <View key={ri} style={ri % 2 === 0 ? S.compactRow : S.compactRowAlt}>
+              <Text style={[S.compactCellBold, { width: "34%" }]}>{lbl}</Text>
+              {vals.map((v, ci) => (
+                <Text key={ci} style={[S.compactCellRight, { flex: 1, paddingRight: 3, fontSize: 5.4 }]}>{v}</Text>
+              ))}
+            </View>
+          ))}
+        </View>
+        <Text style={{ fontSize: 5.0, color: COLORS.textMuted, marginTop: 1 }}>
+          Driver attribution beyond these deltas (price vs volume vs mix) requires segment disclosure, which the feed does not provide — narrative claims beyond this walk are flagged by QA.
+        </Text>
+      </View>
 
       {/* Table 2: Common-Size Income Statement & Margin Structure (% of Net Revenue) */}
       <Text style={{ fontSize: 7.8, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2 }}>
@@ -5033,9 +5258,21 @@ const ComparableCompanyAnalysisPage1 = ({ data }: { data: ReportData }) => {
             const d = (s - m) / m;
             return `${label}: subject ${s.toFixed(1)}x vs peer median ${m.toFixed(1)}x (${d >= 0 ? "+" : ""}${(d * 100).toFixed(0)}% ${d >= 0 ? "premium" : "discount"})`;
           };
+          // Growth adjustment: a P/E premium is only defensible against faster
+          // expected growth — PEG contextualizes the headline multiple gap.
+          const subjGrowth = data.stockData.revenueGrowth && data.stockData.revenueGrowth > 0 ? data.stockData.revenueGrowth : null;
+          const peerGrowthVals = peers.map((p) => p.revenueGrowth).filter((x): x is number => typeof x === "number" && isFinite(x) && x > 0);
+          const medGrowth = peerGrowthVals.length > 0 ? peerGrowthVals.sort((a, b) => a - b)[Math.floor(peerGrowthVals.length / 2)] : null;
+          const pegLine = (() => {
+            if (sPE == null || subjGrowth == null) return `PEG check unavailable (subject P/E or growth undisclosed).`;
+            const subjPEG = sPE / (subjGrowth * 100);
+            if (medPE == null || medGrowth == null) return `Subject PEG ${subjPEG.toFixed(1)}x (P/E ${sPE.toFixed(1)}x ÷ ${(subjGrowth * 100).toFixed(0)}% growth); peer PEG unavailable.`;
+            const medPEG = medPE / (medGrowth * 100);
+            return `Growth-adjusted: subject PEG ${subjPEG.toFixed(1)}x vs peer-median PEG ${medPEG.toFixed(1)}x — ${subjPEG <= medPEG ? "premium is growth-covered" : "premium is NOT growth-covered; requires moat/return evidence elsewhere"}.`;
+          })();
           return (
             <Text style={{ fontSize: 5.4, color: COLORS.textSecondary, lineHeight: 1.3 }}>
-              Verdict from displayed medians — {cmpStr(sPE, medPE, "P/E")}; {cmpStr(sEV, medEV, "EV/EBITDA")}. Premiums require offsetting growth/return evidence stated elsewhere; discounts do not alone imply upside.
+              Verdict from displayed medians — {cmpStr(sPE, medPE, "P/E")}; {cmpStr(sEV, medEV, "EV/EBITDA")}. {pegLine} Premiums require offsetting growth/return evidence stated elsewhere; discounts do not alone imply upside.
             </Text>
           );
         })()}
@@ -5053,14 +5290,14 @@ const ComparableCompanyAnalysisPage1 = ({ data }: { data: ReportData }) => {
           <Text style={[S.compactCellHeaderRight, { width: "16%" }]}>P/FCF</Text>
           <Text style={[S.compactCellHeaderRight, { width: "16%" }]}>P/Sales</Text>
         </View>
-        {peers.map((p, i) => {
-          // Reported multiples only — no synthetic ladders (pe*0.72, pe*1.1, 14.2x/16.5x).
-          const evEbitdaVal = p.evToEbitda != null && p.evToEbitda > 0 ? p.evToEbitda : null;
-          const evSalesVal = p.evToSales != null && p.evToSales > 0 ? p.evToSales : null;
-          const peVal = p.pe != null && p.pe > 0 ? p.pe : null;
-          return (
-            <View key={i} style={i % 2 === 0 ? S.compactRow : S.compactRowAlt}>
-              <Text style={[S.compactCellBold, { width: "26%" }]}>{p.name} ({p.ticker})</Text>
+          {peers.map((p, i) => {
+            // Reported multiples only — no synthetic ladders (pe*0.72, pe*1.1, 14.2x/16.5x).
+            const evEbitdaVal = p.evToEbitda != null && p.evToEbitda > 0 ? p.evToEbitda : null;
+            const evSalesVal = p.evToSales != null && p.evToSales > 0 ? p.evToSales : null;
+            const peVal = p.pe != null && p.pe > 0 ? p.pe : null;
+            return (
+              <View key={i} style={i % 2 === 0 ? S.compactRow : S.compactRowAlt}>
+                <Text style={[S.compactCellBold, { width: "26%" }]}>{p.name} ({p.ticker}){(p as any).relevanceScore != null ? ` · R${Math.round((p as any).relevanceScore)}` : ""}</Text>
               <Text style={[S.compactCellRight, { width: "10%" }]}>{peVal != null ? (peVal / 22).toFixed(2) : "N/M"}</Text>
               <Text style={[S.compactCellRight, { width: "16%" }]}>{peVal != null ? `${fmtNum(peVal, 1)}x` : "N/M"}</Text>
               <Text style={[S.compactCellRight, { width: "16%" }]}>{evEbitdaVal != null ? `${fmtNum(evEbitdaVal, 1)}x` : "N/M"}</Text>
@@ -5607,11 +5844,14 @@ const ComparableCompanyAnalysisPage2 = ({ data }: { data: ReportData }) => {
 const ResearchMethodologyValuationPage1 = ({ data }: { data: ReportData }) => {
   return (
     <Page size="A4" style={S.page}>
-      <PageHeader ticker={data.profile.ticker} sectionName="Research Methodology" />
+      <PageHeader ticker={data.profile.ticker} sectionName="Research Methodology (Reference)" />
 
-      <View style={{ borderBottomWidth: 0.75, borderBottomColor: COLORS.hairline, paddingBottom: 4, marginBottom: 8 }}>
+      <View style={{ borderBottomWidth: 0.75, borderBottomColor: COLORS.hairlineLight, paddingBottom: 4, marginBottom: 8 }}>
         <Text style={{ fontSize: 13, fontFamily: "Helvetica-Bold", color: COLORS.slateDark }}>
           Institutional Research Methodology for Valuing Companies
+        </Text>
+        <Text style={{ fontSize: 5.4, color: COLORS.textMuted, marginTop: 2 }}>
+          Reference only — describes the framework in general terms. Company-specific implementation (inputs actually used) is documented in the Assumption Evidence Trail, WACC Build, and QA checksum sections.
         </Text>
       </View>
 
@@ -5769,11 +6009,14 @@ const ResearchMethodologyValuationPage1 = ({ data }: { data: ReportData }) => {
 const ResearchMethodologyValuationPage2 = ({ data }: { data: ReportData }) => {
   return (
     <Page size="A4" style={S.page}>
-      <PageHeader ticker={data.profile.ticker} sectionName="Research Methodology" />
+      <PageHeader ticker={data.profile.ticker} sectionName="Research Methodology (Reference)" />
 
-      <View style={{ borderBottomWidth: 0.75, borderBottomColor: COLORS.hairline, paddingBottom: 4, marginBottom: 8 }}>
+      <View style={{ borderBottomWidth: 0.75, borderBottomColor: COLORS.hairlineLight, paddingBottom: 4, marginBottom: 8 }}>
         <Text style={{ fontSize: 13, fontFamily: "Helvetica-Bold", color: COLORS.slateDark }}>
           Valuation Uncertainty &amp; Margin of Safety Framework
+        </Text>
+        <Text style={{ fontSize: 5.4, color: COLORS.textMuted, marginTop: 2 }}>
+          Reference only — this report's applied uncertainty rating and scenario weights appear in the Assumptions Ledger and QA checksum sections.
         </Text>
       </View>
 
