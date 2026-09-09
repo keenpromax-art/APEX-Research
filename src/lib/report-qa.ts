@@ -36,6 +36,7 @@ import { assessProvenance, assessMarketIntegrity, resolveShareCount } from "./fi
 import { gatePeerSet, SIMILARITY_THRESHOLD_AVG, SIMILARITY_MIN_QUALIFYING } from "./peer-similarity";
 import { buildCanonicalFacts } from "./canonical-facts";
 import { validateIndependently } from "./independent-validator";
+import type { IndependentIssue } from "./independent-validator";
 
 const SECTOR_KEYWORD_BLOCKLIST: Record<string, { blocked: string[]; sectorNames: string[] }> = {
   telecom: {
@@ -55,6 +56,51 @@ const SECTOR_KEYWORD_BLOCKLIST: Record<string, { blocked: string[]; sectorNames:
     blocked: ["manufacturing inventory", "plant turnaround", "fab utilization", "refinery"],
   },
 };
+
+/**
+ * Display names for independent-validator findings (DEP-02 badges).
+ * Exhaustive against IndependentIssue["code"] — adding a code to the union
+ * without naming it here is a TypeScript error, never a silent wrong label.
+ * Codes marked (reserved) have no emitting call-site yet; the suffix says so
+ * instead of pretending otherwise.
+ */
+export const INDEPENDENT_CHECK_NAMES: Record<IndependentIssue["code"], string> = {
+  "IND-01": "Independent Balance-Sheet Identity",
+  "IND-02": "Independent Cash-Flow Chain",
+  "IND-03": "Independent EV/Equity/Per-Share Bridge",
+  "IND-04": "Independent WACC Re-solution",
+  "IND-05": "Independent Upside/Rating Map",
+  "STMT-01": "Statement Integrity Battery",
+  "STMT-02": "Sector-Native Identity Reconciliation",
+  "WC-01": "Working-Capital Driver Discipline",
+  "EV-01": "EV Taxonomy Disclosure",
+  "ANOM-01": "Accounting Anomaly Scan",
+  "XMOD-01": "Cross-Model Check (reserved)",
+  "CONF-01": "Confidence Check (reserved)",
+  "AI-01": "AI-Narrative Check (reserved)",
+  "ECON-01": "Economic Sanity Check (reserved)",
+  "DUPONT-01": "DuPont Check (reserved)",
+  "LIQ-01": "Liquidity Check (reserved)",
+  "LC-01": "Reserved Check LC-01",
+  "IMM-01": "Immutability Check (reserved)",
+  "AUDIT-01": "Audit Check (reserved)",
+};
+
+/**
+ * Short finding-specific subtitle derived from the validator's own message
+ * (option b: no validator taxonomy change required). Strips the leading
+ * severity preamble ("FATAL: ", "Informational: ", "Advisory: ") and truncates
+ * to ~60 chars at a word boundary, so multiple findings sharing one code
+ * (e.g. four STMT-01s across years) render as visually distinct badges while
+ * the full message remains in `details`.
+ */
+export function independentFindingSubtitle(message: string, maxLen = 60): string {
+  const stripped = message.replace(/^(FATAL|Informational|Advisory)\s*:\s*/i, "").trim();
+  if (stripped.length <= maxLen) return stripped;
+  const cut = stripped.slice(0, maxLen);
+  const lastSpace = cut.lastIndexOf(" ");
+  return `${(lastSpace > 20 ? cut.slice(0, lastSpace) : cut).trim()}…`;
+}
 
 export function validateReportIntegrity(data: ReportData): ReportQAResult {
   const checks: QACheckItem[] = [];
@@ -2156,12 +2202,7 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
       checks.push({
         id: issue.code,
         category: issue.code === "IND-04" || issue.code === "IND-05" ? "CROSS_REFERENCE" : "BALANCE_SHEET",
-        name:
-          issue.code === "IND-01" ? "Independent Balance-Sheet Identity" :
-          issue.code === "IND-02" ? "Independent Cash-Flow Chain" :
-          issue.code === "IND-03" ? "Independent EV/Equity/Per-Share Bridge" :
-          issue.code === "IND-04" ? "Independent WACC Re-solution" :
-          "Independent Upside/Rating Map",
+        name: `${INDEPENDENT_CHECK_NAMES[issue.code]} — ${independentFindingSubtitle(issue.message)}`,
         status: issue.severity,
         details: issue.severity === "FAIL"
           ? `FATAL PUBLICATION BLOCK: ${issue.message}`
