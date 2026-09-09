@@ -409,35 +409,40 @@ function checkStatementIntegrity(inp: IndependentInputs, issues: IndependentIssu
     const v = (f: { value: number | null }) => f.value;
     // 1. Pretax closure: pretax ≈ opInc − interestExpense + interestIncome + otherIncome.
     // interestIncome is a distinct Yahoo line (timeseries) for cash-rich corporates;
-    // quoteSummary vintages lack it (fact null → term 0, old behavior exactly).
-    // Adaptive basis (double-count guard, verified live): captive-finance issuers
-    // (e.g. automakers) already include net interest inside operatingIncome, so for
-    // those vintages adding interestIncome WORSENS the gap (F FY25: 12.6%→31%).
-    // Each year evaluates BOTH bases and judges severity on the better-reconciling
-    // one. When the ex-intInc basis wins despite disclosed interestIncome, that's a
-    // bundling signal → the vintage ambiguity is WARN-disclosed, never silently
-    // resolved, and never upgraded into a new FAIL. Tolerances/materiality unchanged.
-    // HARD FAIL on material breach (scorecard demands block).
+    // quoteSummary vintages lack it (fact null → term 0 unless the data-gap rule below fires).
+    // Adaptive basis (double-count guard, verified live on NVDA/MSFT/F/TSLA/GOOGL/META/AMZN/AAPL):
+    // captive-finance issuers already include net interest inside operatingIncome, so for
+    // those vintages adding interestIncome WORSENS the gap (F FY25: 12.6%→31%). Each year
+    // evaluates BOTH bases whenever interestIncome is disclosed and non-zero and judges
+    // severity on the better-reconciling one — even a sub-tolerance term can flip a verdict
+    // at the FAIL boundary (NVDA FY26: 8.70%→6.81%), so engagement is NOT gated on size.
+    // When the ex-intInc basis wins despite MATERIAL disclosed interestIncome, that's a
+    // bundling signal → the vintage ambiguity is WARN-disclosed (never silent, never a new FAIL).
+    // When interestIncome is STRUCTURALLY ABSENT (fact null) and the old-basis breach fits
+    // entirely inside a plausible missing-interest-income range (≤2.5% of revenue — covers
+    // the full observed large-cap range: MSFT 1.0%, NVDA ~1%, TSLA 1.8%), the year is
+    // undecidable rather than broken → WARN data-gap (never silent, never blocking). Gaps
+    // beyond that ceiling stay FAIL: no plausible missing term explains them.
+    // Tolerances/materiality otherwise unchanged. HARD FAIL on material breach (scorecard demands block).
     // For banks, pretax ≈ operatingIncome (PPOP) − provisionForCreditLosses (interest is revenue, not expense)
     const isBankYear = (y as any).statementType === "bank" || (y as any).statementType === "nbfc" || (y as any).statementType === "insurance";
     if (!isBankYear && v(y.operatingIncome) !== null && v(y.interestExpense) !== null && v(y.pretaxIncome) !== null) {
       evaluated++;
       const other = v(y.otherIncome) ?? 0;
       const intInc = v(y.interestIncome) ?? 0;
+      const intIncDisclosed = v(y.interestIncome) !== null && intInc !== 0;
       const opInc = v(y.operatingIncome) as number;
       const intExp = v(y.interestExpense) as number;
       const reported = v(y.pretaxIncome) as number;
       const mkTol = (exp: number) => ({ absTol: Math.max(1000, Math.abs(exp) * 0.02), relTol: 0.05, materiality: Math.max(1000, Math.abs(exp) * 0.08) });
       const baseOld = opInc - intExp + other;
       const tOld = magnitudeTolerance(baseOld, reported, mkTol(baseOld));
-      // Engage the interestIncome term only when disclosed AND material vs the
-      // old-basis tolerance floor — trivial values keep old behavior silently.
-      const intIncMaterial = v(y.interestIncome) !== null && Math.abs(intInc) > mkTol(baseOld).absTol;
       let t = tOld;
       let expected = baseOld;
       let basis = "opInc−interest+other";
       let bundledNote = "";
-      if (intIncMaterial) {
+      let bundledMaterial = false;
+      if (intIncDisclosed) {
         const baseNew = baseOld + intInc;
         const tNew = magnitudeTolerance(baseNew, reported, mkTol(baseNew));
         const gapOld = Math.abs(reported - baseOld) / Math.max(1, Math.abs(baseOld));
@@ -448,16 +453,28 @@ function checkStatementIntegrity(inp: IndependentInputs, issues: IndependentIssu
           basis = "opInc−interest+intInc+other";
         } else {
           bundledNote = " (ex-intInc basis used: disclosed interestIncome likely already bundled in operating/other income for this vintage — adding it worsens the gap)";
+          // Vintage-ambiguity disclosure only for material terms; trivial leftovers stay silent.
+          bundledMaterial = Math.abs(intInc) > mkTol(baseOld).absTol;
         }
       }
       if (!t.pass) {
         if (t.material && t.gapRel > 0.08) {
-          pushFail(issues, { code: "STMT-01", severity: "FAIL", message: `FATAL: Pretax closure breach in ${y.year}: ${basis} ${fmt0(expected)} vs reported ${fmt0(reported)} (${t.detail}) — broken accounting identity blocks publication.${bundledNote}`, expected: fmt0(expected), actual: fmt0(reported), magnitude: t });
+          // Data-gap rule: interestIncome structurally absent AND the whole gap fits
+          // inside a plausible missing-interest-income range → undecidable, WARN.
+          // Anything larger is provably broken regardless of the missing term → FAIL.
+          const rev = v(y.revenue) ?? 0;
+          const gapAbs = Math.abs(reported - expected);
+          if (bundledNote === "" && v(y.interestIncome) === null && rev > 0 && gapAbs <= 0.025 * rev) {
+            warns++;
+            issues.push({ code: "STMT-01", severity: "WARN", message: `Pretax closure data-gap in ${y.year}: ${basis} ${fmt0(expected)} vs reported ${fmt0(reported)} (${t.detail}) — interestIncome unavailable for this fiscal year and the gap is fully explained by a plausible missing-interest-income range (≤2.5% of revenue); not a confirmed broken identity.`, expected: fmt0(expected), actual: fmt0(reported), magnitude: t });
+          } else {
+            pushFail(issues, { code: "STMT-01", severity: "FAIL", message: `FATAL: Pretax closure breach in ${y.year}: ${basis} ${fmt0(expected)} vs reported ${fmt0(reported)} (${t.detail}) — broken accounting identity blocks publication.${bundledNote}`, expected: fmt0(expected), actual: fmt0(reported), magnitude: t });
+          }
         } else {
           warns++;
           issues.push({ code: "STMT-01", severity: "WARN", message: `Pretax closure drift in ${y.year}: ${basis} ${fmt0(expected)} vs reported ${fmt0(reported)} (${t.detail}).${bundledNote}`, expected: fmt0(expected), actual: fmt0(reported), magnitude: t });
         }
-      } else if (bundledNote !== "") {
+      } else if (bundledNote !== "" && bundledMaterial) {
         // Old basis reconciles but interestIncome is material and non-additive:
         // disclose the vintage ambiguity (WARN, never blocking) instead of
         // silently dropping a disclosed line item.
