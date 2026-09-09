@@ -2299,9 +2299,12 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
         checks.push({ id: "FCST-01", category: "CROSS_REFERENCE", name: "Single Canonical Forecast", status: "FAIL", details: `FATAL: no canonical forecast built — DCF/ratios/PDF have no single source; independent forecast prohibited.`, expected: "5Y projections", actual: "missing" });
       }
     } else {
-      // cross-check DCF projections length if present
+      // cross-check DCF projections length if present. An EMPTY array is not a
+      // second forecast — it is the residual-income path (banks/insurers/NBFCs),
+      // which carries no explicit FCFF projections by construction. Only a
+      // non-empty length mismatch indicates competing forecasts.
       const dcfProjs = (data.dcf as any)?.projections;
-      if (Array.isArray(dcfProjs) && dcfProjs.length !== fc.projections.length) {
+      if (Array.isArray(dcfProjs) && dcfProjs.length > 0 && dcfProjs.length !== fc.projections.length) {
         checks.push({ id: "FCST-01", category: "CROSS_REFERENCE", name: "Single Canonical Forecast", status: "FAIL", details: `FATAL: DCF projections length ${dcfProjs.length} ≠ canonical forecast ${fc.projections.length} — second forecast detected.`, expected: `${fc.projections.length}`, actual: `${dcfProjs.length}` });
       } else {
         checks.push({ id: "FCST-01", category: "CROSS_REFERENCE", name: "Single Canonical Forecast", status: "PASS", details: `Single forecast sealed: ${fc.projections.length}Y ${fc.driverEquation.slice(0,60)} — sole source for DCF/credit/PDF.` });

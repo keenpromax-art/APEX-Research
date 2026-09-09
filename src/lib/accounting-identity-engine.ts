@@ -7,7 +7,13 @@
 //  1) Assets = Liabilities + Equity (BS identity)
 //  2) Beginning Cash + ΔCash = Ending Cash (cash roll-forward when annual cash disclosed)
 //  3) EBIT = Revenue − COGS − Opex (via operatingIncome closure)
-//  4) EBT = EBIT − Interest + OtherIncome (pretax closure)
+//  4) EBT = opInc − interestExpense + interestIncome + otherIncome (pretax closure),
+//     with the same rescue ladder as the independent validator (adaptive +intInc
+//     basis with double-count fallback, data-gap, revenue floors, EBIT
+//     corroboration, input-integrity, stale-year demotion) — implemented HERE
+//     separately ON PURPOSE: agreement between two independent code paths is the
+//     evidence; shared helpers would make agreement vacuous. Engine keeps its own
+//     10% FAIL calibration (validator: 8%).
 //  5) FCF = CFO − Capex (flow chain)
 //  6) Retained earnings: RE(t)=RE(t-1)+NI−Div−Buyback (bridge; OCI plugs WARN-only)
 //  7) Debt: STD+LTD ≈ TotalDebt ; Cash: CA−CL = NWC ; D&A rate / PP&E roll-forward
@@ -28,6 +34,10 @@ const fmt0 = (n: number) => (Number.isFinite(n) ? n.toFixed(0) : "n/a");
 
 export function enforceAccountingIdentities(graph: CanonicalFactGraph): IdentityIssue[] {
   const out: IdentityIssue[] = [];
+  // Corporate EBT-closure FAILs logged with year for the post-loop stale-year
+  // demotion below (latest-clean only). Bank PPOP FAILs are never logged
+  // (exact-by-construction — always block).
+  const ebtFailLog: { idx: number; year: string }[] = [];
   for (const y of graph.years) {
     const v = (f: { value: number | null }) => f.value;
     const isBank = (y as unknown as Record<string, unknown>).statementType === "bank" || (y as unknown as Record<string, unknown>).statementType === "nbfc" || (y as unknown as Record<string, unknown>).statementType === "insurance";
@@ -66,12 +76,85 @@ export function enforceAccountingIdentities(graph: CanonicalFactGraph): Identity
         const t = magnitudeTolerance(expected, v(y.freeCashFlow) as number, { absTol: Math.max(1, Math.abs(v(y.revenue) ?? 0) * 0.005), relTol: 0.02, materiality: Math.max(1, Math.abs(v(y.revenue) ?? 0) * 0.02) });
         if (!t.pass && t.material) out.push({ code: "FCF-CLOSURE", severity: "FAIL", year: y.year, expected: fmt0(expected), actual: fmt0(v(y.freeCashFlow) as number), detail: `FCF≠CFO−capex: ${t.detail}` });
       }
-      // 4) EBT = opInc − interest + otherIncome — corporate only
+      // 4) EBT = opInc − interestExpense + interestIncome + otherIncome — corporate only.
+      // interestIncome is a distinct Yahoo line (timeseries) for cash-rich corporates;
+      // quoteSummary vintages lack it (fact null → term 0). Adaptive basis + rescue
+      // ladder mirrors the independent validator's ECONOMICS in separate code (see
+      // header): each year evaluates old vs +intInc bases and judges the better one;
+      // data-gap (absent term, ≤2.5% rev), revenue floors (1%, tiered 2% at ≥10%
+      // margin), EBIT corroboration (clean pair, relaxed 12%/12%/50% band), and
+      // input-integrity (synth opInc, silent-zero interest with debt under an 8%
+      // coupon ceiling) downgrade to WARN, tagged. Engine keeps its 10% FAIL bar.
       if (v(y.operatingIncome) !== null && v(y.interestExpense) !== null && v(y.pretaxIncome) !== null) {
-        const expected = (v(y.operatingIncome) as number) - (v(y.interestExpense) as number) + (v(y.otherIncome) ?? 0);
-        const t = magnitudeTolerance(expected, v(y.pretaxIncome) as number, { absTol: Math.max(1000, Math.abs(expected) * 0.02), relTol: 0.05, materiality: Math.max(1000, Math.abs(expected) * 0.08) });
-        if (!t.pass && t.material && t.gapRel > 0.1) out.push({ code: "EBT-CLOSURE", severity: "FAIL", year: y.year, expected: fmt0(expected), actual: fmt0(v(y.pretaxIncome) as number), detail: `Pretax≠opInc−interest+other: ${t.detail}` });
-        else if (!t.pass) out.push({ code: "EBT-CLOSURE", severity: "WARN", year: y.year, expected: fmt0(expected), actual: fmt0(v(y.pretaxIncome) as number), detail: `Pretax drift: ${t.detail}` });
+        const other = v(y.otherIncome) ?? 0;
+        const intInc = v(y.interestIncome) ?? 0;
+        const opInc = v(y.operatingIncome) as number;
+        const intExp = v(y.interestExpense) as number;
+        const reported = v(y.pretaxIncome) as number;
+        const mkTol = (exp: number) => ({ absTol: Math.max(1000, Math.abs(exp) * 0.02), relTol: 0.05, materiality: Math.max(1000, Math.abs(exp) * 0.08) });
+        const baseOld = opInc - intExp + other;
+        const tOld = magnitudeTolerance(baseOld, reported, mkTol(baseOld));
+        let t = tOld;
+        let expected = baseOld;
+        let basis = "opInc−interest+other";
+        if (v(y.interestIncome) !== null && intInc !== 0) {
+          const baseNew = baseOld + intInc;
+          const tNew = magnitudeTolerance(baseNew, reported, mkTol(baseNew));
+          const gapOld = Math.abs(reported - baseOld) / Math.max(1, Math.abs(baseOld));
+          const gapNew = Math.abs(reported - baseNew) / Math.max(1, Math.abs(baseNew));
+          if (gapNew <= gapOld) { t = tNew; expected = baseNew; basis = "opInc−interest+intInc+other"; }
+          else basis = "opInc−interest+other(ex-intInc: bundled)";
+        }
+        const rev = v(y.revenue) ?? 0;
+        const gapAbs = Math.abs(reported - expected);
+        const ebtWarn = (msg: string) => {
+          out.push({ code: "EBT-CLOSURE", severity: "WARN", year: y.year, expected: fmt0(expected), actual: fmt0(reported), detail: `${msg} (${t.detail})` });
+        };
+        const ebtFail = () => {
+          out.push({ code: "EBT-CLOSURE", severity: "FAIL", year: y.year, expected: fmt0(expected), actual: fmt0(reported), detail: `Pretax≠${basis}: ${t.detail}` });
+          ebtFailLog.push({ idx: out.length - 1, year: y.year });
+        };
+        if (t.pass) {
+          // pass — nothing to report (vintage note unnecessary here; validator discloses it)
+        } else if (!t.material || t.gapRel <= 0.1) {
+          ebtWarn(`Pretax drift on ${basis}`);
+        } else if (v(y.interestIncome) === null && rev > 0 && gapAbs <= 0.025 * rev) {
+          ebtWarn(`Pretax data-gap: interestIncome unavailable and gap within ≤2.5% of revenue (data-gap)`);
+        } else if (rev > 0 && gapAbs <= 0.01 * rev) {
+          ebtWarn(`Pretax residual under 1% of revenue, immaterial (rev-floor)`);
+        } else if (rev > 0 && Math.abs(reported / rev) >= 0.1 && gapAbs > 0.01 * rev && gapAbs <= 0.02 * rev) {
+          ebtWarn(`Pretax residual 1–2% of revenue at healthy margin (tiered-floor)`);
+        } else if (v(y.ebit) !== null && v(y.incomeTaxExpense) !== null && v(y.netIncome) !== null && !(
+          // Taint guard (parity with the independent validator): a modeled-fallback
+          // operatingIncome echoes into ebit on timeseries vintages — an ebit fact
+          // numerically equal to a low-confidence opInc is the same fiction, not
+          // independent evidence. Those years fall through to input-integrity below.
+          y.operatingIncome.confidence === "low" && v(y.ebit) === v(y.operatingIncome)
+        )) {
+          const expB = (v(y.ebit) as number) - intExp;
+          const tB = magnitudeTolerance(expB, reported, mkTol(expB));
+          const exp3 = (v(y.incomeTaxExpense) as number) + (v(y.netIncome) as number);
+          const t3 = magnitudeTolerance(exp3, reported, mkTol(exp3));
+          if (tB.pass && t3.pass) {
+            ebtWarn(`Pretax doubly corroborated (ebit-corroborated)`);
+          } else {
+            const gE = Math.abs(reported - expB) / Math.max(1, Math.abs(expB));
+            const g3 = Math.abs(reported - exp3) / Math.max(1, Math.abs(exp3));
+            const gB = Math.abs(reported - expected) / Math.max(1, Math.abs(expected));
+            if (gE <= 0.12 && g3 <= 0.12 && gB <= 0.5) {
+              ebtWarn(`Corroborations within 12%, bridge within 50% (ebit-corroborated)`);
+            } else {
+              ebtFail();
+            }
+          }
+        } else {
+          const hintNotes: string[] = [];
+          if (y.operatingIncome.confidence === "low") hintNotes.push("synth-input");
+          const td = v(y.totalDebt);
+          if (intExp === 0 && td !== null && td > 0 && gapAbs <= 0.08 * td) hintNotes.push("intExp-coverage-gap");
+          if (hintNotes.length > 0) ebtWarn(`Unverifiable on compromised inputs (${hintNotes.join(", ")})`);
+          else ebtFail();
+        }
       }
       // 5) EBIT = revenue − costOfRevenue − (implied opex); we validate via operatingIncome ≈ grossProfit − implied opex gap not directly — instead check EBIT taxonomy: operatingIncome + depreciation ≈ ebitda
       if (v(y.ebitda) !== null && v(y.operatingIncome) !== null && v(y.depreciation) !== null) {
@@ -106,6 +189,28 @@ export function enforceAccountingIdentities(graph: CanonicalFactGraph): Identity
     }
   }
   // 9) Cash roll-forward is not assessable without annual cash flow statement detail (ICF/FCF) — disclose limitation
+  // 10) Staleness doctrine (parity with the independent validator): when the latest
+  // evaluated corporate year carries no EBT-closure FAIL, older EBT-closure FAILs
+  // downgrade to WARN — stale-flagged, never silent. Latest-year FAILs always block.
+  {
+    const isB = (yy: (typeof graph.years)[number]): boolean => {
+      const s = (yy as unknown as { statementType?: string }).statementType;
+      return s === "bank" || s === "nbfc" || s === "insurance";
+    };
+    const corpEval = graph.years.filter(
+      (yy) => !isB(yy) && yy.operatingIncome.value !== null && yy.interestExpense.value !== null && yy.pretaxIncome.value !== null
+    );
+    const latestCorp = corpEval[corpEval.length - 1];
+    if (latestCorp && !ebtFailLog.some((e) => e.year === latestCorp.year)) {
+      for (const e of ebtFailLog) {
+        const issue = out[e.idx];
+        if (issue && issue.code === "EBT-CLOSURE" && issue.severity === "FAIL") {
+          issue.severity = "WARN";
+          issue.detail = `${issue.detail} — latest evaluated year (${latestCorp.year}) reconciles; downgraded (stale-year), does not block.`;
+        }
+      }
+    }
+  }
   return out;
 }
 

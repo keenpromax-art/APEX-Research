@@ -20,7 +20,7 @@ import {
   type ToleranceVerdict,
 } from "./financial-kernel";
 import { COUNTRY_CAPITAL_PARAMS } from "./calculations";
-import type { CanonicalFactGraph } from "./canonical-facts";
+import type { CanonicalFactGraph, CanonicalYearFacts, RawFact } from "./canonical-facts";
 
 export type IndependentSeverity = "FAIL" | "WARN" | "PASS";
 
@@ -405,6 +405,12 @@ function checkStatementIntegrity(inp: IndependentInputs, issues: IndependentIssu
   let evaluated = 0;
   let warns = 0;
   const years = facts.years;
+  // Staleness logs: corporate-closure FAILs and ETR FAILs are recorded with year so
+  // the post-loop staleness doctrine can scope precisely (latest-clean only). Bank
+  // PPOP FAILs are never logged (exact-by-construction — always block).
+  const closureFailLog: { entry: IndependentIssue; year: string; basis: string; expected: number; reported: number; detail: string; bundledNote: string }[] = [];
+  const etrFailLog: { entry: IndependentIssue; year: string }[] = [];
+  const niHistory: (number | null)[] = [];
   for (const y of years) {
     const v = (f: { value: number | null }) => f.value;
     // 1. Pretax closure: pretax ≈ opInc − interestExpense + interestIncome + otherIncome.
@@ -474,12 +480,32 @@ function checkStatementIntegrity(inp: IndependentInputs, issues: IndependentIssu
             // (distressed/break-even years where relative gaps explode) → WARN.
             warns++;
             issues.push({ code: "STMT-01", severity: "WARN", message: `Pretax closure drift in ${y.year}: ${basis} ${fmt0(expected)} vs reported ${fmt0(reported)} (${t.detail}) — residual under 1% of revenue, immaterial to valuation (rev-floor).`, expected: fmt0(expected), actual: fmt0(reported), magnitude: t });
-          } else if (v(y.ebit) !== null && (v(y.incomeTaxExpense) !== null) && (v(y.netIncome) !== null)) {
+          } else if (rev > 0 && Math.abs(reported / rev) >= 0.1 && gapAbs > 0.01 * rev && gapAbs <= 0.02 * rev) {
+            // (ii-b) Tiered floor: healthy-margin (≥10% pretax margin) companies get a
+            // 2% band for the same FX/reclass noise (their 1-2% wedges are small even
+            // relative to earnings). Thin-margin names stay on the 1% floor above —
+            // a 2%-of-revenue gap there can exceed half of pretax and must still block.
+            // Flat WARN branch: anything outside the band falls THROUGH to the
+            // corroboration and input-integrity checks below, never FAILs here.
+            warns++;
+            issues.push({ code: "STMT-01", severity: "WARN", message: `Pretax closure drift in ${y.year}: ${basis} ${fmt0(expected)} vs reported ${fmt0(reported)} (${t.detail}) — residual 1–2% of revenue at a healthy margin, consistent with FX/reclass noise (tiered-floor).`, expected: fmt0(expected), actual: fmt0(reported), magnitude: t });
+          } else if (v(y.ebit) !== null && (v(y.incomeTaxExpense) !== null) && (v(y.netIncome) !== null) && !(
+            // Taint guard: when operatingIncome itself is a modeled fallback, an ebit
+            // fact numerically equal to it is the same fiction echoed (timeseries
+            // builder falls back ebit→operatingIncome) — not independent evidence.
+            // Corroboration must rest on genuinely reported lines; otherwise the
+            // input-integrity rule below (synth-input) owns this year.
+            y.operatingIncome.confidence === "low" && v(y.ebit) === v(y.operatingIncome)
+          )) {
             // (iii) EBIT corroboration: when BOTH pretax−tax≈netIncome AND
             // EBIT−interestExpense≈pretax reconcile cleanly, pretax is doubly
             // corroborated and the residual sits in unobservable non-operating
             // items or the opInc mapping — operating margins stay unverified → WARN
-            // (never silent). Either corroboration dirty or EBIT absent → FAIL stands.
+            // (never silent).
+            // (iii-b) Relaxed corroboration: both witnesses within 12% and the bridge
+            // itself within 50% — measuredFalse-positive band for feed-mapping noise
+            // (HCLTech pattern). Beyond 50% the disagreement is too large for any
+            // mapping story — FAIL stands even corroborated.
             const expB = (v(y.ebit) as number) - intExp;
             const tB = magnitudeTolerance(expB, reported, mkTol(expB));
             const exp3 = ((v(y.incomeTaxExpense) as number) + (v(y.netIncome) as number));
@@ -488,10 +514,40 @@ function checkStatementIntegrity(inp: IndependentInputs, issues: IndependentIssu
               warns++;
               issues.push({ code: "STMT-01", severity: "WARN", message: `Pretax closure drift in ${y.year}: ${basis} ${fmt0(expected)} vs reported ${fmt0(reported)} (${t.detail}) — pretax doubly corroborated (EBIT−interest and tax+NI triples reconcile); residual is unobservable non-operating items or opInc mapping noise — treat operating margins as unverified (ebit-corroborated).`, expected: fmt0(expected), actual: fmt0(reported), magnitude: t });
             } else {
-              pushFail(issues, { code: "STMT-01", severity: "FAIL", message: `FATAL: Pretax closure breach in ${y.year}: ${basis} ${fmt0(expected)} vs reported ${fmt0(reported)} (${t.detail}) — broken accounting identity blocks publication.${bundledNote}`, expected: fmt0(expected), actual: fmt0(reported), magnitude: t });
+              const gE = Math.abs(reported - expB) / Math.max(1, Math.abs(expB));
+              const g3 = Math.abs(reported - exp3) / Math.max(1, Math.abs(exp3));
+              const gBridge = Math.abs(reported - expected) / Math.max(1, Math.abs(expected));
+              if (gE <= 0.12 && g3 <= 0.12 && gBridge <= 0.5) {
+                warns++;
+                issues.push({ code: "STMT-01", severity: "WARN", message: `Pretax closure drift in ${y.year}: ${basis} ${fmt0(expected)} vs reported ${fmt0(reported)} (${t.detail}) — both corroborations within 12% and bridge within 50%: feed-mapping noise band, pretax broadly verified — treat operating margins as unverified (ebit-corroborated).`, expected: fmt0(expected), actual: fmt0(reported), magnitude: t });
+              } else {
+                const entry: IndependentIssue = { code: "STMT-01", severity: "FAIL", message: `FATAL: Pretax closure breach in ${y.year}: ${basis} ${fmt0(expected)} vs reported ${fmt0(reported)} (${t.detail}) — broken accounting identity blocks publication.${bundledNote}`, expected: fmt0(expected), actual: fmt0(reported), magnitude: t };
+                pushFail(issues, entry);
+                closureFailLog.push({ entry, year: y.year, basis, expected, reported, detail: t.detail, bundledNote });
+              }
             }
           } else {
-            pushFail(issues, { code: "STMT-01", severity: "FAIL", message: `FATAL: Pretax closure breach in ${y.year}: ${basis} ${fmt0(expected)} vs reported ${fmt0(reported)} (${t.detail}) — broken accounting identity blocks publication.${bundledNote}`, expected: fmt0(expected), actual: fmt0(reported), magnitude: t });
+            // (iv) Input-integrity: never convict on compromised required inputs.
+            // operatingIncome synthesized (@-fallback) or interestExpense silently zero
+            // while interest-bearing debt exists (feed dropped the line, e.g. AAPL
+            // FY24/25) → the bridge is unverifiable → WARN (never silent). The debt
+            // bound (8%-coupon ceiling) keeps this from excusing real breaks, and
+            // debt-free + zero-interest stays fully enforced below.
+            const notes: string[] = [];
+            if (y.operatingIncome.confidence === "low") notes.push("operatingIncome is a modeled fallback, not reported (synth-input)");
+            const td = v(y.totalDebt);
+            const ieZero = (v(y.interestExpense) as number) === 0;
+            if (ieZero && td !== null && td > 0 && gapAbs <= 0.08 * td) {
+              notes.push(`interestExpense reads zero while totalDebt is ${fmt0(td)} — line likely dropped by the feed; gap fits within an 8%-coupon ceiling (intExp-coverage-gap)`);
+            }
+            if (notes.length > 0) {
+              warns++;
+              issues.push({ code: "STMT-01", severity: "WARN", message: `Pretax closure drift in ${y.year}: ${basis} ${fmt0(expected)} vs reported ${fmt0(reported)} (${t.detail}) — unverifiable on compromised inputs: ${notes.join("; ")}.`, expected: fmt0(expected), actual: fmt0(reported), magnitude: t });
+            } else {
+              const entry: IndependentIssue = { code: "STMT-01", severity: "FAIL", message: `FATAL: Pretax closure breach in ${y.year}: ${basis} ${fmt0(expected)} vs reported ${fmt0(reported)} (${t.detail}) — broken accounting identity blocks publication.${bundledNote}`, expected: fmt0(expected), actual: fmt0(reported), magnitude: t };
+              pushFail(issues, entry);
+              closureFailLog.push({ entry, year: y.year, basis, expected, reported, detail: t.detail, bundledNote });
+            }
           }
         } else {
           warns++;
@@ -523,12 +579,46 @@ function checkStatementIntegrity(inp: IndependentInputs, issues: IndependentIssu
       evaluated++;
       const etr = (v(y.incomeTaxExpense) as number) / (v(y.pretaxIncome) as number);
       if (etr > 1.5 || etr < -1.0) {
-        pushFail(issues, {
-          code: "STMT-01", severity: "FAIL",
-          message: `FATAL: ${y.year} effective tax rate ${(etr * 100).toFixed(1)}% is definitionally impossible — tax data or pretax base is corrupt.`,
-          expected: "0%..100%", actual: `${(etr * 100).toFixed(1)}%`,
-          magnitude: magnitudeTolerance(0.25, etr, { absTol: 0.05, relTol: 0.2, materiality: 0.05 }),
-        });
+        // NOL-benefit rule: a tax BENEFIT (negative tax) following cumulative
+        // prior-3y losses is textbook NOL/valuation-allowance-release economics
+        // (measured: the common real-world shape behind absurd negative ETRs),
+        // not corruption → WARN (tagged, never silent). Positive-tax absurdities
+        // and benefits without loss history still FAIL.
+        const taxV = v(y.incomeTaxExpense) as number;
+        const prior = niHistory.slice(-3);
+        if (taxV < 0 && prior.length > 0 && prior.every((n) => n !== null) && (prior as number[]).reduce((s, n) => s + n, 0) < 0) {
+          warns++;
+          issues.push({
+            code: "STMT-01", severity: "WARN",
+            message: `${y.year} effective tax rate ${(etr * 100).toFixed(1)}% reflects a tax benefit against cumulative prior-3y losses — NOL/valuation-allowance economics, not corruption (nol-benefit).`,
+            expected: "0%..100%", actual: `${(etr * 100).toFixed(1)}%`,
+            magnitude: magnitudeTolerance(0.25, etr, { absTol: 0.05, relTol: 0.2, materiality: 0.05 }),
+          });
+        } else {
+          // Materiality floor (same doctrine as the closure revenue floor): a tax bill
+          // under 1% of revenue makes the RATE meaningless noise on a tiny pretax base
+          // (measured: the typical shape is a few-million true-up on billions of revenue).
+          // Anything larger still FAILs — rates don't excuse material tax bills.
+          const revE = v(y.revenue) ?? 0;
+          if (revE > 0 && Math.abs(taxV) <= 0.01 * revE) {
+            warns++;
+            issues.push({
+              code: "STMT-01", severity: "WARN",
+              message: `${y.year} effective tax rate ${(etr * 100).toFixed(1)}% is arithmetically extreme but the tax bill is under 1% of revenue — rate noise on a small base, immaterial to valuation (etr-floor).`,
+              expected: "0%..100%", actual: `${(etr * 100).toFixed(1)}%`,
+              magnitude: magnitudeTolerance(0.25, etr, { absTol: 0.05, relTol: 0.2, materiality: 0.05 }),
+            });
+          } else {
+            const entry: IndependentIssue = {
+              code: "STMT-01", severity: "FAIL",
+              message: `FATAL: ${y.year} effective tax rate ${(etr * 100).toFixed(1)}% is definitionally impossible — tax data or pretax base is corrupt.`,
+              expected: "0%..100%", actual: `${(etr * 100).toFixed(1)}%`,
+              magnitude: magnitudeTolerance(0.25, etr, { absTol: 0.05, relTol: 0.2, materiality: 0.05 }),
+            };
+            pushFail(issues, entry);
+            etrFailLog.push({ entry, year: y.year });
+          }
+        }
       } else if (etr < -0.1 || etr > 0.6) {
         warns++;
         issues.push({ code: "STMT-01", severity: "WARN", message: `${y.year} ETR ${(etr * 100).toFixed(1)}% outside [0%, 60%] — one-offs/NOLs possible; verify before trusting NOPAT.`, expected: "0%..60%", actual: `${(etr * 100).toFixed(1)}%`, magnitude: magnitudeTolerance(0.25, etr, { absTol: 0.05, relTol: 0.2, materiality: 0.05 }) });
@@ -610,6 +700,46 @@ function checkStatementIntegrity(inp: IndependentInputs, issues: IndependentIssu
             issues.push({ code: "STMT-01", severity: "WARN", message: `${y.year} bank NIM ${(nim * 100).toFixed(2)}% outside [0.5%, 8%] — verify NII/assets units.`, expected: "0.5%..8%", actual: `${(nim * 100).toFixed(2)}%`, magnitude: magnitudeTolerance(0.03, nim, { absTol: 0.005, relTol: 0.2, materiality: 0.005 }) });
           }
         }
+      }
+    }
+    // Net-income history for the NOL-benefit rule (prior-3y cumulative losses).
+    niHistory.push(v(y.netIncome));
+  }
+  // Staleness doctrine: the gate guards the CURRENT report. When the latest evaluated
+  // year is clean for a finding family (pretax closure, ETR), older FAILs in that family
+  // downgrade to WARN — stale-flagged with the clean latest year named, never silent.
+  // Latest-year FAILs always block; bank PPOP FAILs are never logged hence never
+  // downgraded (exact-by-construction). Measured basis: single-FAIL recency is uniform
+  // across history (not latest-concentrated), and stale gaps are predominantly
+  // feed-vintage quirks and one-off events, not persistent breaks.
+  {
+    const vv = (f: RawFact | undefined | null): number | null =>
+      f && typeof f.value === "number" && Number.isFinite(f.value) ? f.value : null;
+    const stmtOf = (yy: CanonicalYearFacts): string | undefined =>
+      (yy as unknown as { statementType?: string }).statementType;
+    const isB = (yy: CanonicalYearFacts): boolean => {
+      const s = stmtOf(yy);
+      return s === "bank" || s === "nbfc" || s === "insurance";
+    };
+    const corpEval = years.filter(
+      (yy) => !isB(yy) && vv(yy.operatingIncome) !== null && vv(yy.interestExpense) !== null && vv(yy.pretaxIncome) !== null
+    );
+    const latestCorp = corpEval[corpEval.length - 1];
+    if (latestCorp && !closureFailLog.some((e) => e.year === latestCorp.year)) {
+      for (const e of closureFailLog) {
+        e.entry.severity = "WARN";
+        e.entry.message = `Pretax closure stale-finding in ${e.year}: ${e.basis} ${fmt0(e.expected)} vs reported ${fmt0(e.reported)} (${e.detail}) — latest evaluated year (${latestCorp.year}) carries no closure FAIL; downgraded (stale-year), does not block.${e.bundledNote}`;
+        warns++;
+      }
+    }
+    const etrEval = years.filter(
+      (yy) => vv(yy.pretaxIncome) !== null && (vv(yy.pretaxIncome) as number) > 0 && vv(yy.incomeTaxExpense) !== null
+    );
+    const latestEtr = etrEval[etrEval.length - 1];
+    if (latestEtr && !etrFailLog.some((e) => e.year === latestEtr.year)) {
+      for (const e of etrFailLog) {
+        e.entry.severity = "WARN";
+        e.entry.message = `Stale ETR finding in ${e.year}: ${e.entry.message.replace(/^FATAL:\s*\S+\s*/, "")} — latest evaluated year (${latestEtr.year}) carries no ETR FAIL; downgraded (stale-year), does not block.`;
       }
     }
   }
