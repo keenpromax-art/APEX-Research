@@ -16,6 +16,18 @@ import type { ArchetypeProfile } from "./company-archetype";
 import type { SectorProfile } from "./sectors/types";
 import { computeDriverForecast } from "./driver-models";
 import { resolveShareCount } from "./financial-provenance";
+import {
+  guardedDiv,
+  canonicalCAGR,
+  canonicalMargin,
+  computeFCFF,
+  discountFactor as kernelDiscountFactor,
+  gordonTerminalValue,
+  WACCFormulaEngine,
+  ProvenanceTrail,
+  type WACCInputs,
+  type DenominatorState,
+} from "./financial-kernel";
 
 const safe = (n: number, d = 0) =>
   isFinite(n) && !isNaN(n) ? n : d;
@@ -23,6 +35,9 @@ const safe = (n: number, d = 0) =>
 function div(a: number, b: number) {
   return b !== 0 ? a / b : 0;
 }
+
+/** Numeric value out of a kernel scalar (identical to legacy div/safe results). */
+const kval = (s: { value: number }) => s.value;
 
 // ─────────────────────────────────────────────
 // Ratio Analysis for each year
@@ -54,32 +69,34 @@ export function computeRatios(
     sharesOutstanding,
   } = fin;
 
-  // Profitability
-  const grossMargin = safe(div(grossProfit, revenue));
-  const ebitdaMargin = safe(div(ebitda, revenue));
-  const ebitMargin = safe(div(operatingIncome, revenue));
-  const netMargin = safe(div(netIncome, revenue));
-  const roe = safe(div(netIncome, totalEquity));
-  const roa = safe(div(netIncome, totalAssets));
+  // Profitability — every division routes through the kernel denominator
+  // state machine (numerics bit-identical to legacy div/safe; validity is
+  // exposed separately via computeRatioValidity, never silently valid).
+  const grossMargin = kval(canonicalMargin(grossProfit, revenue, "gross"));
+  const ebitdaMargin = kval(canonicalMargin(ebitda, revenue, "ebitda"));
+  const ebitMargin = kval(canonicalMargin(operatingIncome, revenue, "ebit"));
+  const netMargin = kval(canonicalMargin(netIncome, revenue, "net"));
+  const roe = kval(guardedDiv(netIncome, totalEquity, { label: "netIncome/totalEquity" }));
+  const roa = kval(guardedDiv(netIncome, totalAssets, { label: "netIncome/totalAssets" }));
   const capitalEmployed = totalAssets - currentLiabilities;
-  const roce = safe(div(operatingIncome, capitalEmployed));
+  const roce = kval(guardedDiv(operatingIncome, capitalEmployed, { label: "operatingIncome/capitalEmployed" }));
 
   // Efficiency
-  const assetTurnover = safe(div(revenue, totalAssets));
-  const fixedAssetTurnover = safe(div(revenue, netFixedAssets > 0 ? netFixedAssets : 1));
-  const wcTurnover = safe(div(revenue, netWorkingCapital !== 0 ? netWorkingCapital : 1));
-  const invTurnover = safe(div(revenue, inventory > 0 ? inventory : 1));
-  const arTurnover = safe(div(revenue, netReceivables > 0 ? netReceivables : 1));
+  const assetTurnover = kval(guardedDiv(revenue, totalAssets, { label: "revenue/totalAssets" }));
+  const fixedAssetTurnover = kval(guardedDiv(revenue, netFixedAssets > 0 ? netFixedAssets : 1, { label: "revenue/netFixedAssets" }));
+  const wcTurnover = kval(guardedDiv(revenue, netWorkingCapital !== 0 ? netWorkingCapital : 1, { label: "revenue/netWorkingCapital" }));
+  const invTurnover = kval(guardedDiv(revenue, inventory > 0 ? inventory : 1, { label: "revenue/inventory" }));
+  const arTurnover = kval(guardedDiv(revenue, netReceivables > 0 ? netReceivables : 1, { label: "revenue/netReceivables" }));
 
   // Leverage
-  const debtToEquity = safe(div(totalDebt, totalEquity));
-  const equityMultiplier = safe(div(totalAssets, totalEquity));
-  const interestCoverage = safe(div(operatingIncome, interestExpense > 0 ? interestExpense : 0.001));
+  const debtToEquity = kval(guardedDiv(totalDebt, totalEquity, { label: "totalDebt/totalEquity" }));
+  const equityMultiplier = kval(guardedDiv(totalAssets, totalEquity, { label: "totalAssets/totalEquity" }));
+  const interestCoverage = kval(guardedDiv(operatingIncome, interestExpense > 0 ? interestExpense : 0.001, { label: "operatingIncome/interestExpense" }));
   const netDebt = totalDebt - cash;
-  const netDebtToEbitda = safe(div(netDebt, ebitda > 0 ? ebitda : 0.001));
-  const totalDebtToAssets = safe(div(totalDebt, totalAssets));
-  const currentRatio = safe(div(currentAssets, currentLiabilities > 0 ? currentLiabilities : 1));
-  const quickRatio = safe(div(currentAssets - inventory, currentLiabilities > 0 ? currentLiabilities : 1));
+  const netDebtToEbitda = kval(guardedDiv(netDebt, ebitda > 0 ? ebitda : 0.001, { label: "netDebt/ebitda" }));
+  const totalDebtToAssets = kval(guardedDiv(totalDebt, totalAssets, { label: "totalDebt/totalAssets" }));
+  const currentRatio = kval(guardedDiv(currentAssets, currentLiabilities > 0 ? currentLiabilities : 1, { label: "currentAssets/currentLiabilities" }));
+  const quickRatio = kval(guardedDiv(currentAssets - inventory, currentLiabilities > 0 ? currentLiabilities : 1, { label: "quickAssets/currentLiabilities" }));
 
   // Valuation (at current market price utilizing historical period-specific shares outstanding)
   const periodShares = sharesOutstanding > 0 ? sharesOutstanding : 1;
@@ -125,6 +142,79 @@ export function computeRatios(
     dividendPayout,
     eps,
   };
+}
+
+export interface RatioValidity {
+  validity: DenominatorState;
+  /** Machine-readable reason, e.g. NEGATIVE_DENOMINATOR:totalEquity<0. */
+  reason: string;
+  /** Presentation directive — N_M renders N/M, never the number. */
+  display: "VALUE" | "N_M";
+  /** True when the numeric field was synthesized for lack of a share base. */
+  imputedShareBase: boolean;
+}
+
+export type RatioValidityMap = Record<string, RatioValidity>;
+
+const _v = (s: { validity: DenominatorState; reason: string; display: "VALUE" | "N_M" }, imputedShareBase = false): RatioValidity => ({
+  validity: s.validity,
+  reason: s.reason,
+  display: s.display,
+  imputedShareBase,
+});
+
+/**
+ * Validity sidecar for computeRatios (P0 #7, #8, #21).
+ * Numbers stay in `Ratios`; trust lives HERE. Negative/zero denominators
+ * (negative equity, zero revenue/shares) yield N_M — a −478% ROE on
+ * distressed equity can never again present as a valid measurement.
+ * Valuation multiples additionally record whether the share base was
+ * imputed (MISSING discipline: imputed ≠ reported).
+ */
+export function computeRatioValidity(fin: AnnualFinancials, cmp: number): RatioValidityMap {
+  const {
+    revenue, grossProfit, ebitda, operatingIncome, netIncome, totalEquity,
+    totalAssets, totalDebt, cash, netFixedAssets, netWorkingCapital,
+    currentAssets, currentLiabilities, netReceivables, inventory,
+    interestExpense, dividendsPaid, eps, sharesOutstanding,
+  } = fin;
+  const out: RatioValidityMap = {};
+  const rec = (key: string, s: { validity: DenominatorState; reason: string; display: "VALUE" | "N_M" }, imputed = false) => { out[key] = _v(s, imputed); };
+  rec("grossMargin", canonicalMargin(grossProfit, revenue, "gross"));
+  rec("ebitdaMargin", canonicalMargin(ebitda, revenue, "ebitda"));
+  rec("ebitMargin", canonicalMargin(operatingIncome, revenue, "ebit"));
+  rec("netMargin", canonicalMargin(netIncome, revenue, "net"));
+  rec("roe", guardedDiv(netIncome, totalEquity, { label: "netIncome/totalEquity" }));
+  rec("roa", guardedDiv(netIncome, totalAssets, { label: "netIncome/totalAssets" }));
+  rec("roce", guardedDiv(operatingIncome, totalAssets - currentLiabilities, { label: "operatingIncome/capitalEmployed" }));
+  rec("assetTurnover", guardedDiv(revenue, totalAssets, { label: "revenue/totalAssets" }));
+  rec("fixedAssetTurnover", guardedDiv(revenue, netFixedAssets, { label: "revenue/netFixedAssets" }));
+  rec("workingCapitalTurnover", guardedDiv(revenue, netWorkingCapital, { label: "revenue/netWorkingCapital" }));
+  rec("inventoryTurnover", guardedDiv(revenue, inventory, { label: "revenue/inventory" }));
+  rec("receivablesTurnover", guardedDiv(revenue, netReceivables, { label: "revenue/netReceivables" }));
+  rec("debtToEquity", guardedDiv(totalDebt, totalEquity, { label: "totalDebt/totalEquity" }));
+  rec("equityMultiplier", guardedDiv(totalAssets, totalEquity, { label: "totalAssets/totalEquity" }));
+  rec(
+    "interestCoverage",
+    (interestExpense || 0) <= 0
+      ? { validity: "NM" as DenominatorState, reason: "NO_DEBT:no-interest-expense", display: "N_M" as const }
+      : guardedDiv(operatingIncome, interestExpense, { label: "operatingIncome/interestExpense" })
+  );
+  rec("netDebtToEbitda", guardedDiv(totalDebt - cash, ebitda, { label: "netDebt/ebitda" }));
+  rec("totalDebtToAssets", guardedDiv(totalDebt, totalAssets, { label: "totalDebt/totalAssets" }));
+  rec("currentRatio", guardedDiv(currentAssets, currentLiabilities, { label: "currentAssets/currentLiabilities" }));
+  rec("quickRatio", guardedDiv(currentAssets - inventory, currentLiabilities, { label: "quickAssets/currentLiabilities" }));
+  // Valuation multiples are per-share constructs: no share base ⇒ MISSING.
+  const imputed = !(sharesOutstanding > 0);
+  const noBase = { validity: "NM" as DenominatorState, reason: "MISSING:sharesOutstanding≤0", display: "N_M" as const };
+  rec("pe", (eps || 0) > 0 && cmp > 0 && !imputed ? { validity: "VALID" as DenominatorState, reason: "OK:cmp/eps", display: "VALUE" as const } : ((eps || 0) <= 0 ? { validity: "NM" as DenominatorState, reason: "NON_POSITIVE_EARNINGS:eps≤0", display: "N_M" as const } : noBase), imputed);
+  rec("evToEbitda", (ebitda || 0) > 0 && !imputed ? { validity: "VALID" as DenominatorState, reason: "OK:ev/ebitda", display: "VALUE" as const } : ((ebitda || 0) <= 0 ? { validity: "NEGATIVE" as DenominatorState, reason: "NEGATIVE_DENOMINATOR:ebitda≤0", display: "N_M" as const } : noBase), imputed);
+  rec("pb", !imputed ? guardedDiv(cmp * (sharesOutstanding || 0), totalEquity, { label: "marketCap/totalEquity" }) : noBase, imputed);
+  rec("ps", !imputed ? guardedDiv(cmp * (sharesOutstanding || 0), revenue, { label: "marketCap/revenue" }) : noBase, imputed);
+  rec("bookValuePerShare", !imputed ? guardedDiv(totalEquity, sharesOutstanding || 0, { label: "totalEquity/shares" }) : noBase, imputed);
+  rec("dividendYield", cmp > 0 && !imputed ? { validity: "VALID" as DenominatorState, reason: "OK:dps/cmp", display: "VALUE" as const } : noBase, imputed);
+  rec("dividendPayout", (netIncome || 0) > 0 ? guardedDiv(dividendsPaid, netIncome, { label: "dividends/netIncome" }) : noBase, imputed);
+  return out;
 }
 
 // ─────────────────────────────────────────────
@@ -178,13 +268,26 @@ export function resolveCountryParams(country?: string): CountryCapitalParams {
   return { ...COUNTRY_CAPITAL_PARAMS.US, label: "Global default (US-anchored; override pending)" };
 }
 
-export function computeWACC(
+export interface WACCInputProvenance {
+  beta: string;
+  weights: string;
+  country: string;
+  spread: string;
+  clamp: string;
+}
+
+/**
+ * Input SOURCING for WACC (P0 #15 — methodology quarantined from formula).
+ * Every input records where it came from, including fallbacks, so the
+ * formula engine below can stay pure. Numeric outcomes are unchanged.
+ */
+export function sourceWACCInputs(
   stockData: StockData,
   fin: AnnualFinancials,
   archetypeProfile?: ArchetypeProfile,
   country?: string,
   annualFinancials?: AnnualFinancials[]
-): DCFAssumptions {
+): { inputs: WACCInputs; beta: number; distressSpread: number; provenance: WACCInputProvenance; countryLabel: string } {
   const cp = resolveCountryParams(country);
   const riskFreeRate = cp.riskFreeRate;
   const equityRiskPremium = cp.equityRiskPremium;
@@ -192,21 +295,22 @@ export function computeWACC(
   // Item 8: Sanity range check on beta before WACC calculation
   // Reject or clamp implausible-but-finite values (outside [0.35, 2.50])
   let rawBeta = stockData.beta;
+  let betaNote: string;
   if (rawBeta === undefined || rawBeta === null || !Number.isFinite(rawBeta) || rawBeta <= 0) {
     rawBeta = 0.85;
+    betaNote = "missing/invalid beta → 0.85 default (ASSUMPTION, not market-measured)";
   } else if (rawBeta < 0.35) {
     rawBeta = 0.35;
+    betaNote = "beta clamped to 0.35 floor";
   } else if (rawBeta > 2.50) {
     rawBeta = 2.50;
+    betaNote = "beta clamped to 2.50 cap";
+  } else {
+    betaNote = "reported beta, Blume-adjusted";
   }
   // Blume adjustment towards market portfolio mean of 1.0
   const blumeBeta = 0.67 * rawBeta + 0.33 * 1.0;
   const beta = Math.max(0.5, Math.min(1.8, Number(blumeBeta.toFixed(3))));
-  const costOfEquity = riskFreeRate + beta * equityRiskPremium;
-
-  const costOfDebtPreTax = cp.costOfDebtPreTax;
-  const marginalTaxRate = cp.marginalTaxRate;
-  const costOfDebtPostTax = costOfDebtPreTax * (1 - marginalTaxRate);
 
   // Resolved share base (market-cap cross-checked) so WACC weights agree with the DCF/ledger per-share base.
   const waccShares = (() => {
@@ -224,11 +328,57 @@ export function computeWACC(
 
   // Item 6: Sector / Archetype classification feeds into WACC risk spreads
   let distressSpread = 0.0;
+  let spreadNote = "no archetype spread";
   if (archetypeProfile?.archetype === "DISTRESSED") {
     distressSpread = 0.020; // +200 bps distress risk premium for highly levered / restructuring firms
+    spreadNote = "+200bps DISTRESSED archetype spread (ASSUMPTION)";
   } else if (archetypeProfile?.archetype === "EARLY_PLATFORM_GROWTH") {
     distressSpread = 0.015; // +150 bps platform cash-burn risk premium
+    spreadNote = "+150bps EARLY_PLATFORM_GROWTH spread (ASSUMPTION)";
   }
+
+  return {
+    inputs: {
+      riskFreeRate,
+      equityRiskPremium,
+      beta,
+      preTaxCostOfDebt: cp.costOfDebtPreTax,
+      marginalTaxRate: cp.marginalTaxRate,
+      equityWeight,
+    },
+    beta,
+    distressSpread,
+    provenance: {
+      beta: `${betaNote}; effective beta ${beta.toFixed(3)} after Blume 0.67/0.33 and [0.5, 1.8] clamp`,
+      weights: `market-cap weights from price ${stockData.currentPrice} × resolved shares ${waccShares.toFixed(0)} vs debt ${totalDebtVal.toFixed(0)}`,
+      country: `Country CAPM table v2026-09 (${cp.label})`,
+      spread: spreadNote,
+      clamp: "WACC clamped to [8.5%, 16%] institutional band",
+    },
+    countryLabel: cp.label,
+  };
+}
+
+export function computeWACC(
+  stockData: StockData,
+  fin: AnnualFinancials,
+  archetypeProfile?: ArchetypeProfile,
+  country?: string,
+  annualFinancials?: AnnualFinancials[]
+): DCFAssumptions {
+  const cp = resolveCountryParams(country);
+  const sourced = sourceWACCInputs(stockData, fin, archetypeProfile, country, annualFinancials);
+  const { inputs, beta, distressSpread, provenance } = sourced;
+  const riskFreeRate = inputs.riskFreeRate;
+  const equityRiskPremium = inputs.equityRiskPremium;
+  // Pure formula engine (P0 #15): identical arithmetic, independently re-solvable.
+  const formula = WACCFormulaEngine.compute(inputs);
+  const costOfEquity = formula.costOfEquity;
+  const costOfDebtPreTax = cp.costOfDebtPreTax;
+  const marginalTaxRate = cp.marginalTaxRate;
+  const costOfDebtPostTax = formula.costOfDebtPostTax;
+  const debtWeight = formula.debtWeight;
+  const equityWeight = formula.equityWeight;
 
   const baseWacc = costOfEquity * equityWeight + costOfDebtPostTax * debtWeight;
   const wacc = Math.max(0.085, Math.min(0.16, Number((baseWacc + distressSpread).toFixed(4))));
@@ -284,6 +434,7 @@ export function computeWACC(
     wacc,
     terminalGrowthRate: 0.04, // 4.0% long-term nominal GDP anchor — single source of truth
     parameterSource: `Country CAPM table v2026-09 (${cp.label})`,
+    inputProvenance: { ...provenance },
     revenueGrowthRates: [0.18, 0.16, 0.14, 0.12, 0.10],
     ebitMargins: [
       Math.min(effectiveMargin + 0.010, 0.26),
@@ -307,11 +458,15 @@ export function computeDCF(
 ): DCFResult {
   const latest = annualFinancials[annualFinancials.length - 1];
 
-  // Compute historical revenue CAGR
+  // Compute historical revenue CAGR via the universal kernel primitive
+  // (P0 #5 — identical mathematics; validity tracked, never asserted).
   const years = annualFinancials.length;
   const firstRev = annualFinancials[0]?.revenue || 1;
   const lastRev = latest.revenue;
-  const cagr = years > 1 ? Math.pow(lastRev / (firstRev || 1), 1 / (years - 1)) - 1 : 0.15;
+  const cagrScalar = years > 1
+    ? canonicalCAGR(firstRev || 1, lastRev, years - 1)
+    : { value: 0.15, validity: "NM" as DenominatorState, reason: "INSUFFICIENT_HISTORY:single-period-default-15%", display: "N_M" as const };
+  const cagr = cagrScalar.display === "VALUE" ? cagrScalar.value : 0.15;
 
   const assumptions = computeWACC(stockData, latest, archetypeProfile, country, annualFinancials);
 
@@ -391,9 +546,10 @@ export function computeDCF(
     const depreciation = revenue * avgDeptPct;
     const capex = revenue * Math.max(avgCapexPct, avgDeptPct * 1.1);
     const changeInWorkingCapital = revenue * avgNwcChangePct;
-    const fcff = nopat + depreciation - capex - changeInWorkingCapital;
-    const midYearConvention = i + 0.5;
-    const discountFactor = Math.pow(1 + wacc, -midYearConvention);
+    // Universal FCFF kernel (P0 #12 — identical arithmetic, formula-tagged).
+    const fcff = computeFCFF({ nopat, depreciation, capex, changeInWorkingCapital });
+    // Kernel mid-year discount (P0 #13 — bit-identical to legacy convention).
+    const discountFactor = kernelDiscountFactor(wacc, i);
     const pvFcff = fcff * discountFactor;
 
     const yearNum = new Date().getFullYear() + i + 1;
@@ -418,13 +574,18 @@ export function computeDCF(
 
   const sumPvFcff = projections.reduce((s, p) => s + p.pvFcff, 0);
   const terminalYearFcff = projections[4].fcff;
-  const rawTerminalValue = (terminalYearFcff * (1 + tg)) / Math.max(0.02, wacc - tg);
-
-  // Item 2: Hard cap on terminal value (25x terminal-year FCFF) as a second safeguard
-  const maxTerminalMultiple = 25.0;
-  const terminalValueCap = Math.max(0, terminalYearFcff * maxTerminalMultiple);
-  const isTvCapped = rawTerminalValue > terminalValueCap && terminalYearFcff > 0;
-  const terminalValue = isTvCapped ? terminalValueCap : rawTerminalValue;
+  // Gordon terminal value via the kernel (P0 #13, #14 — identical math plus
+  // explicit spread enforcement, 25× cap, and implied-margin sanity).
+  const tvResult = gordonTerminalValue({
+    terminalYearFcff,
+    wacc,
+    terminalGrowth: tg,
+    terminalRevenue: projections[4].revenue,
+    marginalTaxRate: taxRate,
+  });
+  const rawTerminalValue = tvResult.unadjustedTerminalValue;
+  const isTvCapped = tvResult.capped;
+  const terminalValue = tvResult.terminalValue;
   const pvTerminalValue = terminalValue * Math.pow(1 + wacc, -5);
   const enterpriseValue = sumPvFcff + pvTerminalValue;
 
@@ -459,6 +620,17 @@ export function computeDCF(
   }
   if (isTvCapped) {
     diagnostics.push(`Terminal value capped at 25.0x terminal-year FCFF safeguard (reduced from ${Math.round(rawTerminalValue / (terminalYearFcff || 1))}x).`);
+  }
+  // Kernel terminal-guard diagnostics (spread enforcement, margin sanity).
+  for (const d of tvResult.diagnostics) {
+    if (!diagnostics.some((x) => x.includes("Terminal value capped") && d.includes("capped at"))) diagnostics.push(d);
+  }
+  // TV-concentration flag: a valuation that is almost entirely terminal value
+  // is a perpetuity bet, not a 5-year forecast — disclosed, never silent.
+  if (enterpriseValue > 0 && pvTerminalValue / enterpriseValue > 0.85) {
+    diagnostics.push(
+      `Terminal value is ${((pvTerminalValue / enterpriseValue) * 100).toFixed(0)}% of enterprise value — valuation is terminal-driven; treat explicit-period precision accordingly.`
+    );
   }
 
   let status: "valid" | "insufficient_data" | "invalid_inputs" | "calculation_error" = "valid";
@@ -523,11 +695,42 @@ export function computeDCF(
     driverEquation: driver.driverEquation,
   };
 
+  // Structured derivation trail (P0 #20): every bridge value carries its
+  // formula id + version, named inputs with source IDs, and transform.
+  const trail = new ProvenanceTrail();
+  trail.trace("sumPvFcff", "cashflow.fcff", projections.map((p, i) => ({ name: `fcff[Y${i + 1}]`, value: Math.round(p.fcff), sourceId: `dcf.projections[${i}].fcff` })), "mid-year discount Σ fcff×(1+wacc)^-(i+0.5)");
+  trail.trace("terminalValue", "valuation.gordonTV", [
+    { name: "fcffT", value: Math.round(terminalYearFcff), sourceId: "dcf.projections[4].fcff" },
+    { name: "wacc", value: wacc, sourceId: "dcf.assumptions.wacc" },
+    { name: "terminalGrowth", value: tg, sourceId: "dcf.assumptions.terminalGrowthRate" },
+  ], tvResult.capped ? "Gordon value, 25× terminal-FCFF cap applied" : "Gordon value, uncapped");
+  trail.trace("enterpriseValue", "valuation.gordonTV", [
+    { name: "sumPvFcff", value: Math.round(sumPvFcff), sourceId: "dcf.sumPvFcff" },
+    { name: "pvTerminalValue", value: Math.round(pvTerminalValue), sourceId: "dcf.pvTerminalValue" },
+  ], "EV = ΣPV(FCFF) + PV(TV)");
+  trail.trace("netDebt", "capital.netDebt", [
+    { name: "grossDebt", value: latestDebt, sourceId: "statements.totalDebt" },
+    { name: "cash", value: latestCash, sourceId: "statements.cash+shortTermInvestments" },
+    { name: "financeReceivablesOffset", value: financeReceivablesOffset, sourceId: "dcf.financeReceivablesOffset" },
+  ], "netDebt = grossDebt − cash − verified offset");
+  trail.trace("equityValue", "valuation.gordonTV", [
+    { name: "enterpriseValue", value: Math.round(enterpriseValue), sourceId: "dcf.enterpriseValue" },
+    { name: "netDebt", value: Math.round(netDebt), sourceId: "dcf.netDebt" },
+  ], "equity = EV − netDebt");
+  trail.trace("intrinsicValue", "valuation.perShare", [
+    { name: "equityValue", value: Math.round(equityValue), sourceId: "dcf.equityValue" },
+    { name: "dilutedShares", value: sharesOutstanding, sourceId: "marketIntegrity.resolveShareCount" },
+  ], "per-share = equity / resolved shares");
+
   return {
     status,
     diagnostics,
     assumptions,
     assumptionBasis,
+    derivationTrail: trail.all(),
+    avgCapexPct,
+    avgDeptPct,
+    avgNwcChangePct,
     projections,
     sumPvFcff,
     terminalYearFcff,

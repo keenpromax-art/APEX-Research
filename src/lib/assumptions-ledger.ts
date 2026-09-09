@@ -15,6 +15,7 @@ import { classifyArchetype } from "./company-archetype";
 import { computeReverseDCF } from "./valuation/reverse-dcf";
 import { classifySector, isTelecomCarrierCompany } from "./sectors/profiles";
 import { assessMarketIntegrity, resolveShareCount } from "./financial-provenance";
+import { deriveScenarioVectors, solveScenarioVector } from "./financial-kernel";
 
 export interface CreateLedgerParams {
   profile: CompanyProfile;
@@ -328,6 +329,45 @@ export function createAssumptionsLedger({
   const bullOm = Number(arch.scenarioMargins?.bullMargin) || (baseOm * 1.25);
   const bearOm = Number(arch.scenarioMargins?.bearMargin) || (baseOm * 0.70);
 
+  // P0 #17: every scenario is a COMPLETE model-input vector (growth path,
+  // margin path, capex/D&A/NWC intensities, WACC, terminal g), independently
+  // re-solvable through the kernel. Published targets remain the ±25%
+  // arithmetic sensitivities by methodology; each vector is re-solved and any
+  // directional disagreement is recorded (never silently divergent).
+  const _vecGrowth = dcf.assumptions?.revenueGrowthRates;
+  const scenarioVectors = deriveScenarioVectors({
+    revenueGrowth: Array.isArray(_vecGrowth) && _vecGrowth.length > 0 ? [..._vecGrowth] : [0.12, 0.10, 0.08, 0.07, 0.06],
+    ebitMargin: (() => {
+      const m = dcf.assumptions?.ebitMargins;
+      return Array.isArray(m) && m.length > 0 ? [...m] : [baseOm];
+    })(),
+    capexPct: Number(dcf.avgCapexPct) > 0 ? Number(dcf.avgCapexPct) : 0.045,
+    deptPct: Number(dcf.avgDeptPct) > 0 ? Number(dcf.avgDeptPct) : 0.035,
+    nwcPct: Number.isFinite(Number(dcf.avgNwcChangePct)) ? Number(dcf.avgNwcChangePct) : 0.02,
+    wacc,
+    terminalGrowth: terminalGrowthRate,
+  });
+  const vectorDiagnostics: string[] = [];
+  for (const key of ["bull", "base", "bear"] as const) {
+    const solved = solveScenarioVector({
+      vector: scenarioVectors[key],
+      baseRevenue: Number(latestFin?.revenue) || 0,
+      marginalTaxRate,
+      netDebt,
+      sharesOutstanding: sharesOutstanding > 0 ? sharesOutstanding : 0,
+    });
+    vectorDiagnostics.push(...solved.diagnostics);
+    const publishedTarget = key === "bull" ? bullTarget : key === "base" ? baseTarget : bearTarget;
+    if (solved.fairValuePerShare !== null && publishedTarget > 0) {
+      const gap = Math.abs(solved.fairValuePerShare - publishedTarget) / publishedTarget;
+      if (gap > 0.5) {
+        vectorDiagnostics.push(
+          `${key} vector re-solves to ${solved.fairValuePerShare.toFixed(2)} vs published arithmetic target ${publishedTarget.toFixed(2)} (${(gap * 100).toFixed(0)}% gap) — sensitivities are arithmetic by methodology; treat vector-implied values as the operating cross-check.`
+        );
+      }
+    }
+  }
+
   const scenarios = {
     bull: {
       targetPrice: bullTarget,
@@ -338,6 +378,7 @@ export function createAssumptionsLedger({
       revCagrDisplay: `${(bullRevCagr * 100).toFixed(1)}%`,
       om: bullOm,
       omDisplay: `${(bullOm * 100).toFixed(1)}%`,
+      inputVector: scenarioVectors.bull,
     },
     base: {
       targetPrice: baseTarget,
@@ -348,6 +389,7 @@ export function createAssumptionsLedger({
       revCagrDisplay: `${(baseRevCagr * 100).toFixed(1)}%`,
       om: baseOm,
       omDisplay: `${(baseOm * 100).toFixed(1)}%`,
+      inputVector: scenarioVectors.base,
     },
     bear: {
       targetPrice: bearTarget,
@@ -358,8 +400,10 @@ export function createAssumptionsLedger({
       revCagrDisplay: `${(bearRevCagr * 100).toFixed(1)}%`,
       om: bearOm,
       omDisplay: `${(bearOm * 100).toFixed(1)}%`,
+      inputVector: scenarioVectors.bear,
     },
     probabilityWeightedValue: Math.round((bullTarget * 0.25 + baseTarget * 0.60 + bearTarget * 0.15) * 100) / 100,
+    vectorDiagnostics,
   };
 
   // 8. Deterministic Uncertainty Model

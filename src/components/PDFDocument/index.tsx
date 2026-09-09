@@ -34,6 +34,7 @@ import type {
   EventPriceTrajectoryPoint,
 } from "@/types/report";
 import { formatPct } from "@/lib/calculations";
+import { revalueSensitivity } from "@/lib/financial-kernel";
 import { generatePEFirmAnalysis } from "@/lib/pe-analysis-engine";
 import { buildEventPriceMovements } from "@/lib/event-price-engine";
 import {
@@ -68,6 +69,23 @@ const fmtPct = (n: number) =>
 
 const fmtMult = (n: number) =>
   isFinite(n) && !isNaN(n) && n !== 0 ? `${n.toFixed(1)}x` : "—";
+
+/** Null-safe variants (P0 #21 — missing stays "N/A", never a default number). */
+const fmtPctNA = (v: number | null | undefined): string =>
+  v === null || v === undefined || !isFinite(v) ? "N/A" : fmtPct(v);
+const fmtMultNA = (v: number | null | undefined): string =>
+  v === null || v === undefined || !isFinite(v) || v === 0 ? "N/A" : fmtMult(v);
+/**
+ * Denominator-state display for return-on-base ratios (P0 #8): a non-positive
+ * base or absurd magnitude renders N/M — a −478% ROE on distressed equity
+ * can never print as a measurement.
+ */
+const guardedRoePct = (roe: number | null | undefined, base: number | null | undefined): string => {
+  if (roe === null || roe === undefined || !isFinite(roe)) return "N/A";
+  if (base === null || base === undefined || !(base > 0)) return "N/M";
+  if (Math.abs(roe) > 3) return "N/M";
+  return fmtPct(roe);
+};
 
 const fmtBig = (n: number, currency = "USD") => {
   if (!isFinite(n) || isNaN(n) || n === 0) return "—";
@@ -221,7 +239,10 @@ const getInstitutionalKPIs = (data: ReportData) => {
   const fv = v.fv;
   const beta = ledger ? ledger.beta : (data.stockData.beta || 1.0);
   const latest = data.annualFinancials[data.annualFinancials.length - 1];
-  const roe = latest && latest.totalEquity > 0 ? latest.netIncome / latest.totalEquity : 0.16;
+  // P0 #21: no 16% synthetic ROE — unevidenced return on equity stays missing.
+  const roe = latest && latest.totalEquity > 0 && Number.isFinite(latest.netIncome / latest.totalEquity)
+    ? latest.netIncome / latest.totalEquity
+    : null;
 
   const ratio = fv > 0 ? cmp / fv : 1;
   let stars = "★★★☆☆";
@@ -1814,10 +1835,25 @@ const FundamentalAnalysisPage = ({ data }: { data: ReportData }) => {
             const tg = data.dcf.assumptions?.terminalGrowthRate || 0.04;
             const tgCols = [tg - 0.015, tg - 0.005, tg, tg + 0.005, tg + 0.015];
             const waccRows = [wb + 0.02, wb + 0.01, wb, wb - 0.01, wb - 0.02];
-            const sens = (w: number, t: number) => {
-              const base = Math.max(0.02, wb - tg);
-              const adj  = Math.max(0.02, w - t);
-              return fv * (base / adj);
+            // P0 #16: every cell is an independent kernel revaluation of the
+            // explicit-period stream + Gordon terminal under (w, t) — never a
+            // proportional scaling of base FV (which misstates value whenever
+            // the explicit period carries weight).
+            const sensFcffs = (data.dcf.projections || []).map((p) => Number(p.fcff) || 0);
+            const sensTvFcff = Number(data.dcf.terminalYearFcff) || 0;
+            const sensNetDebt = Number(data.dcf.netDebt ?? 0) || 0;
+            const sensShares = Number(data.dcf.sharesOutstanding) || 0;
+            const sens = (w: number, t: number): number | null => {
+              if (sensFcffs.length === 0 || sensShares <= 0) return null;
+              const r = revalueSensitivity({
+                fcffs: sensFcffs,
+                terminalYearFcff: sensTvFcff,
+                wacc: w,
+                terminalGrowth: t,
+                netDebt: sensNetDebt,
+                sharesOutstanding: sensShares,
+              });
+              return r.fairValuePerShare;
             };
             return (
               <>
@@ -1834,11 +1870,14 @@ const FundamentalAnalysisPage = ({ data }: { data: ReportData }) => {
                     <Text style={[ri === 2 ? S.compactCellBold : S.compactCell, { width: "20%" }]}>
                       {`${(w * 100).toFixed(1)}%${ri === 2 ? " (Base)" : ""}`}
                     </Text>
-                    {tgCols.map((t, ci) => (
-                      <Text key={ci} style={[ri === 2 && ci === 2 ? S.compactCellBoldRight : S.compactCellRight, { width: "16%", color: ri === 2 && ci === 2 ? COLORS.primaryRed : undefined }]}>
-                        {`${sym}${fmtNum(sens(w, t), 1)}`}
-                      </Text>
-                    ))}
+                    {tgCols.map((t, ci) => {
+                      const cell = sens(w, t);
+                      return (
+                        <Text key={ci} style={[ri === 2 && ci === 2 ? S.compactCellBoldRight : S.compactCellRight, { width: "16%", color: ri === 2 && ci === 2 ? COLORS.primaryRed : undefined }]}>
+                          {cell === null || !Number.isFinite(cell) ? "N/A" : `${sym}${fmtNum(cell, 1)}`}
+                        </Text>
+                      );
+                    })}
                   </View>
                 ))}
               </>
@@ -5413,28 +5452,39 @@ const ComparableCompanyAnalysisPage1 = ({ data }: { data: ReportData }) => {
           <Text style={[S.compactCellHeaderRight, { width: "20%" }]}>Dividend Yield %</Text>
         </View>
         {peers.map((p, i) => {
-          const roeVal = p.roe != null && p.roe !== 0 ? p.roe : (p.pb != null && p.pe != null && p.pe > 0 ? p.pb / p.pe : 0.125);
-          const roicVal = roeVal * 0.78;
-          const adjRoicVal = roeVal * 0.88;
-          const divVal = p.dividendYield != null ? fmtPct(p.dividendYield) : (roeVal > 0.12 ? "1.4%" : "0.0%");
+          // P0 #21: reported ROE only (pb/pe identity is legitimate derivation);
+          // ROIC needs invested-capital detail peers don't disclose → N/A, never a ladder.
+          const roeRep = p.roe != null && Number.isFinite(p.roe) && p.roe !== 0 ? p.roe : (p.pb != null && p.pe != null && p.pe > 0 ? p.pb / p.pe : null);
+          const divRep = p.dividendYield != null && Number.isFinite(p.dividendYield) ? fmtPct(p.dividendYield) : "N/A";
           return (
             <View key={i} style={i % 2 === 0 ? S.compactRow : S.compactRowAlt}>
               <Text style={[S.compactCellBold, { width: "26%" }]}>{p.name} ({p.ticker})</Text>
-              <Text style={[S.compactCellRight, { width: "18%" }]}>{fmtPct(roicVal)}</Text>
-              <Text style={[S.compactCellRight, { width: "18%" }]}>{fmtPct(adjRoicVal)}</Text>
-              <Text style={[S.compactCellRight, { width: "18%" }]}>{fmtPct(roeVal)}</Text>
-              <Text style={[S.compactCellRight, { width: "20%" }]}>{divVal}</Text>
+              <Text style={[S.compactCellRight, { width: "18%" }]}>N/A</Text>
+              <Text style={[S.compactCellRight, { width: "18%" }]}>N/A</Text>
+              <Text style={[S.compactCellRight, { width: "18%" }]}>{fmtPctNA(roeRep)}</Text>
+              <Text style={[S.compactCellRight, { width: "20%" }]}>{divRep}</Text>
             </View>
           );
         })}
-        <View style={[S.compactRow, { backgroundColor: "#fef3c7", borderTopWidth: 1, borderTopColor: COLORS.slateDark }]}>
-          <Text style={[S.compactCellBold, { width: "26%", color: COLORS.primaryRed }]}>{data.profile.name} ({subjectTicker})</Text>
-          <Text style={[S.compactCellBold, { width: "18%", textAlign: "right" }]}>{fmtPct(ledger?.roic ?? data.ratiosByYear[data.ratiosByYear.length - 1]?.roce ?? 0.12)}</Text>
-          <Text style={[S.compactCellBold, { width: "18%", textAlign: "right" }]}>{fmtPct((ledger?.roic ?? data.ratiosByYear[data.ratiosByYear.length - 1]?.roce ?? 0.12) * 1.1)}</Text>
-          <Text style={[S.compactCellBold, { width: "18%", textAlign: "right" }]}>{fmtPct(data.dupontByYear[data.dupontByYear.length - 1]?.roe || data.stockData.returnOnEquity || 0)}</Text>
-          <Text style={[S.compactCellBold, { width: "20%", textAlign: "right" }]}>{fmtPct(data.stockData.dividendYield)}</Text>
-        </View>
+        {(() => {
+          const subjFin = data.annualFinancials[data.annualFinancials.length - 1];
+          const subjRoic = ledger?.roic ?? data.ratiosByYear[data.ratiosByYear.length - 1]?.roce ?? null;
+          const subjRoe = data.dupontByYear[data.dupontByYear.length - 1]?.roe ?? data.stockData.returnOnEquity ?? null;
+          const subjEq = subjFin?.totalEquity ?? null;
+          return (
+            <View style={[S.compactRow, { backgroundColor: "#fef3c7", borderTopWidth: 1, borderTopColor: COLORS.slateDark }]}>
+              <Text style={[S.compactCellBold, { width: "26%", color: COLORS.primaryRed }]}>{data.profile.name} ({subjectTicker})</Text>
+              <Text style={[S.compactCellBold, { width: "18%", textAlign: "right" }]}>{fmtPctNA(subjRoic)}</Text>
+              <Text style={[S.compactCellBold, { width: "18%", textAlign: "right" }]}>N/A</Text>
+              <Text style={[S.compactCellBold, { width: "18%", textAlign: "right" }]}>{guardedRoePct(subjRoe, subjEq)}</Text>
+              <Text style={[S.compactCellBold, { width: "20%", textAlign: "right" }]}>{fmtPctNA(data.stockData.dividendYield)}</Text>
+            </View>
+          );
+        })()}
       </View>
+      <Text style={{ fontSize: 4.6, color: COLORS.textMuted, marginTop: 1, marginBottom: 5 }}>
+        N/A = not disclosed (never estimated). Peer ROIC requires invested-capital detail peer filings lack; ROE prints only on reported base with positive equity.
+      </Text>
 
       <Text style={{ fontSize: 7.2, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2 }}>
         Growth Analysis
@@ -5448,25 +5498,34 @@ const ComparableCompanyAnalysisPage1 = ({ data }: { data: ReportData }) => {
           <Text style={[S.compactCellHeaderRight, { width: "20%" }]}>FCF Growth %</Text>
         </View>
         {peers.map((p, i) => {
-          const gVal = p.revenueGrowth != null ? p.revenueGrowth : (p.roe != null && p.roe > 0 ? p.roe * 0.6 : 0.08);
+          // P0 #21: reported revenue growth only — EBIT/EPS/FCF ladders off it had no basis.
+          const gRep = p.revenueGrowth != null && Number.isFinite(p.revenueGrowth) ? p.revenueGrowth : null;
           return (
             <View key={i} style={i % 2 === 0 ? S.compactRow : S.compactRowAlt}>
               <Text style={[S.compactCellBold, { width: "26%" }]}>{p.name} ({p.ticker})</Text>
-              <Text style={[S.compactCellRight, { width: "18%" }]}>{fmtPct(gVal)}</Text>
-              <Text style={[S.compactCellRight, { width: "18%" }]}>{fmtPct(gVal * 1.05)}</Text>
-              <Text style={[S.compactCellRight, { width: "18%" }]}>{fmtPct(gVal * 1.12)}</Text>
-              <Text style={[S.compactCellRight, { width: "20%" }]}>{fmtPct(gVal * 0.95)}</Text>
+              <Text style={[S.compactCellRight, { width: "18%" }]}>{fmtPctNA(gRep)}</Text>
+              <Text style={[S.compactCellRight, { width: "18%" }]}>N/A</Text>
+              <Text style={[S.compactCellRight, { width: "18%" }]}>N/A</Text>
+              <Text style={[S.compactCellRight, { width: "20%" }]}>N/A</Text>
             </View>
           );
         })}
-        <View style={[S.compactRow, { backgroundColor: "#fef3c7", borderTopWidth: 1, borderTopColor: COLORS.slateDark }]}>
-          <Text style={[S.compactCellBold, { width: "26%", color: COLORS.primaryRed }]}>{data.profile.name} ({subjectTicker})</Text>
-          <Text style={[S.compactCellBoldRight, { width: "18%" }]}>{fmtPct(data.stockData.revenueGrowth || 0.08)}</Text>
-          <Text style={[S.compactCellBoldRight, { width: "18%" }]}>{fmtPct((data.stockData.revenueGrowth || 0.08) * 1.08)}</Text>
-          <Text style={[S.compactCellBoldRight, { width: "18%" }]}>{fmtPct((data.stockData.revenueGrowth || 0.08) * 1.15)}</Text>
-          <Text style={[S.compactCellBoldRight, { width: "20%" }]}>{fmtPct(data.stockData.revenueGrowth || 0.08)}</Text>
-        </View>
+        {(() => {
+          const subjG = data.stockData.revenueGrowth != null && Number.isFinite(data.stockData.revenueGrowth) ? data.stockData.revenueGrowth : null;
+          return (
+            <View style={[S.compactRow, { backgroundColor: "#fef3c7", borderTopWidth: 1, borderTopColor: COLORS.slateDark }]}>
+              <Text style={[S.compactCellBold, { width: "26%", color: COLORS.primaryRed }]}>{data.profile.name} ({subjectTicker})</Text>
+              <Text style={[S.compactCellBoldRight, { width: "18%" }]}>{fmtPctNA(subjG)}</Text>
+              <Text style={[S.compactCellBoldRight, { width: "18%" }]}>N/A</Text>
+              <Text style={[S.compactCellBoldRight, { width: "18%" }]}>N/A</Text>
+              <Text style={[S.compactCellBoldRight, { width: "20%" }]}>N/A</Text>
+            </View>
+          );
+        })()}
       </View>
+      <Text style={{ fontSize: 4.6, color: COLORS.textMuted, marginTop: 1, marginBottom: 6 }}>
+        N/A = not disclosed (never estimated). EBIT/EPS/FCF growth are shown only where directly reported.
+      </Text>
 
       {/* Table 4: Enterprise Value & Market Multiples Dislocation Analysis */}
       <Text style={{ fontSize: 7.2, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2 }}>
@@ -5481,40 +5540,47 @@ const ComparableCompanyAnalysisPage1 = ({ data }: { data: ReportData }) => {
           <Text style={[S.compactCellHeaderRight, { width: "20%" }]}>FCF Yield %</Text>
         </View>
         {peers.map((p, i) => {
-          const evEbitda = p.evToEbitda != null && p.evToEbitda > 0 ? p.evToEbitda : (p.pe != null && p.pe > 0 ? p.pe * 0.72 : 12.0);
-          const evSales = p.evToSales != null && p.evToSales > 0 ? p.evToSales : Math.max(0.8, evEbitda * 0.35);
-          const evEbit = evEbitda * 1.3;
-          const pbVal = p.pb != null && p.pb > 0 ? p.pb : (p.pe != null && p.pe > 0 ? p.pe * 0.12 : 2.5);
-          const fcfYield = p.pe != null && p.pe > 0 ? 1 / p.pe : 0.045;
+          // P0 #21: reported multiples only — 12.0×/0.72×/1.3×/2.5×/4.5% ladders removed.
+          const evEbitdaRep = p.evToEbitda != null && Number.isFinite(p.evToEbitda) && p.evToEbitda > 0 ? p.evToEbitda : null;
+          const evSalesRep = p.evToSales != null && Number.isFinite(p.evToSales) && p.evToSales > 0 ? p.evToSales : null;
+          const pbRep = p.pb != null && Number.isFinite(p.pb) && p.pb > 0 ? p.pb : null;
+          const fcfYieldRep = p.pe != null && Number.isFinite(p.pe) && p.pe > 0 ? 1 / p.pe : null;
           return (
             <View key={i} style={i % 2 === 0 ? S.compactRow : S.compactRowAlt}>
               <Text style={[S.compactCellBold, { width: "26%" }]}>{p.name} ({p.ticker})</Text>
-              <Text style={[S.compactCellRight, { width: "18%" }]}>{fmtMult(evSales)}</Text>
-              <Text style={[S.compactCellRight, { width: "18%" }]}>{fmtMult(evEbit)}</Text>
-              <Text style={[S.compactCellRight, { width: "18%" }]}>{fmtMult(pbVal)}</Text>
-              <Text style={[S.compactCellRight, { width: "20%" }]}>{fmtPct(fcfYield)}</Text>
+              <Text style={[S.compactCellRight, { width: "18%" }]}>{fmtMultNA(evSalesRep)}</Text>
+              <Text style={[S.compactCellRight, { width: "18%" }]}>{fmtMultNA(evEbitdaRep)}</Text>
+              <Text style={[S.compactCellRight, { width: "18%" }]}>{fmtMultNA(pbRep)}</Text>
+              <Text style={[S.compactCellRight, { width: "20%" }]}>{fmtPctNA(fcfYieldRep)}</Text>
             </View>
           );
         })}
         <View style={[S.compactRow, { backgroundColor: "#fef3c7", borderTopWidth: 1, borderTopColor: COLORS.slateDark }]}>
           <Text style={[S.compactCellBold, { width: "26%", color: COLORS.primaryRed }]}>{data.profile.name} ({subjectTicker})</Text>
           <Text style={[S.compactCellBoldRight, { width: "18%" }]}>{(() => {
-            const rawEv = data.dcf?.enterpriseValue || data.stockData?.enterpriseValue || (data.stockData.marketCap ? data.stockData.marketCap * 1.05 : 0);
-            const rev = data.annualFinancials[data.annualFinancials.length - 1]?.revenue || (data.stockData.ps > 0 ? data.stockData.marketCap / data.stockData.ps : 1);
-            const mult = rev > 0 && rawEv > 0 ? rawEv / rev : 2.8;
-            return fmtMult(mult);
+            const rawEv = (data.dcf?.enterpriseValue || 0) > 0 ? data.dcf.enterpriseValue : (data.stockData?.enterpriseValue || 0) > 0 ? data.stockData.enterpriseValue : null;
+            const rev = data.annualFinancials[data.annualFinancials.length - 1]?.revenue ?? null;
+            if (rawEv === null || rev === null || !(rev > 0) || !(rawEv > 0)) return "N/A";
+            return fmtMult(rawEv / rev);
           })()}</Text>
           <Text style={[S.compactCellBoldRight, { width: "18%" }]}>{(() => {
-            const rawEv = data.dcf?.enterpriseValue || data.stockData?.enterpriseValue || (data.stockData.marketCap ? data.stockData.marketCap * 1.05 : 0);
-            const rev = data.annualFinancials[data.annualFinancials.length - 1]?.revenue || (data.stockData.ps > 0 ? data.stockData.marketCap / data.stockData.ps : 1);
-            const ebit = data.annualFinancials[data.annualFinancials.length - 1]?.operatingIncome || (rev * (data.stockData.operatingMargins || 0.12));
-            const mult = ebit > 0 && rawEv > 0 ? rawEv / ebit : 18.5;
-            return fmtMult(mult);
+            const rawEv = (data.dcf?.enterpriseValue || 0) > 0 ? data.dcf.enterpriseValue : (data.stockData?.enterpriseValue || 0) > 0 ? data.stockData.enterpriseValue : null;
+            const ebit = data.annualFinancials[data.annualFinancials.length - 1]?.operatingIncome ?? null;
+            if (rawEv === null || ebit === null || !(ebit > 0) || !(rawEv > 0)) return "N/A";
+            return fmtMult(rawEv / ebit);
           })()}</Text>
-          <Text style={[S.compactCellBoldRight, { width: "18%" }]}>{fmtMult(data.stockData.priceToBook || 3.4)}</Text>
-          <Text style={[S.compactCellBoldRight, { width: "20%" }]}>{fmtPct((data.annualFinancials[data.annualFinancials.length - 1]?.freeCashFlow || 0) / Math.max(1, data.stockData.marketCap || 1e9))}</Text>
+          <Text style={[S.compactCellBoldRight, { width: "18%" }]}>{fmtMultNA(data.stockData.priceToBook > 0 ? data.stockData.priceToBook : null)}</Text>
+          <Text style={[S.compactCellBoldRight, { width: "20%" }]}>{(() => {
+            const fcf = data.annualFinancials[data.annualFinancials.length - 1]?.freeCashFlow;
+            const mc = data.stockData.marketCap;
+            if (fcf === null || fcf === undefined || !Number.isFinite(fcf) || !(mc > 0)) return "N/A";
+            return fmtPct(fcf / mc);
+          })()}</Text>
         </View>
       </View>
+      <Text style={{ fontSize: 4.6, color: COLORS.textMuted, marginTop: 1, marginBottom: 5 }}>
+        N/A = not disclosed (never estimated). Peer multiples print only when directly reported; derived ladders are prohibited.
+      </Text>
 
       {/* Dense 2-Column Buy-Side Relative Valuation Synthesis Box */}
       <View style={{ padding: 5, backgroundColor: COLORS.offWhite, borderWidth: 0.5, borderColor: COLORS.hairlineLight }}>
@@ -5743,11 +5809,12 @@ const ComparableCompanyAnalysisPage2 = ({ data }: { data: ReportData }) => {
           const totalDebt = (data.dcf?.totalDebt ?? latestFin?.totalDebt) || 0;
           const cashAndEquiv = (data.dcf?.cashAndEquiv ?? latestFin?.cash) || 0;
           const isNetCash = cashAndEquiv >= totalDebt;
-          const equity = latestFin?.totalEquity || (data.stockData.marketCap > 0 ? data.stockData.marketCap : 1);
-          const auditedDebtToEquity = equity > 0 ? totalDebt / equity : 0;
-          const auditedDebtToCap = (totalDebt + equity) > 0 ? totalDebt / (totalDebt + equity) : 0;
-          const deStr = isNetCash && totalDebt === 0 ? "0.0% (Net Cash)" : fmtPct(auditedDebtToEquity);
-          const dcStr = isNetCash ? "0.0% (Net Cash)" : fmtPct(auditedDebtToCap);
+          // P0 #21: market cap is NOT equity — no marketCap-as-equity substitution.
+          const equity = latestFin?.totalEquity ?? null;
+          const auditedDebtToEquity = equity !== null && equity > 0 ? totalDebt / equity : null;
+          const auditedDebtToCap = equity !== null && (totalDebt + equity) > 0 ? totalDebt / (totalDebt + equity) : null;
+          const deStr = isNetCash && totalDebt === 0 ? "0.0% (Net Cash)" : fmtPctNA(auditedDebtToEquity);
+          const dcStr = isNetCash ? "0.0% (Net Cash)" : fmtPctNA(auditedDebtToCap);
 
           return (
             <View style={[S.compactRow, { backgroundColor: "#fef3c7", borderTopWidth: 1, borderTopColor: COLORS.slateDark }]}>
@@ -5755,7 +5822,7 @@ const ComparableCompanyAnalysisPage2 = ({ data }: { data: ReportData }) => {
               <Text style={[S.compactCellBoldRight, { width: "18%" }]}>{deStr}</Text>
               <Text style={[S.compactCellBoldRight, { width: "18%" }]}>{dcStr}</Text>
               <Text style={[S.compactCellBoldRight, { width: "18%" }]}>{latestFin?.interestExpense && latestFin.interestExpense > 0 ? `${fmtNum((latestFin?.ebitda || 0) / latestFin.interestExpense, 1)}x` : "N/M"}</Text>
-              <Text style={[S.compactCellBoldRight, { width: "20%" }]}>{fmtMult(data.dupontByYear[data.dupontByYear.length - 1]?.equityMultiplier || (equity > 0 && latestFin?.totalAssets ? latestFin.totalAssets / equity : 1.45))}</Text>
+              <Text style={[S.compactCellBoldRight, { width: "20%" }]}>{fmtMultNA(data.dupontByYear[data.dupontByYear.length - 1]?.equityMultiplier ?? (equity > 0 && latestFin?.totalAssets ? latestFin.totalAssets / equity : null))}</Text>
             </View>
           );
         })()}
@@ -5787,8 +5854,8 @@ const ComparableCompanyAnalysisPage2 = ({ data }: { data: ReportData }) => {
         })}
         <View style={[S.compactRow, { backgroundColor: "#fef3c7", borderTopWidth: 1, borderTopColor: COLORS.slateDark }]}>
           <Text style={[S.compactCellBold, { width: "26%", color: COLORS.primaryRed }]}>{data.profile.name} ({subjectTicker})</Text>
-          <Text style={[S.compactCellBoldRight, { width: "18%" }]}>{fmtMult(data.stockData.currentRatio || data.ratiosByYear[data.ratiosByYear.length - 1]?.currentRatio || 1.0)}</Text>
-          <Text style={[S.compactCellBoldRight, { width: "18%" }]}>{fmtMult((data.stockData.currentRatio || 1.0) * 0.85)}</Text>
+          <Text style={[S.compactCellBoldRight, { width: "18%" }]}>{fmtMultNA(data.stockData.currentRatio ?? data.ratiosByYear[data.ratiosByYear.length - 1]?.currentRatio ?? null)}</Text>
+          <Text style={[S.compactCellBoldRight, { width: "18%" }]}>{fmtMultNA(data.stockData.quickRatio ?? data.ratiosByYear[data.ratiosByYear.length - 1]?.quickRatio ?? null)}</Text>
           <Text style={[S.compactCellBoldRight, { width: "18%" }]}>{(() => {
             const latestFin = data.annualFinancials[data.annualFinancials.length - 1];
             const debt = (data.dcf?.totalDebt ?? latestFin?.totalDebt) || 0;
@@ -5813,43 +5880,62 @@ const ComparableCompanyAnalysisPage2 = ({ data }: { data: ReportData }) => {
           <Text style={[S.compactCellHeaderRight, { width: "20%" }]}>DuPont ROE %</Text>
         </View>
         {peers.map((p, i) => {
-          const netM = p.netMargin != null ? p.netMargin : (p.roe != null && p.roe > 0 ? p.roe * 0.45 : 0.095);
-          const de = p.debtToEquity != null ? p.debtToEquity : 0.38;
-          const finLev = 1 + de;
-          const roe = p.roe != null && p.roe !== 0 ? p.roe : (p.pb != null && p.pe != null && p.pe > 0 ? p.pb / p.pe : 0.135);
-          const assetTurnover = roe / Math.max(0.01, netM * finLev);
+          // P0 #21: reported DuPont legs only (pb/pe identity is legitimate);
+          // turnover decomposes ONLY when all three legs are reported.
+          const netMRep = p.netMargin != null && Number.isFinite(p.netMargin) ? p.netMargin : null;
+          const deRep = p.debtToEquity != null && Number.isFinite(p.debtToEquity) ? p.debtToEquity : null;
+          const finLevRep = deRep != null ? 1 + deRep : null;
+          const roeRep = p.roe != null && p.roe !== 0 && Number.isFinite(p.roe) ? p.roe : (p.pb != null && p.pe != null && p.pe > 0 ? p.pb / p.pe : null);
+          const turnoverRep = netMRep != null && netMRep !== 0 && finLevRep != null && roeRep != null ? roeRep / (netMRep * finLevRep) : null;
           return (
             <View key={i} style={i % 2 === 0 ? S.compactRow : S.compactRowAlt}>
               <Text style={[S.compactCellBold, { width: "26%" }]}>{p.name} ({p.ticker})</Text>
-              <Text style={[S.compactCellRight, { width: "18%" }]}>{fmtPct(netM)}</Text>
-              <Text style={[S.compactCellRight, { width: "18%" }]}>{fmtMult(assetTurnover)}</Text>
-              <Text style={[S.compactCellRight, { width: "18%" }]}>{fmtMult(finLev)}</Text>
-              <Text style={[S.compactCellRight, { width: "20%" }]}>{fmtPct(roe)}</Text>
+              <Text style={[S.compactCellRight, { width: "18%" }]}>{fmtPctNA(netMRep)}</Text>
+              <Text style={[S.compactCellRight, { width: "18%" }]}>{fmtMultNA(turnoverRep)}</Text>
+              <Text style={[S.compactCellRight, { width: "18%" }]}>{fmtMultNA(finLevRep)}</Text>
+              <Text style={[S.compactCellRight, { width: "20%" }]}>{fmtPctNA(roeRep)}</Text>
             </View>
           );
         })}
-        <View style={[S.compactRow, { backgroundColor: "#fef3c7", borderTopWidth: 1, borderTopColor: COLORS.slateDark }]}>
-          <Text style={[S.compactCellBold, { width: "26%", color: COLORS.primaryRed }]}>{data.profile.name} ({subjectTicker})</Text>
-          <Text style={[S.compactCellBoldRight, { width: "18%" }]}>{fmtPct(data.dupontByYear[data.dupontByYear.length - 1]?.netProfitMargin || data.stockData.profitMargins || 0.22)}</Text>
-          <Text style={[S.compactCellBoldRight, { width: "18%" }]}>{fmtMult(data.dupontByYear[data.dupontByYear.length - 1]?.assetTurnover || 0.92)}</Text>
-          <Text style={[S.compactCellBoldRight, { width: "18%" }]}>{fmtMult(data.dupontByYear[data.dupontByYear.length - 1]?.equityMultiplier || 1.65)}</Text>
-          <Text style={[S.compactCellBoldRight, { width: "20%" }]}>{fmtPct(data.dupontByYear[data.dupontByYear.length - 1]?.roe || data.stockData.returnOnEquity || 0.25)}</Text>
-        </View>
+        {(() => {
+          const dup = data.dupontByYear[data.dupontByYear.length - 1];
+          const subjFin = data.annualFinancials[data.annualFinancials.length - 1];
+          const subjEq = subjFin?.totalEquity ?? null;
+          const netMRep = dup?.netProfitMargin ?? data.stockData.profitMargins ?? null;
+          const turnsRep = dup?.assetTurnover ?? null;
+          const levRep = dup?.equityMultiplier ?? null;
+          const roeRep = dup?.roe ?? data.stockData.returnOnEquity ?? null;
+          return (
+            <View style={[S.compactRow, { backgroundColor: "#fef3c7", borderTopWidth: 1, borderTopColor: COLORS.slateDark }]}>
+              <Text style={[S.compactCellBold, { width: "26%", color: COLORS.primaryRed }]}>{data.profile.name} ({subjectTicker})</Text>
+              <Text style={[S.compactCellBoldRight, { width: "18%" }]}>{fmtPctNA(netMRep)}</Text>
+              <Text style={[S.compactCellBoldRight, { width: "18%" }]}>{fmtMultNA(turnsRep)}</Text>
+              <Text style={[S.compactCellBoldRight, { width: "18%" }]}>{fmtMultNA(levRep)}</Text>
+              <Text style={[S.compactCellBoldRight, { width: "20%" }]}>{guardedRoePct(roeRep, subjEq)}</Text>
+            </View>
+          );
+        })()}
       </View>
+      <Text style={{ fontSize: 4.6, color: COLORS.textMuted, marginTop: 1, marginBottom: 4 }}>
+        N/A = not disclosed (never estimated). DuPont ROE prints only on reported legs with positive equity — distressed-base artifacts render N/M.
+      </Text>
 
       {/* Dense 2-Column Operational Efficiency & Solvency Benchmark Synthesis Box */}
       {(() => {
         const latestFin = data.annualFinancials[data.annualFinancials.length - 1];
-        const subjectGross = latestFin?.grossMargin || data.stockData.grossMargins || 0.324;
-        const subjectOp = data.stockData.operatingMargins || data.dupontByYear[data.dupontByYear.length - 1]?.netProfitMargin || 0.131;
-        const subjectRoe = data.dupontByYear[data.dupontByYear.length - 1]?.roe || data.stockData.returnOnEquity || 0.334;
-        const subjectTurns = data.dupontByYear[data.dupontByYear.length - 1]?.assetTurnover || 0.9;
+        // P0 #21: reported inputs only — terminal numeric fallbacks removed (N/A below).
+        const subjectGross = latestFin?.grossMargin ?? data.stockData.grossMargins ?? null;
+        const subjectOp = data.stockData.operatingMargins ?? data.dupontByYear[data.dupontByYear.length - 1]?.netProfitMargin ?? null;
+        const subjectRoeRaw = data.dupontByYear[data.dupontByYear.length - 1]?.roe ?? data.stockData.returnOnEquity ?? null;
+        const subjectTurns = data.dupontByYear[data.dupontByYear.length - 1]?.assetTurnover ?? null;
         const totalDebt = (data.dcf?.totalDebt ?? latestFin?.totalDebt) || 0;
         const cashAndEquiv = (data.dcf?.cashAndEquiv ?? latestFin?.cash) || 0;
         const isNetCash = cashAndEquiv >= totalDebt;
-        const equity = latestFin?.totalEquity || (data.stockData.marketCap > 0 ? data.stockData.marketCap : 1);
-        const subjectDe = isNetCash && totalDebt === 0 ? "0.0% (Net Cash)" : fmtPct(equity > 0 ? totalDebt / equity : 0.45);
-        const subjectCr = fmtMult(data.stockData.currentRatio || data.ratiosByYear[data.ratiosByYear.length - 1]?.currentRatio || 2.0);
+        const equity = latestFin?.totalEquity ?? null;
+        const subjectRoe = guardedRoePct(subjectRoeRaw, equity);
+        const subjectDe = isNetCash && totalDebt === 0 ? "0.0% (Net Cash)" : (equity !== null && equity > 0 ? fmtPct(totalDebt / equity) : "N/A");
+        const subjectCrVal = data.stockData.currentRatio ?? data.ratiosByYear[data.ratiosByYear.length - 1]?.currentRatio ?? null;
+        const subjectCr = fmtMultNA(subjectCrVal);
 
         const peerCount = peers.length;
         // Peer averages use REPORTED values only — no 0.34/0.08/0.45/0.10 filler.
@@ -5879,11 +5965,11 @@ const ComparableCompanyAnalysisPage2 = ({ data }: { data: ReportData }) => {
                 </Text>
                 <Text style={{ fontSize: 6.6, color: COLORS.textSecondary, lineHeight: 1.35, marginBottom: 2 }}>
                   {canCompare
-                    ? `${data.profile.name} delivers ${fmtPct(subjectGross)} gross margin and ${fmtPct(subjectOp)} operating margin, versus a reported peer average of ${fmtPct(peerAvgGross as number)} gross and ${fmtPct(peerAvgOp as number)} operating margin across ${peerCount} active comps. DuPont synthesis shows return on equity of ${fmtPct(subjectRoe)} against ${fmtPct(peerAvgRoe as number)} peer average; the split between margin, turnover, and leverage drivers is as tabulated above.`
-                    : `${data.profile.name} reports ${fmtPct(subjectGross)} gross margin and ${fmtPct(subjectOp)} operating margin. Fewer than 3 peers with reported fundamentals are available, so no peer-average comparison is drawn — relative positioning is stated as not assessable in this build.`}
+                    ? `${data.profile.name} delivers ${fmtPctNA(subjectGross)} gross margin and ${fmtPctNA(subjectOp)} operating margin, versus a reported peer average of ${fmtPct(peerAvgGross as number)} gross and ${fmtPct(peerAvgOp as number)} operating margin across ${peerCount} active comps. DuPont synthesis shows return on equity of ${subjectRoe} against ${fmtPct(peerAvgRoe as number)} peer average; the split between margin, turnover, and leverage drivers is as tabulated above.`
+                    : `${data.profile.name} reports ${fmtPctNA(subjectGross)} gross margin and ${fmtPctNA(subjectOp)} operating margin. Fewer than 3 peers with reported fundamentals are available, so no peer-average comparison is drawn — relative positioning is stated as not assessable in this build.`}
                 </Text>
                 <Text style={{ fontSize: 6.6, color: COLORS.textSecondary, lineHeight: 1.35 }}>
-                  Asset turnover of {fmtMult(subjectTurns)} reflects the working-capital profile stated in the financials above; cross-company equipment or supply-chain claims are not made here.
+                  Asset turnover of {fmtMultNA(subjectTurns)} reflects the working-capital profile stated in the financials above; cross-company equipment or supply-chain claims are not made here.
                 </Text>
               </View>
               <View style={{ flex: 1 }}>
@@ -5893,7 +5979,7 @@ const ComparableCompanyAnalysisPage2 = ({ data }: { data: ReportData }) => {
                 <Text style={{ fontSize: 6.6, color: COLORS.textSecondary, lineHeight: 1.35, marginBottom: 2 }}>
                   {peerAvgDe !== null && peerCount >= 3
                     ? `Capital structure analysis shows ${subjectDe} debt gearing against a reported peer average of ${fmtPct(peerAvgDe)} across ${peerCount} comps.`
-                    : `Capital structure analysis shows ${subjectDe} debt gearing on a standalone basis; no peer-cohort average is available, so no relative leverage conclusion is drawn.`} {subjectCr !== "—" ? `Reported current ratio is ${subjectCr}.` : `Liquidity ratios are not disclosed.`} Refinancing risk is assessed from the maturity disclosure above — no insulation is claimed beyond stated cash and coverage.
+                    : `Capital structure analysis shows ${subjectDe} debt gearing on a standalone basis; no peer-cohort average is available, so no relative leverage conclusion is drawn.`} {subjectCr !== "N/A" ? `Reported current ratio is ${subjectCr}.` : `Liquidity ratios are not disclosed.`} Refinancing risk is assessed from the maturity disclosure above — no insulation is claimed beyond stated cash and coverage.
                 </Text>
                 <Text style={{ fontSize: 6.6, color: COLORS.textSecondary, lineHeight: 1.35 }}>
                   Interest coverage and debt-service headroom follow from reported operating cash generation versus stated obligations; capacity for growth capex is conditional on the coverage shown, not assumed.

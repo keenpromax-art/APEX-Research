@@ -113,6 +113,59 @@ export function createShareCount(
 }
 
 // ─────────────────────────────────────────────────────────────
+// Dimensional branded types  (P0 #2, #3 — no naked monetary numbers
+// in NEW pipeline code; currency/scale ride with every money value)
+// ─────────────────────────────────────────────────────────────
+declare const __brand: unique symbol;
+type Brand<T, B extends string> = T & { readonly [__brand]: B };
+
+/** Money dimension: value + currency + scale travel together. */
+export interface MoneyDim {
+  readonly kind: "money";
+  readonly value: number;
+  readonly currency: string;
+  readonly scale: "raw" | "thousand" | "lakh" | "million" | "crore" | "billion" | "trillion";
+}
+export type Shares = Brand<number, "shares">;
+export type Price = Brand<number, "price">;
+export type Pct = Brand<number, "pct-fraction">;
+export type Multiple = Brand<number, "multiple">;
+export type Days = Brand<number, "days">;
+
+export function asMoney(value: number, currency: string, scale: MoneyDim["scale"] = "raw"): MoneyDim {
+  return { kind: "money", value: Number(value) || 0, currency: (currency || "UNKNOWN").toUpperCase(), scale };
+}
+
+export function asShares(value: number): Shares {
+  return (Number(value) || 0) as Shares;
+}
+
+export function asPrice(value: number): Price {
+  return (Number(value) || 0) as Price;
+}
+
+/** Fractions only (0.12 = 12%). Values outside [−5, 5] are returned as-is but flagged by callers. */
+export function asPct(value: number): Pct {
+  return (Number(value) || 0) as Pct;
+}
+
+export function asMultiple(value: number): Multiple {
+  return (Number(value) || 0) as Multiple;
+}
+
+export function asDays(value: number): Days {
+  return (Number(value) || 0) as Days;
+}
+
+/** Convert MoneyDim across display scales without touching currency. */
+export function convertMoneyScale(m: MoneyDim, to: MoneyDim["scale"]): MoneyDim {
+  const perUnit: Record<MoneyDim["scale"], number> = {
+    raw: 1, thousand: 1e3, lakh: 1e5, million: 1e6, crore: 1e7, billion: 1e9, trillion: 1e12,
+  };
+  return { ...m, value: (m.value * (perUnit[m.scale] ?? 1)) / (perUnit[to] ?? 1), scale: to };
+}
+
+// ─────────────────────────────────────────────────────────────
 // Presentation-Layer Formatting (ONLY for UI/PDF display)
 // NEVER use formatted strings inside calculation internals
 // ─────────────────────────────────────────────────────────────

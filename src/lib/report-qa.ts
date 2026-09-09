@@ -7,7 +7,7 @@
 // scratch/test-publication-gate.ts two-phase fixtures; Priority 4 independent gate):
 //   FAIL (blocks export): primary-data gaps (DATA-01), ontology violations (ONT-01,
 //     HOSP-01, HW-01), arithmetic breaks (XREF-01/03/04/05, SCEN-01/02, PROB-01, FV-RECOMP-01,
-//     CHAIN-01, BS-01, MODEL-01), share/market-cap integrity (SHARE-01),
+//     CHAIN-01, BS-01, MODEL-01, IND-01..IND-05 independent recomputation), share/market-cap integrity (SHARE-01),
 //     identity defects (IDENTITY-01),
 //     rating/moat/credit contradictions (RATING-01/02, MOAT-01/02, STEWARD-01,
 //     SEMANTIC-01, CREDIT-01, WACC-01, VAL-01, COV-01), contamination (BS-DETECTOR-04 ≥1,
@@ -18,6 +18,9 @@
 //   WARN (costs score, never blocks): unverified council (BS-DETECTOR-06), margin step-change
 //     (MARGIN-01), loose chain tolerance (CHAIN-01), generic content screens
 //     (THESIS-01, OVERVIEW-01, COMPET-01, MGMT-01, CATALYST-01, GOV-01, CLAIM-01 evidence).
+//   IND-01..IND-05 (P0 #9, #23): independent recomputation (BS identity, cash
+//     chain, EV bridge, WACC re-solution, upside/rating map) from canonical
+//     facts through the math kernel — separate implementation, materiality-gated.
 //   Rationale: FAIL = machine-verifiable falsehood, missing primary, or proven contamination.
 //   WARN = style/evidence thinness where a strict block would false-positive
 //   on legitimate LLM phrasing. Every WARN names the remediation. Independent checks
@@ -30,6 +33,8 @@ import { getAllowlistedConcepts } from "./sector-allowlist";
 import { buildCompanyOntology, validateOntologyCoverage } from "./company-ontology";
 import { assessProvenance, assessMarketIntegrity, resolveShareCount } from "./financial-provenance";
 import { gatePeerSet, SIMILARITY_THRESHOLD_AVG, SIMILARITY_MIN_QUALIFYING } from "./peer-similarity";
+import { buildCanonicalFacts } from "./canonical-facts";
+import { validateIndependently } from "./independent-validator";
 
 const SECTOR_KEYWORD_BLOCKLIST: Record<string, { blocked: string[]; sectorNames: string[] }> = {
   telecom: {
@@ -2020,6 +2025,85 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
         status: "PASS",
         details: `Independent EV/equity/per-share bridges recomputed from primary statements agree with model.`,
       });
+    }
+  }
+
+  // IND-01..IND-05: independent recomputation gate (P0 #9, #23, #26).
+  // A separate implementation re-derives every load-bearing bridge from
+  // canonical facts through the math kernel — never the model's own code.
+  // Material disagreement FAILS (automatic publication block); drift WARNs.
+  {
+    const facts = buildCanonicalFacts({
+      profile: data.profile,
+      stockData: data.stockData,
+      annualFinancials: data.annualFinancials,
+      asOf: data.generatedAt,
+    });
+    const ind = validateIndependently({
+      facts,
+      isFinancialInstitution: !!sectorProfile.isFinancialInstitution,
+      archetype: (ledger as unknown as { archetype?: string } | undefined)?.archetype,
+      country: data.profile.country,
+      beta: data.stockData.beta,
+      dcf: {
+        enterpriseValue: Number(data.dcf.enterpriseValue) || 0,
+        sumPvFcff: Number(data.dcf.sumPvFcff) || 0,
+        pvTerminalValue: Number(data.dcf.pvTerminalValue) || 0,
+        equityValue: Number(data.dcf.equityValue) || 0,
+        netDebt: data.dcf.netDebt,
+        financeReceivablesOffset: Number((data.dcf as unknown as { financeReceivablesOffset?: number }).financeReceivablesOffset) || 0,
+        intrinsicValue: Number(data.dcf.intrinsicValue) || 0,
+        fairValuePerShare: data.dcf.fairValuePerShare ?? null,
+        sharesOutstanding: Number(data.dcf.sharesOutstanding) || 0,
+        currentMarketPrice: Number(data.dcf.currentMarketPrice) || 0,
+        assumptions: {
+          revenueGrowthRates: data.dcf.assumptions?.revenueGrowthRates,
+          ebitMargins: data.dcf.assumptions?.ebitMargins,
+          wacc: data.dcf.assumptions?.wacc,
+          terminalGrowthRate: data.dcf.assumptions?.terminalGrowthRate,
+        },
+      },
+      ledger: {
+        fairValue: Number(ledger?.fairValue ?? data.targetPrice) || 0,
+        targetPrice: Number(ledger?.targetPrice ?? data.targetPrice) || 0,
+        currentPrice: Number(ledger?.currentPrice ?? data.cmp) || 0,
+        enterpriseValue: ledger?.enterpriseValue !== undefined ? Number(ledger.enterpriseValue) : undefined,
+        equityValue: ledger?.equityValue !== undefined ? Number(ledger.equityValue) : undefined,
+        netDebt: ledger?.netDebt !== undefined ? Number(ledger.netDebt) : undefined,
+        sharesOutstanding: ledger?.sharesOutstanding !== undefined ? Number(ledger.sharesOutstanding) : undefined,
+        wacc: ledger?.wacc !== undefined ? Number(ledger.wacc) : undefined,
+        rating: (ledger as unknown as { rating?: string } | undefined)?.rating,
+      },
+    });
+    for (const issue of ind.issues) {
+      checks.push({
+        id: issue.code,
+        category: issue.code === "IND-04" || issue.code === "IND-05" ? "CROSS_REFERENCE" : "BALANCE_SHEET",
+        name:
+          issue.code === "IND-01" ? "Independent Balance-Sheet Identity" :
+          issue.code === "IND-02" ? "Independent Cash-Flow Chain" :
+          issue.code === "IND-03" ? "Independent EV/Equity/Per-Share Bridge" :
+          issue.code === "IND-04" ? "Independent WACC Re-solution" :
+          "Independent Upside/Rating Map",
+        status: issue.severity,
+        details: issue.severity === "FAIL"
+          ? `FATAL PUBLICATION BLOCK: ${issue.message}`
+          : issue.message,
+        expected: issue.expected,
+        actual: issue.actual,
+      });
+    }
+    for (const p of ind.passes) {
+      const code = p.slice(0, 6);
+      if (["IND-01", "IND-02", "IND-03", "IND-04", "IND-05"].includes(code) && !checks.some((c) => c.id === code)) {
+        checks.push({
+          id: code,
+          category: code === "IND-04" || code === "IND-05" ? "CROSS_REFERENCE" : "BALANCE_SHEET",
+          name: `${code} Independent Recomputation`,
+          status: "PASS",
+          details: p,
+        });
+      }
     }
   }
 

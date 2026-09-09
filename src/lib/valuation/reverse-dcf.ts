@@ -36,6 +36,15 @@ export interface ReverseDCFOutput {
   verdict: string;
   targetEnterpriseValue: number;
   confidence: "High" | "Medium" | "Low";
+  /** Solver convergence metadata (P0 #18 — bisection audit trail). */
+  iterationsUsed?: number;
+  /** |EV(solved) − targetEV| / targetEV at termination. */
+  residualPct?: number;
+  /** False when the target lay outside the solvable [low, high] bracket. */
+  converged?: boolean;
+  /** True when the target EV was outside the solvable bracket entirely. */
+  outsideSolvableRange?: boolean;
+  solvableRangeNote?: string;
 }
 
 function fmtPct(n: number): string {
@@ -154,6 +163,11 @@ export function computeReverseDCF(input: ReverseDCFInput): ReverseDCFOutput {
       verdict: "Market expectations are in-line with modeled fundamental baseline.",
       targetEnterpriseValue: Math.max(0, targetEV),
       confidence: "Low",
+      iterationsUsed: 0,
+      residualPct: 1,
+      converged: false,
+      outsideSolvableRange: true,
+      solvableRangeNote: "Solver not run: non-positive target EV, revenue, or share base — no economically solvable expectation exists.",
     };
   }
 
@@ -166,13 +180,18 @@ export function computeReverseDCF(input: ReverseDCFInput): ReverseDCFOutput {
   const evAtHigh = calculateEVForGrowth(highG, input, avgCapexPct, avgDeptPct, avgNwcChangePct);
 
   let impliedG = modelBaseGrowthRate;
+  let growthIters = 0;
+  let growthOutside = false;
   if (targetEV <= evAtLow) {
     impliedG = lowG;
+    growthOutside = true;
   } else if (targetEV >= evAtHigh) {
     impliedG = highG;
+    growthOutside = true;
   } else {
     // Binary search over monotonic function
     for (let iter = 0; iter < 45; iter++) {
+      growthIters++;
       const midG = (lowG + highG) / 2;
       const evMid = calculateEVForGrowth(midG, input, avgCapexPct, avgDeptPct, avgNwcChangePct);
       if (evMid < targetEV) {
@@ -191,12 +210,17 @@ export function computeReverseDCF(input: ReverseDCFInput): ReverseDCFOutput {
   const evAtHighM = calculateEVForMargin(highM, input, modelBaseGrowthRate, avgCapexPct, avgDeptPct, avgNwcChangePct);
 
   let impliedM = baseEbitMargin;
+  let marginIters = 0;
+  let marginOutside = false;
   if (targetEV <= evAtLowM) {
     impliedM = lowM;
+    marginOutside = true;
   } else if (targetEV >= evAtHighM) {
     impliedM = highM;
+    marginOutside = true;
   } else {
     for (let iter = 0; iter < 45; iter++) {
+      marginIters++;
       const midM = (lowM + highM) / 2;
       const evMid = calculateEVForMargin(midM, input, modelBaseGrowthRate, avgCapexPct, avgDeptPct, avgNwcChangePct);
       if (evMid < targetEV) {
@@ -227,6 +251,17 @@ export function computeReverseDCF(input: ReverseDCFInput): ReverseDCFOutput {
   const confidence: "High" | "Medium" | "Low" =
     Math.abs(growthGap) < 0.08 ? "High" : Math.abs(growthGap) < 0.20 ? "Medium" : "Low";
 
+  // Convergence audit (P0 #18): residual of the solved growth rate against the
+  // target EV, plus explicit impossible-solution detection. A clamped boundary
+  // answer is not a solution — verdict and confidence say so.
+  const solvedEV = calculateEVForGrowth(impliedG, input, avgCapexPct, avgDeptPct, avgNwcChangePct);
+  const residualPct = targetEV > 0 ? Math.abs(solvedEV - targetEV) / targetEV : 1;
+  const outsideSolvableRange = growthOutside || marginOutside;
+  const converged = !outsideSolvableRange && residualPct < 0.005;
+  if (outsideSolvableRange) {
+    verdict = `Market-implied expectations lie outside any economically solvable range (growth bracket [−50%, +120%], margin bracket [−10%, +80%]) — no convergent implied growth exists; treat price as sentiment-driven, not fundamentals-driven.`;
+  }
+
   return {
     impliedRevenueGrowthRate: impliedG,
     impliedTerminalOperatingMargin: impliedM,
@@ -236,6 +271,13 @@ export function computeReverseDCF(input: ReverseDCFInput): ReverseDCFOutput {
     growthGapPctDisplay: fmtPct(growthGap),
     verdict,
     targetEnterpriseValue: targetEV,
-    confidence,
+    confidence: outsideSolvableRange ? "Low" : confidence,
+    iterationsUsed: growthIters + marginIters,
+    residualPct: Number(residualPct.toFixed(6)),
+    converged,
+    outsideSolvableRange,
+    solvableRangeNote: outsideSolvableRange
+      ? "Target EV outside solver brackets — boundary value reported, not a converged solution."
+      : `Bisection converged in ${growthIters + marginIters} iterations; residual ${(residualPct * 100).toFixed(3)}%. Uniqueness holds by monotonicity of EV in growth and margin (all reinvestment rates fixed).`,
   };
 }

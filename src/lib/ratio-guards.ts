@@ -124,4 +124,6 @@ export const RATIO_FOOTNOTES = {
   NEGATIVE_MULTIPLE: "N/M: Negative operating profit invalidates standard valuation multiple.",
   SANITY_CAPPED: "N/M*: Figure exceeds institutional solvency bounds; excluded from averages.",
   ESTIMATED_INPUT: "Est.: Input field model-estimated from fixed-margin fallback (not company-reported). See Data Quality disclosure.",
+  DENOMINATOR_STATE: "N/M: denominator state is ZERO/NEGATIVE (e.g. negative equity) — the ratio is mathematically computable but economically meaningless and never prints as fact.",
+  NOT_DISCLOSED: "N/A: input not disclosed — shown as missing, never estimated or laddered.",
 };

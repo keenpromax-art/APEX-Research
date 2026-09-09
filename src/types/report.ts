@@ -246,6 +246,8 @@ export interface DCFAssumptions {
   ebitMargins: number[];
   /** Human-readable source of RF/ERP/tax parameters, e.g. "Country CAPM table v2026-09 (US)". */
   parameterSource?: string;
+  /** Per-input WACC provenance (P0 #15 — sourcing quarantined from formula). */
+  inputProvenance?: { beta: string; weights: string; country: string; spread: string; clamp: string };
 }
 
 export interface DCFResult {
@@ -285,6 +287,11 @@ export interface DCFResult {
     growthGapPctDisplay: string;
     verdict: string;
     confidence?: "High" | "Medium" | "Low";
+    iterationsUsed?: number;
+    residualPct?: number;
+    converged?: boolean;
+    outsideSolvableRange?: boolean;
+    solvableRangeNote?: string;
   };
   terminalValueCapped?: boolean;
   unadjustedTerminalValue?: number;
@@ -292,6 +299,15 @@ export interface DCFResult {
   calibration?: ValuationCalibration;
   /** Per-assumption evidence trail: assumption name → empirical basis string. */
   assumptionBasis?: Record<string, string>;
+  /**
+   * Structured derivation trail (P0 #20): every derived bridge value stores
+   * its formula id + version, named inputs with source IDs, and transform.
+   */
+  derivationTrail?: import("@/lib/financial-kernel").DerivationEntry[];
+  /** Model reinvestment intensities (P0 #17 — scenario vectors reuse them). */
+  avgCapexPct?: number;
+  avgDeptPct?: number;
+  avgNwcChangePct?: number;
 }
 
 export interface ValuationCalibration {
@@ -591,10 +607,12 @@ export interface AssumptionsLedger {
   buybackYieldDisplay?: string;
   totalShareholderYieldDisplay?: string;
   scenarios?: {
-    bull: { targetPrice: number; impliedReturn: number; impliedReturnPctDisplay: string; weight: number; revCagr?: number; revCagrDisplay?: string; om?: number; omDisplay?: string };
-    base: { targetPrice: number; impliedReturn: number; impliedReturnPctDisplay: string; weight: number; revCagr?: number; revCagrDisplay?: string; om?: number; omDisplay?: string };
-    bear: { targetPrice: number; impliedReturn: number; impliedReturnPctDisplay: string; weight: number; revCagr?: number; revCagrDisplay?: string; om?: number; omDisplay?: string };
+    bull: { targetPrice: number; impliedReturn: number; impliedReturnPctDisplay: string; weight: number; revCagr?: number; revCagrDisplay?: string; om?: number; omDisplay?: string; inputVector?: import("@/lib/financial-kernel").ScenarioVector };
+    base: { targetPrice: number; impliedReturn: number; impliedReturnPctDisplay: string; weight: number; revCagr?: number; revCagrDisplay?: string; om?: number; omDisplay?: string; inputVector?: import("@/lib/financial-kernel").ScenarioVector };
+    bear: { targetPrice: number; impliedReturn: number; impliedReturnPctDisplay: string; weight: number; revCagr?: number; revCagrDisplay?: string; om?: number; omDisplay?: string; inputVector?: import("@/lib/financial-kernel").ScenarioVector };
     probabilityWeightedValue: number;
+    /** Kernel re-solution notes per scenario vector (P0 #17 — operating cross-check). */
+    vectorDiagnostics?: string[];
   };
   uncertaintyScore?: number;
   uncertaintyRating?: "Low" | "Medium" | "High" | "Very High" | "N/A";
@@ -627,6 +645,11 @@ export interface AssumptionsLedger {
     growthGapPctDisplay: string;
     verdict: string;
     confidence: "High" | "Medium" | "Low";
+    iterationsUsed?: number;
+    residualPct?: number;
+    converged?: boolean;
+    outsideSolvableRange?: boolean;
+    solvableRangeNote?: string;
   };
   dcfBaseTarget?: number;
   publishedTargetPrice?: number;
