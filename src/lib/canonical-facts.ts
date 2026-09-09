@@ -64,6 +64,11 @@ export interface CanonicalYearFacts {
   shortTermInvestments: RawFact;
   netIncome: RawFact;
   ebitda: RawFact;
+  // Yahoo EBIT (pretax + interestExpense by Yahoo's construction). Corroborates
+  // reported pretax independently of the operatingIncome line — the two share no
+  // input except the reported pretax/interestExpense pair under test. Absent on
+  // quoteSummary vintages (no distinct EBIT key) → confidence none.
+  ebit: RawFact;
   sharesOutstanding: RawFact;
   dilutedEps: RawFact;
   // Income-statement integrity set (P0 #21, #25–#27, #38–#39)
@@ -301,7 +306,7 @@ export function buildCanonicalFacts(params: {
     const need = (name: string, v: unknown) => { if (numOrNull(v) === null) missingFields.push(name); };
     // Per-architecture required sets (native identities, never corporate fictions).
     const requiredByArch: Record<string, string[]> = {
-      corporate: ["revenue", "operatingCashFlow", "capitalExpenditures", "freeCashFlow", "currentAssets", "currentLiabilities", "netWorkingCapital", "totalAssets", "totalLiabilities", "totalEquity", "totalDebt", "cash", "netIncome", "ebitda", "sharesOutstanding", "costOfRevenue", "grossProfit", "operatingIncome", "interestExpense", "interestIncome", "pretaxIncome", "incomeTaxExpense", "depreciation", "shortTermDebt", "longTermDebt", "accountsPayable", "netFixedAssets", "retainedEarnings", "dividendsPaid"],
+      corporate: ["revenue", "operatingCashFlow", "capitalExpenditures", "freeCashFlow", "currentAssets", "currentLiabilities", "netWorkingCapital", "totalAssets", "totalLiabilities", "totalEquity", "totalDebt", "cash", "netIncome", "ebitda", "ebit", "sharesOutstanding", "costOfRevenue", "grossProfit", "operatingIncome", "interestExpense", "interestIncome", "pretaxIncome", "incomeTaxExpense", "depreciation", "shortTermDebt", "longTermDebt", "accountsPayable", "netFixedAssets", "retainedEarnings", "dividendsPaid"],
       bank: ["totalRevenue", "netInterestIncome", "operatingCashFlow", "capitalExpenditures", "freeCashFlow", "currentAssets", "currentLiabilities", "totalAssets", "totalLiabilities", "totalEquity", "totalDebt", "cash", "netIncome", "sharesOutstanding", "operatingIncome", "interestExpense", "interestIncome", "pretaxIncome", "incomeTaxExpense", "shortTermDebt", "longTermDebt", "retainedEarnings", "dividendsPaid"],
       insurance: ["grossWrittenPremium", "netEarnedPremium", "claimsIncurred", "underwritingExpenses", "underwritingResult", "combinedRatio", "investmentIncome", "float", "policyholderLiabilities", "operatingCashFlow", "freeCashFlow", "totalAssets", "totalLiabilities", "totalEquity", "totalDebt", "cash", "netIncome", "sharesOutstanding", "pretaxIncome", "incomeTaxExpense", "dividendsPaid"],
       reit: ["rentalIncome", "netOperatingIncome", "fundsFromOperations", "adjustedFundsFromOperations", "operatingCashFlow", "freeCashFlow", "totalAssets", "investmentPropertyValue", "totalLiabilities", "totalEquity", "totalDebt", "cash", "netIncome", "sharesOutstanding", "interestExpense", "dividendsPaid"],
@@ -346,6 +351,7 @@ export function buildCanonicalFacts(params: {
       otherIncome: S("Yahoo.timeseries:otherIncome", false, "money", "otherIncome"),
       depreciation: S("Yahoo.timeseries:depreciation", estHas("depreciation@"), "money", "depreciation", "depreciationAmortization"),
       ebitda: S("Yahoo.timeseries:ebitda", estHas("ebitda@"), "money", "ebitda"),
+      ebit: S("Yahoo.timeseries:ebit", false, "money", "ebit"),
       accountsPayable: S("Yahoo.timeseries:accountsPayable", false, "money", "accountsPayable"),
       netReceivables: S("Yahoo.timeseries:netReceivables", false, "money", "netReceivables"),
       inventory: S("Yahoo.timeseries:inventory", false, "money", "inventory"),

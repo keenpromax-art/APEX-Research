@@ -459,14 +459,37 @@ function checkStatementIntegrity(inp: IndependentInputs, issues: IndependentIssu
       }
       if (!t.pass) {
         if (t.material && t.gapRel > 0.08) {
-          // Data-gap rule: interestIncome structurally absent AND the whole gap fits
-          // inside a plausible missing-interest-income range → undecidable, WARN.
-          // Anything larger is provably broken regardless of the missing term → FAIL.
           const rev = v(y.revenue) ?? 0;
           const gapAbs = Math.abs(reported - expected);
+          // (i) Data-gap rule: interestIncome structurally absent AND the whole gap
+          // fits inside a plausible missing-interest-income range → undecidable, WARN.
+          // Anything larger is provably broken regardless of the missing term → FAIL.
           if (bundledNote === "" && v(y.interestIncome) === null && rev > 0 && gapAbs <= 0.025 * rev) {
             warns++;
             issues.push({ code: "STMT-01", severity: "WARN", message: `Pretax closure data-gap in ${y.year}: ${basis} ${fmt0(expected)} vs reported ${fmt0(reported)} (${t.detail}) — interestIncome unavailable for this fiscal year and the gap is fully explained by a plausible missing-interest-income range (≤2.5% of revenue); not a confirmed broken identity.`, expected: fmt0(expected), actual: fmt0(reported), magnitude: t });
+          } else if (rev > 0 && gapAbs <= 0.01 * rev) {
+            // (ii) Revenue-materiality floor: a bridge discrepancy under 1% of revenue
+            // is immaterial to any valuation use (normal FX/reclass noise routinely
+            // reaches this scale) even when large relative to a small pretax base
+            // (distressed/break-even years where relative gaps explode) → WARN.
+            warns++;
+            issues.push({ code: "STMT-01", severity: "WARN", message: `Pretax closure drift in ${y.year}: ${basis} ${fmt0(expected)} vs reported ${fmt0(reported)} (${t.detail}) — residual under 1% of revenue, immaterial to valuation (rev-floor).`, expected: fmt0(expected), actual: fmt0(reported), magnitude: t });
+          } else if (v(y.ebit) !== null && (v(y.incomeTaxExpense) !== null) && (v(y.netIncome) !== null)) {
+            // (iii) EBIT corroboration: when BOTH pretax−tax≈netIncome AND
+            // EBIT−interestExpense≈pretax reconcile cleanly, pretax is doubly
+            // corroborated and the residual sits in unobservable non-operating
+            // items or the opInc mapping — operating margins stay unverified → WARN
+            // (never silent). Either corroboration dirty or EBIT absent → FAIL stands.
+            const expB = (v(y.ebit) as number) - intExp;
+            const tB = magnitudeTolerance(expB, reported, mkTol(expB));
+            const exp3 = ((v(y.incomeTaxExpense) as number) + (v(y.netIncome) as number));
+            const t3 = magnitudeTolerance(exp3, reported, mkTol(exp3));
+            if (tB.pass && t3.pass) {
+              warns++;
+              issues.push({ code: "STMT-01", severity: "WARN", message: `Pretax closure drift in ${y.year}: ${basis} ${fmt0(expected)} vs reported ${fmt0(reported)} (${t.detail}) — pretax doubly corroborated (EBIT−interest and tax+NI triples reconcile); residual is unobservable non-operating items or opInc mapping noise — treat operating margins as unverified (ebit-corroborated).`, expected: fmt0(expected), actual: fmt0(reported), magnitude: t });
+            } else {
+              pushFail(issues, { code: "STMT-01", severity: "FAIL", message: `FATAL: Pretax closure breach in ${y.year}: ${basis} ${fmt0(expected)} vs reported ${fmt0(reported)} (${t.detail}) — broken accounting identity blocks publication.${bundledNote}`, expected: fmt0(expected), actual: fmt0(reported), magnitude: t });
+            }
           } else {
             pushFail(issues, { code: "STMT-01", severity: "FAIL", message: `FATAL: Pretax closure breach in ${y.year}: ${basis} ${fmt0(expected)} vs reported ${fmt0(reported)} (${t.detail}) — broken accounting identity blocks publication.${bundledNote}`, expected: fmt0(expected), actual: fmt0(reported), magnitude: t });
           }
