@@ -872,20 +872,25 @@ export function classifySector(
     return NBFC_PROFILE;
   }
 
-  // 2. Insurance — require industry/sector to be insurance (description mentions like "serves insurance" are client verticals, not own industry)
+  // 2. Insurance — require industry/sector to be insurance (description mentions like "serves insurance" are client verticals, not own industry).
+  // Subsidiary-name triggers (SBI Life, HDFC Life, ...) MUST NOT fire for banks:
+  // universal banks describe insurance subsidiaries, but their industry is banking.
+  // A genuine insurer never carries a banking industry label.
   if (
     industryLower.includes("insurance") ||
     sectorLower.includes("insurance") ||
-    combined.includes("life assurance") ||
-    combined.includes("general insurance") ||
-    combined.includes("reinsurance") ||
-    combined.includes("icici pru life") ||
-    combined.includes("hdfc life") ||
-    combined.includes("sbi life") ||
-    combined.includes("max financial") ||
-    combined.includes("star health") ||
-    combined.includes("gic re") ||
-    combined.includes("new india assurance")
+    (!industryLower.includes("bank") && (
+      combined.includes("life assurance") ||
+      combined.includes("general insurance") ||
+      combined.includes("reinsurance") ||
+      combined.includes("icici pru life") ||
+      combined.includes("hdfc life") ||
+      combined.includes("sbi life") ||
+      combined.includes("max financial") ||
+      combined.includes("star health") ||
+      combined.includes("gic re") ||
+      combined.includes("new india assurance")
+    ))
   ) {
     return INSURANCE_PROFILE;
   }

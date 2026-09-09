@@ -917,6 +917,20 @@ export function parseQuoteSummary(raw: Record<string, unknown>, symbol: string) 
   };
 
   // ── Stock Data ────────────────────────────────────────────────────────────
+  // Derived share count (same grounding as sharesTotal below): when keyStats
+  // omits sharesOutstanding but quotes marketCap + price, derive shares rather
+  // than dropping to 0 — a 0 here cascades to DATA_INVALID_SHARES and blocks
+  // export even though the feed carried enough signal. Grounded derivation
+  // (two quoted fields), never a constant synthesis.
+  const derivedSharesOutstanding =
+    safeNum((keyStats.sharesOutstanding as Record<string,unknown>)?.raw) ||
+    safeNum((keyStats.impliedSharesOutstanding as Record<string,unknown>)?.raw) ||
+    (() => {
+      const mc = safeNum((priceData.marketCap as Record<string,unknown>)?.raw) ||
+        safeNum((summary.marketCap as Record<string,unknown>)?.raw);
+      const px = safeNum((priceData.regularMarketPrice as Record<string,unknown>)?.raw);
+      return mc > 0 && px > 0 ? mc / px : 0;
+    })();
   const stockData = {
     currentPrice:
       safeNum((priceData.regularMarketPrice as Record<string,unknown>)?.raw) ||
@@ -941,7 +955,7 @@ export function parseQuoteSummary(raw: Record<string, unknown>, symbol: string) 
     beta: safeNum((summary.beta as Record<string,unknown>)?.raw),
     week52High: safeNum((summary.fiftyTwoWeekHigh as Record<string,unknown>)?.raw),
     week52Low: safeNum((summary.fiftyTwoWeekLow as Record<string,unknown>)?.raw),
-    sharesOutstanding: safeNum((keyStats.sharesOutstanding as Record<string,unknown>)?.raw),
+    sharesOutstanding: derivedSharesOutstanding,
     floatShares: safeNum((keyStats.floatShares as Record<string,unknown>)?.raw),
     avgVolume: safeNum((summary.averageVolume as Record<string,unknown>)?.raw),
     volume: safeNum((priceData.regularMarketVolume as Record<string,unknown>)?.raw),
@@ -984,11 +998,10 @@ export function parseQuoteSummary(raw: Record<string, unknown>, symbol: string) 
 
   const years = Math.min(incRev.length, bsRev.length, cfRev.length, 5);
 
-  // Fallback estimates from defaultKeyStatistics and financialData
-  const sharesTotal =
-    safeNum((keyStats.sharesOutstanding as Record<string,unknown>)?.raw) ||
-    safeNum((keyStats.impliedSharesOutstanding as Record<string,unknown>)?.raw) ||
-    safeNum((priceData.marketCap as Record<string,unknown>)?.raw) / (safeNum((priceData.regularMarketPrice as Record<string,unknown>)?.raw) || 1);
+  // Fallback estimates from defaultKeyStatistics and financialData.
+  // Reuses the guarded derivation above (price must be > 0 — never divide by
+  // a `|| 1` fallback, which minted marketCap-sized "share counts").
+  const sharesTotal = derivedSharesOutstanding;
 
   const fallbackEquity =
     (safeNum((keyStats.bookValue as Record<string,unknown>)?.raw) * sharesTotal) ||

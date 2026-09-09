@@ -189,7 +189,13 @@ export function buildMasterReportFacts(params: {
   const currency = profile.currency || "USD";
   const reportingScale = currency === "INR" ? "crore" : "million";
   const cmp = ledger?.currentPrice ?? (stockData.currentPrice > 0 ? stockData.currentPrice : null);
-  const shares = ledger?.sharesOutstanding ?? stockData.sharesOutstanding ?? (annualFinancials.length > 0 ? annualFinancials[annualFinancials.length - 1].sharesOutstanding : 0);
+  // Zero-tolerant chain: a fail-closed ledger 0 must not mask a valid count
+  // from another source, and the model carry-through is a last resort.
+  // A persistent 0 still yields missing ShareCount → DATA_INVALID_SHARES blocks.
+  const latestShares = annualFinancials.length > 0 ? annualFinancials[annualFinancials.length - 1].sharesOutstanding : 0;
+  const shares = [ledger?.sharesOutstanding, stockData.sharesOutstanding, latestShares, dcf?.sharesOutstanding]
+    .map((v) => Number(v) || 0)
+    .find((v) => v > 0) ?? 0;
 
   // 1. Company Facts
   const company: CompanyFacts = {

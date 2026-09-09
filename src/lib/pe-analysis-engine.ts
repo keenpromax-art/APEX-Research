@@ -204,7 +204,7 @@ export function generatePEFirmAnalysis(input: PEAnalysisInput): AIAnalysis {
     investmentConclusion = `We formulate ${recAction} recommendation on ${profile.name} with a fair value target of ${sym}${fv.toFixed(2)} per share (${formatPct(upsidePct)} implied upside), anchored on ${isReit ? "NOI/AFFO and NAV cap-rate" : "RevPAR/EBITDAR"} delivery against the hospitality DCF trajectory.`;
   } else {
     companyOverview = `${profile.name} operates in the ${profile.sector} sector (${profile.industry}). The business description and segment disclosures in the company profile, together with the reported financials below, define its operating model — no sector-specific template applies.`;
-    investmentThesis = `Our analysis of ${profile.name} is anchored on its reported revenue trajectory, margin structure, cash conversion, and balance-sheet capacity as detailed below. Without a sector-specific template match, no industry boilerplate (manufacturing scale, loan books, subscriber metrics, or platform dynamics) is assumed.`;
+    investmentThesis = `Our analysis of ${profile.name} is anchored on its reported revenue trajectory, margin structure, cash conversion, and balance-sheet capacity as detailed below. Without a sector-specific template match, no industry boilerplate (manufacturing throughput, credit-portfolio growth, user-based metrics, or platform dynamics) is assumed.`;
     investmentConclusion = `We formulate ${recAction} recommendation on ${profile.name} with an intrinsic fair value target of ${sym}${fv.toFixed(2)} per share (${formatPct(upsidePct)} implied upside), reflecting reported fundamentals and operational execution.`;
   }
 
@@ -655,7 +655,7 @@ export function generatePEFirmAnalysis(input: PEAnalysisInput): AIAnalysis {
       { event: "Seasonal Demand Softness or New Supply Pressuring Occupancy/ADR", horizon: "Ongoing", probability: "Evidence-Dependent", impact: "RevPAR and target downside sensitivity" },
     ];
   } else {
-    businessStrategyCommentary = `${profile.name}'s strategy requires validation against its reported operating model, segment disclosures, and capital-allocation record. This baseline deliberately avoids assuming plants, loan growth, inventory, subscriber metrics, or platform infrastructure where those are not evidenced.`;
+    businessStrategyCommentary = `${profile.name}'s strategy requires validation against its reported operating model, segment disclosures, and capital-allocation record. This baseline deliberately avoids assuming plants, credit-portfolio growth, inventory, user-based metrics, or platform infrastructure where those are not evidenced.`;
     catalysts = [
       { event: "Company-Specific Earnings Execution", horizon: "6-12 Months", probability: "Evidence-Dependent", impact: "Requires reported KPI confirmation" },
       { event: "Market Share or Product-Mix Change", horizon: "12-18 Months", probability: "Evidence-Dependent", impact: "Requires sector-specific evidence" },
@@ -1096,7 +1096,7 @@ export function generatePEFirmAnalysis(input: PEAnalysisInput): AIAnalysis {
         { risk: "New Supply & OTA Pressure", description: "Competitive supply additions and OTA take-rates pressure occupancy/ADR and net realization.", impact: "Medium", mitigation: "Loyalty direct-booking scale and brand premium" },
       ];
     }
-  } else if (sectorType === "banking_financials" || sectorType === "nbfc") {
+  } else if (sectorType === "banking_financials") {
     swotStrengths = [
       "Granular low-cost CASA deposit franchise providing structural funding cost advantage.",
       "Prudent underwriting and risk-calibrated credit architecture with through-cycle NPA containment.",
@@ -1121,6 +1121,34 @@ export function generatePEFirmAnalysis(input: PEAnalysisInput): AIAnalysis {
       { risk: "Asset Quality Shock", description: "Slippage in corporate or retail portfolios elevating GNPA and credit costs.", impact: "High", mitigation: "Sectoral underwriting caps, early-warning triggers, and provision buffers" },
       { risk: "Net Interest Margin Compression", description: "Deposit repricing and competitive lending rates compressing NIM and spreads.", impact: "Medium", mitigation: "CASA mobilization and risk-adjusted pricing discipline" },
       { risk: "Regulatory Capital Pressure", description: "Higher capital adequacy and provisioning requirements constraining growth.", impact: "Medium", mitigation: "Capital planning and internal accrual retention" },
+    ];
+  } else if (sectorType === "nbfc") {
+    // NBFCs cannot accept demand deposits — CASA language is forbidden here
+    // (NBFC_PROFILE). Funding narrative uses wholesale/borrowing vocabulary.
+    swotStrengths = [
+      "Grassroots distribution reach and proprietary borrower-level underwriting data.",
+      "Diversified wholesale borrowing lines across banks, markets, and priority-sector allocations.",
+      "Digital collections infrastructure supporting through-cycle recovery rates.",
+    ];
+    swotWeaknesses = [
+      "Wholesale funding-cost sensitivity to policy rates and liquidity conditions.",
+      "Borrower overleveraging and geographic concentration in income-generating segments.",
+      "Asset-liability maturity mismatches under funding-market stress.",
+    ];
+    swotOpportunities = [
+      "Assets-under-management growth via contiguous rural district expansion.",
+      "Direct assignment and securitization unlocking liquidity and capital relief.",
+      "Credit-rating upgrades lowering incremental cost of borrowing.",
+    ];
+    swotThreats = [
+      "Localized weather or agricultural demand disruption impairing collections.",
+      "Wholesale liquidity tightening raising rollover costs.",
+      "Fintech and bank down-market expansion compressing yields.",
+    ];
+    keyRisks = [
+      { risk: "Collection Disruption", description: "Localized income shocks impairing group-lending collection efficiency.", impact: "High", mitigation: "Center-network density, digital collections, and credit discipline" },
+      { risk: "Borrowing Cost Pressure", description: "Policy-rate and liquidity-driven repricing of wholesale borrowings compressing spreads.", impact: "Medium", mitigation: "Liability diversification and fixed-rate term funding" },
+      { risk: "Asset-Liability Mismatch", description: "Tenor gaps between borrowings and micro-loan assets under stress.", impact: "Medium", mitigation: "Positive liquidity buffers and securitization runways" },
     ];
   } else if (archProfile.archetype === "CYCLICAL_CAPITAL_INTENSIVE") {
     swotStrengths = [
@@ -1236,30 +1264,63 @@ export function generatePEFirmAnalysis(input: PEAnalysisInput): AIAnalysis {
       { risk: "Seat Downsell & Churn", description: "Headcount reductions translating into license contraction.", impact: "Medium", mitigation: "Platform consolidation plays and usage-based tiers retaining workloads" },
       { risk: "AI Packaging Disruption", description: "Seat-pricing erosion as AI automation reduces per-seat value capture.", impact: "Medium", mitigation: "Outcome- and consumption-linked packaging alongside seat base" },
     ];
-  } else {
+  } else if (sectorType === "pharma_healthcare") {
+    // Pharma needs its own SWOT even when archetype is MATURE_COMPOUNDER —
+    // otherwise it falls to IT-generic risks (master service agreements).
     swotStrengths = [
-      "Durable institutional economic moat supported by mission-critical customer workflows and high switching costs.",
-      "Superior return on invested capital profile (ROIC > 20%) driving consistent free cash flow conversion.",
-      "Pristine, conservative net debt-free balance sheet with exceptional capital return track record.",
+      "Entrenched domestic formulations franchise with chronic-therapy prescription loyalty.",
+      "Vertically integrated active-ingredient manufacturing supporting cost and supply resilience.",
+      "Differentiated complex-generics pipeline targeting regulated export markets.",
+    ];
+    swotWeaknesses = [
+      "US generics price erosion compressing realized export margins.",
+      "Regulatory inspection exposure across manufacturing sites requiring remediation readiness.",
+      "Working-capital intensity from channel inventory and receivables cycles.",
+    ];
+    swotOpportunities = [
+      "Complex injectable and specialty launches commanding premium realizations.",
+      "Domestic chronic-market growth outpacing acute segments on demographics.",
+      "Contract manufacturing partnerships monetizing spare compliant capacity.",
+    ];
+    swotThreats = [
+      "Accelerated US buyer consolidation intensifying generic price compression.",
+      "Adverse regulatory observations disrupting site-level supply continuity.",
+      "Active-ingredient input inflation squeezing formulation spreads.",
+    ];
+    keyRisks = [
+      { risk: "US Generics Price Erosion", description: "Buyer consolidation and competition compressing US generic realizations.", impact: "High", mitigation: "Complex-product mix shift and differentiated launch cadence" },
+      { risk: "Regulatory Inspection Exposure", description: "Observations at manufacturing sites risking supply disruption and remediation cost.", impact: "Medium", mitigation: "Quality-system investment and site diversification" },
+      { risk: "Input Cost & Channel Pressure", description: "Active-ingredient inflation plus distributor destocking weighing on margins.", impact: "Medium", mitigation: "Backward integration and disciplined channel inventory" },
+    ];
+  } else {
+    // Sector-neutral fallback: this branch serves every sector WITHOUT a dedicated
+    // template (ratings, energy, diversified industrials, ...). It must not borrow
+    // ANY sector's vocabulary (no IT deal/MSA language, no CASA/loan-book, no
+    // spectrum/subscriber, no plant/refinery, no clinical/FMCG terms) — otherwise
+    // un-templated sectors false-block on SANITIZE-01.
+    swotStrengths = [
+      "Established customer relationships and repeat-purchase behavior supporting revenue durability.",
+      "Disciplined reinvestment sustaining operating margins through cycles.",
+      "Conservative balance sheet posture preserving strategic flexibility.",
     ];
     swotWeaknesses = [
       "Moderating organic revenue growth rates as market share reaches maturity in core geographies.",
-      "Modest exposure to enterprise discretionary budget scrutiny during broader macro decelerations.",
+      "Exposure to customer discretionary spending scrutiny during broader macro decelerations.",
       "Elevated baseline valuation multiples reducing margin of error for quarterly execution misses.",
     ];
     swotOpportunities = [
-      "Disciplined programmatic tuck-in M&A deploying liquid reserves into adjacent high-growth verticals.",
-      "Operational productivity gains from automated service delivery platforms and artificial intelligence integration.",
-      "Vendor consolidation market share gains as enterprise clients rationalize sub-scale suppliers.",
+      "Disciplined tuck-in acquisitions deploying liquid reserves into adjacent growth verticals.",
+      "Operating productivity gains from process automation and capacity debottlenecking.",
+      "Market-share gains as customers consolidate purchases with scaled suppliers.",
     ];
     swotThreats = [
-      "Technological platform shifts requiring ongoing modernization of legacy proprietary frameworks.",
-      "Wage and talent retention competition in specialized technical and domain-specific roles.",
-      "Broader institutional equity market multiple compression during elevated risk-free interest rate environments.",
+      "Technology and product-cycle shifts requiring ongoing operating-model modernization.",
+      "Wage and skilled-talent retention competition in core operating roles.",
+      "Broader equity-market multiple compression during elevated risk-free interest rate environments.",
     ];
     keyRisks = [
-      { risk: "Enterprise IT Budget Moderation", description: "Corporate decision-makers extending deal signing cycles or pausing discretionary consulting spend.", impact: "Low", mitigation: "Mission-critical system integration and contractual master service agreement renewals" },
-      { risk: "Foreign Exchange Realization Swings", description: "Unhedged currency fluctuations impacting cross-border contract billing and reported revenue.", impact: "Low", mitigation: "Active rolling multi-currency hedging policies and pass-through billing structures" },
+      { risk: "Enterprise Demand Moderation", description: "Customers deferring procurement and pausing discretionary spending compressing near-term revenue.", impact: "Low", mitigation: "Contracted recurring-revenue renewals and retention execution" },
+      { risk: "Foreign Exchange Realization Swings", description: "Unhedged currency fluctuations impacting cross-border sales realization and reported revenue.", impact: "Low", mitigation: "Active rolling multi-currency hedging policies and pass-through billing structures" },
       { risk: "Valuation Multiple De-Rating", description: "Market-wide contraction in growth multiples driven by shifts in sovereign bond yields.", impact: "Medium", mitigation: "Disciplined capital return via steady dividend compounding and opportunistic buybacks" },
     ];
   }

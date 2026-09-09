@@ -126,8 +126,8 @@ export const SEMANTIC_BLEED_RULES: { sectors: string[]; blocked: string[] }[] = 
   { sectors: ["pharma", "health", "biotech", "drug"], blocked: ["spectrum auction", "arpu", "tower tenancy", "dark store", "dark stores", "ride hailing", "proprietary silicon"] },
   { sectors: ["technology", "software", "it services"], blocked: ["us fda", "cgmp", "spectrum auction", "agr dues", "refinery throughput", "crack spread"] },
   // Hardware (devices/components): SaaS/consulting boilerplate is contamination.
-  // Industry-strict via SectorProfile.forbiddenConcepts; this rule is the backstop
-  // for description-matched hardware names.
+  // Industry-matched backstop; description-classified hardware names are covered
+  // by SectorProfile.forbiddenConcepts (classification-aware).
   { sectors: ["computer hardware", "electronic components", "computer peripherals", "data storage", "communication equipment"], blocked: [...HARDWARE_SAAS_BLEED, "casa", "nim", "gnpa", "loan book", "spectrum auction", "subscriber churn", "clinical trial", "refinery throughput", "dark stores"] },
   { sectors: ["energy", "oil", "gas", "mining"], blocked: ["app store commission", "saas churn", "arr expansion", "dark store", "dark stores", "proprietary silicon"] },
   // NOTE: consumer and hospitality are NOT listed here — their blocked terms are enforced via SectorProfile.forbiddenConcepts
@@ -152,7 +152,14 @@ export function sanitizeSectorBleed<T>(
   rewriteLog?: string[]
 ): T {
   if (!data) return data;
-  const sectorLower = `${sector || ""} ${industry || ""} ${description || ""}`.toLowerCase();
+  // Rule preselection matches on sector + industry ONLY (never description):
+  // description-vertical mentions ("serves hospitality", "digital advertising"
+  // as one carrier segment, "consumer banking") are not the company's sector and
+  // must not arm another sector's blocklist — that rewrote carriers' own
+  // vocabulary (spectrum/4g/5g/tower/subscriber) and BLOCKED valid reports.
+  // Mirrors QA BS-DETECTOR-04 matching scope exactly. The classified
+  // SectorProfile.forbiddenConcepts below remain fully applied regardless.
+  const sectorLower = `${sector || ""} ${industry || ""}`.toLowerCase();
   const secProf = getSectorProfile(sector || "", industry || "", description || "");
 
   const blockedTerms = new Set<string>();
