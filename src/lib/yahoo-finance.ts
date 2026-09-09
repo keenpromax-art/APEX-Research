@@ -527,6 +527,7 @@ export async function fetchPeerQuotes(symbols: string[]): Promise<Record<string,
             epsVal != null && bvVal != null && bvVal > 0
               ? epsVal / bvVal
               : null;
+          const peerBeta = safeVal((ks as Record<string, unknown>).beta) ?? safeVal((sd as Record<string, unknown>).beta) ?? safeVal((baseQuote as Record<string, unknown>).beta);
           const pbRatio = safeVal(ks.priceToBook) ?? safeVal(sd.priceToBook) ?? safeVal(baseQuote.priceToBook);
           const peRatio = safeVal(sd.trailingPE) ?? safeVal(baseQuote.trailingPE);
           const derivedRoe =
@@ -562,6 +563,7 @@ export async function fetchPeerQuotes(symbols: string[]): Promise<Record<string,
             trailingPE: peRatio ?? safeVal(baseQuote.trailingPE),
             marketCap: safeVal(sd.marketCap) ?? safeVal(baseQuote.marketCap),
             regularMarketPrice: safeVal(sd.regularMarketPrice) ?? safeVal(baseQuote.regularMarketPrice),
+            beta: peerBeta,
           };
         }
       } catch {

@@ -60,6 +60,30 @@ export interface CanonicalYearFacts {
   ebitda: RawFact;
   sharesOutstanding: RawFact;
   dilutedEps: RawFact;
+  // Income-statement integrity set (P0 #21, #25–#27, #38–#39)
+  costOfRevenue: RawFact;
+  grossProfit: RawFact;
+  operatingIncome: RawFact;
+  interestExpense: RawFact;
+  otherIncome: RawFact;
+  pretaxIncome: RawFact;
+  incomeTaxExpense: RawFact;
+  depreciation: RawFact;
+  eps: RawFact;
+  // Balance-sheet detail set (P0 #22–#24, #35–#37, #41–#42, #46)
+  shortTermDebt: RawFact;
+  longTermDebt: RawFact;
+  accountsPayable: RawFact;
+  netReceivables: RawFact;
+  inventory: RawFact;
+  netFixedAssets: RawFact;
+  retainedEarnings: RawFact;
+  dividendsPaid: RawFact;
+  repurchases: RawFact;
+  stockBasedCompensation: RawFact;
+  capitalLeaseObligations: RawFact;
+  otherCurrentAssets: RawFact;
+  otherCurrentLiabilities: RawFact;
 }
 
 export interface CanonicalFactGraph {
@@ -153,7 +177,7 @@ export function buildCanonicalFacts(params: {
       moneyFact(value, { source, period, fiscalPeriod, periodType, currency, scale, asOf, estimated });
     const missingFields: string[] = [];
     const need = (name: string, v: unknown) => { if (numOrNull(v) === null) missingFields.push(name); };
-    (["revenue", "operatingCashFlow", "capitalExpenditures", "freeCashFlow", "currentAssets", "currentLiabilities", "netWorkingCapital", "totalAssets", "totalLiabilities", "totalEquity", "totalDebt", "cash", "netIncome", "ebitda", "sharesOutstanding"] as const)
+    (["revenue", "operatingCashFlow", "capitalExpenditures", "freeCashFlow", "currentAssets", "currentLiabilities", "netWorkingCapital", "totalAssets", "totalLiabilities", "totalEquity", "totalDebt", "cash", "netIncome", "ebitda", "sharesOutstanding", "costOfRevenue", "grossProfit", "operatingIncome", "interestExpense", "pretaxIncome", "incomeTaxExpense", "depreciation", "shortTermDebt", "longTermDebt", "accountsPayable", "netFixedAssets", "retainedEarnings", "dividendsPaid"] as const)
       .forEach((k) => need(k, (f as unknown as Record<string, unknown>)[k]));
     return {
       year: period, fiscalPeriod, periodType, missingFields,
@@ -174,6 +198,28 @@ export function buildCanonicalFacts(params: {
       ebitda: mf(f.ebitda, "Yahoo.timeseries:ebitda", (f.estimatesUsed || []).some((t) => t.startsWith("ebitda@"))),
       sharesOutstanding: mf(f.sharesOutstanding, "Yahoo.timeseries:sharesOutstanding"),
       dilutedEps: mf(f.dilutedEps, "Yahoo.timeseries:dilutedEps"),
+      costOfRevenue: mf(f.costOfRevenue, "Yahoo.timeseries:costOfRevenue"),
+      grossProfit: mf(f.grossProfit, "Yahoo.timeseries:grossProfit", (f.estimatesUsed || []).some((t) => t.startsWith("grossProfit@"))),
+      operatingIncome: mf(f.operatingIncome, "Yahoo.timeseries:operatingIncome", (f.estimatesUsed || []).some((t) => t.startsWith("operatingIncome@"))),
+      interestExpense: mf(f.interestExpense, "Yahoo.timeseries:interestExpense"),
+      otherIncome: mf((f as unknown as { otherIncome?: unknown }).otherIncome, "Yahoo.timeseries:otherIncome"),
+      pretaxIncome: mf((f as unknown as { pretaxIncome?: unknown }).pretaxIncome, "Yahoo.timeseries:pretaxIncome"),
+      incomeTaxExpense: mf((f as unknown as { incomeTaxExpense?: unknown }).incomeTaxExpense, "Yahoo.timeseries:incomeTaxExpense"),
+      depreciation: mf(f.depreciation, "Yahoo.timeseries:depreciation", (f.estimatesUsed || []).some((t) => t.startsWith("depreciation@"))),
+      eps: mf(f.eps, "Yahoo.timeseries:eps"),
+      shortTermDebt: mf(f.shortTermDebt, "Yahoo.timeseries:shortTermDebt"),
+      longTermDebt: mf(f.longTermDebt, "Yahoo.timeseries:longTermDebt"),
+      accountsPayable: mf(f.accountsPayable, "Yahoo.timeseries:accountsPayable"),
+      netReceivables: mf((f as unknown as { netReceivables?: unknown }).netReceivables, "Yahoo.timeseries:netReceivables"),
+      inventory: mf((f as unknown as { inventory?: unknown }).inventory, "Yahoo.timeseries:inventory"),
+      netFixedAssets: mf(f.netFixedAssets, "Yahoo.timeseries:netFixedAssets"),
+      retainedEarnings: mf((f as unknown as { retainedEarnings?: unknown }).retainedEarnings, "Yahoo.timeseries:retainedEarnings"),
+      dividendsPaid: mf((f as unknown as { dividendsPaid?: unknown }).dividendsPaid, "Yahoo.timeseries:dividendsPaid"),
+      repurchases: mf((f as unknown as { repurchases?: unknown }).repurchases, "Yahoo.timeseries:repurchases"),
+      stockBasedCompensation: mf((f as unknown as { stockBasedCompensation?: unknown }).stockBasedCompensation, "Yahoo.timeseries:stockBasedCompensation"),
+      capitalLeaseObligations: mf((f as unknown as { capitalLeaseObligations?: unknown }).capitalLeaseObligations, "Yahoo.timeseries:capitalLeaseObligations"),
+      otherCurrentAssets: mf((f as unknown as { otherCurrentAssets?: unknown }).otherCurrentAssets, "Yahoo.timeseries:otherCurrentAssets"),
+      otherCurrentLiabilities: mf((f as unknown as { otherCurrentLiabilities?: unknown }).otherCurrentLiabilities, "Yahoo.timeseries:otherCurrentLiabilities"),
     };
   });
 

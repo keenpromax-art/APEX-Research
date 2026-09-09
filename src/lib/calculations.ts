@@ -25,6 +25,8 @@ import {
   gordonTerminalValue,
   WACCFormulaEngine,
   ProvenanceTrail,
+  MODEL_VERSION,
+  KERNEL_VERSION,
   type WACCInputs,
   type DenominatorState,
 } from "./financial-kernel";
@@ -308,9 +310,12 @@ export function sourceWACCInputs(
   } else {
     betaNote = "reported beta, Blume-adjusted";
   }
-  // Blume adjustment towards market portfolio mean of 1.0
+  // Blume adjustment towards market portfolio mean of 1.0.
+  // P0 #94: full precision flows into cost-of-equity math; the rounded copy
+  // below is display-only and never feeds another calculation.
   const blumeBeta = 0.67 * rawBeta + 0.33 * 1.0;
-  const beta = Math.max(0.5, Math.min(1.8, Number(blumeBeta.toFixed(3))));
+  const betaFull = Math.max(0.5, Math.min(1.8, blumeBeta));
+  const beta = Number(betaFull.toFixed(3));
 
   // Resolved share base (market-cap cross-checked) so WACC weights agree with the DCF/ledger per-share base.
   const waccShares = (() => {
@@ -341,7 +346,7 @@ export function sourceWACCInputs(
     inputs: {
       riskFreeRate,
       equityRiskPremium,
-      beta,
+      beta: betaFull,
       preTaxCostOfDebt: cp.costOfDebtPreTax,
       marginalTaxRate: cp.marginalTaxRate,
       equityWeight,
@@ -381,7 +386,8 @@ export function computeWACC(
   const equityWeight = formula.equityWeight;
 
   const baseWacc = costOfEquity * equityWeight + costOfDebtPostTax * debtWeight;
-  const wacc = Math.max(0.085, Math.min(0.16, Number((baseWacc + distressSpread).toFixed(4))));
+  // P0 #94: clamp full-precision math, round only the stored value.
+  const wacc = Number(Math.max(0.085, Math.min(0.16, baseWacc + distressSpread)).toFixed(4));
 
   // Mid-cycle EBIT margin anchor from reported history (through-cycle).
   // The prior logic used the archetype's trough-derived baseMargin or the
@@ -694,6 +700,20 @@ export function computeDCF(
     terminal: `${(assumptions.terminalGrowthRate * 100).toFixed(1)}% sector anchor (${sectorIdForDrivers}); TV capped at 25× terminal-year FCFF${isTvCapped ? " (CAP ACTIVE — see diagnostics)" : " (not binding)"}`,
     driverEquation: driver.driverEquation,
   };
+  // Structured assumption provenance (P0 #17): machine-readable twin of the
+  // prose trail above — every material assumption carries value + source.
+  const assumptionInputs: Record<string, { value: number | string; source: string }> = {
+    baseRevenueGrowth: { value: Number(baseGrowth.toFixed(6)), source: "driver-models:55% winsorized hist CAGR + 45% live" },
+    revenueGrowthPath: { value: assumptions.revenueGrowthRates.map((g) => Number(g.toFixed(6))).join(","), source: "driver-models:sector fade shape" },
+    baseEbitMargin: { value: Number(assumptions.ebitMargins[0].toFixed(6)), source: marginSource },
+    capexPct: { value: Number(avgCapexPct.toFixed(6)), source: "driver-models:hist intensity clamped [2.5%, 8.0%]" },
+    deptPct: { value: Number(avgDeptPct.toFixed(6)), source: "driver-models:hist intensity clamped [2.0%, 6.0%]" },
+    nwcPct: { value: Number(avgNwcChangePct.toFixed(6)), source: "driver-models:sector overlay" },
+    wacc: { value: wacc, source: assumptions.parameterSource || "CAPM blend" },
+    terminalGrowth: { value: tg, source: "driver-models:sector terminal anchor" },
+    netDebt: { value: netDebt, source: financeReceivablesOffset > 0 ? "statements + bounded captive-finance offset" : "statements:totalDebt − cash" },
+    sharesOutstanding: { value: sharesOutstanding, source: "marketIntegrity.resolveShareCount" },
+  };
 
   // Structured derivation trail (P0 #20): every bridge value carries its
   // formula id + version, named inputs with source IDs, and transform.
@@ -724,10 +744,12 @@ export function computeDCF(
 
   return {
     status,
-    diagnostics,
+    diagnostics: [`Model ${MODEL_VERSION} (kernel ${KERNEL_VERSION}).`, ...diagnostics],
     assumptions,
     assumptionBasis,
+    assumptionInputs,
     derivationTrail: trail.all(),
+    modelVersion: MODEL_VERSION,
     avgCapexPct,
     avgDeptPct,
     avgNwcChangePct,

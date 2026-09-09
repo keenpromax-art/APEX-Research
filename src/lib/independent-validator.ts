@@ -14,6 +14,9 @@ import {
   PER_SHARE_TOL,
   RATIO_TOL,
   WACCFormulaEngine,
+  wcDriverDays,
+  rollforwardVariance,
+  detectAccountingAnomalies,
   type ToleranceVerdict,
 } from "./financial-kernel";
 import { COUNTRY_CAPITAL_PARAMS } from "./calculations";
@@ -22,7 +25,7 @@ import type { CanonicalFactGraph } from "./canonical-facts";
 export type IndependentSeverity = "FAIL" | "WARN" | "PASS";
 
 export interface IndependentIssue {
-  code: "IND-01" | "IND-02" | "IND-03" | "IND-04" | "IND-05";
+  code: "IND-01" | "IND-02" | "IND-03" | "IND-04" | "IND-05" | "STMT-01" | "WC-01" | "EV-01" | "ANOM-01" | "XMOD-01" | "CONF-01" | "AI-01" | "ECON-01" | "DUPONT-01" | "LIQ-01" | "LC-01" | "IMM-01" | "AUDIT-01";
   severity: Exclude<IndependentSeverity, "PASS">;
   message: string;
   expected: string;
@@ -303,7 +306,7 @@ function checkWacc(inp: IndependentInputs, issues: IndependentIssue[], passes: s
   else if (rawBeta < 0.35) rawBeta = 0.35;
   else if (rawBeta > 2.5) rawBeta = 2.5;
   const blume = 0.67 * rawBeta + 0.33 * 1.0;
-  const eb = Math.max(0.5, Math.min(1.8, Number(blume.toFixed(3))));
+  const eb = Math.max(0.5, Math.min(1.8, blume));
   const price = facts.market.price.value ?? 0;
   const basic = facts.market.sharesBasic.value ?? 0;
   const mktCap = price > 0 && basic > 0 ? price * basic : (facts.market.marketCap.value ?? 0);
@@ -325,7 +328,7 @@ function checkWacc(inp: IndependentInputs, issues: IndependentIssue[], passes: s
     });
     return;
   }
-  const recomputed = Math.max(0.085, Math.min(0.16, Number((solved.wacc + spread).toFixed(4))));
+  const recomputed = Number(Math.max(0.085, Math.min(0.16, solved.wacc + spread)).toFixed(4));
   const published = Number(ledger.wacc ?? (dcf.assumptions as unknown as { wacc?: number } | undefined)?.wacc) || 0;
   const v = magnitudeTolerance(recomputed, published, { absTol: 0.0025, relTol: 0.02, materiality: 0.005 });
   if (!v.pass && v.material && Math.abs(recomputed - published) > 0.005) {
@@ -390,6 +393,295 @@ function checkUpsideRating(inp: IndependentInputs, issues: IndependentIssue[], p
   }
 }
 
+/**
+ * STMT-01: statement-integrity battery — income-statement closure, ETR bounds,
+ * sign discipline, retained-earnings bridge, debt-maturity sum, cash
+ * roll-forward, EBITDA taxonomy, interest-tranche rates, buyback/SBC share
+ * consistency. FAIL only on material, definitionally-impossible breaks;
+ * definitional variance (other income in EBITDA, OCI plugs in RE) WARNs.
+ */
+function checkStatementIntegrity(inp: IndependentInputs, issues: IndependentIssue[], passes: string[]): void {
+  const { facts } = inp;
+  let evaluated = 0;
+  let warns = 0;
+  const years = facts.years;
+  for (const y of years) {
+    const v = (f: { value: number | null }) => f.value;
+    // 1. Pretax closure: pretax ≈ opInc − interest + otherIncome.
+    // WARN-only: otherIncome is sparsely disclosed (often 0) and Yahoo gaps
+    // cause 5-6% drift that is not a statement-integrity failure.
+    if (v(y.operatingIncome) !== null && v(y.interestExpense) !== null && v(y.pretaxIncome) !== null) {
+      evaluated++;
+      const other = v(y.otherIncome) ?? 0;
+      const expected = (v(y.operatingIncome) as number) - (v(y.interestExpense) as number) + other;
+      const t = magnitudeTolerance(expected, v(y.pretaxIncome) as number, { absTol: Math.max(1000, Math.abs(expected) * 0.02), relTol: 0.05, materiality: Math.max(1000, Math.abs(expected) * 0.08) });
+      if (!t.pass) {
+        warns++;
+        issues.push({ code: "STMT-01", severity: "WARN", message: `Pretax closure drift in ${y.year}: opInc−interest+other ${fmt0(expected)} vs reported ${fmt0(v(y.pretaxIncome) as number)} (${t.detail}).`, expected: fmt0(expected), actual: fmt0(v(y.pretaxIncome) as number), magnitude: t });
+      }
+    }
+    // 2. ETR bounds + sign discipline (P0 #38-part, #93).
+    if (v(y.pretaxIncome) !== null && (v(y.pretaxIncome) as number) > 0 && v(y.incomeTaxExpense) !== null) {
+      evaluated++;
+      const etr = (v(y.incomeTaxExpense) as number) / (v(y.pretaxIncome) as number);
+      if (etr > 1.5 || etr < -1.0) {
+        pushFail(issues, {
+          code: "STMT-01", severity: "FAIL",
+          message: `FATAL: ${y.year} effective tax rate ${(etr * 100).toFixed(1)}% is definitionally impossible — tax data or pretax base is corrupt.`,
+          expected: "0%..100%", actual: `${(etr * 100).toFixed(1)}%`,
+          magnitude: magnitudeTolerance(0.25, etr, { absTol: 0.05, relTol: 0.2, materiality: 0.05 }),
+        });
+      } else if (etr < -0.1 || etr > 0.6) {
+        warns++;
+        issues.push({ code: "STMT-01", severity: "WARN", message: `${y.year} ETR ${(etr * 100).toFixed(1)}% outside [0%, 60%] — one-offs/NOLs possible; verify before trusting NOPAT.`, expected: "0%..60%", actual: `${(etr * 100).toFixed(1)}%`, magnitude: magnitudeTolerance(0.25, etr, { absTol: 0.05, relTol: 0.2, materiality: 0.05 }) });
+      }
+    }
+    if (v(y.interestExpense) !== null && (v(y.interestExpense) as number) < 0) {
+      evaluated++;
+      pushFail(issues, {
+        code: "STMT-01", severity: "FAIL",
+        message: `FATAL: ${y.year} negative interest expense (${fmt0(v(y.interestExpense) as number)}) — violates signed-value convention (expense ≥ 0).`,
+        expected: "≥ 0", actual: fmt0(v(y.interestExpense) as number),
+        magnitude: magnitudeTolerance(0, v(y.interestExpense) as number, { absTol: 1, relTol: 0.01, materiality: 1 }),
+      });
+    }
+    // 3. EBITDA taxonomy: reported vs operatingIncome + depreciation (WARN-only:
+    // definitional variance — other operating income — is legitimate).
+    if (v(y.ebitda) !== null && v(y.operatingIncome) !== null && v(y.depreciation) !== null) {
+      evaluated++;
+      const expected = (v(y.operatingIncome) as number) + (v(y.depreciation) as number);
+      const t = magnitudeTolerance(expected, v(y.ebitda) as number, { absTol: Math.max(1000, Math.abs(expected) * 0.02), relTol: 0.05, materiality: Math.max(1000, Math.abs(expected) * 0.05) });
+      if (!t.pass) {
+        warns++;
+        issues.push({ code: "STMT-01", severity: "WARN", message: `${y.year} EBITDA taxonomy drift: reported ${fmt0(v(y.ebitda) as number)} vs opInc+D&A ${fmt0(expected)} (${t.detail}) — definitional variance possible.`, expected: fmt0(expected), actual: fmt0(v(y.ebitda) as number), magnitude: t });
+      }
+    }
+    // 4. Debt maturity: short + long ≈ total (WARN-only: classification drift).
+    // Skip when split fields are both zero/undisclosed (only totalDebt reported) — not a drift, just missing split.
+    if (v(y.shortTermDebt) !== null && v(y.longTermDebt) !== null && v(y.totalDebt) !== null && (v(y.totalDebt) as number) > 0) {
+      const sd = Number(v(y.shortTermDebt) ?? 0);
+      const ld = Number(v(y.longTermDebt) ?? 0);
+      if (sd === 0 && ld === 0) {
+        // Split not disclosed — nothing to validate.
+      } else {
+        evaluated++;
+        const expected = sd + ld;
+        const t = magnitudeTolerance(expected, v(y.totalDebt) as number, { absTol: Math.max(1000, expected * 0.02), relTol: 0.05, materiality: Math.max(1000, expected * 0.1) });
+        if (!t.pass) {
+          warns++;
+          issues.push({ code: "STMT-01", severity: "WARN", message: `${y.year} debt-maturity split drift: short+long ${fmt0(expected)} vs total ${fmt0(v(y.totalDebt) as number)} (${t.detail}).`, expected: fmt0(expected), actual: fmt0(v(y.totalDebt) as number), magnitude: t });
+        }
+      }
+    }
+    // 5. Interest-tranche implied rate bounds (P0 #39-part).
+    if (v(y.interestExpense) !== null && (v(y.interestExpense) as number) > 0 && v(y.totalDebt) !== null && (v(y.totalDebt) as number) > 0) {
+      evaluated++;
+      const rate = (v(y.interestExpense) as number) / (v(y.totalDebt) as number);
+      if (rate < 0 || rate > 0.25) {
+        warns++;
+        issues.push({ code: "STMT-01", severity: "WARN", message: `${y.year} implied borrowing rate ${(rate * 100).toFixed(1)}% outside [0%, 25%] — verify interest/debt units before trusting coverage math.`, expected: "0%..25%", actual: `${(rate * 100).toFixed(1)}%`, magnitude: magnitudeTolerance(0.05, rate, { absTol: 0.01, relTol: 0.2, materiality: 0.01 }) });
+      }
+    }
+  }
+  // 6. Retained-earnings bridge across years (WARN-only: OCI/SBC/FX plugs legitimately break exactness).
+  for (let i = 1; i < years.length; i++) {
+    const prev = years[i - 1];
+    const cur = years[i];
+    if (prev.retainedEarnings.value !== null && cur.retainedEarnings.value !== null && cur.netIncome.value !== null) {
+      evaluated++;
+      const div = cur.dividendsPaid.value ?? 0;
+      const repo = cur.repurchases.value ?? 0;
+      const expected = (prev.retainedEarnings.value as number) + (cur.netIncome.value as number) - div - repo;
+      const actual = cur.retainedEarnings.value as number;
+      const t = magnitudeTolerance(expected, actual, { absTol: Math.max(1000, Math.abs(expected) * 0.02), relTol: 0.1, materiality: Math.max(1000, Math.abs(expected) * 0.1) });
+      if (!t.pass) {
+        warns++;
+        issues.push({ code: "STMT-01", severity: "WARN", message: `${cur.year} retained-earnings bridge drift: RE(t−1)+NI−div−buybacks ${fmt0(expected)} vs reported ${fmt0(actual)} (${t.detail}) — OCI/SBC/FX plugs possible.`, expected: fmt0(expected), actual: fmt0(actual), magnitude: t });
+      }
+    }
+  }
+  // 7. Buyback without shrinkage + SBC without dilution (WARN: timing/issuance offsets possible).
+  for (let i = 1; i < years.length; i++) {
+    const prev = years[i - 1];
+    const cur = years[i];
+    if (cur.repurchases.value !== null && (cur.repurchases.value as number) > 0 && prev.sharesOutstanding.value !== null && cur.sharesOutstanding.value !== null) {
+      evaluated++;
+      if ((cur.sharesOutstanding.value as number) >= (prev.sharesOutstanding.value as number)) {
+        warns++;
+        issues.push({ code: "STMT-01", severity: "WARN", message: `${cur.year} buybacks of ${fmt0(cur.repurchases.value as number)} with no share-count shrinkage — offsetting issuance/timing possible; verify before modeling shrinkage.`, expected: "shares decrease", actual: `prev ${fmt0(prev.sharesOutstanding.value as number)} → cur ${fmt0(cur.sharesOutstanding.value as number)}`, magnitude: magnitudeTolerance(prev.sharesOutstanding.value as number, cur.sharesOutstanding.value as number, { absTol: 1, relTol: 0.01, materiality: 1 }) });
+      }
+    }
+  }
+  if (evaluated === 0) {
+    issues.push({
+      code: "STMT-01", severity: "WARN",
+      message: `Statement-integrity battery not assessable — IS/equity detail facts missing (see DATA-01).`,
+      expected: "assessable detail", actual: "missing inputs",
+      magnitude: magnitudeTolerance(0, 0, { absTol: 0, relTol: 0 }),
+    });
+  } else if (!issues.some((i) => i.code === "STMT-01")) {
+    passes.push(`STMT-01: statement-integrity battery clean across ${evaluated} check(s).`);
+  }
+}
+
+/**
+ * WC-01: working-capital driver discipline (WARN-only — drivers are
+ * judgmental; extremes and schedule breaks still deserve daylight).
+ * DIO/DSO/DPO extremes, PP&E roll-forward breaks, capex<D&A
+ * underinvestment, D&A-rate absurdity.
+ */
+function checkWorkingCapital(inp: IndependentInputs, issues: IndependentIssue[], passes: string[]): void {
+  const { facts, archetype } = inp;
+  let evaluated = 0;
+  for (const y of facts.years) {
+    const v = (f: { value: number | null }) => f.value;
+    // DIO/DSO/DPO extremes (P0 #32–#34).
+    if (v(y.revenue) !== null && (v(y.revenue) as number) > 0) {
+      const days = wcDriverDays({
+        netReceivables: v(y.netReceivables) ?? undefined,
+        revenue: v(y.revenue) as number,
+        inventory: v(y.inventory) ?? undefined,
+        costOfRevenue: v(y.costOfRevenue) ?? undefined,
+        accountsPayable: v(y.accountsPayable) ?? undefined,
+      });
+      for (const [label, s] of [["DSO", days.dso], ["DIO", days.dio], ["DPO", days.dpo]] as const) {
+        if (s.display === "VALUE") {
+          evaluated++;
+          if (s.value < 0 || s.value > 365) {
+            issues.push({
+              code: "WC-01", severity: "WARN",
+              message: `${y.year} ${label} of ${s.value.toFixed(0)} days outside [0, 365] — verify receivables/inventory/payables units before trusting WC drivers.`,
+              expected: "0..365 days", actual: `${s.value.toFixed(0)} days`,
+              magnitude: magnitudeTolerance(180, s.value, { absTol: 30, relTol: 0.2, materiality: 30 }),
+            });
+          }
+        }
+      }
+    }
+    // D&A rate bounds (P0 #36).
+    if (v(y.depreciation) !== null && v(y.netFixedAssets) !== null && (v(y.netFixedAssets) as number) > 0) {
+      evaluated++;
+      const rate = (v(y.depreciation) as number) / (v(y.netFixedAssets) as number);
+      if (rate < 0 || rate > 0.4) {
+        issues.push({
+          code: "WC-01", severity: "WARN",
+          message: `${y.year} depreciation rate ${(rate * 100).toFixed(1)}% of net PPE outside [0%, 40%] — verify asset base vs capex linkage.`,
+          expected: "0%..40%", actual: `${(rate * 100).toFixed(1)}%`,
+          magnitude: magnitudeTolerance(0.1, rate, { absTol: 0.02, relTol: 0.2, materiality: 0.02 }),
+        });
+      }
+    }
+    // Capex < 0.3× D&A sustained underinvestment (capital-intensive only).
+    if (archetype === "CYCLICAL_CAPITAL_INTENSIVE" && v(y.capitalExpenditures) !== null && v(y.depreciation) !== null && (v(y.depreciation) as number) > 0) {
+      evaluated++;
+      if ((v(y.capitalExpenditures) as number) < 0.3 * (v(y.depreciation) as number)) {
+        issues.push({
+          code: "WC-01", severity: "WARN",
+          message: `${y.year} capex covers <30% of depreciation under a capital-intensive archetype — chronic underinvestment or asset-light shift; verify.`,
+          expected: "≥ 30% of D&A", actual: `${(((v(y.capitalExpenditures) as number) / (v(y.depreciation) as number)) * 100).toFixed(0)}%`,
+          magnitude: magnitudeTolerance(0.3 * (v(y.depreciation) as number), v(y.capitalExpenditures) as number, { absTol: 1, relTol: 0.1, materiality: 1 }),
+        });
+      }
+    }
+  }
+  // PP&E roll-forward across years (P0 #37 — WARN: revaluations/M&A legitimately break exactness).
+  for (let i = 1; i < facts.years.length; i++) {
+    const prev = facts.years[i - 1];
+    const cur = facts.years[i];
+    if (prev.netFixedAssets.value !== null && cur.netFixedAssets.value !== null && cur.depreciation.value !== null && cur.capitalExpenditures.value !== null) {
+      evaluated++;
+      const r = rollforwardVariance(prev.netFixedAssets.value as number, cur.capitalExpenditures.value as number, cur.depreciation.value as number, cur.netFixedAssets.value as number);
+      if (r.display === "VALUE" && r.value > 0.1) {
+        issues.push({
+          code: "WC-01", severity: "WARN",
+          message: `${cur.year} PP&E roll-forward drift ${(r.value * 100).toFixed(1)}% (opening + capex − depreciation vs closing) — revaluations/M&A/disposals possible.`,
+          expected: "≤ 10%", actual: `${(r.value * 100).toFixed(1)}%`,
+          magnitude: magnitudeTolerance(0, r.value, { absTol: 0.02, relTol: 0.1, materiality: 0.02 }),
+        });
+      }
+    }
+  }
+  if (evaluated === 0) {
+    issues.push({
+      code: "WC-01", severity: "WARN",
+      message: `Working-capital driver battery not assessable — WC/PPE detail facts missing (see DATA-01).`,
+      expected: "assessable detail", actual: "missing inputs",
+      magnitude: magnitudeTolerance(0, 0, { absTol: 0, relTol: 0 }),
+    });
+  } else if (!issues.some((i) => i.code === "WC-01")) {
+    passes.push(`WC-01: working-capital drivers sane across ${evaluated} check(s).`);
+  }
+}
+
+/**
+ * EV-01: EV taxonomy unknowns disclosure (WARN-only).
+ * NCI / preferred / pension / operating-lease claims are UNKNOWN from Yahoo
+ * feeds — the bridge states them instead of zero-folding them.
+ */
+function checkEvTaxonomy(inp: IndependentInputs, issues: IndependentIssue[], passes: string[]): void {
+  const { facts } = inp;
+  const latest = facts.years[facts.years.length - 1];
+  const leases = latest ? latest.capitalLeaseObligations.value : null;
+  if (leases !== null && leases > 0) {
+    issues.push({
+      code: "EV-01", severity: "WARN",
+      message: `Finance-lease obligations of ${fmt0(leases)} evidenced — verify EV bridge adds them to debt; NCI/preferred/pension/operating-leases remain UNKNOWN from feed.`,
+      expected: "lease-inclusive EV bridge", actual: fmt0(leases),
+      magnitude: magnitudeTolerance(0, leases, { absTol: 1, relTol: 0.01, materiality: 1 }),
+    });
+  } else {
+    passes.push(`EV-01: EV taxonomy stated — finance leases none evidenced; NCI/preferred/pension/operating-leases UNKNOWN from feed (never zero-folded).`);
+  }
+}
+
+/**
+ * ANOM-01: accounting-anomaly aggregation (P0 #77).
+ * Every anomaly WARNs; ≥2 material anomalies escalate to a single FAIL.
+ */
+function checkAnomalies(inp: IndependentInputs, issues: IndependentIssue[], passes: string[]): void {
+  const hist = inp.facts.years.map((y) => ({
+    year: y.year,
+    revenue: y.revenue.value ?? 0,
+    netIncome: y.netIncome.value ?? 0,
+    operatingCashFlow: y.operatingCashFlow.value ?? 0,
+    netReceivables: y.netReceivables.value ?? 0,
+    totalAssets: y.totalAssets.value ?? 0,
+    grossMargin: (y.revenue.value ?? 0) > 0 && y.grossProfit.value !== null
+      ? (y.grossProfit.value as number) / (y.revenue.value as number)
+      : 0,
+  }));
+  if (hist.length < 2) {
+    issues.push({
+      code: "ANOM-01", severity: "WARN",
+      message: `Anomaly scan needs ≥2 periods — only ${hist.length} available.`,
+      expected: "≥ 2 periods", actual: `${hist.length}`,
+      magnitude: magnitudeTolerance(2, hist.length, { absTol: 0, relTol: 0, materiality: 0 }),
+    });
+    return;
+  }
+  const found = detectAccountingAnomalies(hist);
+  for (const a of found) {
+    issues.push({
+      code: "ANOM-01", severity: "WARN",
+      message: `${a.code}: ${a.message}`,
+      expected: "no anomaly", actual: a.code,
+      magnitude: magnitudeTolerance(0, 1, { absTol: 0, relTol: 0, materiality: 0 }),
+    });
+  }
+  const material = found.filter((a) => a.material);
+  const distinctMaterial = new Set(material.map((a) => a.code)).size;
+  if (material.length >= 3 || distinctMaterial >= 2) {
+    pushFail(issues, {
+      code: "ANOM-01", severity: "FAIL",
+      message: `FATAL: ${material.length} material accounting anomalies compound (${material.map((a) => a.code).join(", ")}) — mandatory review before publication; statements cannot be trusted at face value.`,
+      expected: "< 3 material or < 2 distinct types", actual: `${material.length} material (${distinctMaterial} distinct)`,
+      magnitude: magnitudeTolerance(2, material.length, { absTol: 0, relTol: 0, materiality: 1 }),
+    });
+  } else if (found.length === 0) {
+    passes.push(`ANOM-01: no accounting anomalies across ${hist.length} year(s).`);
+  }
+}
+
 export function validateIndependently(inputs: IndependentInputs): IndependentReport {
   const issues: IndependentIssue[] = [];
   const passes: string[] = [];
@@ -398,5 +690,9 @@ export function validateIndependently(inputs: IndependentInputs): IndependentRep
   checkEvBridge(inputs, issues, passes);
   checkWacc(inputs, issues, passes);
   checkUpsideRating(inputs, issues, passes);
-  return { issues, passes, checked: 5 };
+  checkStatementIntegrity(inputs, issues, passes);
+  checkWorkingCapital(inputs, issues, passes);
+  checkEvTaxonomy(inputs, issues, passes);
+  checkAnomalies(inputs, issues, passes);
+  return { issues, passes, checked: 9 };
 }

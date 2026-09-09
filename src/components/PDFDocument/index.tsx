@@ -1751,7 +1751,12 @@ const FundamentalAnalysisPage = ({ data }: { data: ReportData }) => {
 
           <Text style={S.bodyText}>
             <Text style={{ fontFamily: "Helvetica-Bold", color: COLORS.slateDark }}>Base-Case Scenario: </Text>
-            Our base-case projection assumes annual revenue compounding of {ledger?.scenarios?.base.revCagrDisplay || "8.2%"} over our 5-year discrete explicit forecast period, with operating margins (EBIT) stabilizing near {fmtPct(baseOmVal)} (EBITDA margin near {fmtPct(latest.ebitdaMargin || 0.26)}). Under these baseline assumptions, our discounted cash-flow methodology yields our fair value estimate of {sym}{fmtNum(fv, 2)} per share.
+            {(() => {
+              const revCagrText = ledger?.scenarios?.base.revCagrDisplay ?? (data.dcf.assumptions?.revenueGrowthRates?.[0] != null ? `${(data.dcf.assumptions.revenueGrowthRates[0] * 100).toFixed(1)}%` : "N/A");
+              const ebitMText = Number.isFinite(baseOmVal) ? fmtPct(baseOmVal) : "N/A";
+              const ebitdaMText = latest.ebitdaMargin != null && Number.isFinite(latest.ebitdaMargin) ? fmtPct(latest.ebitdaMargin) : "N/A";
+              return `Our base-case projection assumes annual revenue compounding of ${revCagrText} over our 5-year discrete explicit forecast period, with operating margins (EBIT) stabilizing near ${ebitMText} (EBITDA margin near ${ebitdaMText}). Under these baseline assumptions, our discounted cash-flow methodology yields our fair value estimate of ${sym}${fmtNum(fv, 2)} per share.`;
+            })()}
           </Text>
 
           <Text style={S.bodyText}>
@@ -2628,13 +2633,13 @@ const BullsSayBearsSayPage = ({ data }: { data: ReportData }) => {
           </View>
           {(() => {
             const sm = ledger?.scenarioMargins;
-            const bullTm = sm?.bullMarginDisplay || "24.0%";
-            const baseTm = sm?.baseMarginDisplay || `${(((data.annualFinancials[data.annualFinancials.length-1]?.ebitdaMargin || 0.22)) * 100).toFixed(1)}%`;
-            const bearTm = sm?.bearMarginDisplay || "12.0%";
-            const bullTmNum = sm ? sm.bullMargin * 100 : 24.0;
-            const baseTmNum = sm ? sm.baseMargin * 100 : 18.0;
-            const bearTmNum = sm ? sm.bearMargin * 100 : 12.0;
-            const blendedMargin = (0.25 * bullTmNum + 0.60 * baseTmNum + 0.15 * bearTmNum).toFixed(1);
+            const bullTm = sm?.bullMarginDisplay ?? (data.annualFinancials[data.annualFinancials.length-1]?.ebitdaMargin != null ? `${(data.annualFinancials[data.annualFinancials.length-1].ebitdaMargin * 100).toFixed(1)}%` : "N/A");
+            const baseTm = sm?.baseMarginDisplay ?? (data.annualFinancials[data.annualFinancials.length-1]?.ebitdaMargin != null ? `${(data.annualFinancials[data.annualFinancials.length-1].ebitdaMargin * 100).toFixed(1)}%` : "N/A");
+            const bearTm = sm?.bearMarginDisplay ?? "N/A";
+            const bullTmNum = sm ? sm.bullMargin * 100 : null;
+            const baseTmNum = sm ? sm.baseMargin * 100 : null;
+            const bearTmNum = sm ? sm.bearMargin * 100 : null;
+            const blendedMargin = bullTmNum != null && baseTmNum != null && bearTmNum != null ? (0.25 * bullTmNum + 0.60 * baseTmNum + 0.15 * bearTmNum).toFixed(1) : "N/A";
             const sym = data.profile.currency === "INR" ? "Rs. " : "$";
             const cscen = canonicalScenarios(data);
             const scenBullTp = Math.max(0.01, cscen?.bull.targetPrice ?? canonicalValuation(data).targetPrice);

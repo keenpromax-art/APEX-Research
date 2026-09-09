@@ -9,6 +9,8 @@ import { normalizeTicker } from "@/lib/request-validation";
 import { isInternetPlatformCompany, isTelecomCarrierCompany, isHospitalityCompany, isRealEstateCompany, isHardwareCompany, isSoftwareCompany } from "@/lib/sectors/profiles";
 import { buildCompanyOntology } from "@/lib/company-ontology";
 import { scorePeerSimilarity, gatePeerSet } from "@/lib/peer-similarity";
+import { ModelLifecycle } from "@/lib/financial-kernel";
+import { assessMarketIntegrity } from "@/lib/financial-provenance";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -23,9 +25,13 @@ export async function GET(request: NextRequest) {
   }
 
   try {
+    // P0 #85: strict model lifecycle — every stage transition is recorded;
+    // VERIFIED is appended client-side after QA, so a skipped stage is visible.
+    const lifecycle = new ModelLifecycle();
     const raw = await fetchQuoteSummary(symbol);
     const { companyProfile, stockData, annualFinancials, quarterlyFinancials, shareholding } =
       parseQuoteSummary(raw as Record<string, unknown>, symbol);
+    lifecycle.advance("FETCHED", "Yahoo quoteSummary + timeseries retrieved");
 
     if (annualFinancials.length === 0) {
       return NextResponse.json(
@@ -70,6 +76,16 @@ export async function GET(request: NextRequest) {
     const cmp = stockData.currentPrice;
     const ratiosByYear = annualFinancials.map(f => computeRatios(f, cmp));
     const dupontByYear = annualFinancials.map(f => computeDuPont(f));
+    lifecycle.advance("NORMALIZED", "statements parsed + ratios/DuPont computed");
+    // Pre-model integrity screen (P0 #85 VALIDATED stage): share-base and
+    // balance-sheet sanity before any valuation math runs.
+    const preIntegrity = assessMarketIntegrity({ stockData, annualFinancials });
+    lifecycle.advance(
+      "VALIDATED",
+      preIntegrity.blocked
+        ? `integrity BLOCKED: ${preIntegrity.issues.filter((i) => i.severity === "BLOCK").map((i) => i.code).join(",")}`
+        : "integrity screen passed"
+    );
 
     // Dynamic Sector & Archetype-Calibrated Valuation (Residual Income for Financials / FCFF for non-financials)
     const archetypeProfile = classifyArchetype(companyProfile, stockData, annualFinancials);
@@ -285,6 +301,7 @@ export async function GET(request: NextRequest) {
           const pOpMargin = parseNum(p.operatingMargins);
           const pDebtToEquity = parseNum(p.debtToEquity);
           const pCurrentRatio = parseNum(p.currentRatio);
+          const pBeta = parseNum((p as Record<string, unknown>).beta);
 
           // Priority 5: business-model similarity engine (operating model + geography +
           // growth + margins + capital intensity + size). Ontology is the authority.
@@ -331,6 +348,9 @@ export async function GET(request: NextRequest) {
             debtToEquity: pDebtToEquity,
             currentRatio: pCurrentRatio,
             revenueGrowth: pRevGrowth,
+            // Point-in-time peer beta for the median beta engine (P0 #57) —
+            // null when undisclosed (single-beta path, limitation disclosed).
+            beta: pBeta,
             // Missing peer currency stays null (renders N/M) — never inherit
             // the subject's currency, which stamps wrong FX on foreign peers.
             currency: (p.currency as string) || null,
@@ -359,8 +379,10 @@ export async function GET(request: NextRequest) {
       dcf,
       peers: peers as any[],
     });
+    lifecycle.advance("MODELED", `valuation ${valuationResult.selectedModel} + ledger + facts built`);
 
     return NextResponse.json({
+      pipeline: lifecycle.history_(),
       profile: companyProfile,
       stockData,
       annualFinancials,

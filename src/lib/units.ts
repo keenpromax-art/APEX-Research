@@ -166,6 +166,31 @@ export function convertMoneyScale(m: MoneyDim, to: MoneyDim["scale"]): MoneyDim 
 }
 
 // ─────────────────────────────────────────────────────────────
+// Dimensional bridge  (P0 #2, #3, #90 — Money {value, currency, scale};
+// no naked monetary numbers in NEW pipeline code; dimensional ops in
+// financial-kernel MoneyOps throw on USD×shares / %×USD style errors)
+// ─────────────────────────────────────────────────────────────
+import type { DimValue } from "./financial-kernel";
+
+/** Lift a legacy Money metric into a dimension-checked value (null when missing). */
+export function toDimValue(m: Money | null | undefined): DimValue | null {
+  if (!m || m.amount === null || !Number.isFinite(m.amount)) return null;
+  return { kind: "money", value: m.amount as number, currency: m.currency };
+}
+
+/** Lift a share count into a dimension-checked value (null when missing). */
+export function toDimShares(shares: number | null | undefined): DimValue | null {
+  if (shares === null || shares === undefined || !Number.isFinite(shares) || shares <= 0) return null;
+  return { kind: "shares", value: shares };
+}
+
+/** Lift a price into a dimension-checked value (null when missing). */
+export function toDimPrice(price: number | null | undefined, currency?: string): DimValue | null {
+  if (price === null || price === undefined || !Number.isFinite(price) || price <= 0) return null;
+  return { kind: "price", value: price, currency };
+}
+
+// ─────────────────────────────────────────────────────────────
 // Presentation-Layer Formatting (ONLY for UI/PDF display)
 // NEVER use formatted strings inside calculation internals
 // ─────────────────────────────────────────────────────────────

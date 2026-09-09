@@ -300,6 +300,13 @@ export interface DCFResult {
   /** Per-assumption evidence trail: assumption name → empirical basis string. */
   assumptionBasis?: Record<string, string>;
   /**
+   * Structured assumption provenance (P0 #17): material assumption key →
+   * numeric value + source. Machine-readable twin of assumptionBasis prose.
+   */
+  assumptionInputs?: Record<string, { value: number | string; source: string }>;
+  /** Financial-model version that produced this result (P0 #95 reproducibility). */
+  modelVersion?: string;
+  /**
    * Structured derivation trail (P0 #20): every derived bridge value stores
    * its formula id + version, named inputs with source IDs, and transform.
    */
@@ -386,6 +393,8 @@ export interface PeerData {
   currentRatio?: number | null;
   revenueGrowth: number | null;
   currency: string | null;
+  /** Point-in-time equity beta for the peer-median beta engine (P0 #57). Null when undisclosed. */
+  beta?: number | null;
   sector?: string | null;
   industry?: string | null;
   /** 0–100 peer-relevance score (sector/industry overlap + size proximity). Null = unscored. */

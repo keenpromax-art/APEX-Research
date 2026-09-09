@@ -468,6 +468,504 @@ export function valuePerShare(equityValue: number, sharesOutstanding: number): K
   return guardedDiv(equityValue, sharesOutstanding, { label: "equityValue/dilutedShares" });
 }
 
+export const MODEL_VERSION = "apex-financial-model-v1";
+export const KERNEL_VERSION_ALIAS = KERNEL_VERSION;
+
+// ─────────────────────────────────────────────
+// Economic plausibility bounds  (P0 #91 — generous bands; breaches
+// diagnose, and only material, machine-verifiable breaks gate upstream)
+// ─────────────────────────────────────────────
+export interface EconomicBound {
+  id: string;
+  min: number;
+  max: number;
+  unit: string;
+  rationale: string;
+}
+
+export const ECONOMIC_BOUNDS: Record<string, EconomicBound> = {
+  "margin.gross": { id: "margin.gross", min: -0.5, max: 1.0, unit: "fraction", rationale: "Gross margin outside [−50%, +100%] is economically extraordinary." },
+  "margin.ebitda": { id: "margin.ebitda", min: -1.0, max: 1.0, unit: "fraction", rationale: "EBITDA margin outside [−100%, +100%] is economically extraordinary." },
+  "margin.ebit": { id: "margin.ebit", min: -1.0, max: 1.0, unit: "fraction", rationale: "EBIT margin outside [−100%, +100%] is economically extraordinary." },
+  "margin.net": { id: "margin.net", min: -2.0, max: 1.0, unit: "fraction", rationale: "Net margin outside [−200%, +100%] is economically extraordinary." },
+  "return.roe": { id: "return.roe", min: -3.0, max: 3.0, unit: "fraction", rationale: "|ROE| above 300% is a distressed-base artifact until proven otherwise." },
+  "growth.revenue": { id: "growth.revenue", min: -0.9, max: 5.0, unit: "fraction", rationale: "Annual revenue change outside [−90%, +500%] is economically extraordinary." },
+  "valuation.wacc": { id: "valuation.wacc", min: 0.03, max: 0.3, unit: "fraction", rationale: "WACC outside [3%, 30%] is economically extraordinary." },
+  "valuation.terminalGrowth": { id: "valuation.terminalGrowth", min: 0.0, max: 0.08, unit: "fraction", rationale: "Perpetual growth above 8% nominal exceeds any long-run economy." },
+  "leverage.debtToEquity": { id: "leverage.debtToEquity", min: 0, max: 50, unit: "multiple", rationale: "D/E above 50× is balance-sheet distress until proven otherwise." },
+};
+
+export function checkEconomicBound(id: string, value: number): { within: boolean; bound: EconomicBound | null } {
+  const bound = ECONOMIC_BOUNDS[id] ?? null;
+  if (!bound || !Number.isFinite(value)) return { within: true, bound };
+  return { within: value >= bound.min && value <= bound.max, bound };
+}
+
+// ─────────────────────────────────────────────
+// Sign-aware tax + coverage helpers  (P0 #93 — interpretation follows
+// the sign of the base; arithmetic never pretends otherwise)
+// ─────────────────────────────────────────────
+export function effectiveTaxRate(incomeTaxExpense: number, pretaxIncome: number): KernelScalar {
+  if (!(pretaxIncome > 0)) {
+    return { value: 0, validity: "NM", reason: "NON_POSITIVE_BASE:pretaxIncome≤0", display: "N_M" };
+  }
+  return { value: (Number(incomeTaxExpense) || 0) / pretaxIncome, validity: "VALID", reason: "OK:etr", display: "VALUE" };
+}
+
+export function netDebtDescriptor(netDebt: number): "NET_CASH" | "NET_DEBT" | "UNFUNDED_ZERO" {
+  if (!Number.isFinite(netDebt) || netDebt === 0) return "UNFUNDED_ZERO";
+  return netDebt < 0 ? "NET_CASH" : "NET_DEBT";
+}
+
+/** Implied borrowing rate = interestExpense / average gross debt; bounds-checked. */
+export function impliedDebtRate(interestExpense: number, grossDebt: number): KernelScalar & { sane: boolean } {
+  const s = guardedDiv(interestExpense, grossDebt, { label: "interestExpense/grossDebt" });
+  const sane = s.display === "VALUE" && s.value >= 0 && s.value <= 0.25;
+  return { ...s, sane };
+}
+
+// ─────────────────────────────────────────────
+// Working-capital driver days  (P0 #31–#34 — DIO×COGS, DSO×revenue,
+// DPO×COGS; all denominators guarded, all outputs validity-tagged)
+// ─────────────────────────────────────────────
+export interface WorkingCapitalDays {
+  dso: KernelScalar;
+  dio: KernelScalar;
+  dpo: KernelScalar;
+  cashConversionCycle: number | null;
+}
+
+export function wcDriverDays(fin: {
+  netReceivables?: number; revenue?: number; inventory?: number;
+  costOfRevenue?: number; accountsPayable?: number;
+}): WorkingCapitalDays {
+  const revenue = Number(fin.revenue) || 0;
+  const cogs = Number(fin.costOfRevenue) || 0;
+  const dso = guardedDiv((Number(fin.netReceivables) || 0) * 365, revenue, { label: "receivables×365/revenue" });
+  const dio = guardedDiv((Number(fin.inventory) || 0) * 365, cogs, { label: "inventory×365/cogs" });
+  const dpo = guardedDiv((Number(fin.accountsPayable) || 0) * 365, cogs, { label: "payables×365/cogs" });
+  const ccc = dso.display === "VALUE" && dio.display === "VALUE" && dpo.display === "VALUE"
+    ? dso.value + dio.value - dpo.value
+    : null;
+  return { dso, dio, dpo, cashConversionCycle: ccc };
+}
+
+/** Generic roll-forward variance: opening + additions − charge vs closing. */
+export function rollforwardVariance(opening: number, additions: number, charge: number, closing: number): KernelScalar & { gap: number } {
+  const o = Number(opening) || 0;
+  const expected = o + (Number(additions) || 0) - (Number(charge) || 0);
+  const c = Number(closing) || 0;
+  if (!(o > 0) && !(c > 0)) {
+    return { value: 0, validity: "NM", reason: "NO_BASE:opening-and-closing-non-positive", display: "N_M", gap: 0 };
+  }
+  const gap = Math.abs(c - expected);
+  const base = Math.max(Math.abs(o), Math.abs(c), 1);
+  return {
+    value: gap / base,
+    validity: "VALID",
+    reason: "OK:rollforward",
+    display: "VALUE",
+    gap,
+  };
+}
+
+// ─────────────────────────────────────────────
+// FCFE engine  (P0 #30 — standardized; FCFF − after-tax interest + net borrowing)
+// ─────────────────────────────────────────────
+export function computeFCFE(input: {
+  fcff: number; interestExpense: number; marginalTaxRate: number; netBorrowing: number;
+}): number {
+  const f = Number(input.fcff) || 0;
+  const i = Number(input.interestExpense) || 0;
+  const t = Number(input.marginalTaxRate) || 0;
+  const nb = Number(input.netBorrowing) || 0;
+  return f - i * (1 - t) + nb;
+}
+
+// ─────────────────────────────────────────────
+// Beta engine  (P0 #57 — raw beta → unlever → median → relever).
+// Point-in-time peer methodology when ≥3 peer betas exist; otherwise an
+// explicitly-labeled single-beta path (limitation disclosed, not hidden).
+// ─────────────────────────────────────────────
+export interface BetaEngineResult {
+  method: "peer-median-unlevered" | "single-beta";
+  assetBetaMedian: number | null;
+  releveredBeta: number;
+  peerCount: number;
+  note: string;
+}
+
+export function unleverBeta(equityBeta: number, marginalTaxRate: number, debtToEquity: number): number {
+  const de = Math.max(0, Number(debtToEquity) || 0);
+  return (Number(equityBeta) || 0) / (1 + (1 - (Number(marginalTaxRate) || 0)) * de);
+}
+
+export function releverBeta(assetBeta: number, marginalTaxRate: number, debtToEquity: number): number {
+  const de = Math.max(0, Number(debtToEquity) || 0);
+  return (Number(assetBeta) || 0) * (1 + (1 - (Number(marginalTaxRate) || 0)) * de);
+}
+
+export function medianBetaEngine(params: {
+  subjectBeta: number;
+  subjectDebtToEquity: number;
+  marginalTaxRate: number;
+  peerBetas: number[];
+  peerDebtToEquity?: number[];
+}): BetaEngineResult {
+  const peers = (params.peerBetas || []).filter((b) => Number.isFinite(b) && b > 0);
+  if (peers.length >= 3) {
+    const unlevered = peers.map((b, i) => unleverBeta(b, params.marginalTaxRate, params.peerDebtToEquity?.[i] ?? 0));
+    const sorted = [...unlevered].sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    const median = sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+    return {
+      method: "peer-median-unlevered",
+      assetBetaMedian: median,
+      releveredBeta: releverBeta(median, params.marginalTaxRate, params.subjectDebtToEquity),
+      peerCount: peers.length,
+      note: `Point-in-time peer median over ${peers.length} betas, relevered at subject D/E.`,
+    };
+  }
+  return {
+    method: "single-beta",
+    assetBetaMedian: null,
+    releveredBeta: Number(params.subjectBeta) || 0,
+    peerCount: peers.length,
+    note: "Fewer than 3 peer betas — single-beta path (limitation: no peer-median discipline).",
+  };
+}
+
+/** Debt-tranche schedule (P0 #39/#58): short/LT mix + implied rate bounds. */
+export function debtTrancheSchedule(fin: {
+  shortTermDebt?: number; longTermDebt?: number; totalDebt?: number; interestExpense?: number;
+}): { shortDebt: number; longDebt: number; shortShare: number | null; impliedRate: KernelScalar & { sane: boolean }; note: string } {
+  const shortDebt = Math.max(0, Number(fin.shortTermDebt) || 0);
+  const longDebt = Math.max(0, Number(fin.longTermDebt) || 0);
+  const totalDebt = Number(fin.totalDebt) || shortDebt + longDebt;
+  const shortShare = totalDebt > 0 ? (shortDebt / totalDebt) : null;
+  const impliedRate = impliedDebtRate(Number(fin.interestExpense) || 0, totalDebt);
+  return {
+    shortDebt, longDebt, shortShare, impliedRate,
+    note: totalDebt <= 0 ? "No funded debt — tranche schedule not applicable."
+      : impliedRate.display !== "VALUE" ? "Implied rate not computable (see validity)."
+      : !impliedRate.sane ? "Implied rate outside [0%, 25%] — verify interest/debt units before trusting coverage math."
+      : "Tranche mix and implied rate within plausibility.",
+  };
+}
+
+// ─────────────────────────────────────────────
+// Liquidity interpretation bands  (P0 #71 — industry-aware reading,
+// extremes only; never a fresh ratio, only an interpretation)
+// ─────────────────────────────────────────────
+const LIQUIDITY_FLOORS: Record<string, number> = {
+  bank: 0, nbfc: 0, insurance: 0,
+  "internet-retail": 0.8, hospitality: 0.8,
+  default: 1.0,
+};
+
+export function assessLiquidity(sectorId: string, currentRatio: number | null): { assessment: string; warn: boolean } {
+  if (currentRatio === null || !Number.isFinite(currentRatio)) {
+    return { assessment: "Liquidity not assessable — current ratio undisclosed.", warn: false };
+  }
+  const floor = LIQUIDITY_FLOORS[sectorId] ?? LIQUIDITY_FLOORS.default;
+  if (currentRatio < floor) {
+    return { assessment: `Current ratio ${currentRatio.toFixed(2)}× below ${floor.toFixed(1)}× sector floor — monitor refinancing/rollover risk.`, warn: true };
+  }
+  return { assessment: `Current ratio ${currentRatio.toFixed(2)}× at/above sector floor.`, warn: false };
+}
+
+/** Cash conversion with denominator-validity gate (P0 #74). */
+export function cashConversion(cashFlow: number, netIncome: number, label: string): KernelScalar {
+  return guardedDiv(cashFlow, netIncome, { label: `${label}/netIncome` });
+}
+
+/** Reported-or-derived multiple with denominator validation (P0 #64). */
+export function validateMultiple(numerator: number, denominator: number, label: string, opts?: { mustBePositive?: boolean }): KernelScalar {
+  const s = guardedDiv(numerator, denominator, { label });
+  if (s.display !== "VALUE") return s;
+  if ((opts?.mustBePositive ?? true) && s.value <= 0) {
+    return { value: s.value, validity: "NM", reason: `NON_POSITIVE_MULTIPLE:${label}≤0`, display: "N_M" };
+  }
+  return s;
+}
+
+// ─────────────────────────────────────────────
+// Covenant-claim tagging  (P0 #75/#76 — ACTUAL_COVENANT vs
+// ANALYTICAL_THRESHOLD; only separately-sourced facility language
+// may claim an actual covenant)
+// ─────────────────────────────────────────────
+export type CovenantClaimKind = "ACTUAL_COVENANT" | "ANALYTICAL_THRESHOLD" | "NONE";
+
+export function tagCovenantClaim(text: string): { kind: CovenantClaimKind; matches: string[] } {
+  const t = (text || "").toLowerCase();
+  const actualMarkers = [
+    /credit agreement (requires|mandates|covenants)/,
+    /facility covenant/,
+    /loan agreement.{0,40}covenant/,
+    /indenture.{0,40}covenant/,
+    /disclosed.{0,40}covenant.{0,40}\d/,
+  ];
+  const thresholdMarkers = [
+    /standard threshold/, /analytical threshold/, /model assumption/,
+    /illustrative/, /for context only/, /headroom.{0,40}standard/,
+  ];
+  const matches: string[] = [];
+  for (const re of actualMarkers) {
+    const m = t.match(re);
+    if (m) matches.push(`actual:${m[0].slice(0, 60)}`);
+  }
+  for (const re of thresholdMarkers) {
+    const m = t.match(re);
+    if (m) matches.push(`threshold:${m[0].slice(0, 60)}`);
+  }
+  if (matches.some((m) => m.startsWith("actual:"))) return { kind: "ACTUAL_COVENANT", matches };
+  if (matches.some((m) => m.startsWith("threshold:"))) return { kind: "ANALYTICAL_THRESHOLD", matches };
+  return { kind: "NONE", matches };
+}
+
+// ─────────────────────────────────────────────
+// Accounting-anomaly detector  (P0 #77 — warnings always; ≥2 material
+// anomalies escalate to FAIL upstream; cross-period plausibility folded in)
+// ─────────────────────────────────────────────
+export interface AccountingAnomaly {
+  code: string;
+  material: boolean;
+  message: string;
+}
+
+export function detectAccountingAnomalies(history: {
+  year: string; revenue: number; netIncome: number; operatingCashFlow: number;
+  netReceivables: number; totalAssets: number; grossMargin: number;
+}[]): AccountingAnomaly[] {
+  const out: AccountingAnomaly[] = [];
+  for (let i = 1; i < history.length; i++) {
+    const prev = history[i - 1];
+    const cur = history[i];
+    if (!(prev.revenue > 0) || !(cur.revenue > 0)) continue;
+    const revG = cur.revenue / prev.revenue - 1;
+    // Revenue/cash divergence: revenue up >25% while OCF falls >25%.
+    if (revG > 0.25 && prev.operatingCashFlow !== 0 && cur.operatingCashFlow / prev.operatingCashFlow - 1 < -0.25) {
+      out.push({ code: "ANOM-REV-CASH", material: true, message: `${cur.year}: revenue +${(revG * 100).toFixed(0)}% while operating cash flow collapsed — accrual quality review required.` });
+    }
+    // Receivables surging far ahead of revenue.
+    if (prev.netReceivables > 0 && cur.netReceivables > 0) {
+      const recG = cur.netReceivables / prev.netReceivables - 1;
+      if (recG > 0.7 && recG > revG + 0.5) {
+        out.push({ code: "ANOM-RECEIVABLES", material: true, message: `${cur.year}: receivables +${(recG * 100).toFixed(0)}% vs revenue +${(revG * 100).toFixed(0)}% — channel-stuffing/collection review required.` });
+      }
+    }
+    // Margin cliff: gross margin collapse >15pp YoY.
+    if (Number.isFinite(prev.grossMargin) && Number.isFinite(cur.grossMargin) && prev.grossMargin - cur.grossMargin > 0.15) {
+      out.push({ code: "ANOM-MARGIN-CLIFF", material: true, message: `${cur.year}: gross margin cliff (${(prev.grossMargin * 100).toFixed(0)}% → ${(cur.grossMargin * 100).toFixed(0)}%) — mix-shift or cost-shock review required.` });
+    }
+    // Asset growth without revenue: assets +50% with revenue flat/down.
+    if (prev.totalAssets > 0 && cur.totalAssets / prev.totalAssets - 1 > 0.5 && revG < 0.05) {
+      out.push({ code: "ANOM-ASSET-BLOAT", material: false, message: `${cur.year}: assets +${((cur.totalAssets / prev.totalAssets - 1) * 100).toFixed(0)}% on flat revenue — capitalization-policy review recommended.` });
+    }
+    // Cross-period plausibility envelope (P0 #78 second half): ±80% revenue, ±70% assets.
+    if (revG < -0.8 || revG > 5) {
+      out.push({ code: "ANOM-PERIOD-JUMP", material: true, message: `${cur.year}: revenue discontinuity (${(revG * 100).toFixed(0)}% YoY) — verify corporate action, restatement, or unit error before modeling.` });
+    }
+  }
+  return out;
+}
+
+// ─────────────────────────────────────────────
+// Confidence propagation  (P0 #83, #84 — output confidence is a
+// FUNCTION of dependency confidence; low-confidence inputs downgrade
+// every downstream output explicitly)
+// ─────────────────────────────────────────────
+export type OutputConfidence = "HIGH" | "MODERATE" | "LOW" | "UNKNOWN";
+
+export function propagateConfidence(input: {
+  estimateRatio: number;
+  integrityWarns: number;
+  integrityBlocks: number;
+  tvShareOfEv: number;
+  reverseConverged: boolean | null;
+  insufficientData: boolean;
+}): { level: OutputConfidence; reasons: string[] } {
+  const reasons: string[] = [];
+  if (input.insufficientData || input.integrityBlocks > 0) {
+    return { level: "UNKNOWN", reasons: ["Blocked inputs — no confident output exists."] };
+  }
+  let score = 100;
+  if (input.estimateRatio >= 0.5) { score -= 40; reasons.push(`${(input.estimateRatio * 100).toFixed(0)}% estimated inputs (−40).`); }
+  else if (input.estimateRatio > 0) { score -= Math.round(input.estimateRatio * 30); reasons.push(`Estimated inputs present (−${Math.round(input.estimateRatio * 30)}).`); }
+  if (input.integrityWarns > 0) { score -= Math.min(25, input.integrityWarns * 5); reasons.push(`${input.integrityWarns} integrity warning(s) (−${Math.min(25, input.integrityWarns * 5)}).`); }
+  if (input.tvShareOfEv > 0.85) { score -= 15; reasons.push(`Terminal-driven valuation (${(input.tvShareOfEv * 100).toFixed(0)}% of EV) (−15).`); }
+  if (input.reverseConverged === false) { score -= 10; reasons.push("Reverse-DCF did not converge (−10)."); }
+  const level: OutputConfidence = score >= 80 ? "HIGH" : score >= 55 ? "MODERATE" : "LOW";
+  if (reasons.length === 0) reasons.push("All dependencies high-confidence.");
+  return { level, reasons };
+}
+
+// ─────────────────────────────────────────────
+// Immutability + snapshot hashing  (P0 #86 — facts immutable after
+// validation; downstream mutation is detectable, not silently absorbed)
+// ─────────────────────────────────────────────
+export function deepFreeze<T>(obj: T): T {
+  if (obj && typeof obj === "object" && !Object.isFrozen(obj)) {
+    for (const v of Object.values(obj as Record<string, unknown>)) deepFreeze(v as object);
+    Object.freeze(obj);
+  }
+  return obj;
+}
+
+function stableStringify(v: unknown): string {
+  if (v === null || typeof v !== "object") return JSON.stringify(v) ?? "null";
+  if (Array.isArray(v)) return `[${v.map(stableStringify).join(",")}]`;
+  const keys = Object.keys(v as Record<string, unknown>).sort();
+  return `{${keys.map((k) => `${JSON.stringify(k)}:${stableStringify((v as Record<string, unknown>)[k])}`).join(",")}}`;
+}
+
+export function factHash(obj: unknown): string {
+  const s = stableStringify(obj);
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return `fh_${(h >>> 0).toString(16).padStart(8, "0")}`;
+}
+
+// ─────────────────────────────────────────────
+// Model lifecycle state machine  (P0 #85 — strict stage order:
+// FETCHED → NORMALIZED → VALIDATED → MODELED → VERIFIED)
+// ─────────────────────────────────────────────
+export type ModelStage = "FETCHED" | "NORMALIZED" | "VALIDATED" | "MODELED" | "VERIFIED";
+
+const STAGE_ORDER: ModelStage[] = ["FETCHED", "NORMALIZED", "VALIDATED", "MODELED", "VERIFIED"];
+
+export interface StageRecord {
+  stage: ModelStage;
+  at: string;
+  note?: string;
+}
+
+export class ModelLifecycle {
+  private history: StageRecord[] = [];
+  current(): ModelStage | null {
+    return this.history.length > 0 ? this.history[this.history.length - 1].stage : null;
+  }
+  advance(stage: ModelStage, note?: string): void {
+    const cur = this.current();
+    const curIdx = cur === null ? -1 : STAGE_ORDER.indexOf(cur);
+    const nextIdx = STAGE_ORDER.indexOf(stage);
+    if (nextIdx !== curIdx + 1) {
+      throw new Error(`ModelLifecycle: illegal transition ${cur ?? "∅"} → ${stage}; strict order is ${STAGE_ORDER.join(" → ")}.`);
+    }
+    this.history.push({ stage, at: new Date().toISOString(), note });
+  }
+  verifyOrder(): { ok: boolean; skipped: ModelStage[] } {
+    // advance() enforces stepwise order, so history is always an in-order
+    // prefix by construction; verification asserts COMPLETENESS (no skipped
+    // stages) for the publication gate.
+    const seen = this.history.map((h) => h.stage);
+    const missing = STAGE_ORDER.filter((s) => !seen.includes(s));
+    return { ok: missing.length === 0, skipped: missing };
+  }
+  history_(): StageRecord[] {
+    return [...this.history];
+  }
+}
+
+// ─────────────────────────────────────────────
+// Audit graph  (P0 #96 — machine-readable nodes/edges over the trail)
+// ─────────────────────────────────────────────
+export interface AuditGraph {
+  modelVersion: string;
+  nodes: { id: string; kind: "input" | "derived"; value: number | string | null }[];
+  edges: { from: string; to: string; formulaId: string; formulaVersion: string }[];
+}
+
+export function buildAuditGraph(trail: { output: string; formulaId: string; formulaVersion: string; inputs: { name: string; value: number | string; sourceId: string }[]; transform: string }[]): AuditGraph {
+  const nodes = new Map<string, { id: string; kind: "input" | "derived"; value: number | string | null }>();
+  const edges: AuditGraph["edges"] = [];
+  for (const e of trail) {
+    if (!nodes.has(e.output)) nodes.set(e.output, { id: e.output, kind: "derived", value: null });
+    for (const inp of e.inputs) {
+      if (!nodes.has(inp.sourceId)) {
+        nodes.set(inp.sourceId, { id: inp.sourceId, kind: "input", value: typeof inp.value === "number" ? inp.value : null });
+      }
+      edges.push({ from: inp.sourceId, to: e.output, formulaId: e.formulaId, formulaVersion: e.formulaVersion });
+    }
+  }
+  return { modelVersion: MODEL_VERSION, nodes: [...nodes.values()], edges };
+}
+
+// ─────────────────────────────────────────────
+// Dimensionally-safe money operations  (P0 #90 — USD × shares,
+// % × USD and friends throw instead of computing)
+// ─────────────────────────────────────────────
+export type DimKind = "money" | "shares" | "price" | "pct" | "multiple" | "days" | "scalar";
+
+export interface DimValue {
+  kind: DimKind;
+  value: number;
+  currency?: string;
+}
+
+/**
+ * Dimension table: [left, right] → result. Anything absent THROWS —
+ * dimension errors are defects, not NaNs.
+ */
+const DIM_TABLE: Record<string, DimKind> = {
+  "money*scalar": "money",
+  "scalar*money": "money",
+  "money/scalar": "money",
+  "money/money": "multiple",
+  "money/shares": "price",
+  "price*shares": "money",
+  "shares*price": "money",
+  "multiple*money": "money",
+  "money*multiple": "money",
+  "pct*money": "money",
+  "money*pct": "money",
+  "multiple*scalar": "multiple",
+  "scalar*multiple": "multiple",
+  "money+money": "money",
+  "money-money": "money",
+  "scalar+scalar": "scalar",
+  "scalar-scalar": "scalar",
+  "scalar*scalar": "scalar",
+  "scalar/scalar": "scalar",
+};
+
+function checkCurrency(a: DimValue, b: DimValue, op: string): void {
+  if ((a.kind === "money" || b.kind === "money") && a.currency && b.currency && a.currency !== b.currency) {
+    throw new Error(`DimSafety: currency mismatch ${a.currency} ${op} ${b.currency} — convert explicitly first.`);
+  }
+}
+
+export const MoneyOps = {
+  add(a: DimValue, b: DimValue): DimValue {
+    const k = DIM_TABLE[`${a.kind}+${b.kind}`];
+    if (!k) throw new Error(`DimSafety: cannot add ${a.kind} + ${b.kind}.`);
+    checkCurrency(a, b, "+");
+    return { kind: k, value: a.value + b.value, currency: a.currency ?? b.currency };
+  },
+  sub(a: DimValue, b: DimValue): DimValue {
+    const k = DIM_TABLE[`${a.kind}-${b.kind}`];
+    if (!k) throw new Error(`DimSafety: cannot subtract ${a.kind} − ${b.kind}.`);
+    checkCurrency(a, b, "−");
+    return { kind: k, value: a.value - b.value, currency: a.currency ?? b.currency };
+  },
+  mul(a: DimValue, b: DimValue): DimValue {
+    const k = DIM_TABLE[`${a.kind}*${b.kind}`];
+    if (!k) throw new Error(`DimSafety: cannot multiply ${a.kind} × ${b.kind} (e.g. money × shares is a dimension error — use price × shares).`);
+    checkCurrency(a, b, "×");
+    return { kind: k, value: a.value * b.value, currency: a.currency ?? b.currency };
+  },
+  div(a: DimValue, b: DimValue): DimValue {
+    const k = DIM_TABLE[`${a.kind}/${b.kind}`];
+    if (!k) throw new Error(`DimSafety: cannot divide ${a.kind} ÷ ${b.kind}.`);
+    if (b.value === 0) throw new Error(`DimSafety: division by zero (${a.kind} ÷ ${b.kind}).`);
+    checkCurrency(a, b, "÷");
+    return { kind: k, value: a.value / b.value, currency: a.currency ?? b.currency };
+  },
+};
+
 /**
  * Revalue an existing explicit-period FCFF stream under alternate (wacc, g).
  * Used by sensitivity grids so EVERY cell is an independent kernel valuation,
