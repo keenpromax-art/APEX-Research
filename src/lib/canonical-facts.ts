@@ -71,6 +71,9 @@ export interface CanonicalYearFacts {
   grossProfit: RawFact;
   operatingIncome: RawFact;
   interestExpense: RawFact;
+  // Non-operating interest income (distinct Yahoo line from interestExpense for
+  // cash-rich corporates; absent on quoteSummary vintages → confidence none).
+  interestIncome: RawFact;
   otherIncome: RawFact;
   pretaxIncome: RawFact;
   incomeTaxExpense: RawFact;
@@ -298,8 +301,8 @@ export function buildCanonicalFacts(params: {
     const need = (name: string, v: unknown) => { if (numOrNull(v) === null) missingFields.push(name); };
     // Per-architecture required sets (native identities, never corporate fictions).
     const requiredByArch: Record<string, string[]> = {
-      corporate: ["revenue", "operatingCashFlow", "capitalExpenditures", "freeCashFlow", "currentAssets", "currentLiabilities", "netWorkingCapital", "totalAssets", "totalLiabilities", "totalEquity", "totalDebt", "cash", "netIncome", "ebitda", "sharesOutstanding", "costOfRevenue", "grossProfit", "operatingIncome", "interestExpense", "pretaxIncome", "incomeTaxExpense", "depreciation", "shortTermDebt", "longTermDebt", "accountsPayable", "netFixedAssets", "retainedEarnings", "dividendsPaid"],
-      bank: ["totalRevenue", "netInterestIncome", "operatingCashFlow", "capitalExpenditures", "freeCashFlow", "currentAssets", "currentLiabilities", "totalAssets", "totalLiabilities", "totalEquity", "totalDebt", "cash", "netIncome", "sharesOutstanding", "operatingIncome", "interestExpense", "pretaxIncome", "incomeTaxExpense", "shortTermDebt", "longTermDebt", "retainedEarnings", "dividendsPaid"],
+      corporate: ["revenue", "operatingCashFlow", "capitalExpenditures", "freeCashFlow", "currentAssets", "currentLiabilities", "netWorkingCapital", "totalAssets", "totalLiabilities", "totalEquity", "totalDebt", "cash", "netIncome", "ebitda", "sharesOutstanding", "costOfRevenue", "grossProfit", "operatingIncome", "interestExpense", "interestIncome", "pretaxIncome", "incomeTaxExpense", "depreciation", "shortTermDebt", "longTermDebt", "accountsPayable", "netFixedAssets", "retainedEarnings", "dividendsPaid"],
+      bank: ["totalRevenue", "netInterestIncome", "operatingCashFlow", "capitalExpenditures", "freeCashFlow", "currentAssets", "currentLiabilities", "totalAssets", "totalLiabilities", "totalEquity", "totalDebt", "cash", "netIncome", "sharesOutstanding", "operatingIncome", "interestExpense", "interestIncome", "pretaxIncome", "incomeTaxExpense", "shortTermDebt", "longTermDebt", "retainedEarnings", "dividendsPaid"],
       insurance: ["grossWrittenPremium", "netEarnedPremium", "claimsIncurred", "underwritingExpenses", "underwritingResult", "combinedRatio", "investmentIncome", "float", "policyholderLiabilities", "operatingCashFlow", "freeCashFlow", "totalAssets", "totalLiabilities", "totalEquity", "totalDebt", "cash", "netIncome", "sharesOutstanding", "pretaxIncome", "incomeTaxExpense", "dividendsPaid"],
       reit: ["rentalIncome", "netOperatingIncome", "fundsFromOperations", "adjustedFundsFromOperations", "operatingCashFlow", "freeCashFlow", "totalAssets", "investmentPropertyValue", "totalLiabilities", "totalEquity", "totalDebt", "cash", "netIncome", "sharesOutstanding", "interestExpense", "dividendsPaid"],
       fee: ["totalFeeRevenue", "managementFees", "operatingExpenses", "operatingIncome", "operatingMargin", "operatingCashFlow", "freeCashFlow", "totalAssets", "totalLiabilities", "totalEquity", "totalDebt", "cash", "netIncome", "sharesOutstanding", "pretaxIncome", "incomeTaxExpense", "dividendsPaid"],
@@ -339,6 +342,7 @@ export function buildCanonicalFacts(params: {
       grossProfit: S("Yahoo.timeseries:grossProfit", estHas("grossProfit@"), "money", "grossProfit"),
       operatingIncome: S("Yahoo.timeseries:operatingIncome", estHas("operatingIncome@"), "money", "operatingIncome"),
       interestExpense: S("Yahoo.timeseries:interestExpense", false, "money", "interestExpense"),
+      interestIncome: S("Yahoo.timeseries:interestIncome", false, "money", "interestIncome"),
       otherIncome: S("Yahoo.timeseries:otherIncome", false, "money", "otherIncome"),
       depreciation: S("Yahoo.timeseries:depreciation", estHas("depreciation@"), "money", "depreciation", "depreciationAmortization"),
       ebitda: S("Yahoo.timeseries:ebitda", estHas("ebitda@"), "money", "ebitda"),

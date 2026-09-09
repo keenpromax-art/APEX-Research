@@ -1149,7 +1149,9 @@ function parseTimeseriesFinancials(
     const dividendsPaid = Math.abs(d.annualCashDividendsPaid || 0);
     const changeInCash = d.annualChangesInCash || d.annualChangeInCash || (operatingCashFlow + investingCashFlow + financingCashFlow);
 
-    const interestIncome = d.annualInterestIncome || 0;
+    // Yahoo serves the same non-operating interest-income line under two aliases
+    // (verified live: identical values for MSFT/F). Either may be absent per vintage.
+    const interestIncome = d.annualInterestIncome || (d as unknown as Record<string, number>).annualInterestIncomeNonOperating || 0;
     const ebit = d.annualEBIT || operatingIncome;
     const depr = d.annualReconciledDepreciation || d.annualDepreciationAndAmortization || (ebitda > operatingIncome ? ebitda - operatingIncome : Math.round(revenue * 0.035));
     if (revenue > 0 && !hasReported(d, "annualReconciledDepreciation") && !hasReported(d, "annualDepreciationAndAmortization") && !(ebitda > operatingIncome)) trackEstimate(estimatesUsed, "depreciation@3.5%-of-revenue");

@@ -407,21 +407,62 @@ function checkStatementIntegrity(inp: IndependentInputs, issues: IndependentIssu
   const years = facts.years;
   for (const y of years) {
     const v = (f: { value: number | null }) => f.value;
-    // 1. Pretax closure: pretax ≈ opInc − interest + otherIncome. HARD FAIL on material breach (scorecard demands block).
+    // 1. Pretax closure: pretax ≈ opInc − interestExpense + interestIncome + otherIncome.
+    // interestIncome is a distinct Yahoo line (timeseries) for cash-rich corporates;
+    // quoteSummary vintages lack it (fact null → term 0, old behavior exactly).
+    // Adaptive basis (double-count guard, verified live): captive-finance issuers
+    // (e.g. automakers) already include net interest inside operatingIncome, so for
+    // those vintages adding interestIncome WORSENS the gap (F FY25: 12.6%→31%).
+    // Each year evaluates BOTH bases and judges severity on the better-reconciling
+    // one. When the ex-intInc basis wins despite disclosed interestIncome, that's a
+    // bundling signal → the vintage ambiguity is WARN-disclosed, never silently
+    // resolved, and never upgraded into a new FAIL. Tolerances/materiality unchanged.
+    // HARD FAIL on material breach (scorecard demands block).
     // For banks, pretax ≈ operatingIncome (PPOP) − provisionForCreditLosses (interest is revenue, not expense)
     const isBankYear = (y as any).statementType === "bank" || (y as any).statementType === "nbfc" || (y as any).statementType === "insurance";
     if (!isBankYear && v(y.operatingIncome) !== null && v(y.interestExpense) !== null && v(y.pretaxIncome) !== null) {
       evaluated++;
       const other = v(y.otherIncome) ?? 0;
-      const expected = (v(y.operatingIncome) as number) - (v(y.interestExpense) as number) + other;
-      const t = magnitudeTolerance(expected, v(y.pretaxIncome) as number, { absTol: Math.max(1000, Math.abs(expected) * 0.02), relTol: 0.05, materiality: Math.max(1000, Math.abs(expected) * 0.08) });
+      const intInc = v(y.interestIncome) ?? 0;
+      const opInc = v(y.operatingIncome) as number;
+      const intExp = v(y.interestExpense) as number;
+      const reported = v(y.pretaxIncome) as number;
+      const mkTol = (exp: number) => ({ absTol: Math.max(1000, Math.abs(exp) * 0.02), relTol: 0.05, materiality: Math.max(1000, Math.abs(exp) * 0.08) });
+      const baseOld = opInc - intExp + other;
+      const tOld = magnitudeTolerance(baseOld, reported, mkTol(baseOld));
+      // Engage the interestIncome term only when disclosed AND material vs the
+      // old-basis tolerance floor — trivial values keep old behavior silently.
+      const intIncMaterial = v(y.interestIncome) !== null && Math.abs(intInc) > mkTol(baseOld).absTol;
+      let t = tOld;
+      let expected = baseOld;
+      let basis = "opInc−interest+other";
+      let bundledNote = "";
+      if (intIncMaterial) {
+        const baseNew = baseOld + intInc;
+        const tNew = magnitudeTolerance(baseNew, reported, mkTol(baseNew));
+        const gapOld = Math.abs(reported - baseOld) / Math.max(1, Math.abs(baseOld));
+        const gapNew = Math.abs(reported - baseNew) / Math.max(1, Math.abs(baseNew));
+        if (gapNew <= gapOld) {
+          t = tNew;
+          expected = baseNew;
+          basis = "opInc−interest+intInc+other";
+        } else {
+          bundledNote = " (ex-intInc basis used: disclosed interestIncome likely already bundled in operating/other income for this vintage — adding it worsens the gap)";
+        }
+      }
       if (!t.pass) {
         if (t.material && t.gapRel > 0.08) {
-          pushFail(issues, { code: "STMT-01", severity: "FAIL", message: `FATAL: Pretax closure breach in ${y.year}: opInc−interest+other ${fmt0(expected)} vs reported ${fmt0(v(y.pretaxIncome) as number)} (${t.detail}) — broken accounting identity blocks publication.`, expected: fmt0(expected), actual: fmt0(v(y.pretaxIncome) as number), magnitude: t });
+          pushFail(issues, { code: "STMT-01", severity: "FAIL", message: `FATAL: Pretax closure breach in ${y.year}: ${basis} ${fmt0(expected)} vs reported ${fmt0(reported)} (${t.detail}) — broken accounting identity blocks publication.${bundledNote}`, expected: fmt0(expected), actual: fmt0(reported), magnitude: t });
         } else {
           warns++;
-          issues.push({ code: "STMT-01", severity: "WARN", message: `Pretax closure drift in ${y.year}: opInc−interest+other ${fmt0(expected)} vs reported ${fmt0(v(y.pretaxIncome) as number)} (${t.detail}).`, expected: fmt0(expected), actual: fmt0(v(y.pretaxIncome) as number), magnitude: t });
+          issues.push({ code: "STMT-01", severity: "WARN", message: `Pretax closure drift in ${y.year}: ${basis} ${fmt0(expected)} vs reported ${fmt0(reported)} (${t.detail}).${bundledNote}`, expected: fmt0(expected), actual: fmt0(reported), magnitude: t });
         }
+      } else if (bundledNote !== "") {
+        // Old basis reconciles but interestIncome is material and non-additive:
+        // disclose the vintage ambiguity (WARN, never blocking) instead of
+        // silently dropping a disclosed line item.
+        warns++;
+        issues.push({ code: "STMT-01", severity: "WARN", message: `Pretax closure vintage-ambiguity in ${y.year}: ${basis} reconciles (${fmt0(expected)} vs reported ${fmt0(reported)}), but disclosed interestIncome of ${fmt0(intInc)} is non-additive here.${bundledNote}`, expected: fmt0(expected), actual: fmt0(reported), magnitude: t });
       }
     } else if (isBankYear && v(y.operatingIncome) !== null && v(y.pretaxIncome) !== null) {
       evaluated++;
