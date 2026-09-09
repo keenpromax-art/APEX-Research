@@ -6,6 +6,7 @@
  * Every number carries source + period + currency + units + estimated flag.
  */
 import type { AnnualFinancials, CompanyProfile, StockData } from "@/types/report";
+import { stmtNum } from "@/types/report";
 
 export type ProvenanceSource =
   | "YAHOO_TIMESERIES_REPORTED"
@@ -89,9 +90,11 @@ export function assessProvenance(params: {
   push("netIncome", latest.netIncome);
   push("operatingCashFlow", latest.operatingCashFlow, estTags("operatingCashFlow@"));
   push("capitalExpenditures", latest.capitalExpenditures, estTags("capex@"));
-  push("grossProfit", latest.grossProfit, estTags("grossProfit@"));
-  push("operatingIncome", latest.operatingIncome, estTags("operatingIncome@"));
-  push("ebitda", latest.ebitda, estTags("ebitda@"));
+  // stmtNum: corporate-only constructs read 0/MISSING on sector-native shapes
+  // (identical runtime for Arch A/B — bank rows carry zeroed N/A fields).
+  push("grossProfit", stmtNum(latest, "grossProfit", Number.NaN), estTags("grossProfit@"));
+  push("operatingIncome", stmtNum(latest, "operatingIncome", Number.NaN), estTags("operatingIncome@"));
+  push("ebitda", stmtNum(latest, "ebitda", Number.NaN), estTags("ebitda@"));
 
   const estimatedCount = fields.filter((f) => f.isEstimated).length + (latest.estimatesUsed?.length || 0);
   const estimatedRatio = fields.length > 0 ? fields.filter((f) => f.isEstimated).length / fields.length : 1;

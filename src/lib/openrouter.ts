@@ -20,6 +20,7 @@ import type {
   NewsSummaryDeskAnalysis,
   AssumptionsLedger,
 } from "@/types/report";
+import { stmtNum } from "@/types/report";
 import { formatPct, formatLargeNum } from "./calculations";
 import { generatePEFirmAnalysis } from "./pe-analysis-engine";
 import { buildCompanyOntology } from "./company-ontology";
@@ -370,7 +371,7 @@ Financial & Valuation Inputs:
 - Investment Recommendation: ${dcf.verdict}
 - Market Capitalization: ${formatLargeNum(stockData.marketCap || 0, profile.currency)} | Beta: ${safeFix(stockData.beta, 2)}
 - 5-Year Revenue CAGR: ${formatPct(revCAGR)} | Latest FY Revenue: ${formatLargeNum(latest.revenue, profile.currency)}
-- Latest Margins: Gross: ${formatPct(latest.grossMargin)}, EBITDA: ${formatPct(latest.ebitdaMargin)}, Net: ${formatPct(latest.netMargin)}
+- Latest Margins: Gross: ${formatPct(stmtNum(latest, "grossMargin"))}, EBITDA: ${formatPct(stmtNum(latest, "ebitdaMargin"))}, Net: ${formatPct(latest.netMargin)}
 - Capital Efficiency: ROE: ${formatPct(latest.netIncome / (latest.totalEquity || 1))}, Trailing P/E: ${stockData.pe > 0 ? stockData.pe.toFixed(1) + "x" : "N/A"}
 - DCF Valuation Drivers: WACC = ${wacc}%, Perpetual Terminal Growth Rate = ${tgr}%
 
@@ -551,15 +552,16 @@ async function runMoatAndStrategyAnalyst(
   const rawInvestedCap = (latest.totalEquity || 0) + (latest.totalDebt || 0) - (latest.cash || 0);
   const investedCap = rawInvestedCap > 0 ? rawInvestedCap : (latest.totalAssets > 0 ? latest.totalAssets : 1);
   const taxRate = dcf.assumptions?.marginalTaxRate ?? 0.25;
-  const nopat = (latest.operatingIncome || 0) * (1 - taxRate);
-  const roic = latest.operatingIncome ? Math.max(0, nopat / investedCap) : (stockData.returnOnAssets || 0.12);
+  const latestOpInc = stmtNum(latest, "operatingIncome");
+  const nopat = latestOpInc * (1 - taxRate);
+  const roic = latestOpInc ? Math.max(0, nopat / investedCap) : (stockData.returnOnAssets || 0.12);
   const roicSpread = (roic - wacc) * 100;
 
   const prompt = `You are the Head of Economic Moats and Industrial Organization Strategy (Morningstar / Michael Porter Framework).
 Evaluate the competitive defensibility, Porter's Five Forces, and structural moat sources for ${profile.name} (${profile.ticker}, ${profile.industry}):
 
 Financial & Competitive Context:
-- Gross Margin: ${formatPct(latest.grossMargin)} | EBITDA Margin: ${formatPct(latest.ebitdaMargin)} | Net Margin: ${formatPct(latest.netMargin)}
+- Gross Margin: ${formatPct(stmtNum(latest, "grossMargin"))} | EBITDA Margin: ${formatPct(stmtNum(latest, "ebitdaMargin"))} | Net Margin: ${formatPct(latest.netMargin)}
 - Capital Return (ROIC): ${formatPct(roic)} | Cost of Capital (WACC): ${(wacc * 100).toFixed(1)}% | ROIC Economic Spread: ${roicSpread >= 0 ? "+" : ""}${roicSpread.toFixed(1)}% | ROE: ${formatPct(roe)}
 - Enterprise Scale: Market Cap = ${formatLargeNum(stockData.marketCap || 0, profile.currency)}, Revenue = ${formatLargeNum(latest.revenue, profile.currency)}
 - Strict Directive: Never confuse ROE with ROIC. Economic spread is strictly ROIC minus WACC. If ROIC spread is negative or near zero, do not claim returns substantially exceed cost of capital.
@@ -637,12 +639,13 @@ async function runForensicFinancialAnalyst(
     : 0;
 
   const summaryData = annualFinancials.map(f =>
-    `${f.year}: Rev=${formatLargeNum(f.revenue, profile.currency)}, GM=${formatPct(f.grossMargin)}, EBITDA=${formatLargeNum(f.ebitda, profile.currency)} (${formatPct(f.ebitdaMargin)}), PAT=${formatLargeNum(f.netIncome, profile.currency)}, OCF=${formatLargeNum(f.operatingCashFlow, profile.currency)}, Capex=${formatLargeNum(f.capitalExpenditures, profile.currency)}`
+    `${f.year}: Rev=${formatLargeNum(f.revenue, profile.currency)}, GM=${formatPct(stmtNum(f, "grossMargin"))}, EBITDA=${formatLargeNum(stmtNum(f, "ebitda"), profile.currency)} (${formatPct(stmtNum(f, "ebitdaMargin"))}), PAT=${formatLargeNum(f.netIncome, profile.currency)}, OCF=${formatLargeNum(f.operatingCashFlow, profile.currency)}, Capex=${formatLargeNum(f.capitalExpenditures, profile.currency)}`
   ).join("\n");
 
   const taxBurden = latest.pretaxIncome > 0 ? (latest.netIncome / latest.pretaxIncome).toFixed(2) : "0.75";
-  const intBurden = latest.operatingIncome > 0 ? (latest.pretaxIncome / latest.operatingIncome).toFixed(2) : "0.85";
-  const opMargin = formatPct(latest.ebitMargin || (latest.operatingIncome / (latest.revenue || 1)));
+  const dupontOpInc = stmtNum(latest, "operatingIncome");
+  const intBurden = dupontOpInc > 0 ? (latest.pretaxIncome / dupontOpInc).toFixed(2) : "0.85";
+  const opMargin = formatPct(stmtNum(latest, "ebitMargin") || (dupontOpInc / (latest.revenue || 1)));
   const assetTurn = (latest.revenue / (latest.totalAssets || 1)).toFixed(2);
   const eqMult = (latest.totalAssets / (latest.totalEquity || 1)).toFixed(2);
   const roe = formatPct(latest.netIncome / (latest.totalEquity || 1));
@@ -723,9 +726,12 @@ async function runCreditSolvencyAnalyst(
   keyRisks: { risk: string; description: string; impact: "High" | "Medium" | "Low" }[];
 }> {
   const latest = annualFinancials[annualFinancials.length - 1];
-  const debtToEbitda = latest.ebitda > 0 ? (latest.totalDebt / latest.ebitda).toFixed(2) : "0.15";
-  const intCov = (latest.interestExpense || 0) > 0 ? (latest.operatingIncome / latest.interestExpense).toFixed(1) : "45.0+";
-  const netDebt = Math.max(0, latest.totalDebt - ((latest.cash || 0) + (latest.shortTermInvestments || 0)));
+  const creditEbitda = stmtNum(latest, "ebitda");
+  const creditOpInc = stmtNum(latest, "operatingIncome");
+  const creditIntExp = stmtNum(latest, "interestExpense");
+  const debtToEbitda = creditEbitda > 0 ? (latest.totalDebt / creditEbitda).toFixed(2) : "0.15";
+  const intCov = creditIntExp > 0 ? (creditOpInc / creditIntExp).toFixed(1) : "45.0+";
+  const netDebt = Math.max(0, latest.totalDebt - ((latest.cash || 0) + stmtNum(latest, "shortTermInvestments")));
 
   const prompt = `You are the Managing Director of Corporate Credit Ratings and Fixed Income Solvency Research.
 Evaluate corporate creditworthiness, liquidity cushions, debt maturity schedules, and downside covenant headroom for ${profile.name} (${profile.ticker}):
@@ -867,9 +873,9 @@ async function runCouncilVerificationOfficer(
   const upsidePct = cmp > 0 ? ((fv - cmp) / cmp) * 100 : 0;
   const verdict = dcf.verdict || "HOLD";
   const totalDebt = latest.totalDebt || 0;
-  const cash = (latest.cash || 0) + (latest.shortTermInvestments || 0);
+  const cash = (latest.cash || 0) + stmtNum(latest, "shortTermInvestments");
   const netDebt = Math.max(0, totalDebt - cash);
-  const ebitda = latest.ebitda || (latest.revenue * (latest.ebitdaMargin || 0.15));
+  const ebitda = stmtNum(latest, "ebitda") || (latest.revenue * (stmtNum(latest, "ebitdaMargin") || 0.15));
   const netDebtToEbitda = ebitda > 0 ? netDebt / ebitda : 0;
 
   // Honest fallback: the council did NOT run. Never present as VERIFIED —
@@ -925,7 +931,7 @@ GROUND-TRUTH FINANCIAL FACTS (UNCOMPROMISING BASELINE):
 - DCF Intrinsic Fair Value: ${sym}${fv.toFixed(2)} (Implied Upside/Downside: ${upsidePct >= 0 ? "+" : ""}${upsidePct.toFixed(1)}%)
 - Official Model Verdict: ${verdict}
 - Latest Revenue: ${formatLargeNum(latest.revenue, cur)}
-- Gross Margin: ${(latest.grossMargin * 100).toFixed(1)}% | EBITDA Margin: ${(latest.ebitdaMargin * 100).toFixed(1)}% | Net Margin: ${(latest.netMargin * 100).toFixed(1)}%
+- Gross Margin: ${(stmtNum(latest, "grossMargin") * 100).toFixed(1)}% | EBITDA Margin: ${(stmtNum(latest, "ebitdaMargin") * 100).toFixed(1)}% | Net Margin: ${(latest.netMargin * 100).toFixed(1)}%
 - Net Debt: ${formatLargeNum(netDebt, cur)} | Net Debt to EBITDA: ${netDebtToEbitda.toFixed(2)}x
 - Competitive Moat Identified: ${assembled.competitiveMoat || "Wide"}
 

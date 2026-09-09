@@ -15,6 +15,7 @@ import type {
   CouncilVerificationAudit,
   NewsSummaryDeskAnalysis,
 } from "@/types/report";
+import { stmtNum, isReitStatement, isAssetLightStatement } from "@/types/report";
 import { formatPct, formatLargeNum } from "./calculations";
 import { classifyArchetype, type GICSSector, type FinancialArchetype } from "./company-archetype";
 import { buildCompanyOntology } from "./company-ontology";
@@ -51,13 +52,24 @@ export function generatePEFirmAnalysis(input: PEAnalysisInput): AIAnalysis {
   const cmp = stockData.currentPrice || dcf.currentMarketPrice || 100;
   const fv = dcf.intrinsicValue || cmp * 1.1;
   const rev = latest.revenue || 1000000;
-  const ebitda = latest.ebitda ?? (rev * (latest.ebitdaMargin || 0));
-  const ebitdaMargin = latest.ebitdaMargin || (ebitda / (rev || 1));
+  // Arch-aware earnings power for the evidence lead: REITs read FFO (EBITDA is
+  // depreciation-distorted and absent by design); fee franchises read operating
+  // income (their real margin construct); corporates/banks read EBITDA exactly
+  // as before (bank zero preserved). Labels follow the construct so prose never
+  // prints "EBITDA margin" for a REIT.
+  const earnBasis = isReitStatement(latest)
+    ? { label: "FFO", value: latest.fundsFromOperations, margin: rev > 0 ? latest.fundsFromOperations / rev : 0 }
+    : isAssetLightStatement(latest)
+      ? { label: "operating", value: latest.operatingIncome, margin: latest.operatingMargin }
+      : { label: "EBITDA", value: stmtNum(latest, "ebitda", rev * stmtNum(latest, "ebitdaMargin")), margin: stmtNum(latest, "ebitdaMargin", 0) };
+  const earnLabel = earnBasis.label;
+  const ebitda = earnBasis.value;
+  const ebitdaMargin = earnBasis.margin || (ebitda / (rev || 1));
   const netIncome = latest.netIncome ?? 0;
   const netMargin = latest.netMargin || (netIncome / (rev || 1));
   const pe = stockData.pe || (netIncome > 0 ? (stockData.marketCap || rev * 3) / netIncome : 25);
   const totalDebt = latest.totalDebt || 0;
-  const cash = (latest.cash || 0) + (latest.shortTermInvestments || 0);
+  const cash = (latest.cash || 0) + stmtNum(latest, "shortTermInvestments");
   const netDebt = Math.max(0, totalDebt - cash);
   const isDeleveraged = totalDebt === 0 || netDebt <= rev * 0.1;
   const verdict = dcf.verdict || "HOLD";
@@ -76,24 +88,24 @@ export function generatePEFirmAnalysis(input: PEAnalysisInput): AIAnalysis {
     if (nFY >= 2 && prev.revenue > 0 && rev > 0) {
       const cagr = Math.pow(rev / prev.revenue, 1 / (nFY - 1)) - 1;
       parts.push(
-        `${profile.name} compounded revenue at ${formatPct(cagr)} p.a. across the last ${nFY} reported years to ${formatLargeNum(rev, cur)}, with trailing EBITDA margin at ${formatPct(ebitdaMargin)} and net margin at ${formatPct(netMargin)}.`
+        `${profile.name} compounded revenue at ${formatPct(cagr)} p.a. across the last ${nFY} reported years to ${formatLargeNum(rev, cur)}, with trailing ${earnLabel} margin at ${formatPct(ebitdaMargin)} and net margin at ${formatPct(netMargin)}.`
       );
     } else if (rev > 0) {
       parts.push(
-        `${profile.name} reported trailing revenue of ${formatLargeNum(rev, cur)} at ${formatPct(ebitdaMargin)} EBITDA margin and ${formatPct(netMargin)} net margin.`
+        `${profile.name} reported trailing revenue of ${formatLargeNum(rev, cur)} at ${formatPct(ebitdaMargin)} ${earnLabel} margin and ${formatPct(netMargin)} net margin.`
       );
     }
     if (ebitda > 0) {
       parts.push(
         netDebt <= 0
           ? `The balance sheet is net-cash, so enterprise value tracks equity value and the ${formatPct(upsidePct)} spread to our ${sym}${fv.toFixed(2)} fair value is a pure earnings-multiple call.`
-          : `Net debt stands at ${(netDebt / ebitda).toFixed(1)}x trailing EBITDA, so leverage ${netDebt / ebitda > 3 ? "is the binding constraint on" : "leaves headroom for"} the ${formatPct(upsidePct)} spread to our ${sym}${fv.toFixed(2)} fair value.`
+          : `Net debt stands at ${(netDebt / ebitda).toFixed(1)}x trailing ${earnLabel}, so leverage ${netDebt / ebitda > 3 ? "is the binding constraint on" : "leaves headroom for"} the ${formatPct(upsidePct)} spread to our ${sym}${fv.toFixed(2)} fair value.`
       );
     }
     if (pe > 0 && netIncome > 0) {
       parts.push(`At ${pe.toFixed(1)}x trailing earnings, the market prices ${netMargin >= 0.15 ? "a premium compounding multiple that demands sustained margin defense" : "a moderate multiple that leaves room for re-rating on margin recovery"}.`);
     }
-    const rdPct = rev > 0 ? (latest.researchDevelopment || 0) / rev : 0;
+    const rdPct = rev > 0 ? stmtNum(latest, "researchDevelopment") / rev : 0;
     const capexPct = rev > 0 ? Math.abs(latest.capitalExpenditures || 0) / rev : 0;
     if (rdPct >= 0.02 || capexPct >= 0.03) {
       const bits: string[] = [];
@@ -105,8 +117,8 @@ export function generatePEFirmAnalysis(input: PEAnalysisInput): AIAnalysis {
       const conv = latest.operatingCashFlow / ebitda;
       parts.push(
         conv >= 0.8
-          ? `Operating cash conversion of ${(conv * 100).toFixed(0)}% of EBITDA corroborates earnings quality.`
-          : `Operating cash conversion of ${(conv * 100).toFixed(0)}% of EBITDA trails earnings — working-capital absorption qualifies the cash story.`
+          ? `Operating cash conversion of ${(conv * 100).toFixed(0)}% of ${earnLabel} corroborates earnings quality.`
+          : `Operating cash conversion of ${(conv * 100).toFixed(0)}% of ${earnLabel} trails earnings — working-capital absorption qualifies the cash story.`
       );
     }
     return parts.join(" ");

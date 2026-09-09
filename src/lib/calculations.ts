@@ -3,6 +3,11 @@
 // ============================================================
 import type {
   AnnualFinancials,
+  CorporateAnnualFinancials,
+  BankAnnualFinancials,
+  InsuranceAnnualFinancials,
+  ReitAnnualFinancials,
+  AssetLightFeeAnnualFinancials,
   Ratios,
   DuPontAnalysis,
   DCFResult,
@@ -10,6 +15,7 @@ import type {
   DCFProjection,
   StockData,
 } from "@/types/report";
+import { isBankStatement, isInsuranceStatement, isReitStatement, isAssetLightStatement, isCorporateStatement, stmtNum } from "@/types/report";
 import { calculateRecommendation } from "./recommendation";
 import { computeReverseDCF } from "./valuation/reverse-dcf";
 import type { ArchetypeProfile } from "./company-archetype";
@@ -38,16 +44,421 @@ function div(a: number, b: number) {
   return b !== 0 ? a / b : 0;
 }
 
+function getRevenue(fin: AnnualFinancials): number {
+  // Every statement shape carries a `revenue` compat alias (bank: NII+fees,
+  // insurance: NEP+investment income, REIT: rental, fee: fee revenue).
+  return fin.revenue || 0;
+}
+function getEbitMargin(fin: AnnualFinancials): number | undefined {
+  // Operating margin is economically meaningful for fee-native firms; for
+  // banks/insurers/REITs the native margin (net/NIM/NOI/FFO) replaces EBIT.
+  if (isAssetLightStatement(fin)) return (fin as AssetLightFeeAnnualFinancials).operatingMargin;
+  if (isCorporateStatement(fin)) return (fin as CorporateAnnualFinancials).ebitMargin;
+  return undefined;
+}
+/**
+ * Margin anchor per architecture for mid-cycle forecasting. Banks/insurers anchor
+ * on net margin (no EBIT construct); REITs on rental net margin (FFO economics
+ * live in ReitRatios); fee-native firms on operating margin (meaningful here).
+ */
+function getMarginAnchor(fin: AnnualFinancials): { value: number; label: string } {
+  if (isBankStatement(fin)) return { value: (fin as BankAnnualFinancials).netMargin, label: "net" };
+  if (isInsuranceStatement(fin)) return { value: (fin as InsuranceAnnualFinancials).netMargin, label: "net" };
+  if (isReitStatement(fin)) {
+    const r = fin as ReitAnnualFinancials;
+    const rental = r.rentalIncome + r.otherPropertyIncome;
+    return { value: rental > 0 ? r.netIncome / rental : 0, label: "rental-net" };
+  }
+  if (isAssetLightStatement(fin)) return { value: (fin as AssetLightFeeAnnualFinancials).operatingMargin, label: "operating" };
+  return { value: (fin as CorporateAnnualFinancials).ebitMargin, label: "EBIT" };
+}
+function getDepreciation(fin: AnnualFinancials): number {
+  // RE depreciation is real (added back for FFO downstream); banks/insurers/fee cos carry none material.
+  if (isReitStatement(fin)) return (fin as ReitAnnualFinancials).depreciationAmortization || 0;
+  if (isCorporateStatement(fin)) return (fin as CorporateAnnualFinancials).depreciation || 0;
+  return 0;
+}
+
+function getCapex(fin: AnnualFinancials): number {
+  return (fin as any).capitalExpenditures || 0;
+}
+
 /** Numeric value out of a kernel scalar (identical to legacy div/safe results). */
 const kval = (s: { value: number }) => s.value;
 
 // ─────────────────────────────────────────────
-// Ratio Analysis for each year
+// Sector-native ratio engines — each computes ONLY the ratios that are
+// economically valid for its architecture. No DSO/DIO/DPO or EBITDA-based
+// ratios for banks/insurers; no combined-ratio math outside insurance; no
+// gross-margin/inventory math outside standard corporates.
+// ─────────────────────────────────────────────
+
+/** Bank-native KPIs: NIM, cost-to-income, asset quality, capital adequacy, leverage-as-multiplier. */
+export interface BankRatios {
+  year: string;
+  netMargin: number;
+  nim: number;
+  costToIncome: number;
+  roe: number;
+  roa: number;
+  roce: number;
+  assetTurnover: number;
+  debtToEquity: number;
+  equityMultiplier: number;
+  totalDebtToAssets: number;
+  currentRatio: number;
+  pe: number;
+  pb: number;
+  ps: number;
+  bookValuePerShare: number;
+  marketCap: number;
+  enterpriseValue: number;
+  dividendYield: number;
+  dividendPayout: number;
+  eps: number;
+  gnpaPct?: number;
+  nnpaPct?: number;
+  provisionCoverage?: number;
+  capitalAdequacy?: number;
+  tier1Ratio?: number;
+  casaRatio?: number;
+}
+
+/** Insurance-native KPIs: loss/expense/combined ratio, underwriting margin, float yield. */
+export interface InsuranceRatios {
+  year: string;
+  lossRatio: number;
+  expenseRatio: number;
+  combinedRatio: number;
+  underwritingMargin: number; // underwritingResult / NEP (positive = underwriting profit)
+  investmentYieldOnFloat: number; // investmentIncome / float
+  netMargin: number;
+  roe: number;
+  roa: number;
+  leverage: number; // assets / equity
+  assetTurnover: number; // (NEP + investment income) / assets
+  debtToEquity: number;
+  totalDebtToAssets: number;
+  pe: number;
+  pb: number;
+  ps: number; // price / GWP
+  bookValuePerShare: number;
+  marketCap: number;
+  dividendYield: number;
+  dividendPayout: number;
+  eps: number;
+  solvencyRatio?: number;
+}
+
+/** REIT-native KPIs: NOI margin, FFO/AFFO + per-share, AFFO payout, NAV-appropriate leverage. */
+export interface ReitRatios {
+  year: string;
+  noiMargin: number;
+  ffoMargin: number; // FFO / rental income
+  affoMargin: number; // AFFO / rental income
+  ffoPerShare: number;
+  affoPerShare: number;
+  priceToFfo: number;
+  priceToAffo: number;
+  dividendYield: number;
+  affoPayout: number; // distributions / AFFO (the REIT payout KPI — not earnings payout)
+  earningsPayout: number; // distributions / net income (informational; depreciation distorts)
+  roe: number;
+  roa: number;
+  netMargin: number;
+  debtToAssets: number;
+  debtToEquity: number;
+  equityMultiplier: number;
+  noiInterestCover: number; // NOI / interest (REIT-appropriate coverage, not EBIT-based)
+  pb: number;
+  bookValuePerShare: number;
+  marketCap: number;
+  eps: number;
+  occupancyPct?: number;
+  capRate?: number;
+}
+
+/** Asset-light fee-native KPIs: fee margins, AUM unit economics, FCF conversion. */
+export interface AssetLightRatios {
+  year: string;
+  operatingMargin: number; // meaningful here (unlike banks)
+  netMargin: number;
+  revenueAsPctOfAum: number; // 0 + NM validity when AUM undisclosed
+  roe: number;
+  roa: number;
+  assetTurnover: number;
+  fcfConversion: number; // FCF / net income (a core fee-franchise KPI)
+  debtToEquity: number;
+  equityMultiplier: number;
+  totalDebtToAssets: number;
+  currentRatio: number;
+  pe: number;
+  pb: number;
+  ps: number;
+  bookValuePerShare: number;
+  marketCap: number;
+  enterpriseValue: number;
+  dividendYield: number;
+  dividendPayout: number;
+  eps: number;
+}
+
+/** Architecture B engine — only spread/book/asset-quality/capital ratios. Never DSO/DIO/DPO/EBITDA. */
+export function computeBankRatios(fin: BankAnnualFinancials, cmp: number): BankRatios {
+  const totalRevenue = fin.totalRevenue || (fin.netInterestIncome + fin.nonInterestIncome) || 0;
+  const periodShares = fin.sharesOutstanding > 0 ? fin.sharesOutstanding : 1;
+  const netDebt = fin.totalDebt - fin.cash;
+  const marketCap = cmp * periodShares;
+  return {
+    year: fin.year,
+    netMargin: kval(canonicalMargin(fin.netIncome, totalRevenue, "net")),
+    nim: fin.netInterestMargin ?? kval(guardedDiv(fin.netInterestIncome, fin.totalAssets, { label: "netInterestIncome/totalAssets" })),
+    costToIncome: fin.costToIncome ?? kval(guardedDiv(fin.nonInterestExpenses, totalRevenue, { label: "nonInterestExpenses/totalRevenue" })),
+    roe: kval(guardedDiv(fin.netIncome, fin.totalEquity, { label: "netIncome/totalEquity" })),
+    roa: kval(guardedDiv(fin.netIncome, fin.totalAssets, { label: "netIncome/totalAssets" })),
+    roce: kval(guardedDiv(fin.netIncome, fin.totalAssets, { label: "netIncome/totalAssets" })),
+    assetTurnover: kval(guardedDiv(totalRevenue, fin.totalAssets, { label: "totalRevenue/totalAssets" })),
+    debtToEquity: kval(guardedDiv(fin.totalDebt, fin.totalEquity, { label: "totalDebt/totalEquity" })),
+    equityMultiplier: kval(guardedDiv(fin.totalAssets, fin.totalEquity, { label: "totalAssets/totalEquity" })),
+    totalDebtToAssets: kval(guardedDiv(fin.totalDebt, fin.totalAssets, { label: "totalDebt/totalAssets" })),
+    currentRatio: kval(guardedDiv(fin.currentAssets, fin.currentLiabilities > 0 ? fin.currentLiabilities : 1, { label: "currentAssets/currentLiabilities" })),
+    pe: fin.eps > 0 ? safe(div(cmp, fin.eps)) : 0,
+    pb: safe(div(marketCap, fin.totalEquity)),
+    ps: safe(div(marketCap, totalRevenue)),
+    bookValuePerShare: safe(div(fin.totalEquity, periodShares)),
+    marketCap,
+    enterpriseValue: marketCap + netDebt,
+    dividendYield: cmp > 0 ? safe(div(fin.dividendsPaid / periodShares, cmp)) : 0,
+    dividendPayout: fin.netIncome > 0 ? safe(div(fin.dividendsPaid, fin.netIncome)) : 0,
+    eps: fin.eps || 0,
+    gnpaPct: fin.grossNPAPct,
+    nnpaPct: fin.netNPAPct,
+    provisionCoverage: fin.provisionCoverageRatio,
+    capitalAdequacy: fin.capitalAdequacyRatio,
+    tier1Ratio: fin.tier1Ratio,
+    casaRatio: fin.casaRatio,
+  };
+}
+
+/** Architecture C engine — only underwriting + float + book ratios. Never EBITDA/inventory/DSO. */
+export function computeInsuranceRatios(fin: InsuranceAnnualFinancials, cmp: number): InsuranceRatios {
+  const totalRev = fin.netEarnedPremium + fin.investmentIncome;
+  const periodShares = fin.sharesOutstanding > 0 ? fin.sharesOutstanding : 1;
+  const marketCap = cmp * periodShares;
+  return {
+    year: fin.year,
+    lossRatio: fin.lossRatio,
+    expenseRatio: fin.expenseRatio,
+    combinedRatio: fin.combinedRatio,
+    underwritingMargin: fin.netEarnedPremium > 0 ? fin.underwritingResult / fin.netEarnedPremium : 0,
+    investmentYieldOnFloat: fin.float > 0 ? fin.investmentIncome / fin.float : 0,
+    netMargin: kval(canonicalMargin(fin.netIncome, totalRev, "net")),
+    roe: kval(guardedDiv(fin.netIncome, fin.totalEquity, { label: "netIncome/totalEquity" })),
+    roa: kval(guardedDiv(fin.netIncome, fin.totalAssets, { label: "netIncome/totalAssets" })),
+    leverage: kval(guardedDiv(fin.totalAssets, fin.totalEquity, { label: "totalAssets/totalEquity" })),
+    assetTurnover: kval(guardedDiv(totalRev, fin.totalAssets, { label: "totalRev/totalAssets" })),
+    debtToEquity: kval(guardedDiv(fin.totalDebt, fin.totalEquity, { label: "totalDebt/totalEquity" })),
+    totalDebtToAssets: kval(guardedDiv(fin.totalDebt, fin.totalAssets, { label: "totalDebt/totalAssets" })),
+    pe: fin.eps > 0 ? safe(div(cmp, fin.eps)) : 0,
+    pb: safe(div(marketCap, fin.totalEquity)),
+    ps: safe(div(marketCap, fin.grossWrittenPremium)),
+    bookValuePerShare: safe(div(fin.totalEquity, periodShares)),
+    marketCap,
+    dividendYield: cmp > 0 ? safe(div(fin.dividendsPaid / periodShares, cmp)) : 0,
+    dividendPayout: fin.netIncome > 0 ? safe(div(fin.dividendsPaid, fin.netIncome)) : 0,
+    eps: fin.eps || 0,
+    solvencyRatio: fin.solvencyRatio,
+  };
+}
+
+/** Architecture D engine — only NOI/FFO/AFFO/NAV-basis ratios. Never gross-margin/EBITDA/WC-turnover. */
+export function computeReitRatios(fin: ReitAnnualFinancials, cmp: number): ReitRatios {
+  const rental = fin.rentalIncome + fin.otherPropertyIncome;
+  const periodShares = fin.sharesOutstanding > 0 ? fin.sharesOutstanding : 1;
+  const marketCap = cmp * periodShares;
+  const dps = periodShares > 0 ? fin.dividendsPaid / periodShares : 0;
+  return {
+    year: fin.year,
+    noiMargin: fin.noiMargin,
+    ffoMargin: rental > 0 ? fin.fundsFromOperations / rental : 0,
+    affoMargin: rental > 0 ? fin.adjustedFundsFromOperations / rental : 0,
+    ffoPerShare: fin.ffoPerShare,
+    affoPerShare: fin.affoPerShare,
+    priceToFfo: fin.ffoPerShare > 0 ? safe(div(cmp, fin.ffoPerShare)) : 0,
+    priceToAffo: fin.affoPerShare > 0 ? safe(div(cmp, fin.affoPerShare)) : 0,
+    dividendYield: cmp > 0 ? safe(div(dps, cmp)) : 0,
+    affoPayout: fin.adjustedFundsFromOperations > 0 ? safe(div(fin.dividendsPaid, fin.adjustedFundsFromOperations)) : 0,
+    earningsPayout: fin.netIncome > 0 ? safe(div(fin.dividendsPaid, fin.netIncome)) : 0,
+    roe: kval(guardedDiv(fin.netIncome, fin.totalEquity, { label: "netIncome/totalEquity" })),
+    roa: kval(guardedDiv(fin.netIncome, fin.totalAssets, { label: "netIncome/totalAssets" })),
+    netMargin: kval(canonicalMargin(fin.netIncome, rental, "net")),
+    debtToAssets: kval(guardedDiv(fin.totalDebt, fin.totalAssets, { label: "totalDebt/totalAssets" })),
+    debtToEquity: kval(guardedDiv(fin.totalDebt, fin.totalEquity, { label: "totalDebt/totalEquity" })),
+    equityMultiplier: kval(guardedDiv(fin.totalAssets, fin.totalEquity, { label: "totalAssets/totalEquity" })),
+    noiInterestCover: fin.interestExpense > 0 ? safe(div(fin.netOperatingIncome, fin.interestExpense)) : 0,
+    pb: safe(div(marketCap, fin.totalEquity)),
+    bookValuePerShare: safe(div(fin.totalEquity, periodShares)),
+    marketCap,
+    eps: fin.eps || 0,
+    occupancyPct: fin.occupancyPct,
+    capRate: fin.capRate,
+  };
+}
+
+/** Architecture E engine — fee margins, AUM unit economics, FCF conversion. Never loan-book/combined-ratio. */
+export function computeAssetLightRatios(fin: AssetLightFeeAnnualFinancials, cmp: number): AssetLightRatios {
+  const feeRev = fin.totalFeeRevenue;
+  const periodShares = fin.sharesOutstanding > 0 ? fin.sharesOutstanding : 1;
+  const netDebt = fin.totalDebt - fin.cash;
+  const marketCap = cmp * periodShares;
+  const avgAum = (fin.aumBeginning + fin.aumEnding) / 2;
+  return {
+    year: fin.year,
+    operatingMargin: fin.operatingMargin,
+    netMargin: fin.netMargin,
+    revenueAsPctOfAum: avgAum > 0 ? feeRev / avgAum : 0,
+    roe: kval(guardedDiv(fin.netIncome, fin.totalEquity, { label: "netIncome/totalEquity" })),
+    roa: kval(guardedDiv(fin.netIncome, fin.totalAssets, { label: "netIncome/totalAssets" })),
+    assetTurnover: kval(guardedDiv(feeRev, fin.totalAssets, { label: "feeRevenue/totalAssets" })),
+    fcfConversion: fin.netIncome !== 0 ? fin.freeCashFlow / fin.netIncome : 0,
+    debtToEquity: kval(guardedDiv(fin.totalDebt, fin.totalEquity, { label: "totalDebt/totalEquity" })),
+    equityMultiplier: kval(guardedDiv(fin.totalAssets, fin.totalEquity, { label: "totalAssets/totalEquity" })),
+    totalDebtToAssets: kval(guardedDiv(fin.totalDebt, fin.totalAssets, { label: "totalDebt/totalAssets" })),
+    currentRatio: kval(guardedDiv(fin.currentAssets, fin.currentLiabilities > 0 ? fin.currentLiabilities : 1, { label: "currentAssets/currentLiabilities" })),
+    pe: fin.eps > 0 ? safe(div(cmp, fin.eps)) : 0,
+    pb: safe(div(marketCap, fin.totalEquity)),
+    ps: safe(div(marketCap, feeRev)),
+    bookValuePerShare: safe(div(fin.totalEquity, periodShares)),
+    marketCap,
+    enterpriseValue: marketCap + netDebt,
+    dividendYield: cmp > 0 ? safe(div(fin.dividendsPaid / periodShares, cmp)) : 0,
+    dividendPayout: fin.netIncome > 0 ? safe(div(fin.dividendsPaid, fin.netIncome)) : 0,
+    eps: fin.eps || 0,
+  };
+}
+
+// ─────────────────────────────────────────────
+// Ratio Analysis for each year — branches on statementType
 // ─────────────────────────────────────────────
 export function computeRatios(
   fin: AnnualFinancials,
   cmp: number
 ): Ratios {
+  // Architecture B — bank-native (never revenue/costOfRevenue/grossProfit/inventory)
+  if (isBankStatement(fin)) {
+    const r = computeBankRatios(fin as BankAnnualFinancials, cmp);
+    return {
+      year: r.year,
+      grossMargin: 0, // not applicable — validity NM
+      ebitdaMargin: 0,
+      ebitMargin: 0,
+      netMargin: r.netMargin,
+      roe: r.roe, roa: r.roa,
+      roce: r.roce, // for banks ROCE≈ROA (no operatingIncome)
+      assetTurnover: r.assetTurnover,
+      fixedAssetTurnover: 0,
+      workingCapitalTurnover: 0,
+      inventoryTurnover: 0,
+      receivablesTurnover: 0,
+      debtToEquity: r.debtToEquity,
+      equityMultiplier: r.equityMultiplier,
+      interestCoverage: 0, // not applicable
+      netDebtToEbitda: 0,
+      totalDebtToAssets: r.totalDebtToAssets,
+      currentRatio: r.currentRatio,
+      quickRatio: 0,
+      pe: r.pe, evToEbitda: 0, pb: r.pb, ps: r.ps,
+      bookValuePerShare: r.bookValuePerShare, marketCap: r.marketCap, enterpriseValue: r.enterpriseValue,
+      dividendYield: r.dividendYield, dividendPayout: r.dividendPayout, eps: r.eps,
+    };
+  }
+  // Architecture C — insurance-native (underwriting + float; never EBITDA/inventory/DSO)
+  if (isInsuranceStatement(fin)) {
+    const r = computeInsuranceRatios(fin as InsuranceAnnualFinancials, cmp);
+    const finAny = fin as unknown as InsuranceAnnualFinancials;
+    return {
+      year: r.year,
+      grossMargin: 0, // not applicable — validity NM (NOI-equivalent is underwriting margin)
+      ebitdaMargin: 0,
+      ebitMargin: 0,
+      netMargin: r.netMargin,
+      roe: r.roe, roa: r.roa,
+      roce: r.roa, // no operating capital construct for insurers
+      assetTurnover: r.assetTurnover,
+      fixedAssetTurnover: 0,
+      workingCapitalTurnover: 0,
+      inventoryTurnover: 0,
+      receivablesTurnover: 0,
+      debtToEquity: r.debtToEquity,
+      equityMultiplier: r.leverage,
+      interestCoverage: 0, // not applicable (investment leverage, not operating debt)
+      netDebtToEbitda: 0,
+      totalDebtToAssets: r.totalDebtToAssets,
+      currentRatio: kval(guardedDiv(finAny.currentAssets, finAny.currentLiabilities > 0 ? finAny.currentLiabilities : 1, { label: "currentAssets/currentLiabilities" })),
+      quickRatio: 0,
+      pe: r.pe, evToEbitda: 0, pb: r.pb, ps: r.ps,
+      bookValuePerShare: r.bookValuePerShare, marketCap: r.marketCap, enterpriseValue: r.marketCap,
+      dividendYield: r.dividendYield, dividendPayout: r.dividendPayout, eps: r.eps,
+    };
+  }
+  // Architecture D — REIT-native (NOI/FFO/AFFO; never gross-margin/EBITDA/WC-turnover)
+  if (isReitStatement(fin)) {
+    const r = computeReitRatios(fin as ReitAnnualFinancials, cmp);
+    const finAny = fin as unknown as ReitAnnualFinancials;
+    return {
+      year: r.year,
+      grossMargin: 0, // not applicable — validity NM (NOI margin replaces it)
+      ebitdaMargin: 0,
+      ebitMargin: 0,
+      netMargin: r.netMargin,
+      roe: r.roe, roa: r.roa,
+      roce: r.roa,
+      assetTurnover: kval(guardedDiv(finAny.rentalIncome, finAny.totalAssets, { label: "rentalIncome/totalAssets" })),
+      fixedAssetTurnover: 0,
+      workingCapitalTurnover: 0,
+      inventoryTurnover: 0,
+      receivablesTurnover: 0,
+      debtToEquity: r.debtToEquity,
+      equityMultiplier: r.equityMultiplier,
+      interestCoverage: r.noiInterestCover, // REIT-appropriate: NOI / interest
+      netDebtToEbitda: 0,
+      totalDebtToAssets: r.debtToAssets,
+      currentRatio: kval(guardedDiv(finAny.currentAssets, finAny.currentLiabilities > 0 ? finAny.currentLiabilities : 1, { label: "currentAssets/currentLiabilities" })),
+      quickRatio: 0,
+      pe: 0, // P/E is depreciation-distorted for REITs — P/FFO and P/AFFO (ReitRatios) are primary; validity NM
+      evToEbitda: 0, pb: r.pb, ps: safe(div(r.marketCap, finAny.rentalIncome)),
+      bookValuePerShare: r.bookValuePerShare, marketCap: r.marketCap, enterpriseValue: r.marketCap,
+      dividendYield: r.dividendYield, dividendPayout: r.affoPayout, eps: r.eps,
+    };
+  }
+  // Architecture E — fee-native (operating margin meaningful; never loan-book/combined-ratio)
+  if (isAssetLightStatement(fin)) {
+    const r = computeAssetLightRatios(fin as AssetLightFeeAnnualFinancials, cmp);
+    return {
+      year: r.year,
+      grossMargin: 0, // not applicable — validity NM (fee businesses carry no COGS)
+      ebitdaMargin: 0,
+      ebitMargin: r.operatingMargin, // operating margin IS the fee-franchise margin
+      netMargin: r.netMargin,
+      roe: r.roe, roa: r.roa,
+      roce: r.roa,
+      assetTurnover: r.assetTurnover,
+      fixedAssetTurnover: 0,
+      workingCapitalTurnover: 0,
+      inventoryTurnover: 0,
+      receivablesTurnover: 0,
+      debtToEquity: r.debtToEquity,
+      equityMultiplier: r.equityMultiplier,
+      interestCoverage: 0, // fee-native shape carries no interest-expense field
+      netDebtToEbitda: 0,
+      totalDebtToAssets: r.totalDebtToAssets,
+      currentRatio: r.currentRatio,
+      quickRatio: 0,
+      pe: r.pe, evToEbitda: 0, pb: r.pb, ps: r.ps,
+      bookValuePerShare: r.bookValuePerShare, marketCap: r.marketCap, enterpriseValue: r.enterpriseValue,
+      dividendYield: r.dividendYield, dividendPayout: r.dividendPayout, eps: r.eps,
+    };
+  }
   const {
     year,
     revenue,
@@ -69,7 +480,7 @@ export function computeRatios(
     dividendsPaid,
     eps,
     sharesOutstanding,
-  } = fin;
+  } = fin as CorporateAnnualFinancials;
 
   // Profitability — every division routes through the kernel denominator
   // state machine (numerics bit-identical to legacy div/safe; validity is
@@ -174,12 +585,168 @@ const _v = (s: { validity: DenominatorState; reason: string; display: "VALUE" | 
  * imputed (MISSING discipline: imputed ≠ reported).
  */
 export function computeRatioValidity(fin: AnnualFinancials, cmp: number): RatioValidityMap {
+  if (isBankStatement(fin)) {
+    const b = fin as BankAnnualFinancials;
+    const totalRevenue = b.totalRevenue || 0;
+    const out: RatioValidityMap = {};
+    const rec = (key: string, s: { validity: DenominatorState; reason: string; display: "VALUE" | "N_M" }, imputed = false) => { out[key] = _v(s, imputed); };
+    rec("grossMargin", { validity: "NM", reason: "NOT_APPLICABLE:bank-no-grossProfit", display: "N_M" });
+    rec("ebitdaMargin", { validity: "NM", reason: "NOT_APPLICABLE:bank-no-ebitda", display: "N_M" });
+    rec("ebitMargin", { validity: "NM", reason: "NOT_APPLICABLE:bank-no-ebit", display: "N_M" });
+    rec("netMargin", canonicalMargin(b.netIncome, totalRevenue, "net"));
+    rec("roe", guardedDiv(b.netIncome, b.totalEquity, { label: "netIncome/totalEquity" }));
+    rec("roa", guardedDiv(b.netIncome, b.totalAssets, { label: "netIncome/totalAssets" }));
+    rec("roce", guardedDiv(b.netIncome, b.totalAssets, { label: "netIncome/totalAssets" }));
+    rec("assetTurnover", guardedDiv(totalRevenue, b.totalAssets, { label: "totalRevenue/totalAssets" }));
+    rec("fixedAssetTurnover", { validity: "NM", reason: "NOT_APPLICABLE:bank-no-fixedAssets", display: "N_M" });
+    rec("workingCapitalTurnover", { validity: "NM", reason: "NOT_APPLICABLE:bank-no-WC", display: "N_M" });
+    rec("inventoryTurnover", { validity: "NM", reason: "NOT_APPLICABLE:bank-no-inventory", display: "N_M" });
+    rec("receivablesTurnover", { validity: "NM", reason: "NOT_APPLICABLE:bank-no-receivables", display: "N_M" });
+    rec("debtToEquity", guardedDiv(b.totalDebt, b.totalEquity, { label: "totalDebt/totalEquity" }));
+    rec("equityMultiplier", guardedDiv(b.totalAssets, b.totalEquity, { label: "totalAssets/totalEquity" }));
+    rec("interestCoverage", { validity: "NM", reason: "NOT_APPLICABLE:bank-interest-is-revenue", display: "N_M" });
+    rec("netDebtToEbitda", { validity: "NM", reason: "NOT_APPLICABLE:bank-no-ebitda", display: "N_M" });
+    rec("totalDebtToAssets", guardedDiv(b.totalDebt, b.totalAssets, { label: "totalDebt/totalAssets" }));
+    rec("currentRatio", guardedDiv(b.currentAssets, b.currentLiabilities, { label: "currentAssets/currentLiabilities" }));
+    rec("quickRatio", { validity: "NM", reason: "NOT_APPLICABLE:bank-no-inventory", display: "N_M" });
+    const imputed = !(b.sharesOutstanding > 0);
+    const noBase = { validity: "NM" as DenominatorState, reason: "MISSING:sharesOutstanding≤0", display: "N_M" as const };
+    const epsVal = (b as any).eps || 0;
+    rec("pe", (epsVal || 0) > 0 && cmp > 0 && !imputed ? { validity: "VALID" as DenominatorState, reason: "OK:cmp/eps", display: "VALUE" as const } : ((epsVal || 0) <= 0 ? { validity: "NM" as DenominatorState, reason: "NON_POSITIVE_EARNINGS:eps≤0", display: "N_M" as const } : noBase), imputed);
+    rec("evToEbitda", { validity: "NM", reason: "NOT_APPLICABLE:bank-EV/EBITDA-na", display: "N_M" }, imputed);
+    rec("pb", !imputed ? guardedDiv(cmp * (b.sharesOutstanding || 0), b.totalEquity, { label: "marketCap/totalEquity" }) : noBase, imputed);
+    rec("ps", !imputed ? guardedDiv(cmp * (b.sharesOutstanding || 0), totalRevenue, { label: "marketCap/totalRevenue" }) : noBase, imputed);
+    rec("bookValuePerShare", !imputed ? guardedDiv(b.totalEquity, b.sharesOutstanding || 0, { label: "totalEquity/shares" }) : noBase, imputed);
+    rec("dividendYield", cmp > 0 && !imputed ? { validity: "VALID" as DenominatorState, reason: "OK:dps/cmp", display: "VALUE" as const } : noBase, imputed);
+    rec("dividendPayout", (b.netIncome || 0) > 0 ? guardedDiv(b.dividendsPaid, b.netIncome, { label: "dividends/netIncome" }) : noBase, imputed);
+    return out;
+  }
+  // Architecture C validity — underwriting/float ratios valid; corporate efficiency/EBITDA invalid by construction.
+  if (isInsuranceStatement(fin)) {
+    const b = fin as InsuranceAnnualFinancials;
+    const totalRev = b.netEarnedPremium + b.investmentIncome;
+    const out: RatioValidityMap = {};
+    const rec = (key: string, s: { validity: DenominatorState; reason: string; display: "VALUE" | "N_M" }, imputed = false) => { out[key] = _v(s, imputed); };
+    rec("grossMargin", { validity: "NM", reason: "NOT_APPLICABLE:insurer-no-grossProfit", display: "N_M" });
+    rec("ebitdaMargin", { validity: "NM", reason: "NOT_APPLICABLE:insurer-no-ebitda", display: "N_M" });
+    rec("ebitMargin", { validity: "NM", reason: "NOT_APPLICABLE:insurer-no-ebit", display: "N_M" });
+    rec("netMargin", canonicalMargin(b.netIncome, totalRev, "net"));
+    rec("roe", guardedDiv(b.netIncome, b.totalEquity, { label: "netIncome/totalEquity" }));
+    rec("roa", guardedDiv(b.netIncome, b.totalAssets, { label: "netIncome/totalAssets" }));
+    rec("roce", guardedDiv(b.netIncome, b.totalAssets, { label: "netIncome/totalAssets" }));
+    rec("assetTurnover", guardedDiv(totalRev, b.totalAssets, { label: "totalRev/totalAssets" }));
+    rec("fixedAssetTurnover", { validity: "NM", reason: "NOT_APPLICABLE:insurer-no-fixedAssets", display: "N_M" });
+    rec("workingCapitalTurnover", { validity: "NM", reason: "NOT_APPLICABLE:insurer-no-WC", display: "N_M" });
+    rec("inventoryTurnover", { validity: "NM", reason: "NOT_APPLICABLE:insurer-no-inventory", display: "N_M" });
+    rec("receivablesTurnover", { validity: "NM", reason: "NOT_APPLICABLE:insurer-no-receivables", display: "N_M" });
+    rec("debtToEquity", guardedDiv(b.totalDebt, b.totalEquity, { label: "totalDebt/totalEquity" }));
+    rec("equityMultiplier", guardedDiv(b.totalAssets, b.totalEquity, { label: "totalAssets/totalEquity" }));
+    rec("interestCoverage", { validity: "NM", reason: "NOT_APPLICABLE:insurer-investment-leverage", display: "N_M" });
+    rec("netDebtToEbitda", { validity: "NM", reason: "NOT_APPLICABLE:insurer-no-ebitda", display: "N_M" });
+    rec("totalDebtToAssets", guardedDiv(b.totalDebt, b.totalAssets, { label: "totalDebt/totalAssets" }));
+    rec("currentRatio", guardedDiv(b.currentAssets, b.currentLiabilities, { label: "currentAssets/currentLiabilities" }));
+    rec("quickRatio", { validity: "NM", reason: "NOT_APPLICABLE:insurer-no-inventory", display: "N_M" });
+    rec("combinedRatio", b.netEarnedPremium > 0 ? { validity: "VALID" as DenominatorState, reason: "OK:(claims+uwExp)/NEP", display: "VALUE" as const } : { validity: "NM" as DenominatorState, reason: "MISSING:netEarnedPremium≤0", display: "N_M" as const });
+    rec("underwritingMargin", b.netEarnedPremium > 0 ? { validity: "VALID" as DenominatorState, reason: "OK:uwResult/NEP", display: "VALUE" as const } : { validity: "NM" as DenominatorState, reason: "MISSING:netEarnedPremium≤0", display: "N_M" as const });
+    rec("investmentYieldOnFloat", b.float > 0 ? { validity: "VALID" as DenominatorState, reason: "OK:invIncome/float", display: "VALUE" as const } : { validity: "NM" as DenominatorState, reason: "MISSING:float-undisclosed", display: "N_M" as const });
+    const imputed = !(b.sharesOutstanding > 0);
+    const noBase = { validity: "NM" as DenominatorState, reason: "MISSING:sharesOutstanding≤0", display: "N_M" as const };
+    rec("pe", (b.eps || 0) > 0 && cmp > 0 && !imputed ? { validity: "VALID" as DenominatorState, reason: "OK:cmp/eps", display: "VALUE" as const } : ((b.eps || 0) <= 0 ? { validity: "NM" as DenominatorState, reason: "NON_POSITIVE_EARNINGS:eps≤0", display: "N_M" as const } : noBase), imputed);
+    rec("evToEbitda", { validity: "NM", reason: "NOT_APPLICABLE:insurer-EV/EBITDA-na", display: "N_M" }, imputed);
+    rec("pb", !imputed ? guardedDiv(cmp * (b.sharesOutstanding || 0), b.totalEquity, { label: "marketCap/totalEquity" }) : noBase, imputed);
+    rec("ps", !imputed ? guardedDiv(cmp * (b.sharesOutstanding || 0), b.grossWrittenPremium, { label: "marketCap/GWP" }) : noBase, imputed);
+    rec("bookValuePerShare", !imputed ? guardedDiv(b.totalEquity, b.sharesOutstanding || 0, { label: "totalEquity/shares" }) : noBase, imputed);
+    rec("dividendYield", cmp > 0 && !imputed ? { validity: "VALID" as DenominatorState, reason: "OK:dps/cmp", display: "VALUE" as const } : noBase, imputed);
+    rec("dividendPayout", (b.netIncome || 0) > 0 ? guardedDiv(b.dividendsPaid, b.netIncome, { label: "dividends/netIncome" }) : noBase, imputed);
+    return out;
+  }
+  // Architecture D validity — NOI/FFO/AFFO valid; gross/EBITDA/WC-turnover invalid by construction.
+  if (isReitStatement(fin)) {
+    const b = fin as ReitAnnualFinancials;
+    const rental = b.rentalIncome + b.otherPropertyIncome;
+    const out: RatioValidityMap = {};
+    const rec = (key: string, s: { validity: DenominatorState; reason: string; display: "VALUE" | "N_M" }, imputed = false) => { out[key] = _v(s, imputed); };
+    rec("grossMargin", { validity: "NM", reason: "NOT_APPLICABLE:reit-NOI-replaces-gross", display: "N_M" });
+    rec("ebitdaMargin", { validity: "NM", reason: "NOT_APPLICABLE:reit-FFO-replaces-ebitda", display: "N_M" });
+    rec("ebitMargin", { validity: "NM", reason: "NOT_APPLICABLE:reit-NOI-replaces-ebit", display: "N_M" });
+    rec("netMargin", canonicalMargin(b.netIncome, rental, "net"));
+    rec("noiMargin", rental > 0 ? { validity: "VALID" as DenominatorState, reason: "OK:NOI/rental", display: "VALUE" as const } : { validity: "NM" as DenominatorState, reason: "MISSING:rental≤0", display: "N_M" as const });
+    rec("ffoMargin", rental > 0 ? { validity: "VALID" as DenominatorState, reason: "OK:FFO/rental", display: "VALUE" as const } : { validity: "NM" as DenominatorState, reason: "MISSING:rental≤0", display: "N_M" as const });
+    rec("affoMargin", rental > 0 ? { validity: "VALID" as DenominatorState, reason: "OK:AFFO/rental", display: "VALUE" as const } : { validity: "NM" as DenominatorState, reason: "MISSING:rental≤0", display: "N_M" as const });
+    rec("roe", guardedDiv(b.netIncome, b.totalEquity, { label: "netIncome/totalEquity" }));
+    rec("roa", guardedDiv(b.netIncome, b.totalAssets, { label: "netIncome/totalAssets" }));
+    rec("roce", guardedDiv(b.netIncome, b.totalAssets, { label: "netIncome/totalAssets" }));
+    rec("assetTurnover", guardedDiv(rental, b.totalAssets, { label: "rental/totalAssets" }));
+    rec("fixedAssetTurnover", { validity: "NM", reason: "NOT_APPLICABLE:reit-investment-property", display: "N_M" });
+    rec("workingCapitalTurnover", { validity: "NM", reason: "NOT_APPLICABLE:reit-no-WC", display: "N_M" });
+    rec("inventoryTurnover", { validity: "NM", reason: "NOT_APPLICABLE:reit-no-inventory", display: "N_M" });
+    rec("receivablesTurnover", { validity: "NM", reason: "NOT_APPLICABLE:reit-rent-receivables", display: "N_M" });
+    rec("debtToEquity", guardedDiv(b.totalDebt, b.totalEquity, { label: "totalDebt/totalEquity" }));
+    rec("equityMultiplier", guardedDiv(b.totalAssets, b.totalEquity, { label: "totalAssets/totalEquity" }));
+    rec("interestCoverage", b.interestExpense > 0 ? guardedDiv(b.netOperatingIncome, b.interestExpense, { label: "NOI/interestExpense" }) : { validity: "NM" as DenominatorState, reason: "NO_DEBT:no-interest-expense", display: "N_M" as const });
+    rec("netDebtToEbitda", { validity: "NM", reason: "NOT_APPLICABLE:reit-debt-on-NOI-basis", display: "N_M" });
+    rec("totalDebtToAssets", guardedDiv(b.totalDebt, b.totalAssets, { label: "totalDebt/totalAssets" }));
+    rec("currentRatio", guardedDiv(b.currentAssets, b.currentLiabilities, { label: "currentAssets/currentLiabilities" }));
+    rec("quickRatio", { validity: "NM", reason: "NOT_APPLICABLE:reit-no-inventory", display: "N_M" });
+    const imputed = !(b.sharesOutstanding > 0);
+    const noBase = { validity: "NM" as DenominatorState, reason: "MISSING:sharesOutstanding≤0", display: "N_M" as const };
+    rec("priceToFfo", (b.ffoPerShare || 0) > 0 && cmp > 0 && !imputed ? { validity: "VALID" as DenominatorState, reason: "OK:cmp/ffoPS", display: "VALUE" as const } : noBase, imputed);
+    rec("priceToAffo", (b.affoPerShare || 0) > 0 && cmp > 0 && !imputed ? { validity: "VALID" as DenominatorState, reason: "OK:cmp/affoPS", display: "VALUE" as const } : noBase, imputed);
+    // P/E is depreciation-distorted for REITs — P/FFO and P/AFFO above are primary (matches computeRatios pe:0).
+    rec("pe", { validity: "NM" as DenominatorState, reason: "NOT_APPLICABLE:reit-P/FFO-primary", display: "N_M" as const }, imputed);
+    rec("evToEbitda", { validity: "NM", reason: "NOT_APPLICABLE:reit-P/FFO-replaces-EV/EBITDA", display: "N_M" }, imputed);
+    rec("pb", !imputed ? guardedDiv(cmp * (b.sharesOutstanding || 0), b.totalEquity, { label: "marketCap/totalEquity" }) : noBase, imputed);
+    rec("ps", !imputed ? guardedDiv(cmp * (b.sharesOutstanding || 0), rental, { label: "marketCap/rental" }) : noBase, imputed);
+    rec("bookValuePerShare", !imputed ? guardedDiv(b.totalEquity, b.sharesOutstanding || 0, { label: "totalEquity/shares" }) : noBase, imputed);
+    rec("dividendYield", cmp > 0 && !imputed ? { validity: "VALID" as DenominatorState, reason: "OK:dps/cmp", display: "VALUE" as const } : noBase, imputed);
+    rec("dividendPayout", (b.adjustedFundsFromOperations || 0) > 0 ? guardedDiv(b.dividendsPaid, b.adjustedFundsFromOperations, { label: "distributions/AFFO" }) : noBase, imputed);
+    return out;
+  }
+  // Architecture E validity — operating margin + FCF conversion valid; loan-book/combined-ratio absent.
+  if (isAssetLightStatement(fin)) {
+    const b = fin as AssetLightFeeAnnualFinancials;
+    const feeRev = b.totalFeeRevenue;
+    const avgAum = (b.aumBeginning + b.aumEnding) / 2;
+    const out: RatioValidityMap = {};
+    const rec = (key: string, s: { validity: DenominatorState; reason: string; display: "VALUE" | "N_M" }, imputed = false) => { out[key] = _v(s, imputed); };
+    rec("grossMargin", { validity: "NM", reason: "NOT_APPLICABLE:fee-no-COGS", display: "N_M" });
+    rec("ebitdaMargin", { validity: "NM", reason: "NOT_APPLICABLE:fee-no-ebitda", display: "N_M" });
+    rec("ebitMargin", canonicalMargin(b.operatingIncome, feeRev, "ebit"));
+    rec("netMargin", canonicalMargin(b.netIncome, feeRev, "net"));
+    rec("revenueAsPctOfAum", avgAum > 0 ? { validity: "VALID" as DenominatorState, reason: "OK:feeRevenue/avgAUM", display: "VALUE" as const } : { validity: "NM" as DenominatorState, reason: "MISSING:AUM-undisclosed", display: "N_M" as const });
+    rec("fcfConversion", (b.netIncome || 0) !== 0 ? { validity: "VALID" as DenominatorState, reason: "OK:FCF/netIncome", display: "VALUE" as const } : { validity: "NM" as DenominatorState, reason: "MISSING:netIncome=0", display: "N_M" as const });
+    rec("roe", guardedDiv(b.netIncome, b.totalEquity, { label: "netIncome/totalEquity" }));
+    rec("roa", guardedDiv(b.netIncome, b.totalAssets, { label: "netIncome/totalAssets" }));
+    rec("roce", guardedDiv(b.operatingIncome, b.totalAssets, { label: "operatingIncome/totalAssets" }));
+    rec("assetTurnover", guardedDiv(feeRev, b.totalAssets, { label: "feeRevenue/totalAssets" }));
+    rec("fixedAssetTurnover", { validity: "NM", reason: "NOT_APPLICABLE:fee-asset-light", display: "N_M" });
+    rec("workingCapitalTurnover", { validity: "NM", reason: "NOT_APPLICABLE:fee-minimal-WC", display: "N_M" });
+    rec("inventoryTurnover", { validity: "NM", reason: "NOT_APPLICABLE:fee-no-inventory", display: "N_M" });
+    rec("receivablesTurnover", { validity: "NM", reason: "NOT_APPLICABLE:fee-no-receivables-driver", display: "N_M" });
+    rec("debtToEquity", guardedDiv(b.totalDebt, b.totalEquity, { label: "totalDebt/totalEquity" }));
+    rec("equityMultiplier", guardedDiv(b.totalAssets, b.totalEquity, { label: "totalAssets/totalEquity" }));
+    rec("interestCoverage", { validity: "NM", reason: "NOT_APPLICABLE:fee-no-interest-field", display: "N_M" });
+    rec("netDebtToEbitda", { validity: "NM", reason: "NOT_APPLICABLE:fee-no-ebitda", display: "N_M" });
+    rec("totalDebtToAssets", guardedDiv(b.totalDebt, b.totalAssets, { label: "totalDebt/totalAssets" }));
+    rec("currentRatio", guardedDiv(b.currentAssets, b.currentLiabilities, { label: "currentAssets/currentLiabilities" }));
+    rec("quickRatio", { validity: "NM", reason: "NOT_APPLICABLE:fee-no-inventory", display: "N_M" });
+    const imputed = !(b.sharesOutstanding > 0);
+    const noBase = { validity: "NM" as DenominatorState, reason: "MISSING:sharesOutstanding≤0", display: "N_M" as const };
+    rec("pe", (b.eps || 0) > 0 && cmp > 0 && !imputed ? { validity: "VALID" as DenominatorState, reason: "OK:cmp/eps", display: "VALUE" as const } : ((b.eps || 0) <= 0 ? { validity: "NM" as DenominatorState, reason: "NON_POSITIVE_EARNINGS:eps≤0", display: "N_M" as const } : noBase), imputed);
+    rec("evToEbitda", { validity: "NM", reason: "NOT_APPLICABLE:fee-no-ebitda", display: "N_M" }, imputed);
+    rec("pb", !imputed ? guardedDiv(cmp * (b.sharesOutstanding || 0), b.totalEquity, { label: "marketCap/totalEquity" }) : noBase, imputed);
+    rec("ps", !imputed ? guardedDiv(cmp * (b.sharesOutstanding || 0), feeRev, { label: "marketCap/feeRevenue" }) : noBase, imputed);
+    rec("bookValuePerShare", !imputed ? guardedDiv(b.totalEquity, b.sharesOutstanding || 0, { label: "totalEquity/shares" }) : noBase, imputed);
+    rec("dividendYield", cmp > 0 && !imputed ? { validity: "VALID" as DenominatorState, reason: "OK:dps/cmp", display: "VALUE" as const } : noBase, imputed);
+    rec("dividendPayout", (b.netIncome || 0) > 0 ? guardedDiv(b.dividendsPaid, b.netIncome, { label: "dividends/netIncome" }) : noBase, imputed);
+    return out;
+  }
   const {
     revenue, grossProfit, ebitda, operatingIncome, netIncome, totalEquity,
     totalAssets, totalDebt, cash, netFixedAssets, netWorkingCapital,
     currentAssets, currentLiabilities, netReceivables, inventory,
     interestExpense, dividendsPaid, eps, sharesOutstanding,
-  } = fin;
+  } = fin as CorporateAnnualFinancials;
   const out: RatioValidityMap = {};
   const rec = (key: string, s: { validity: DenominatorState; reason: string; display: "VALUE" | "N_M" }, imputed = false) => { out[key] = _v(s, imputed); };
   rec("grossMargin", canonicalMargin(grossProfit, revenue, "gross"));
@@ -220,14 +787,51 @@ export function computeRatioValidity(fin: AnnualFinancials, cmp: number): RatioV
 }
 
 // ─────────────────────────────────────────────
-// DuPont Analysis
+// DuPont Analysis — bank branch uses totalRevenue and bank leverage
 // ─────────────────────────────────────────────
 export function computeDuPont(
   fin: AnnualFinancials
 ): DuPontAnalysis {
-  const netProfitMargin = safe(div(fin.netIncome, fin.revenue));
-  const assetTurnover = safe(div(fin.revenue, fin.totalAssets));
-  const equityMultiplier = safe(div(fin.totalAssets, fin.totalEquity));
+  if (isBankStatement(fin)) {
+    const b = fin as BankAnnualFinancials;
+    const totalRevenue = b.totalRevenue || 0;
+    const netProfitMargin = safe(div(b.netIncome, totalRevenue));
+    const assetTurnover = safe(div(totalRevenue, b.totalAssets));
+    const equityMultiplier = safe(div(b.totalAssets, b.totalEquity));
+    const roe = netProfitMargin * assetTurnover * equityMultiplier;
+    const roa = netProfitMargin * assetTurnover;
+    return { year: b.year, netProfitMargin, assetTurnover, equityMultiplier, roe, roa };
+  }
+  // Architecture C — DuPont on (NEP + investment income); leverage is float-driven.
+  if (isInsuranceStatement(fin)) {
+    const b = fin as InsuranceAnnualFinancials;
+    const totalRev = b.netEarnedPremium + b.investmentIncome;
+    const netProfitMargin = safe(div(b.netIncome, totalRev));
+    const assetTurnover = safe(div(totalRev, b.totalAssets));
+    const equityMultiplier = safe(div(b.totalAssets, b.totalEquity));
+    return { year: b.year, netProfitMargin, assetTurnover, equityMultiplier, roe: netProfitMargin * assetTurnover * equityMultiplier, roa: netProfitMargin * assetTurnover };
+  }
+  // Architecture D — DuPont on rental income (FFO economics live in ReitRatios, not here).
+  if (isReitStatement(fin)) {
+    const b = fin as ReitAnnualFinancials;
+    const rental = b.rentalIncome + b.otherPropertyIncome;
+    const netProfitMargin = safe(div(b.netIncome, rental));
+    const assetTurnover = safe(div(rental, b.totalAssets));
+    const equityMultiplier = safe(div(b.totalAssets, b.totalEquity));
+    return { year: b.year, netProfitMargin, assetTurnover, equityMultiplier, roe: netProfitMargin * assetTurnover * equityMultiplier, roa: netProfitMargin * assetTurnover };
+  }
+  // Architecture E — DuPont on fee revenue (operating margin meaningful here).
+  if (isAssetLightStatement(fin)) {
+    const b = fin as AssetLightFeeAnnualFinancials;
+    const netProfitMargin = safe(div(b.netIncome, b.totalFeeRevenue));
+    const assetTurnover = safe(div(b.totalFeeRevenue, b.totalAssets));
+    const equityMultiplier = safe(div(b.totalAssets, b.totalEquity));
+    return { year: b.year, netProfitMargin, assetTurnover, equityMultiplier, roe: netProfitMargin * assetTurnover * equityMultiplier, roa: netProfitMargin * assetTurnover };
+  }
+  const cf = fin as CorporateAnnualFinancials;
+  const netProfitMargin = safe(div(cf.netIncome, cf.revenue));
+  const assetTurnover = safe(div(cf.revenue, cf.totalAssets));
+  const equityMultiplier = safe(div(cf.totalAssets, cf.totalEquity));
   const roe = netProfitMargin * assetTurnover * equityMultiplier;
   const roa = netProfitMargin * assetTurnover;
 
@@ -400,7 +1004,7 @@ export function computeWACC(
   let midCycleMargin: number | undefined;
   if (annualFinancials && annualFinancials.length >= 2) {
     const hist = annualFinancials
-      .map((f) => f.ebitMargin)
+      .map((f) => getMarginAnchor(f).value)
       .filter((m): m is number => typeof m === "number" && isFinite(m) && m > -0.5 && m < 0.5);
     if (hist.length >= 2) {
       const sorted = [...hist].sort((a, b) => a - b);
@@ -419,12 +1023,13 @@ export function computeWACC(
   // trough for manufacturing) so a deep-cycle year does not permanently depress
   // the explicit forecast — the bridge then remains economically coherent.
   const cyclicalFloor = archetypeProfile?.sector === "auto_manufacturing" || archetypeProfile?.sector === "renewables" ? 0.03 : 0.02;
+  const finEbitMargin = getMarginAnchor(fin).value;
   const effectiveMargin = midCycleMargin !== undefined
     ? Math.max(cyclicalFloor, Math.min(0.14, midCycleMargin))
     : (archetypeBaseMargin !== undefined && archetypeBaseMargin > 0)
     ? archetypeBaseMargin
-    : (fin.ebitMargin > 0.03
-        ? fin.ebitMargin
+    : (finEbitMargin > 0.03
+        ? finEbitMargin
         : (stockData.operatingMargins > 0 ? stockData.operatingMargins : 0.14));
 
   return {
@@ -463,12 +1068,15 @@ export function computeDCF(
   country?: string
 ): DCFResult {
   const latest = annualFinancials[annualFinancials.length - 1];
+  // Banks AND insurers ride the residual-income path (selector); defensively both
+  // are excluded from captive-finance netting here should they ever reach FCFF.
+  const isBankDCF = isBankStatement(latest) || isInsuranceStatement(latest);
 
   // Compute historical revenue CAGR via the universal kernel primitive
   // (P0 #5 — identical mathematics; validity tracked, never asserted).
   const years = annualFinancials.length;
-  const firstRev = annualFinancials[0]?.revenue || 1;
-  const lastRev = latest.revenue;
+  const firstRev = getRevenue(annualFinancials[0]) || 1;
+  const lastRev = getRevenue(latest);
   const cagrScalar = years > 1
     ? canonicalCAGR(firstRev || 1, lastRev, years - 1)
     : { value: 0.15, validity: "NM" as DenominatorState, reason: "INSUFFICIENT_HISTORY:single-period-default-15%", display: "N_M" as const };
@@ -489,12 +1097,12 @@ export function computeDCF(
   // Base growth stays winsorized history+live; shape, margins, capex, terminal
   // are driver-native per business type (auto volume×ASP, hospitality Occ×ADR,
   // IT utilization×realization, platform DAU×price-per-ad, etc.).
-  const nonZeroRevCount = annualFinancials.filter(f => f.revenue > 0).length || 1;
+  const nonZeroRevCount = annualFinancials.filter(f => getRevenue(f) > 0).length || 1;
   const rawAvgCapexPct =
-    annualFinancials.reduce((s, f) => s + (f.revenue > 0 ? f.capitalExpenditures / f.revenue : 0), 0) /
+    annualFinancials.reduce((s, f) => s + (getRevenue(f) > 0 ? getCapex(f) / getRevenue(f) : 0), 0) /
     nonZeroRevCount;
   const rawAvgDeptPct =
-    annualFinancials.reduce((s, f) => s + (f.revenue > 0 ? f.depreciation / f.revenue : 0), 0) /
+    annualFinancials.reduce((s, f) => s + (getRevenue(f) > 0 ? getDepreciation(f) / getRevenue(f) : 0), 0) /
     nonZeroRevCount;
   // effectiveMargin mirrors computeWACC's mid-cycle anchor (first explicit margin minus 1pp ramp).
   const effectiveMarginSeed = (assumptions.ebitMargins?.[0] ?? 0.14) - 0.01;
@@ -540,7 +1148,7 @@ export function computeDCF(
   const taxRate = assumptions.marginalTaxRate;
 
   const projections: DCFProjection[] = [];
-  let baseRevenue = latest.revenue;
+  let baseRevenue = getRevenue(latest);
 
   for (let i = 0; i < 5; i++) {
     const growthRate = assumptions.revenueGrowthRates[i];
@@ -595,8 +1203,10 @@ export function computeDCF(
   const pvTerminalValue = terminalValue * Math.pow(1 + wacc, -5);
   const enterpriseValue = sumPvFcff + pvTerminalValue;
 
-  const latestDebt = Number(latest.totalDebt) || ((Number(latest.shortTermDebt) || 0) + (Number(latest.longTermDebt) || 0));
-  const latestCash = (Number(latest.cash) || 0) + (Number(latest.shortTermInvestments) || 0);
+  // stmtNum: debt/cash bridge reads across all five shapes (non-corporate shapes
+  // carry no maturity split or short-term-investment fields — totalDebt/cash only).
+  const latestDebt = Number(latest.totalDebt) || (stmtNum(latest, "shortTermDebt") + stmtNum(latest, "longTermDebt"));
+  const latestCash = (Number(latest.cash) || 0) + stmtNum(latest, "shortTermInvestments");
   // Captive-finance adjustment (SOTP-lite): automakers/industrials with financing
   // arms carry lender-scale debt matched by finance receivables. Charging the full
   // consolidated debt against operating cash flows makes every such name
@@ -605,13 +1215,18 @@ export function computeDCF(
   // Bounded, disclosed in diagnostics + evidence trail, and re-verified by XREF-04.
   // Inapplicable to financials (separate residual-income path) and to firms
   // without material receivables — for them the offset is exactly zero.
-  const receivables = Number(latest.netReceivables) || 0;
+  const receivables = isBankStatement(latest)
+    ? Number((latest as BankAnnualFinancials).loans) || 0
+    : isCorporateStatement(latest)
+      ? Number((latest as CorporateAnnualFinancials).netReceivables) || 0
+      : 0; // insurers/REITs/fee firms carry no trade-receivables finance book
   const isAutoCaptive = archetypeProfile?.sector === "auto_manufacturing";
   // Auto OEMs carry dealer/finance receivables ~6–8% trade WC; 12% is already
   // conservative for the trade allowance, leaving true finance book as offset.
   // Other sectors use 20% to avoid over-netting normal trade receivables.
-  const tradeAllowance = latest.revenue > 0 ? (isAutoCaptive ? 0.12 : 0.20) * latest.revenue : 0;
-  const financeReceivablesOffset = latest.revenue > 0 && receivables > 0 && latestDebt > 0
+  const latestRevForTrade = getRevenue(latest);
+  const tradeAllowance = latestRevForTrade > 0 ? (isAutoCaptive ? 0.12 : 0.20) * latestRevForTrade : 0;
+  const financeReceivablesOffset = !isBankDCF && latestRevForTrade > 0 && receivables > 0 && latestDebt > 0
     ? Math.min(Math.max(0, receivables - tradeAllowance), latestDebt)
     : 0;
   const netDebt = latestDebt - latestCash - financeReceivablesOffset;
@@ -622,7 +1237,7 @@ export function computeDCF(
 
   const diagnostics: string[] = [];
   if (financeReceivablesOffset > 0) {
-    diagnostics.push(`Captive-finance adjustment: ${financeReceivablesOffset.toFixed(0)} of receivables (above 20%-of-revenue trade allowance on revenue ${latest.revenue.toFixed(0)}) netted against debt; adjusted net debt ${netDebt.toFixed(0)}. See evidence trail.`);
+    diagnostics.push(`Captive-finance adjustment: ${financeReceivablesOffset.toFixed(0)} of receivables (above 20%-of-revenue trade allowance on revenue ${latestRevForTrade.toFixed(0)}) netted against debt; adjusted net debt ${netDebt.toFixed(0)}. See evidence trail.`);
   }
   if (isTvCapped) {
     diagnostics.push(`Terminal value capped at 25.0x terminal-year FCFF safeguard (reduced from ${Math.round(rawTerminalValue / (terminalYearFcff || 1))}x).`);
@@ -667,7 +1282,7 @@ export function computeDCF(
     currentMarketPrice: cmp,
     sharesOutstanding,
     netDebt,
-    latestRevenue: latest.revenue,
+    latestRevenue: getRevenue(latest),
     baseEbitMargin: assumptions.ebitMargins[0] || 0.15,
     wacc,
     terminalGrowthRate: tg,
@@ -680,11 +1295,13 @@ export function computeDCF(
 
   // Evidence trail: every major assumption records its empirical basis so the
   // forecast is auditable (not "aggressive relative to evidence" by default).
+  const latestAnchor = getMarginAnchor(latest);
+  const latestEbitMarginForSource = latestAnchor.value;
   const marginSource =
     (archetypeProfile?.scenarioMargins?.baseMargin ?? 0) > 0
       ? `archetype base margin ${(((archetypeProfile?.scenarioMargins?.baseMargin) || 0) * 100).toFixed(1)}%`
-      : latest.ebitMargin > 0.03
-        ? `reported EBIT margin ${(latest.ebitMargin * 100).toFixed(1)}%`
+      : latestEbitMarginForSource > 0.03
+        ? `reported ${latestAnchor.label} margin ${(latestEbitMarginForSource * 100).toFixed(1)}%`
         : stockData.operatingMargins > 0
           ? `live operating margin ${(stockData.operatingMargins * 100).toFixed(1)}%`
           : `14% default (no margin basis — treat with caution)`;

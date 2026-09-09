@@ -26,6 +26,7 @@ import { UncertaintyFacts, calculateUncertainty } from "./uncertainty";
 import { ScenarioSet, buildScenarioSet } from "./scenarios";
 import { classifySector } from "./sectors/profiles";
 import type { StockData, CompanyProfile, AnnualFinancials, Ratios, DuPontAnalysis, DCFResult, AssumptionsLedger } from "@/types/report";
+import { stmtNum } from "@/types/report";
 
 export type ProvenanceType = "REPORTED" | "DERIVED" | "ASSUMPTION" | "INFERENCE" | "HYPOTHESIS";
 
@@ -226,14 +227,14 @@ export function buildMasterReportFacts(params: {
   // 3. Financial Facts
   const years = annualFinancials.map(f => f.year);
   const history: FinancialYearFact[] = annualFinancials.map(f => {
-    const netDebt = f.totalDebt - f.cash - (f.shortTermInvestments || 0);
+    const netDebt = f.totalDebt - f.cash - stmtNum(f, "shortTermInvestments");
     const fcf = f.freeCashFlow || (f.operatingCashFlow - f.capitalExpenditures);
     return {
       year: f.year,
       revenue: createMetric(f.revenue, currency, "valid", "Audited Income Statement", "reported"),
-      grossProfit: createMetric(f.grossProfit, currency, "valid", "Audited Income Statement", "reported"),
-      ebitda: createMetric(f.ebitda, currency, "valid", "Audited Income Statement", "reported"),
-      operatingIncome: createMetric(f.operatingIncome, currency, "valid", "Audited Income Statement", "reported"),
+      grossProfit: createMetric(stmtNum(f, "grossProfit"), currency, "valid", "Audited Income Statement", "reported"),
+      ebitda: createMetric(stmtNum(f, "ebitda"), currency, "valid", "Audited Income Statement", "reported"),
+      operatingIncome: createMetric(stmtNum(f, "operatingIncome"), currency, "valid", "Audited Income Statement", "reported"),
       netIncome: createMetric(f.netIncome, currency, "valid", "Audited Income Statement", "reported"),
       totalDebt: createMetric(f.totalDebt, currency, "valid", "Balance Sheet", "reported"),
       cashAndEquivalents: createMetric(f.cash, currency, "valid", "Balance Sheet", "reported"),
@@ -337,7 +338,9 @@ export function buildMasterReportFacts(params: {
 
   // 9. Canonical Moat
   const roceHistory = ratiosByYear.map(r => r.roce);
-  const gmHistory = annualFinancials.map(f => f.revenue > 0 ? f.grossProfit / f.revenue : 0);
+  // stmtNum: gross-profit history is N/A (NaN) on sector-native shapes — moat
+  // evaluator treats non-finite as absent, never as zero-margin evidence.
+  const gmHistory = annualFinancials.map(f => f.revenue > 0 ? stmtNum(f, "grossProfit", Number.NaN) / f.revenue : 0);
   const moat = evaluateCanonicalMoat({
     roceHistory,
     wacc: valuation.wacc,

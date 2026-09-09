@@ -3,6 +3,7 @@
 // Enforces mathematical reconciliation across accounting identities
 // ============================================================
 import type { AnnualFinancials, StockData, DCFResult } from "@/types/report";
+import { stmtNum } from "@/types/report";
 
 export type IssueSeverity = "FATAL" | "FLAG" | "INFO";
 
@@ -59,38 +60,47 @@ export function validateFinancialIdentities(params: {
   }
 
   // 1. Check Accounting Chain: Revenue >= EBITDA >= EBIT (For Non-Financial Corporates)
-  if (!isFinancialInstitution && latest.revenue > 0) {
+  // Sector-native shapes (insurance/REIT/fee) carry no EBITDA construct — the
+  // chain is N/A for them (their own identities live in the QA arch checks),
+  // never a false FLAG on absent fields.
+  const corpEbitda = stmtNum(latest, "ebitda", Number.NaN);
+  const hasEbitdaConstruct = Number.isFinite(corpEbitda);
+  const corpOperatingIncome = stmtNum(latest, "operatingIncome", Number.NaN);
+  if (!isFinancialInstitution && hasEbitdaConstruct && latest.revenue > 0) {
     metricsAudited++;
-    if (latest.ebitda > latest.revenue * 1.05) {
+    if (corpEbitda > latest.revenue * 1.05) {
       issues.push({
         code: "EBITDA_EXCEEDS_REVENUE",
         severity: "FLAG",
         identityName: "Revenue >= EBITDA",
-        message: `Reported EBITDA (${latest.ebitda}) exceeds reported revenue (${latest.revenue}). Verify if other operating income is included.`,
+        message: `Reported EBITDA (${corpEbitda}) exceeds reported revenue (${latest.revenue}). Verify if other operating income is included.`,
         expected: latest.revenue,
-        actual: latest.ebitda,
+        actual: corpEbitda,
         period: latest.year,
       });
     }
 
     metricsAudited++;
     // In ordinary operations with positive depreciation, EBITDA >= Operating Income (EBIT)
-    if (latest.ebitda < latest.operatingIncome - 1e-3) {
+    if (Number.isFinite(corpOperatingIncome) && corpEbitda < corpOperatingIncome - 1e-3) {
       issues.push({
         code: "EBITDA_LESS_THAN_EBIT",
         severity: "FLAG",
         identityName: "EBITDA >= EBIT",
-        message: `Operating Income EBIT (${latest.operatingIncome}) exceeds EBITDA (${latest.ebitda}), violating standard D&A add-back convention.`,
-        expected: latest.ebitda,
-        actual: latest.operatingIncome,
+        message: `Operating Income EBIT (${corpOperatingIncome}) exceeds EBITDA (${corpEbitda}), violating standard D&A add-back convention.`,
+        expected: corpEbitda,
+        actual: corpOperatingIncome,
         period: latest.year,
       });
     }
 
     // 2. Margin Chain: Gross Margin >= EBITDA Margin >= EBIT Margin
     metricsAudited++;
-    const gm = latest.grossMargin !== undefined ? latest.grossMargin : (latest.revenue > 0 && latest.grossProfit !== undefined ? latest.grossProfit / latest.revenue : 0);
-    const em = latest.ebitdaMargin !== undefined ? latest.ebitdaMargin : (latest.revenue > 0 && latest.ebitda !== undefined ? latest.ebitda / latest.revenue : 0);
+    const gmRaw = stmtNum(latest, "grossMargin", Number.NaN);
+    const gpRaw = stmtNum(latest, "grossProfit", Number.NaN);
+    const emRaw = stmtNum(latest, "ebitdaMargin", Number.NaN);
+    const gm = Number.isFinite(gmRaw) ? gmRaw : (latest.revenue > 0 && Number.isFinite(gpRaw) ? gpRaw / latest.revenue : 0);
+    const em = Number.isFinite(emRaw) ? emRaw : (latest.revenue > 0 ? corpEbitda / latest.revenue : 0);
     if (gm > 0 && em > gm + 0.05) {
       issues.push({
         code: "EBITDA_MARGIN_EXCEEDS_GROSS",
@@ -166,7 +176,7 @@ export function validateFinancialIdentities(params: {
   // is verified against it, never trusted). An inflated offset fails here.
   if (!isFinancialInstitution && dcf && dcf.enterpriseValue > 0) {
     metricsAudited++;
-    const cash = (latest.cash || 0) + (latest.shortTermInvestments || 0);
+    const cash = (latest.cash || 0) + stmtNum(latest, "shortTermInvestments");
     const totalDebtVal = (latest.totalDebt || 0);
     const rawNetDebt = totalDebtVal - cash;
     const bsReceivables = Number((latest as any)?.netReceivables) || 0;

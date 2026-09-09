@@ -25,7 +25,7 @@ import type { CanonicalFactGraph } from "./canonical-facts";
 export type IndependentSeverity = "FAIL" | "WARN" | "PASS";
 
 export interface IndependentIssue {
-  code: "IND-01" | "IND-02" | "IND-03" | "IND-04" | "IND-05" | "STMT-01" | "WC-01" | "EV-01" | "ANOM-01" | "XMOD-01" | "CONF-01" | "AI-01" | "ECON-01" | "DUPONT-01" | "LIQ-01" | "LC-01" | "IMM-01" | "AUDIT-01";
+  code: "IND-01" | "IND-02" | "IND-03" | "IND-04" | "IND-05" | "STMT-01" | "STMT-02" | "WC-01" | "EV-01" | "ANOM-01" | "XMOD-01" | "CONF-01" | "AI-01" | "ECON-01" | "DUPONT-01" | "LIQ-01" | "LC-01" | "IMM-01" | "AUDIT-01";
   severity: Exclude<IndependentSeverity, "PASS">;
   message: string;
   expected: string;
@@ -407,17 +407,34 @@ function checkStatementIntegrity(inp: IndependentInputs, issues: IndependentIssu
   const years = facts.years;
   for (const y of years) {
     const v = (f: { value: number | null }) => f.value;
-    // 1. Pretax closure: pretax ≈ opInc − interest + otherIncome.
-    // WARN-only: otherIncome is sparsely disclosed (often 0) and Yahoo gaps
-    // cause 5-6% drift that is not a statement-integrity failure.
-    if (v(y.operatingIncome) !== null && v(y.interestExpense) !== null && v(y.pretaxIncome) !== null) {
+    // 1. Pretax closure: pretax ≈ opInc − interest + otherIncome. HARD FAIL on material breach (scorecard demands block).
+    // For banks, pretax ≈ operatingIncome (PPOP) − provisionForCreditLosses (interest is revenue, not expense)
+    const isBankYear = (y as any).statementType === "bank" || (y as any).statementType === "nbfc" || (y as any).statementType === "insurance";
+    if (!isBankYear && v(y.operatingIncome) !== null && v(y.interestExpense) !== null && v(y.pretaxIncome) !== null) {
       evaluated++;
       const other = v(y.otherIncome) ?? 0;
       const expected = (v(y.operatingIncome) as number) - (v(y.interestExpense) as number) + other;
       const t = magnitudeTolerance(expected, v(y.pretaxIncome) as number, { absTol: Math.max(1000, Math.abs(expected) * 0.02), relTol: 0.05, materiality: Math.max(1000, Math.abs(expected) * 0.08) });
       if (!t.pass) {
-        warns++;
-        issues.push({ code: "STMT-01", severity: "WARN", message: `Pretax closure drift in ${y.year}: opInc−interest+other ${fmt0(expected)} vs reported ${fmt0(v(y.pretaxIncome) as number)} (${t.detail}).`, expected: fmt0(expected), actual: fmt0(v(y.pretaxIncome) as number), magnitude: t });
+        if (t.material && t.gapRel > 0.08) {
+          pushFail(issues, { code: "STMT-01", severity: "FAIL", message: `FATAL: Pretax closure breach in ${y.year}: opInc−interest+other ${fmt0(expected)} vs reported ${fmt0(v(y.pretaxIncome) as number)} (${t.detail}) — broken accounting identity blocks publication.`, expected: fmt0(expected), actual: fmt0(v(y.pretaxIncome) as number), magnitude: t });
+        } else {
+          warns++;
+          issues.push({ code: "STMT-01", severity: "WARN", message: `Pretax closure drift in ${y.year}: opInc−interest+other ${fmt0(expected)} vs reported ${fmt0(v(y.pretaxIncome) as number)} (${t.detail}).`, expected: fmt0(expected), actual: fmt0(v(y.pretaxIncome) as number), magnitude: t });
+        }
+      }
+    } else if (isBankYear && v(y.operatingIncome) !== null && v(y.pretaxIncome) !== null) {
+      evaluated++;
+      const provision = (y as any).provisionForCreditLosses?.value ?? 0;
+      const expected = (v(y.operatingIncome) as number) - provision;
+      const t = magnitudeTolerance(expected, v(y.pretaxIncome) as number, { absTol: Math.max(1000, Math.abs(expected) * 0.02), relTol: 0.05, materiality: Math.max(1000, Math.abs(expected) * 0.08) });
+      if (!t.pass) {
+        if (t.material && t.gapRel > 0.08) {
+          pushFail(issues, { code: "STMT-01", severity: "FAIL", message: `FATAL: Bank pretax closure breach in ${y.year}: PPOP−provision ${fmt0(expected)} vs reported ${fmt0(v(y.pretaxIncome) as number)} (${t.detail}).`, expected: fmt0(expected), actual: fmt0(v(y.pretaxIncome) as number), magnitude: t });
+        } else {
+          warns++;
+          issues.push({ code: "STMT-01", severity: "WARN", message: `Bank pretax closure drift in ${y.year}: PPOP−provision ${fmt0(expected)} vs reported ${fmt0(v(y.pretaxIncome) as number)} (${t.detail}).`, expected: fmt0(expected), actual: fmt0(v(y.pretaxIncome) as number), magnitude: t });
+        }
       }
     }
     // 2. ETR bounds + sign discipline (P0 #38-part, #93).
@@ -473,13 +490,45 @@ function checkStatementIntegrity(inp: IndependentInputs, issues: IndependentIssu
         }
       }
     }
-    // 5. Interest-tranche implied rate bounds (P0 #39-part).
-    if (v(y.interestExpense) !== null && (v(y.interestExpense) as number) > 0 && v(y.totalDebt) !== null && (v(y.totalDebt) as number) > 0) {
+    // 5. Interest-tranche implied rate bounds (P0 #39-part) — HARD FAIL when outside [0,25%] and debt is material.
+    if (!isBankYear && v(y.interestExpense) !== null && (v(y.interestExpense) as number) > 0 && v(y.totalDebt) !== null && (v(y.totalDebt) as number) > 0) {
       evaluated++;
       const rate = (v(y.interestExpense) as number) / (v(y.totalDebt) as number);
       if (rate < 0 || rate > 0.25) {
-        warns++;
-        issues.push({ code: "STMT-01", severity: "WARN", message: `${y.year} implied borrowing rate ${(rate * 100).toFixed(1)}% outside [0%, 25%] — verify interest/debt units before trusting coverage math.`, expected: "0%..25%", actual: `${(rate * 100).toFixed(1)}%`, magnitude: magnitudeTolerance(0.05, rate, { absTol: 0.01, relTol: 0.2, materiality: 0.01 }) });
+        // Banks: interest is revenue (netInterestIncome), so this corporate rate check is N/A — skipped above.
+        pushFail(issues, { code: "STMT-01", severity: "FAIL", message: `FATAL: ${y.year} implied borrowing rate ${(rate * 100).toFixed(1)}% outside [0%, 25%] — broken debt/interest linkage blocks publication; verify units before trusting coverage.`, expected: "0%..25%", actual: `${(rate * 100).toFixed(1)}%`, magnitude: magnitudeTolerance(0.05, rate, { absTol: 0.01, relTol: 0.2, materiality: 0.01 }) });
+      }
+    } else if (isBankYear && v(y.interestExpense) !== null && v(y.totalDebt) !== null && (v(y.totalDebt) as number) > 0) {
+      const stmt = (y as any).statementType as string | undefined;
+      if (stmt === "insurance") {
+        // Insurers carry no NII construct — validate the underwriting identity
+        // instead: combined ratio must sit in a definitionally-possible band and
+        // float yield must be non-absurd. WARN-only (NEP/claims are proxied).
+        const combined = (y as any).combinedRatio?.value as number | null;
+        if (combined !== null && combined !== undefined && (combined < 0.3 || combined > 2.0)) {
+          warns++;
+          issues.push({ code: "STMT-01", severity: "WARN", message: `${y.year} insurer combined ratio ${(combined * 100).toFixed(0)}% outside [30%, 200%] — verify NEP/claims mapping units.`, expected: "30%..200%", actual: `${(combined * 100).toFixed(0)}%`, magnitude: magnitudeTolerance(1, combined, { absTol: 0.05, relTol: 0.1, materiality: 0.05 }) });
+        }
+        const invY = (y as any).investmentIncome?.value as number | null;
+        const flt = (y as any).float?.value as number | null;
+        if (invY !== null && flt !== null && invY !== undefined && flt !== undefined && flt > 0) {
+          const yld = invY / flt;
+          if (yld < 0 || yld > 0.25) {
+            warns++;
+            issues.push({ code: "STMT-01", severity: "WARN", message: `${y.year} insurer float yield ${(yld * 100).toFixed(1)}% outside [0%, 25%] — verify investment-income/float units.`, expected: "0%..25%", actual: `${(yld * 100).toFixed(1)}%`, magnitude: magnitudeTolerance(0.06, yld, { absTol: 0.01, relTol: 0.2, materiality: 0.01 }) });
+          }
+        }
+      } else {
+        // For banks, check netInterestMargin sanity instead: NIM must be 1-6% for banks (interest is revenue)
+        const totalAssets = (y as any).totalAssets?.value ?? 0;
+        const netII = (y as any).netInterestIncome?.value ?? 0;
+        if (totalAssets > 0 && netII !== null) {
+          const nim = netII / totalAssets;
+          if (nim < 0.005 || nim > 0.08) {
+            warns++;
+            issues.push({ code: "STMT-01", severity: "WARN", message: `${y.year} bank NIM ${(nim * 100).toFixed(2)}% outside [0.5%, 8%] — verify NII/assets units.`, expected: "0.5%..8%", actual: `${(nim * 100).toFixed(2)}%`, magnitude: magnitudeTolerance(0.03, nim, { absTol: 0.005, relTol: 0.2, materiality: 0.005 }) });
+          }
+        }
       }
     }
   }
@@ -682,6 +731,95 @@ function checkAnomalies(inp: IndependentInputs, issues: IndependentIssue[], pass
   }
 }
 
+/**
+ * STMT-02: sector-native definitional identities — the architecture's OWN
+ * reconciliation battery. Each identity is exact by construction (combined =
+ * loss + expense; FFO = NI + RE depreciation − gains; fee revenue = fee parts;
+ * bank total = NII + fees), so any breach is a pipeline construction bug and
+ * FAILs. Clean architectures PASS on their own identities rather than WARN on
+ * corporate checks that never applied to them.
+ */
+function checkNativeIdentities(inp: IndependentInputs, issues: IndependentIssue[], passes: string[]): void {
+  const { facts } = inp;
+  let evaluated = 0;
+  const tol = (expected: number, actual: number, label: string, year: string) => {
+    evaluated++;
+    const v = magnitudeTolerance(expected, actual, { absTol: Math.max(2, Math.abs(expected) * 0.001), relTol: 0.002, materiality: Math.max(2, Math.abs(expected) * 0.005) });
+    if (!v.pass && v.material) {
+      pushFail(issues, {
+        code: "STMT-02", severity: "FAIL",
+        message: `FATAL: ${year} ${label} breach — expected ${fmt0(expected)} vs constructed ${fmt0(actual)} (${v.detail}). Sector-native identity construction is corrupt.`,
+        expected: fmt0(expected), actual: fmt0(actual), magnitude: v,
+      });
+    }
+  };
+  const num = (y: (typeof facts.years)[number], k: string): number | null => {
+    const f = (y as unknown as Record<string, { value: number | null }>)[k];
+    return f && typeof f.value === "number" && Number.isFinite(f.value) ? f.value : null;
+  };
+  for (const y of facts.years) {
+    const stmt = (y as unknown as { statementType?: string }).statementType;
+    if (stmt === "bank" || stmt === "nbfc") {
+      const nii = num(y, "netInterestIncome") ?? 0;
+      const nonII = num(y, "nonInterestIncome") ?? 0;
+      const tr = num(y, "totalRevenue");
+      if (tr !== null) tol(nii + nonII, tr, "bank totalRevenue = NII + non-interest income", y.year);
+      const rev = num(y, "revenue");
+      if (tr !== null && rev !== null) tol(tr, rev, "bank revenue alias = totalRevenue", y.year);
+    } else if (stmt === "insurance") {
+      const loss = num(y, "lossRatio");
+      const exp = num(y, "expenseRatio");
+      const comb = num(y, "combinedRatio");
+      if (loss !== null && exp !== null && comb !== null) tol(loss + exp, comb, "insurance combined = loss + expense", y.year);
+      const nep = num(y, "netEarnedPremium");
+      const claims = num(y, "claimsIncurred");
+      const uwExp = num(y, "underwritingExpenses");
+      const uwRes = num(y, "underwritingResult");
+      if (nep !== null && claims !== null && uwExp !== null && uwRes !== null) tol(nep - claims - uwExp, uwRes, "insurance UW result = NEP − claims − expenses", y.year);
+      const inv = num(y, "investmentIncome");
+      const rev = num(y, "revenue");
+      if (nep !== null && inv !== null && rev !== null) tol(nep + inv, rev, "insurance revenue = NEP + investment income", y.year);
+    } else if (stmt === "reit") {
+      // Exact-by-construction identities (converter-derived — breach = pipeline bug).
+      const rental = num(y, "rentalIncome");
+      const rev = num(y, "revenue");
+      if (rental !== null && rev !== null) tol(rental, rev, "REIT revenue alias = rental income", y.year);
+      const ffo = num(y, "fundsFromOperations");
+      const affo = num(y, "adjustedFundsFromOperations");
+      if (ffo !== null && affo !== null) {
+        evaluated++;
+        if (!(affo <= ffo + 1)) {
+          pushFail(issues, {
+            code: "STMT-02", severity: "FAIL",
+            message: `FATAL: ${y.year} AFFO (${fmt0(affo)}) exceeds FFO (${fmt0(ffo)}) — maintenance adjustments must reduce FFO. Construction corrupt.`,
+            expected: `≤ ${fmt0(ffo)}`, actual: fmt0(affo),
+            magnitude: magnitudeTolerance(ffo, affo, { absTol: 1, relTol: 0.001, materiality: 1 }),
+          });
+        }
+      }
+      const ffoPs = num(y, "ffoPerShare");
+      const sh = num(y, "sharesOutstanding");
+      if (ffo !== null && ffoPs !== null && sh !== null && sh > 0) tol(ffo / sh, ffoPs, "REIT FFO/share = FFO / shares", y.year);
+    } else if (stmt === "asset-light") {
+      const mgmt = num(y, "managementFees") ?? 0;
+      const perf = num(y, "performanceFees") ?? 0;
+      const tech = num(y, "technologyServicesRevenue") ?? 0;
+      const fee = num(y, "totalFeeRevenue");
+      if (fee !== null) tol(mgmt + perf + tech, fee, "fee totalFeeRevenue = fee parts", y.year);
+      const opex = num(y, "operatingExpenses");
+      const opInc = num(y, "operatingIncome");
+      if (fee !== null && opex !== null && opInc !== null) tol(fee - opex, opInc, "fee operatingIncome = feeRevenue − opex", y.year);
+      const rev = num(y, "revenue");
+      if (fee !== null && rev !== null) tol(fee, rev, "fee revenue alias = totalFeeRevenue", y.year);
+    }
+  }
+  if (evaluated === 0) {
+    passes.push(`STMT-02: no sector-native identities to verify (all-corporate history).`);
+  } else if (!issues.some((i) => i.code === "STMT-02")) {
+    passes.push(`STMT-02: sector-native definitional identities reconciled across ${evaluated} check(s).`);
+  }
+}
+
 export function validateIndependently(inputs: IndependentInputs): IndependentReport {
   const issues: IndependentIssue[] = [];
   const passes: string[] = [];
@@ -691,8 +829,9 @@ export function validateIndependently(inputs: IndependentInputs): IndependentRep
   checkWacc(inputs, issues, passes);
   checkUpsideRating(inputs, issues, passes);
   checkStatementIntegrity(inputs, issues, passes);
+  checkNativeIdentities(inputs, issues, passes);
   checkWorkingCapital(inputs, issues, passes);
   checkEvTaxonomy(inputs, issues, passes);
   checkAnomalies(inputs, issues, passes);
-  return { issues, passes, checked: 9 };
+  return { issues, passes, checked: 10 };
 }

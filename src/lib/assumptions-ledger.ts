@@ -11,6 +11,7 @@ import type {
   DCFResult,
   ValuationCalibration,
 } from "@/types/report";
+import { stmtNum } from "@/types/report";
 import { classifyArchetype } from "./company-archetype";
 import { computeReverseDCF } from "./valuation/reverse-dcf";
 import { classifySector, isTelecomCarrierCompany } from "./sectors/profiles";
@@ -94,8 +95,10 @@ export function createAssumptionsLedger({
   const pvTerminalValue = Number(dcf.pvTerminalValue) || 0;
   const enterpriseValue = isBankOrNbfc ? (Number(dcf.enterpriseValue) || Number(dcf.equityValue) || 0) : (Number(dcf.enterpriseValue) || (sumPvFcff + pvTerminalValue));
 
-  const bsDebt = Number(latestFin?.totalDebt) || ((Number(latestFin?.shortTermDebt) || 0) + (Number(latestFin?.longTermDebt) || 0));
-  const bsCash = ((Number(latestFin?.cash) || 0) + (Number(latestFin?.shortTermInvestments) || 0));
+  // stmtNum: maturity-split/investment fields exist on corporate rows only; other
+  // shapes bridge on totalDebt/cash (identical runtime for Arch A/B).
+  const bsDebt = Number(latestFin?.totalDebt) || (latestFin ? (stmtNum(latestFin, "shortTermDebt") + stmtNum(latestFin, "longTermDebt")) : 0);
+  const bsCash = ((Number(latestFin?.cash) || 0) + (latestFin ? stmtNum(latestFin, "shortTermInvestments") : 0));
   const totalDebt = bsDebt > 0 ? bsDebt : (Number(dcf.totalDebt) || 0);
   const cashAndEquiv = bsCash > 0 ? bsCash : (Number(dcf.cashAndEquiv) || 0);
   const netDebt = isBankOrNbfc ? 0 : (Number.isFinite(Number(dcf.netDebt)) ? Number(dcf.netDebt) : totalDebt - cashAndEquiv);
@@ -186,7 +189,7 @@ export function createAssumptionsLedger({
     : (latestFin && (latestFin.totalAssets - latestFin.currentLiabilities) > 0 
         ? latestFin.totalAssets - latestFin.currentLiabilities 
         : (latestFin?.totalAssets || 1));
-  const nopat = (latestFin?.operatingIncome || 0) * (1 - marginalTaxRate);
+  const nopat = (latestFin ? stmtNum(latestFin, "operatingIncome") : 0) * (1 - marginalTaxRate);
   const roic = latestFin && investedCapital > 0 ? Math.max(0, nopat / investedCapital) : 0.12;
   const roicSpread = roic - wacc;
   const roeSpread = roe - costOfEquity;
@@ -325,7 +328,7 @@ export function createAssumptionsLedger({
   const baseRevCagr = Math.round(dcfBaseGrowth * 1000) / 1000;
   const bearRevCagr = Math.round(Math.max(0.02, dcfBaseGrowth * 0.45) * 1000) / 1000;
 
-  const baseOm = Number(arch.scenarioMargins?.baseMargin) || Number(dcf.assumptions?.ebitMargins?.[0]) || (latestFin && latestFin.revenue > 0 ? (latestFin.operatingIncome / latestFin.revenue) : 0.15);
+  const baseOm = Number(arch.scenarioMargins?.baseMargin) || Number(dcf.assumptions?.ebitMargins?.[0]) || (latestFin && latestFin.revenue > 0 ? (stmtNum(latestFin, "operatingIncome") / latestFin.revenue) : 0.15);
   const bullOm = Number(arch.scenarioMargins?.bullMargin) || (baseOm * 1.25);
   const bearOm = Number(arch.scenarioMargins?.bearMargin) || (baseOm * 0.70);
 

@@ -4,6 +4,7 @@
 // operational reality before generating financial templates and narratives.
 // ============================================================
 import type { CompanyProfile, StockData, AnnualFinancials } from "@/types/report";
+import { stmtNum, isReitStatement, isInsuranceStatement, isAssetLightStatement } from "@/types/report";
 import { isInternetPlatformCompany, isHospitalityCompany, isRealEstateCompany, isTelecomCarrierCompany, isHardwareCompany, isSoftwareCompany } from "./sectors/profiles";
 
 export type FinancialArchetype =
@@ -271,7 +272,14 @@ export function classifyArchetype(
   // ── 2. Financial Metrics Analysis ──────────────────────────────────────
   const latest = annualFinancials[annualFinancials.length - 1] || {} as AnnualFinancials;
   const rev = latest.revenue || 0;
-  const ebitda = latest.ebitda ?? (rev * (latest.ebitdaMargin || 0));
+  // stmtNum: EBITDA exists on corporate rows and as zeroed N/A on bank rows
+  // (identical runtime to the old single-shape pipeline). REITs carry no EBITDA
+  // by design — FFO is their earnings power for leverage/distress purposes.
+  const ebitdaRaw = stmtNum(latest, "ebitda", Number.NaN);
+  const ebitdaMarginRaw = stmtNum(latest, "ebitdaMargin", Number.NaN);
+  const ebitda = isReitStatement(latest)
+    ? latest.fundsFromOperations
+    : (Number.isFinite(ebitdaRaw) ? ebitdaRaw : rev * (Number.isFinite(ebitdaMarginRaw) ? ebitdaMarginRaw : 0));
   const netIncome = latest.netIncome ?? 0;
   const totalDebt = latest.totalDebt || 0;
   const cash = latest.cash || 0;
@@ -281,7 +289,8 @@ export function classifyArchetype(
 
   const netDebtToEbitda = ebitda > 0 ? netDebt / ebitda : (totalDebt > 0 ? 999 : 0);
   const isLossMaking = netIncome < 0 || latest.netMargin < -0.01;
-  const isEbitdaNegative = ebitda <= 0 || (latest.ebitdaMargin !== undefined && latest.ebitdaMargin < 0);
+  // ebitdaMarginRaw is NaN on shapes without an EBITDA construct (REIT/insurance/fee).
+  const isEbitdaNegative = ebitda <= 0 || (Number.isFinite(ebitdaMarginRaw) && ebitdaMarginRaw < 0);
   const isFinancialSector = sector === "banking_financials" || sector === "nbfc";
   const isAssetLightFinancial = sector === "asset_management" || sector === "financial_data_ratings";
   const isHospitalitySector = sector === "hospitality" || sector === "hospitality_owner_operator" || sector === "hospitality_asset_light" || sector === "hospitality_reit" || sector === "real_estate";
@@ -468,8 +477,20 @@ export function classifyArchetype(
   }
 
   // ── 8. Monotonic Scenario Margins (Strictly Prevent Inversion) ─────────
-  // Base margin is grounded in the company's real EBITDA margin
-  const baseMargin = latest.ebitdaMargin !== undefined ? latest.ebitdaMargin : 0.18;
+  // Base margin is grounded in the company's real margin construct: EBITDA margin
+  // for corporates/banks (bank zero preserved exactly), operating margin for
+  // fee franchises (meaningful there), rental net margin for REITs, net margin
+  // for insurers. Shapes without a margin construct fall back to 0.18.
+  const scenarioMarginBasis = isAssetLightStatement(latest)
+    ? latest.operatingMargin
+    : isReitStatement(latest)
+      ? (rev > 0 ? latest.netIncome / rev : undefined)
+      : isInsuranceStatement(latest)
+        ? latest.netMargin
+        : stmtNum(latest, "ebitdaMargin", Number.NaN);
+  const baseMargin = scenarioMarginBasis !== undefined && Number.isFinite(scenarioMarginBasis)
+    ? scenarioMarginBasis
+    : 0.18;
   let bearMargin: number;
   let bullMargin: number;
 

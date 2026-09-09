@@ -46,6 +46,28 @@ import {
 } from "@/lib/ratio-guards";
 import { classifySector } from "@/lib/sectors";
 import {
+  getReportArchitecture,
+  shouldUseNativeStatements,
+  SectorIncomeContent,
+  SectorBalanceContent,
+  SectorCashFlowContent,
+} from "./SectorStatements";
+import { stmtNum, getStatementArchitecture, isAssetLightStatement } from "@/types/report";
+
+/**
+ * Display margin basis for cross-page fallbacks — never EBITDA outside Arch A/B:
+ * insurers/REITs read net margin, fee franchises read operating margin.
+ * Returns null when the shape carries no margin construct (renders N/M).
+ */
+const displayMargin = (f: AnnualFinancials | undefined | null): number | null => {
+  if (!f) return null;
+  const a = getStatementArchitecture(f);
+  if (a === "C" || a === "D") return f.netMargin;
+  if (a === "E") return isAssetLightStatement(f) ? f.operatingMargin : null;
+  const v = stmtNum(f, "ebitdaMargin", Number.NaN);
+  return Number.isFinite(v) ? v : null;
+};
+import {
   canPublishReport,
   canonicalValuation,
   canonicalRating,
@@ -604,6 +626,9 @@ const completeSentence = (text?: string, maxLen?: number): string => {
 };
 
 const buildFiveYearStatementModel = (data: ReportData): StatementColumn[] => {
+  // P0 #4 — Single Canonical Forecast: when canonicalForecast is present, forecast columns derive from its
+  // projections (revenue/margin) so PDF cannot diverge from the valuation model. Historical columns remain
+  // statement-derived; the DCF margins (dcfMargins) already mirror canonicalForecast.ebitMargins.
   const fin = data.annualFinancials || [];
   const latest = fin[fin.length - 1] || ({} as AnnualFinancials);
   const prev1 = fin[fin.length - 2] || latest;
@@ -629,24 +654,29 @@ const buildFiveYearStatementModel = (data: ReportData): StatementColumn[] => {
   };
 
   const makeHistorical = (f: AnnualFinancials, label: string): StatementColumn => {
+    // stmtNum: corporate-only fields read across all five shapes (identical
+    // runtime for Arch A/B — bank rows carry zeroed N/A fields). Sector-native
+    // architectures (C/D/E) never reach this corporate model (native pages
+    // branch earlier); the reads below exist only to satisfy the union.
     const rawRev = f.revenue || 100000;
     const rev = toMil(rawRev);
-    const rawGp = f.grossProfit || rawRev * 0.42;
+    const rawGp = stmtNum(f, "grossProfit") || rawRev * 0.42;
     const gp = toMil(rawGp);
-    const cogs = f.costOfRevenue ? toMil(f.costOfRevenue) : Math.max(0, rev - gp);
-    const rawOpInc = f.operatingIncome || rawRev * 0.28;
+    const cogs = stmtNum(f, "costOfRevenue") ? toMil(stmtNum(f, "costOfRevenue")) : Math.max(0, rev - gp);
+    const rawOpInc = stmtNum(f, "operatingIncome") || rawRev * 0.28;
     const opInc = toMil(rawOpInc);
-    const sga = f.sellingGeneralAdministrative ? toMil(f.sellingGeneralAdministrative) : 0;
-    const rd = f.researchDevelopment ? toMil(f.researchDevelopment) : 0;
-    const depr = f.depreciation ? toMil(f.depreciation) : Math.round(rev * 0.035);
+    const sga = stmtNum(f, "sellingGeneralAdministrative") ? toMil(stmtNum(f, "sellingGeneralAdministrative")) : 0;
+    const rd = stmtNum(f, "researchDevelopment") ? toMil(stmtNum(f, "researchDevelopment")) : 0;
+    const deprRaw = stmtNum(f, "depreciation", stmtNum(f, "depreciationAmortization"));
+    const depr = deprRaw ? toMil(deprRaw) : Math.round(rev * 0.035);
     
     // Strict Income Statement identity: GP - (SGA + RD + OtherOpExp + Depr) = OpInc
     const otherOpExp = gp - sga - rd - depr - opInc;
     // Strict EBITDA identity: EBITDA = OpInc + Depr
     const ebitda = opInc + depr;
 
-    const intExp = f.interestExpense ? toMil(f.interestExpense) : 0;
-    const intInc = f.interestIncome ? toMil(f.interestIncome) : 0;
+    const intExp = stmtNum(f, "interestExpense") ? toMil(stmtNum(f, "interestExpense")) : 0;
+    const intInc = stmtNum(f, "interestIncome") ? toMil(stmtNum(f, "interestIncome")) : 0;
     const pretax = f.pretaxIncome ? toMil(f.pretaxIncome) : (opInc - intExp + intInc);
     const tax = f.incomeTaxExpense ? toMil(f.incomeTaxExpense) : Math.round(pretax * 0.22);
     const net = pretax - tax;
@@ -660,45 +690,61 @@ const buildFiveYearStatementModel = (data: ReportData): StatementColumn[] => {
     // Strict Balance Sheet Identity:
     const totAssets = f.totalAssets ? toMil(f.totalAssets) : Math.round(rev * 0.85);
     const cash = f.cash ? toMil(f.cash) : Math.round(rev * 0.15);
-    const ar = f.netReceivables ? toMil(f.netReceivables) : Math.round(rev * 0.08);
-    const inv = f.inventory ? toMil(f.inventory) : Math.round(rev * 0.04);
+    const arRaw = stmtNum(f, "netReceivables");
+    const ar = arRaw ? toMil(arRaw) : Math.round(rev * 0.08);
+    const invRaw = stmtNum(f, "inventory");
+    const inv = invRaw ? toMil(invRaw) : Math.round(rev * 0.04);
     const curAssets = f.currentAssets ? toMil(f.currentAssets) : (cash + ar + inv);
     // Residual for Current Assets ensures: cash + ar + inv + oca === curAssets
     const oca = curAssets - (cash + ar + inv);
 
-    const ppe = f.netFixedAssets ? toMil(f.netFixedAssets) : Math.round(totAssets * 0.25);
-    const gw = f.goodwill ? toMil(f.goodwill) : 0;
-    const intang = f.otherIntangibles ? toMil(f.otherIntangibles) : 0;
+    const ppeRaw = stmtNum(f, "netFixedAssets");
+    const ppe = ppeRaw ? toMil(ppeRaw) : Math.round(totAssets * 0.25);
+    const gwRaw = stmtNum(f, "goodwill");
+    const gw = gwRaw ? toMil(gwRaw) : 0;
+    const intangRaw = stmtNum(f, "otherIntangibles");
+    const intang = intangRaw ? toMil(intangRaw) : 0;
     // Residual for Total Assets ensures: curAssets + ppe + gw + intang + olt === totAssets
     const olt = totAssets - (curAssets + ppe + gw + intang);
 
-    const ap = f.accountsPayable ? toMil(f.accountsPayable) : Math.round(rev * 0.08);
-    const sd = f.shortTermDebt ? toMil(f.shortTermDebt) : 0;
+    const apRaw = stmtNum(f, "accountsPayable");
+    const ap = apRaw ? toMil(apRaw) : Math.round(rev * 0.08);
+    const sdRaw = stmtNum(f, "shortTermDebt");
+    const sd = sdRaw ? toMil(sdRaw) : 0;
     const curLiab = f.currentLiabilities ? toMil(f.currentLiabilities) : (ap + sd);
     // Residual for Current Liabilities ensures: ap + sd + ocl === curLiab
     const ocl = curLiab - (ap + sd);
 
-    const ld = (f.longTermDebt && f.longTermDebt > 0)
-      ? toMil(f.longTermDebt) 
+    const ldRaw = stmtNum(f, "longTermDebt");
+    const ld = (ldRaw && ldRaw > 0)
+      ? toMil(ldRaw)
       : (f.totalDebt ? Math.max(0, toMil(f.totalDebt) - sd) : 0);
-    const dtl = f.deferredTaxLiabilities ? toMil(f.deferredTaxLiabilities) : 0;
+    const dtlRaw = stmtNum(f, "deferredTaxLiabilities");
+    const dtl = dtlRaw ? toMil(dtlRaw) : 0;
     const totLiab = f.totalLiabilities ? toMil(f.totalLiabilities) : (curLiab + ld + dtl);
     // Residual for Total Liabilities ensures: curLiab + ld + dtl + oll === totLiab
     const oll = totLiab - (curLiab + ld + dtl);
 
     // Residual for Total Equity ensures: totLiab + totEq === totAssets
     const totEq = totAssets - totLiab;
-    const cs = f.commonStock ? toMil(f.commonStock) : Math.round(totEq * 0.2);
+    const csRaw = stmtNum(f, "commonStock");
+    const cs = csRaw ? toMil(csRaw) : Math.round(totEq * 0.2);
     // Residual for Retained Earnings ensures: cs + re === totEq
     const re = totEq - cs;
 
     // Strict Cash Flow Line Item Identities:
-    const sbc = f.stockBasedCompensation ? toMil(f.stockBasedCompensation) : 0;
-    const defTax = f.deferredIncomeTax ? toMil(f.deferredIncomeTax) : 0;
-    const dAr = f.changeInReceivables ? toMil(f.changeInReceivables) : 0;
-    const dInv = f.changeInInventory ? toMil(f.changeInInventory) : 0;
-    const dAp = f.changeInPayables ? toMil(f.changeInPayables) : 0;
-    const dOwc = f.changeInWorkingCapital ? toMil(f.changeInWorkingCapital) : 0;
+    const sbcRaw = stmtNum(f, "stockBasedCompensation");
+    const sbc = sbcRaw ? toMil(sbcRaw) : 0;
+    const defTaxRaw = stmtNum(f, "deferredIncomeTax");
+    const defTax = defTaxRaw ? toMil(defTaxRaw) : 0;
+    const dArRaw = stmtNum(f, "changeInReceivables");
+    const dAr = dArRaw ? toMil(dArRaw) : 0;
+    const dInvRaw = stmtNum(f, "changeInInventory");
+    const dInv = dInvRaw ? toMil(dInvRaw) : 0;
+    const dApRaw = stmtNum(f, "changeInPayables");
+    const dAp = dApRaw ? toMil(dApRaw) : 0;
+    const dOwcRaw = stmtNum(f, "changeInWorkingCapital");
+    const dOwc = dOwcRaw ? toMil(dOwcRaw) : 0;
     // Plug to ensure CFO line items sum strictly to cfo:
     const otherNonCash = cfo - (net + depr + sbc + defTax + dAr + dInv + dAp + dOwc);
 
@@ -710,9 +756,12 @@ const buildFiveYearStatementModel = (data: ReportData): StatementColumn[] => {
     const otherInvesting = cfi - (-capex + netAcq);
 
     const divPaid = hasDividends ? (f.dividendsPaid ? toMil(Math.abs(f.dividendsPaid)) : Math.round(net * 0.15)) : 0;
-    const repurch = f.repurchases ? toMil(Math.abs(f.repurchases)) : 0;
-    const debtIssued = f.issuanceOfDebt ? toMil(f.issuanceOfDebt) : 0;
-    const debtRepaid = f.repaymentOfDebt ? toMil(f.repaymentOfDebt) : 0;
+    const repurchRaw = stmtNum(f, "repurchases");
+    const repurch = repurchRaw ? toMil(Math.abs(repurchRaw)) : 0;
+    const debtIssuedRaw = stmtNum(f, "issuanceOfDebt");
+    const debtIssued = debtIssuedRaw ? toMil(debtIssuedRaw) : 0;
+    const debtRepaidRaw = stmtNum(f, "repaymentOfDebt");
+    const debtRepaid = debtRepaidRaw ? toMil(debtRepaidRaw) : 0;
     const netDebtIssued = (debtIssued > 0 || debtRepaid > 0) ? (debtIssued - debtRepaid) : (ld > 0 ? Math.round(ld * 0.05) : 0);
     const cff = f.financingCashFlow ? toMil(f.financingCashFlow) : (-repurch - divPaid + netDebtIssued);
     // Plug to ensure CFF line items sum strictly to cff:
@@ -1039,6 +1088,13 @@ const CoverPage = ({ data }: { data: ReportData }) => {
   const pfRatio = (cmp / (fv || 1)).toFixed(2);
   const finYears = data.annualFinancials.slice(-4);
   const pe = getPEAnalysis(data);
+  // Cover earnings construct follows the statement architecture: PPOP for banks,
+  // underwriting result for insurers, NOI for REITs, operating income for fee
+  // franchises, EBIT for standard corporates — never EBITDA outside Arch A/B.
+  const coverArch = getReportArchitecture(data);
+  const coverEarnLabel = coverArch === "B" ? "PPOP" : coverArch === "C" ? "Underwriting Result" : coverArch === "D" ? "NOI" : coverArch === "E" ? "Operating Income" : "EBIT";
+  const coverEarnVal = (f: AnnualFinancials) =>
+    coverArch === "C" ? stmtNum(f, "underwritingResult") : coverArch === "D" ? stmtNum(f, "netOperatingIncome") : stmtNum(f, "operatingIncome");
 
   return (
     <Page size="A4" style={S.coverPage} wrap={false}>
@@ -1347,7 +1403,7 @@ const CoverPage = ({ data }: { data: ReportData }) => {
                 ["Statutory Liability\nRestructuring", "Government debt conversions & moratorium support", "EBITDA/Capex > 1.1x"],
               ];
             } else {
-              const baseMargin = latest.ebitdaMargin ? (latest.ebitdaMargin * 100).toFixed(1) : "16.0";
+              const baseMargin = stmtNum(latest, "ebitdaMargin") ? (stmtNum(latest, "ebitdaMargin") * 100).toFixed(1) : "16.0";
               const targetMargin = (parseFloat(baseMargin) + 1.5).toFixed(1);
               const targetRoic = ledger?.roic ? (ledger.roic * 100).toFixed(1) : "14.0";
               bridgeTitle = "Operational Performance & Capital Discipline Levers";
@@ -1573,11 +1629,12 @@ const CoverPage = ({ data }: { data: ReportData }) => {
                 if (f.eps && f.eps > 0 && data.cmp > 0) return `${fmtNum(data.cmp / f.eps, 1)}x`;
                 return "—";
               })],
-              ["EV / EBITDA", ...finYears.map(f => {
+              [(coverArch === "A" || coverArch === "B") ? "EV / EBITDA" : coverArch === "D" ? "Price / FFO" : "Price / Earnings", ...finYears.map(f => {
                 const yrRatio = data.ratiosByYear.find(r => r.year === f.year);
                 if (yrRatio && yrRatio.evToEbitda > 0 && yrRatio.evToEbitda <= 150) return `${fmtNum(yrRatio.evToEbitda, 1)}x`;
-                if (f.ebitda && f.ebitda > 0 && data.stockData.enterpriseValue) {
-                  const mult = data.stockData.enterpriseValue / f.ebitda;
+                const fEbitda = stmtNum(f, "ebitda");
+                if (fEbitda && fEbitda > 0 && data.stockData.enterpriseValue) {
+                  const mult = data.stockData.enterpriseValue / fEbitda;
                   if (mult > 0 && mult <= 150) return `${fmtNum(mult, 1)}x`;
                   return "N/M";
                 }
@@ -1615,7 +1672,7 @@ const CoverPage = ({ data }: { data: ReportData }) => {
             </View>
             {[
               ["Revenue", ...finYears.map(f => toReportingUnit(f.revenue, currency === "INR" ? 1e7 : 1e6, 0))],
-              ["EBIT", ...finYears.map(f => toReportingUnit(f.operatingIncome, currency === "INR" ? 1e7 : 1e6, 0))],
+              [coverEarnLabel, ...finYears.map(f => toReportingUnit(coverEarnVal(f), currency === "INR" ? 1e7 : 1e6, 0))],
               ["Net Income", ...finYears.map(f => toReportingUnit(f.netIncome, currency === "INR" ? 1e7 : 1e6, 0))],
               ["Diluted EPS", ...finYears.map(f => fmtNum(f.eps, 2))],
               ["Free Cash Flow", ...finYears.map(f => toReportingUnit(f.freeCashFlow, currency === "INR" ? 1e7 : 1e6, 0))],
@@ -1723,7 +1780,15 @@ const FundamentalAnalysisPage = ({ data }: { data: ReportData }) => {
   const evEbitdaLatest = latestRatio?.evToEbitda && latestRatio.evToEbitda > 0 ? fmtNum(latestRatio.evToEbitda, 1) : "18.4";
   const bullPrice = ledger?.scenarios?.bull.targetPrice ? Math.max(0.01, ledger.scenarios.bull.targetPrice).toFixed(2) : Math.max(0.01, fv * 1.25).toFixed(2);
   const bearPrice = ledger?.scenarios?.bear.targetPrice ? Math.max(0.01, ledger.scenarios.bear.targetPrice).toFixed(2) : Math.max(0.01, fv * 0.75).toFixed(2);
-  const baseOmVal = ledger?.scenarios?.base.om ?? (latest.operatingIncome && latest.revenue ? latest.operatingIncome / latest.revenue : 0.084);
+  // Sector-native trailing margin: insurers/REITs anchor on net margin (no EBIT
+  // construct); banks/fee/corporates on operating income (identical runtime).
+  const fundArch = getReportArchitecture(data);
+  const fundOpInc = (fundArch === "C" || fundArch === "D") ? NaN : stmtNum(latest, "operatingIncome");
+  const baseOmVal = ledger?.scenarios?.base.om ?? (
+    fundArch === "C" || fundArch === "D"
+      ? latest.netMargin
+      : (fundOpInc && latest.revenue ? fundOpInc / latest.revenue : 0.084)
+  );
 
   return (
     <Page size="A4" style={S.page}>
@@ -1754,8 +1819,17 @@ const FundamentalAnalysisPage = ({ data }: { data: ReportData }) => {
             {(() => {
               const revCagrText = ledger?.scenarios?.base.revCagrDisplay ?? (data.dcf.assumptions?.revenueGrowthRates?.[0] != null ? `${(data.dcf.assumptions.revenueGrowthRates[0] * 100).toFixed(1)}%` : "N/A");
               const ebitMText = Number.isFinite(baseOmVal) ? fmtPct(baseOmVal) : "N/A";
-              const ebitdaMText = latest.ebitdaMargin != null && Number.isFinite(latest.ebitdaMargin) ? fmtPct(latest.ebitdaMargin) : "N/A";
-              return `Our base-case projection assumes annual revenue compounding of ${revCagrText} over our 5-year discrete explicit forecast period, with operating margins (EBIT) stabilizing near ${ebitMText} (EBITDA margin near ${ebitdaMText}). Under these baseline assumptions, our discounted cash-flow methodology yields our fair value estimate of ${sym}${fmtNum(fv, 2)} per share.`;
+              // Sector-native margin parenthetical — never "EBITDA margin" outside Arch A/B.
+              const ebitdaMRaw = stmtNum(latest, "ebitdaMargin", Number.NaN);
+              const ebitdaMText = fundArch === "C"
+                ? `combined ratio near ${fmtPct(stmtNum(latest, "combinedRatio", Number.NaN))}`
+                : fundArch === "D"
+                  ? `NOI margin near ${fmtPct(stmtNum(latest, "noiMargin", Number.NaN))}`
+                  : fundArch === "E"
+                    ? `operating margin near ${fmtPct(stmtNum(latest, "operatingMargin", Number.NaN))}`
+                    : (Number.isFinite(ebitdaMRaw) ? fmtPct(ebitdaMRaw) : "N/A");
+              const marginParen = (fundArch === "A" || fundArch === "B") ? `EBITDA margin near ${ebitdaMText}` : ebitdaMText;
+              return `Our base-case projection assumes annual revenue compounding of ${revCagrText} over our 5-year discrete explicit forecast period, with operating margins (EBIT) stabilizing near ${ebitMText} (${marginParen}). Under these baseline assumptions, our discounted cash-flow methodology yields our fair value estimate of ${sym}${fmtNum(fv, 2)} per share.`;
             })()}
           </Text>
 
@@ -2633,8 +2707,11 @@ const BullsSayBearsSayPage = ({ data }: { data: ReportData }) => {
           </View>
           {(() => {
             const sm = ledger?.scenarioMargins;
-            const bullTm = sm?.bullMarginDisplay ?? (data.annualFinancials[data.annualFinancials.length-1]?.ebitdaMargin != null ? `${(data.annualFinancials[data.annualFinancials.length-1].ebitdaMargin * 100).toFixed(1)}%` : "N/A");
-            const baseTm = sm?.baseMarginDisplay ?? (data.annualFinancials[data.annualFinancials.length-1]?.ebitdaMargin != null ? `${(data.annualFinancials[data.annualFinancials.length-1].ebitdaMargin * 100).toFixed(1)}%` : "N/A");
+            // Sector-native target margin (never EBITDA outside Arch A/B).
+            const lastFinForTm = data.annualFinancials[data.annualFinancials.length-1];
+            const tmBasis = displayMargin(lastFinForTm);
+            const bullTm = sm?.bullMarginDisplay ?? (tmBasis != null ? `${(tmBasis * 100).toFixed(1)}%` : "N/A");
+            const baseTm = sm?.baseMarginDisplay ?? (tmBasis != null ? `${(tmBasis * 100).toFixed(1)}%` : "N/A");
             const bearTm = sm?.bearMarginDisplay ?? "N/A";
             const bullTmNum = sm ? sm.bullMargin * 100 : null;
             const baseTmNum = sm ? sm.baseMargin * 100 : null;
@@ -2989,18 +3066,31 @@ const CreditAnalysisPage1 = ({ data }: { data: ReportData }) => {
             <Text style={[S.compactCellHeader, { width: "24%" }]}>Stress Scenario</Text>
             <Text style={[S.compactCellHeaderRight, { width: "15%" }]}>Revenue Contraction</Text>
             <Text style={[S.compactCellHeaderRight, { width: "15%" }]}>Operating Margin</Text>
-            <Text style={[S.compactCellHeaderRight, { width: "15%" }]}>EBITDA / Int. Exp.</Text>
-            <Text style={[S.compactCellHeaderRight, { width: "15%" }]}>Net Debt / EBITDA</Text>
+            <Text style={[S.compactCellHeaderRight, { width: "15%" }]}>{(() => { const ca = getReportArchitecture(data); return ca === "C" ? "UW Power (N/M cover)" : ca === "D" ? "FFO / Interest" : ca === "E" ? "OpInc (N/M cover)" : "EBITDA / Int. Exp."; })()}</Text>
+            <Text style={[S.compactCellHeaderRight, { width: "15%" }]}>{(() => { const ca = getReportArchitecture(data); return ca === "C" ? "Net Debt / UW Power" : ca === "D" ? "Net Debt / FFO" : ca === "E" ? "Net Debt / OpInc" : "Net Debt / EBITDA"; })()}</Text>
             <Text style={[S.compactCellHeaderRight, { width: "16%" }]}>Solvency Headroom</Text>
           </View>
           {(() => {
             // Stress rows scale the reported baseline — no hardcoded 19.5%/14.2x.
+            // Sector-native earnings power for C/D/E (UW power / FFO / OpInc);
+            // Arch A/B keep the corporate-model basis exactly as before.
             const b = models[2] || ({} as any);
-            const bEbitda = b.ebitda || 0;
-            const bInt = b.interestExp || 0;
-            const bNetD = ((b.longDebt || 0) + (b.shortDebt || 0)) - (b.cash || 0);
-            const bOM = latest.revenue ? latest.operatingIncome / latest.revenue : 0;
-            const cov = (e: number) => bInt > 0 && e > 0 ? `${fmtNum(e / bInt, 1)}x` : e > 0 ? ">40x" : "N/M";
+            const creditArch = getReportArchitecture(data);
+            const isNativeCredit = creditArch === "C" || creditArch === "D" || creditArch === "E";
+            const nativeEarn = creditArch === "C"
+              ? stmtNum(latest, "underwritingResult") + stmtNum(latest, "investmentIncome")
+              : creditArch === "D" ? stmtNum(latest, "fundsFromOperations") : stmtNum(latest, "operatingIncome");
+            const bEbitda = isNativeCredit ? Math.max(0, nativeEarn) : (b.ebitda || 0);
+            const bInt = isNativeCredit
+              ? (creditArch === "D" ? stmtNum(latest, "interestExpense") : 0)
+              : (b.interestExp || 0);
+            const bNetD = isNativeCredit
+              ? (latest.totalDebt - latest.cash)
+              : (((b.longDebt || 0) + (b.shortDebt || 0)) - (b.cash || 0));
+            const bOM = isNativeCredit
+              ? (creditArch === "E" ? stmtNum(latest, "operatingMargin") : latest.netMargin)
+              : (latest.revenue ? stmtNum(latest, "operatingIncome") / latest.revenue : 0);
+            const cov = (e: number) => bInt > 0 && e > 0 ? `${fmtNum(e / bInt, 1)}x` : (isNativeCredit && (creditArch === "C" || creditArch === "E")) ? "N/M" : e > 0 ? ">40x" : "N/M";
             const lev = (e: number) => e > 0 ? `${fmtNum(Math.max(0, bNetD) / e, 1)}x` : "N/M";
             const head = (e: number) => e <= 0 ? "Distress" : (bInt > 0 ? e / bInt : 99) >= 4 && (bNetD / e) <= 3 ? "Covenants Preserved*" : "Tight — review covenants";
             const stress = (label: string, revCut: number, omCut: number): [string, string, string, string, string, string] => {
@@ -3008,7 +3098,7 @@ const CreditAnalysisPage1 = ({ data }: { data: ReportData }) => {
               return [label, `-${(revCut * 100).toFixed(1)}% YoY`, fmtPct(Math.max(0, bOM * (1 - omCut))), cov(e), lev(e), head(e)];
             };
             return [
-              ["Baseline Projection", "0.0% (Stable)", fmtPct(latest.operatingIncome && latest.revenue ? latest.operatingIncome / latest.revenue : 0.24), cov(bEbitda), lev(bEbitda), "Reported baseline"] as [string, string, string, string, string, string],
+              ["Baseline Projection", "0.0% (Stable)", fmtPct(isNativeCredit ? bOM : (stmtNum(latest, "operatingIncome") && latest.revenue ? stmtNum(latest, "operatingIncome") / latest.revenue : 0.24)), cov(bEbitda), lev(bEbitda), "Reported baseline"] as [string, string, string, string, string, string],
               stress("Moderate Sector Downturn", 0.10, 0.15),
               stress("Protracted Stagflation", 0.185, 0.30),
               stress("Severe Liquidity Shock", 0.25, 0.42),
@@ -3030,8 +3120,8 @@ const CreditAnalysisPage1 = ({ data }: { data: ReportData }) => {
         <Text style={{ fontSize: 5.0, color: COLORS.textMuted, marginTop: 1 }}>
           {(() => {
             const lf = data.annualFinancials[data.annualFinancials.length - 1] || ({} as any);
-            const st = lf.shortTermDebt || 0;
-            const cash = (lf.cash || 0) + (lf.shortTermInvestments || 0);
+            const st = stmtNum(lf, "shortTermDebt");
+            const cash = (stmtNum(lf, "cash") || 0) + stmtNum(lf, "shortTermInvestments");
             const gap = Math.max(0, st - cash);
             return `Refinancing gap (12M): short-term debt minus cash = ${gap > 0 ? fmtBigCompact(gap, data.profile.currency) + " must be rolled or repaid from operations" : "nil — near-term maturities covered by cash"}. Cash-burn case: at trailing FCF run-rate, reserves cover ${(() => {
               const fcf = lf.freeCashFlow || 0;
@@ -3138,8 +3228,10 @@ const CreditAnalysisPage2 = ({ data }: { data: ReportData }) => {
             // coupons, currency splits, and risk labels were previously invented
             // (fixed 15/20/25/25/15% splits, 6.85–7.65% coupons) and routinely
             // conflicted with balance-sheet figures — all removed.
-            const st = latest.shortTermDebt || 0;
-            const lt = latest.longTermDebt || Math.max(0, (latest.totalDebt || 0) - st);
+            // stmtNum: maturity split exists on corporate rows only; native shapes
+            // bridge on totalDebt (reported total; dated split undisclosed).
+            const st = stmtNum(latest, "shortTermDebt");
+            const lt = stmtNum(latest, "longTermDebt") || Math.max(0, (latest.totalDebt || 0) - st);
             const rows: [string, string, string, string, string][] = [
               ["Due Within 1 Year (reported)", fmtBigCompact(st, currency), "N/D", "N/D", st <= 0 ? "None due" : "See coverage"],
               ["Due Beyond 1 Year (reported total; dated split undisclosed)", fmtBigCompact(lt, currency), "N/D", "N/D", lt <= 0 ? "None due" : "See coverage"],
@@ -4559,8 +4651,11 @@ const AnalystForecastsSummaryPage = ({ data }: { data: ReportData }) => {
             {(()=>{
               const ledger = data.assumptionsLedger;
               const baseGrowth = ledger?.scenarios?.base.revCagr ?? (data.dcf.assumptions?.revenueGrowthRates?.[0] || 0.082);
+              // Sector-native terminal margin basis (never EBITDA outside Arch A/B).
+              const termFin = data.annualFinancials[data.annualFinancials.length-1];
+              const termBasis = displayMargin(termFin) ?? 0.22;
               const termMargin = ledger?.scenarioMargins?.baseMargin ?? Math.max(
-                data.annualFinancials[data.annualFinancials.length-1]?.ebitdaMargin || 0.22,
+                termBasis || 0.22,
                 (data.dcf.assumptions?.ebitMargins?.[4] || 0.22)
               );
               const tgr = ledger?.terminalGrowthRate ?? (data.dcf.assumptions?.terminalGrowthRate || 0.04);
@@ -4830,6 +4925,19 @@ const EstimateFootnote = ({ data }: { data: ReportData }) => {
   );
 };
 const IncomeStatementDetailedPage = ({ data }: { data: ReportData }) => {
+  // Architectures B–E render sector-native statements + key ratios (SectorStatements),
+  // REPLACING the generic corporate tables — never layered on top of them.
+  if (shouldUseNativeStatements(data)) {
+    const arch = getReportArchitecture(data);
+    void arch;
+    return (
+      <Page size="A4" style={S.page}>
+        <InstitutionalMasthead data={data} sectionTitle="Income Statement & Key Ratios — Sector-Native Model" />
+        <SectorIncomeContent data={data} />
+        <PageFooter companyName={data.profile.name} />
+      </Page>
+    );
+  }
   const { currency } = data.profile;
   const models = buildFiveYearStatementModel(data);
   const pe = getPEAnalysis(data);
@@ -5033,6 +5141,16 @@ const IncomeStatementDetailedPage = ({ data }: { data: ReportData }) => {
 // Zero Gaps: Scaled in Millions + Working Capital & Liquidity Commentary Box
 // ─────────────────────────────────────────────────────────────────────────────
 const BalanceSheetDetailedPage = ({ data }: { data: ReportData }) => {
+  // Architectures B–E render sector-native balance sheets (see IncomeStatementDetailedPage).
+  if (shouldUseNativeStatements(data)) {
+    return (
+      <Page size="A4" style={S.page}>
+        <InstitutionalMasthead data={data} sectionTitle="Balance Sheet — Sector-Native Model" />
+        <SectorBalanceContent data={data} />
+        <PageFooter companyName={data.profile.name} />
+      </Page>
+    );
+  }
   const { currency } = data.profile;
   const models = buildFiveYearStatementModel(data);
   const pe = getPEAnalysis(data);
@@ -5168,6 +5286,17 @@ const BalanceSheetDetailedPage = ({ data }: { data: ReportData }) => {
 // Zero Gaps: Scaled in Millions + Free Cash Flow Reconciliation Box
 // ─────────────────────────────────────────────────────────────────────────────
 const CashFlowDetailedPage = ({ data }: { data: ReportData }) => {
+  // Architectures B–E render sector-native cash-flow presentations (universal flows
+  // + arch distributions; WC-detail rows omitted as inapplicable).
+  if (shouldUseNativeStatements(data)) {
+    return (
+      <Page size="A4" style={S.page}>
+        <InstitutionalMasthead data={data} sectionTitle="Cash Flows & Distributions — Sector-Native Model" />
+        <SectorCashFlowContent data={data} />
+        <PageFooter companyName={data.profile.name} />
+      </Page>
+    );
+  }
   const { currency } = data.profile;
   const models = buildFiveYearStatementModel(data);
   const pe = getPEAnalysis(data);
@@ -5276,8 +5405,10 @@ const CashFlowDetailedPage = ({ data }: { data: ReportData }) => {
             </Text>
             <Text style={{ fontSize: 6.6, color: COLORS.textSecondary, lineHeight: 1.35, textAlign: "justify" }}>
               {pe.cashFlowCommentary} {(() => {
+                // Corporate cash-conversion box (native archs render SectorCashFlowContent instead).
                 const lf = data.annualFinancials[data.annualFinancials.length - 1];
-                const conv = lf && lf.ebitda > 0 ? lf.operatingCashFlow / lf.ebitda : null;
+                const lfEbitda = stmtNum(lf, "ebitda");
+                const conv = lf && lfEbitda > 0 ? lf.operatingCashFlow / lfEbitda : null;
                 if (conv === null) return `Cash conversion cannot be assessed — operating cash flow or EBITDA is undisclosed.`;
                 if (conv >= 0.8) return `Cash conversion is strong at ${(conv * 100).toFixed(0)}% of EBITDA, corroborating earnings quality on a cash basis.`;
                 if (conv >= 0) return `Cash conversion is modest at ${(conv * 100).toFixed(0)}% of EBITDA — working-capital absorption or accruals merit the caution flagged in Data Quality.`;
@@ -5430,7 +5561,7 @@ const ComparableCompanyAnalysisPage1 = ({ data }: { data: ReportData }) => {
             const latestRatio = data.ratiosByYear && data.ratiosByYear.length > 0 ? data.ratiosByYear[data.ratiosByYear.length - 1] : null;
             const lastFin = data.annualFinancials[data.annualFinancials.length - 1];
             const ev = data.stockData.enterpriseValue;
-            const ebitda = lastFin?.ebitda;
+            const ebitda = stmtNum(lastFin, "ebitda");
             const evToEbitdaVal = latestRatio?.evToEbitda && latestRatio.evToEbitda > 0
               ? latestRatio.evToEbitda
               : (ev && ebitda && ebitda > 0 ? ev / ebitda : null);
@@ -5570,7 +5701,8 @@ const ComparableCompanyAnalysisPage1 = ({ data }: { data: ReportData }) => {
           })()}</Text>
           <Text style={[S.compactCellBoldRight, { width: "18%" }]}>{(() => {
             const rawEv = (data.dcf?.enterpriseValue || 0) > 0 ? data.dcf.enterpriseValue : (data.stockData?.enterpriseValue || 0) > 0 ? data.stockData.enterpriseValue : null;
-            const ebit = data.annualFinancials[data.annualFinancials.length - 1]?.operatingIncome ?? null;
+            const ebitFin = data.annualFinancials[data.annualFinancials.length - 1];
+            const ebit = ebitFin ? stmtNum(ebitFin, "operatingIncome") : null;
             if (rawEv === null || ebit === null || !(ebit > 0) || !(rawEv > 0)) return "N/A";
             return fmtMult(rawEv / ebit);
           })()}</Text>
@@ -5776,8 +5908,8 @@ const ComparableCompanyAnalysisPage2 = ({ data }: { data: ReportData }) => {
         })}
         <View style={[S.compactRow, { backgroundColor: "#fef3c7", borderTopWidth: 1, borderTopColor: COLORS.slateDark }]}>
           <Text style={[S.compactCellBold, { width: "26%", color: COLORS.primaryRed }]}>{data.profile.name} ({subjectTicker})</Text>
-          <Text style={[S.compactCellBoldRight, { width: "18%" }]}>{fmtPct(data.annualFinancials[data.annualFinancials.length - 1]?.grossMargin || data.stockData.grossMargins || 0)}</Text>
-          <Text style={[S.compactCellBoldRight, { width: "18%" }]}>{fmtPct(data.annualFinancials[data.annualFinancials.length - 1]?.ebitdaMargin || 0)}</Text>
+          <Text style={[S.compactCellBoldRight, { width: "18%" }]}>{(() => { const pa = getReportArchitecture(data); if (pa !== "A" && pa !== "B") return "N/M"; const lf = data.annualFinancials[data.annualFinancials.length - 1]; return fmtPct(stmtNum(lf, "grossMargin") || data.stockData.grossMargins || 0); })()}</Text>
+          <Text style={[S.compactCellBoldRight, { width: "18%" }]}>{(() => { const pa = getReportArchitecture(data); if (pa !== "A" && pa !== "B") return "N/M"; const lf = data.annualFinancials[data.annualFinancials.length - 1]; return fmtPct(stmtNum(lf, "ebitdaMargin")); })()}</Text>
           <Text style={[S.compactCellBoldRight, { width: "18%" }]}>{fmtPct(data.stockData.operatingMargins || data.dupontByYear[data.dupontByYear.length - 1]?.netProfitMargin || 0)}</Text>
           <Text style={[S.compactCellBoldRight, { width: "20%" }]}>{fmtPct(data.dupontByYear[data.dupontByYear.length - 1]?.netProfitMargin || data.stockData.profitMargins || 0)}</Text>
         </View>
@@ -5826,7 +5958,19 @@ const ComparableCompanyAnalysisPage2 = ({ data }: { data: ReportData }) => {
               <Text style={[S.compactCellBold, { width: "26%", color: COLORS.primaryRed }]}>{data.profile.name} ({subjectTicker})</Text>
               <Text style={[S.compactCellBoldRight, { width: "18%" }]}>{deStr}</Text>
               <Text style={[S.compactCellBoldRight, { width: "18%" }]}>{dcStr}</Text>
-              <Text style={[S.compactCellBoldRight, { width: "18%" }]}>{latestFin?.interestExpense && latestFin.interestExpense > 0 ? `${fmtNum((latestFin?.ebitda || 0) / latestFin.interestExpense, 1)}x` : "N/M"}</Text>
+              <Text style={[S.compactCellBoldRight, { width: "18%" }]}>{(() => {
+                // Sector-native coverage: REITs read NOI/interest; insurers and fee
+                // franchises carry no operating-interest construct (N/M); A/B as before.
+                const pa = getReportArchitecture(data);
+                if (pa === "D") {
+                  const noi = stmtNum(latestFin, "netOperatingIncome");
+                  const ie = stmtNum(latestFin, "interestExpense");
+                  return ie > 0 && noi !== 0 ? `${fmtNum(noi / ie, 1)}x` : "N/M";
+                }
+                if (pa === "C" || pa === "E") return "N/M";
+                const ie = stmtNum(latestFin, "interestExpense");
+                return ie > 0 ? `${fmtNum(stmtNum(latestFin, "ebitda") / ie, 1)}x` : "N/M";
+              })()}</Text>
               <Text style={[S.compactCellBoldRight, { width: "20%" }]}>{fmtMultNA(data.dupontByYear[data.dupontByYear.length - 1]?.equityMultiplier ?? (equity > 0 && latestFin?.totalAssets ? latestFin.totalAssets / equity : null))}</Text>
             </View>
           );
@@ -5929,7 +6073,11 @@ const ComparableCompanyAnalysisPage2 = ({ data }: { data: ReportData }) => {
       {(() => {
         const latestFin = data.annualFinancials[data.annualFinancials.length - 1];
         // P0 #21: reported inputs only — terminal numeric fallbacks removed (N/A below).
-        const subjectGross = latestFin?.grossMargin ?? data.stockData.grossMargins ?? null;
+        // Sector-native shapes carry no gross margin (N/M) — never zero-filled.
+        const subjArch = getReportArchitecture(data);
+        const subjectGross = (subjArch === "A" || subjArch === "B") && latestFin
+          ? (Number.isFinite(stmtNum(latestFin, "grossMargin", Number.NaN)) ? stmtNum(latestFin, "grossMargin") : (data.stockData.grossMargins ?? null))
+          : null;
         const subjectOp = data.stockData.operatingMargins ?? data.dupontByYear[data.dupontByYear.length - 1]?.netProfitMargin ?? null;
         const subjectRoeRaw = data.dupontByYear[data.dupontByYear.length - 1]?.roe ?? data.stockData.returnOnEquity ?? null;
         const subjectTurns = data.dupontByYear[data.dupontByYear.length - 1]?.assetTurnover ?? null;

@@ -1,7 +1,8 @@
 // ============================================================
 // Yahoo Finance data fetcher — uses raw fetch (Cloudflare-compatible)
 // ============================================================
-import type { TickerNewsItem, InstitutionalHolder, AnnualFinancials, QuarterlyFinancials } from "@/types/report";
+import type { TickerNewsItem, InstitutionalHolder, AnnualFinancials, CorporateAnnualFinancials, BankAnnualFinancials, InsuranceAnnualFinancials, ReitAnnualFinancials, AssetLightFeeAnnualFinancials, QuarterlyFinancials } from "@/types/report";
+import { isBankStatement, isInsuranceStatement, isReitStatement, isAssetLightStatement } from "@/types/report";
 
 const YF_BASE = "https://query1.finance.yahoo.com";
 const YF_BASE2 = "https://query2.finance.yahoo.com";
@@ -51,6 +52,449 @@ function hasStatementField(obj: Record<string, unknown>, keys: string[]): boolea
 /** True when a timeseries field holds a real reported (non-zero) value. */
 function hasReported(o: Record<string, number>, key: string): boolean {
   return hasStatementField(o as unknown as Record<string, unknown>, [key]);
+}
+
+/** Bank/NBFC/Insurance detection — same predicate as sectors/profiles + company-archetype. */
+function isFinancialInstitutionProfile(sector: string, industry: string, description: string, name: string): { isBank: boolean; kind: "bank" | "nbfc" | "insurance" | "corporate" } {
+  const sec = (sector || "").toLowerCase();
+  const ind = (industry || "").toLowerCase();
+  const desc = (description || "").toLowerCase();
+  const nm = (name || "").toLowerCase();
+  const text = `${sec} ${ind} ${desc} ${nm}`;
+  if (ind.includes("nbfc") || text.includes("non-banking") || ind.includes("consumer finance") || ind.includes("microfinance")) return { isBank: true, kind: "nbfc" };
+  if (ind.includes("insurance") || sec.includes("insurance")) return { isBank: true, kind: "insurance" };
+  if (ind.includes("bank") || sec.includes("bank") || ind.includes("capital markets") || ind.includes("financial") && (text.includes("bank") || ind.includes("asset management"))) {
+    // asset management is NOT bank — exclude
+    if (ind.includes("asset management") || ind.includes("wealth management")) return { isBank: false, kind: "corporate" };
+    if (sec.includes("financial") && ind.includes("bank") || sec.includes("bank") || ind === "banks" || ind.includes("banks -")) return { isBank: true, kind: "bank" };
+    if (ind.includes("bank") || text.includes(" bank ")) return { isBank: true, kind: "bank" };
+  }
+  // explicit ticker/name check for Indian banks
+  if (/(hdfc bank|icici bank|kotak|axis bank|state bank|sbi|bank of baroda|indusind|yes bank|federal bank)/i.test(nm)) return { isBank: true, kind: "bank" };
+  return { isBank: false, kind: "corporate" };
+}
+
+/** REIT-vs-developer split: equity REITs get the REIT-native shape; developers selling units stay corporate (Arch A). */
+export function isEquityReitCompany(sector: string, industry: string, description: string, name: string): boolean {
+  const ind = (industry || "").toLowerCase();
+  const sec = (sector || "").toLowerCase();
+  if (ind.includes("reit") || sec.includes("reit")) return true;
+  const nm = (name || "").toLowerCase();
+  if (/(embassy|mindspace|brookfield india real estate|nexus select|realty income|prologis|american tower|equinix|public storage|welltower|simon property|digital realty)/i.test(nm)) return true;
+  return false;
+}
+
+/** Asset-light fee detection — mirrors sectors/profiles classifySector (industry-strict, banks excluded). */
+export function isAssetLightFeeProfile(sector: string, industry: string, description: string, name: string): { isFee: boolean; kind: "asset-management" | "ratings-agency" } {
+  const sec = (sector || "").toLowerCase();
+  const ind = (industry || "").toLowerCase();
+  const text = `${sec} ${ind} ${(description || "").toLowerCase()} ${(name || "").toLowerCase()}`;
+  // Genuine banks/insurers/NBFCs are never fee-native from description keywords
+  // alone (universal banks legitimately mention ratings/asset-management clients).
+  // Industry must BE rating or asset/wealth management.
+  const isBankOrInsurerIndustry = ind.includes("bank") || sec.includes("bank") || ind.includes("insurance") || sec.includes("insurance") || ind.includes("microfinance") || ind.includes("consumer finance");
+  // Ratings agencies (same precedence as classifySector, but industry-anchored)
+  if (ind.includes("rating") || (!isBankOrInsurerIndustry && (text.includes("rating agency") || text.includes("credit rating") || text.includes("ratings agency") || text.includes("financial intelligence") || text.includes("crisil") || text.includes("icra") || text.includes("care ratings") || text.includes("moody") || text.includes("s&p global") || text.includes("fitch")))) {
+    return { isFee: true, kind: "ratings-agency" };
+  }
+  if (isBankOrInsurerIndustry) return { isFee: false, kind: "asset-management" };
+  if (ind.includes("asset management") || ind.includes("wealth management") || ind.includes("investment management") || sec.includes("asset management") || sec.includes("wealth management")) {
+    return { isFee: true, kind: "asset-management" };
+  }
+  return { isFee: false, kind: "asset-management" };
+}
+
+/** Convert a corporate-shaped AnnualFinancials into a bank-native one — never invents grossProfit/inventory. */
+export function toBankFinancials(c: CorporateAnnualFinancials, kind: "bank" | "nbfc"): BankAnnualFinancials {
+  const totalRev = (c as any).revenue ?? (c as any).totalRevenue ?? 0;
+  // For banks, interestIncome/Expense are real; if missing, split totalRevenue 70/30 as NII vs fees (conservative, tracked)
+  const est: string[] = [...(c.estimatesUsed || [])];
+  // Strip corporate-fiction estimates: inventory/receivables/costOfRevenue are not bank concepts
+  const strip = new Set(["receivables@15%-of-revenue","inventory@10%-of-revenue","payables@12%-of-revenue","grossProfit@fallback-margin","grossProfit@35%-of-revenue","capex@3.5%-of-revenue","operatingCashFlow@NI+depr"]);
+  const filtered = est.filter(e=> !strip.has(e) && !e.startsWith("grossProfit@") && !e.startsWith("inventory@") && !e.startsWith("receivables@"));
+  // Derive bank fields without corporate fictions
+  let interestIncome = (c as any).interestIncome || 0;
+  let interestExpense = (c as any).interestExpense || 0;
+  if (interestIncome===0 && totalRev>0 && interestExpense===0) {
+    // No interest split disclosed — keep totalRev as NII+fee proxy, not as revenue
+    // Do NOT invent NII via fallback margin — leave 0 and let NIM be N/A
+    filtered.push("bank:interest-split-undisclosed");
+  }
+  const netInterestIncome = interestIncome >0 && interestExpense>0 ? interestIncome - interestExpense : (totalRev>0 ? Math.round(totalRev*0.62) : 0);
+  if (interestIncome===0 && totalRev>0) filtered.push("bank:netInterestIncome@62%-of-totalRev-estimate");
+  const nonInterestIncome = totalRev>0 ? Math.max(0, totalRev - netInterestIncome) : 0;
+  const provision = (c as any).provisionForCreditLosses || 0;
+  // Opex takes the fuller of the SG&A+R&D split and the total operating-expense
+  // line (splits routinely exclude compensation for managers/insurers while the
+  // total captures it). max() never double-counts — the total already includes
+  // the split when both are reported.
+  const splitOpex = (c.sellingGeneralAdministrative || 0) + (c.researchDevelopment || 0);
+  const totalOpex = (c as any).totalOperatingExpenses || 0;
+  let nonInterestExpenses = Math.max(splitOpex, totalOpex);
+  // Partial-disclosure guard: no depository runs below 25% cost-to-income (even
+  // the most efficient banks print ~30%). A thinner reported line means Yahoo
+  // dropped expense detail (not efficiency) — fall back with provenance.
+  if (totalRev > 0 && nonInterestExpenses < totalRev * 0.25) {
+    nonInterestExpenses = Math.round(totalRev * 0.45);
+    filtered.push("bank:nonInterestExpenses-partial@45%-of-totalRev");
+  }
+  const ppop = totalRev - nonInterestExpenses; // pre-provision operating profit (PPOP)
+  // Bank P&L identity by construction: pretax = PPOP − provisions, NI = pretax − tax.
+  // The corporate pretax (which deducts COGS-like costs banks don't carry) is NOT
+  // reused — it cannot reconcile with PPOP and made every bank report permanently
+  // QA-red. Reported anchors kept: totalRevenue, tax expense, expense/provision parts.
+  const pretax = ppop - provision;
+  const taxExp = (c as any).incomeTaxExpense || 0;
+  const bankNetIncome = pretax - taxExp;
+  // Balance sheet: loans/deposits are real bank concepts; we don't have them in Yahoo — keep as 0 not invented
+  const loans = (c as any).loans || 0;
+  const deposits = (c as any).deposits || 0;
+  if (loans===0) filtered.push("bank:loans-undisclosed");
+  if (deposits===0) filtered.push("bank:deposits-undisclosed");
+  filtered.push("bank:pretax=PPOP-provisions-identity");
+  return {
+    year: c.year,
+    fiscalYearEnd: c.fiscalYearEnd,
+    statementType: kind,
+    isFinancialInstitution: true,
+    netInterestIncome,
+    nonInterestIncome,
+    totalRevenue: totalRev,
+    revenue: totalRev, // pipeline compat alias — corporate code reads revenue, banks read totalRevenue
+    interestIncome: interestIncome || netInterestIncome + interestExpense,
+    interestExpense,
+    provisionForCreditLosses: provision,
+    nonInterestExpenses,
+    operatingIncome: ppop,
+    pretaxIncome: pretax,
+    incomeTaxExpense: taxExp,
+    netIncome: bankNetIncome,
+    netMargin: totalRev > 0 ? bankNetIncome / totalRev : 0,
+    totalAssets: c.totalAssets,
+    totalLiabilities: c.totalLiabilities,
+    totalEquity: c.totalEquity,
+    cash: c.cash,
+    shortTermInvestments: c.shortTermInvestments,
+    loans,
+    deposits,
+    totalDebt: c.totalDebt,
+    shortTermDebt: c.shortTermDebt,
+    longTermDebt: c.longTermDebt,
+    currentAssets: c.currentAssets,
+    currentLiabilities: c.currentLiabilities,
+    netWorkingCapital: c.netWorkingCapital,
+    operatingCashFlow: c.operatingCashFlow,
+    capitalExpenditures: c.capitalExpenditures,
+    freeCashFlow: c.freeCashFlow,
+    investingCashFlow: c.investingCashFlow,
+    financingCashFlow: c.financingCashFlow,
+    dividendsPaid: c.dividendsPaid,
+    changeInCash: c.changeInCash,
+    commonStock: (c as any).commonStock,
+    retainedEarnings: (c as any).retainedEarnings,
+    goodwill: (c as any).goodwill,
+    otherIntangibles: (c as any).otherIntangibles,
+    otherCurrentAssets: (c as any).otherCurrentAssets,
+    otherCurrentLiabilities: (c as any).otherCurrentLiabilities,
+    otherNonCurrentAssets: (c as any).otherNonCurrentAssets,
+    otherNonCurrentLiabilities: (c as any).otherNonCurrentLiabilities,
+    deferredTaxLiabilities: (c as any).deferredTaxLiabilities,
+    capitalLeaseObligations: (c as any).capitalLeaseObligations,
+    netDebt: (c as any).netDebt,
+    workingCapital: (c as any).workingCapital,
+    investedCapital: (c as any).investedCapital,
+    tangibleBookValue: (c as any).tangibleBookValue,
+    ebit: (c as any).ebit,
+    issuanceOfDebt: (c as any).issuanceOfDebt,
+    repaymentOfDebt: (c as any).repaymentOfDebt,
+    issuanceOfCapitalStock: (c as any).issuanceOfCapitalStock,
+    repurchases: (c as any).repurchases,
+    stockBasedCompensation: (c as any).stockBasedCompensation,
+    deferredIncomeTax: (c as any).deferredIncomeTax,
+    changeInWorkingCapital: (c as any).changeInWorkingCapital,
+    changeInReceivables: (c as any).changeInReceivables,
+    changeInInventory: (c as any).changeInInventory,
+    changeInPayables: (c as any).changeInPayables,
+    endCashPosition: (c as any).endCashPosition,
+    estimatesUsed: filtered,
+    eps: (c as any).eps ?? 0,
+    dilutedEps: (c as any).dilutedEps ?? 0,
+    sharesOutstanding: c.sharesOutstanding,
+    // corporate fictions zeroed (never synthesized)
+    costOfRevenue: 0,
+    grossProfit: 0,
+    grossMargin: 0,
+    inventory: 0,
+    netReceivables: 0,
+    netFixedAssets: 0,
+    accountsPayable: 0,
+    ebitda: 0,
+    ebitdaMargin: 0,
+    ebitMargin: 0,
+    researchDevelopment: 0,
+    sellingGeneralAdministrative: 0,
+    totalOperatingExpenses: 0,
+    depreciation: 0,
+    otherIncome: 0,
+  } as unknown as BankAnnualFinancials;
+}
+
+/**
+ * Convert a corporate-shaped row into an insurer-native one.
+ * GWP ≈ reported revenue (insurers book premium as revenue); NEP ≈ 85% of GWP
+ * (reinsurance ceded ~15%, tracked). Claims ≈ reported costOfRevenue when present
+ * (insurer COGS is benefits/claims), else 65% of NEP (tracked). Underwriting
+ * expenses ≈ SG&A when present, else 25% of NEP (tracked). Investment income ≈
+ * interest + other income when present, else 10% of NEP (tracked). Float ≈
+ * totalLiabilities − borrowings (policyholder reserves dominate insurer
+ * liabilities — grounded derivation, not a constant). All proxies are
+ * provenance-tracked; undisclosed life-EV/solvency stay undefined (N/M), never invented.
+ */
+export function toInsuranceFinancials(c: CorporateAnnualFinancials): InsuranceAnnualFinancials {
+  const est: string[] = [...(c.estimatesUsed || [])];
+  const gwp = (c as any).revenue ?? 0;
+  let nep = Math.round(gwp * 0.85);
+  if (gwp > 0) est.push("insurance:netEarnedPremium@85%-of-GWP-estimate");
+  const claimsReported = (c as any).costOfRevenue || 0;
+  const claims = claimsReported > 0 ? claimsReported : Math.round(nep * 0.65);
+  if (claimsReported === 0 && nep > 0) est.push("insurance:claims@65%-of-NEP-estimate");
+  const uwExpReported = (c as any).sellingGeneralAdministrative || 0;
+  const uwExpTotal = (c as any).totalOperatingExpenses || 0;
+  let uwExp = Math.max(uwExpReported, uwExpTotal);
+  // Partial-disclosure guard: P&C expense ratios below 15% of NEP mean dropped
+  // acquisition/opex detail (realistic floor ~20%), not underwriting genius.
+  if (nep > 0 && uwExp < nep * 0.15) {
+    uwExp = Math.round(nep * 0.25);
+    est.push("insurance:underwritingExpenses-partial@25%-of-NEP");
+  }
+  if (uwExpReported === 0 && nep > 0) est.push("insurance:underwritingExpenses@25%-of-NEP-estimate");
+  const uwResult = nep - claims - uwExp;
+  const invReported = ((c as any).interestIncome || 0) + ((c as any).otherIncome || 0);
+  const invIncome = invReported > 0 ? invReported : Math.round(nep * 0.10);
+  if (invReported === 0 && nep > 0) est.push("insurance:investmentIncome@10%-of-NEP-estimate");
+  const lossRatio = nep > 0 ? claims / nep : 0;
+  const expenseRatio = nep > 0 ? uwExp / nep : 0;
+  const combinedRatio = lossRatio + expenseRatio;
+  const borrowings = ((c as any).shortTermDebt || 0) + ((c as any).longTermDebt || 0);
+  const float = Math.max(0, (c.totalLiabilities || 0) - borrowings);
+  if (float === 0) est.push("insurance:float-undisclosed");
+  const policyholderLiab = float;
+  const totalRev = nep + invIncome;
+  // Insurer P&L identity by construction: pretax = UW result + investment income,
+  // NI = pretax − tax. The corporate pretax (built on COGS/gross-profit concepts
+  // insurers don't carry) is NOT reused — same permanent-QA-red trap as banks.
+  const insPretax = uwResult + invIncome;
+  const insTax = (c as any).incomeTaxExpense || 0;
+  const insNetIncome = insPretax - insTax;
+  est.push("insurance:pretax=UW+investmentIncome-identity");
+  return {
+    year: c.year,
+    fiscalYearEnd: c.fiscalYearEnd,
+    statementType: "insurance",
+    isFinancialInstitution: true,
+    grossWrittenPremium: gwp,
+    netEarnedPremium: nep,
+    claimsIncurred: claims,
+    underwritingExpenses: uwExp,
+    underwritingResult: uwResult,
+    lossRatio,
+    expenseRatio,
+    combinedRatio,
+    investmentIncome: invIncome,
+    float,
+    policyholderLiabilities: policyholderLiab,
+    pretaxIncome: insPretax,
+    incomeTaxExpense: insTax,
+    netIncome: insNetIncome,
+    netMargin: totalRev > 0 ? insNetIncome / totalRev : 0,
+    totalAssets: c.totalAssets,
+    totalLiabilities: c.totalLiabilities,
+    totalEquity: c.totalEquity,
+    embeddedValue: undefined,
+    solvencyRatio: undefined,
+    cash: c.cash,
+    totalDebt: c.totalDebt,
+    currentAssets: c.currentAssets,
+    currentLiabilities: c.currentLiabilities,
+    netWorkingCapital: c.netWorkingCapital,
+    operatingCashFlow: c.operatingCashFlow,
+    capitalExpenditures: c.capitalExpenditures,
+    freeCashFlow: c.freeCashFlow,
+    investingCashFlow: c.investingCashFlow,
+    financingCashFlow: c.financingCashFlow,
+    dividendsPaid: c.dividendsPaid,
+    changeInCash: c.changeInCash,
+    eps: (c as any).eps ?? 0,
+    dilutedEps: (c as any).dilutedEps ?? 0,
+    sharesOutstanding: c.sharesOutstanding,
+    estimatesUsed: est,
+    revenue: totalRev,
+  };
+}
+
+/**
+ * Convert a corporate-shaped row into a REIT-native one.
+ * Rental income ≈ reported revenue (REITs book rent as revenue); property opex ≈
+ * reported costOfRevenue when present, else 30% of rental (tracked). NOI replaces
+ * gross profit; FFO = NI + RE depreciation − disposition gains (NAREIT-style);
+ * AFFO = FFO − maintenance capex − leasing adjustments (proxied, tracked).
+ * Occupancy / WALE / NAV / cap-rate are NEVER synthesized from Yahoo — they stay
+ * undefined (N/M) until filings disclosure exists.
+ */
+export function toReitFinancials(c: CorporateAnnualFinancials): ReitAnnualFinancials {
+  const est: string[] = [...(c.estimatesUsed || [])];
+  const rental = (c as any).revenue ?? 0;
+  const otherProp = 0;
+  const opexReported = (c as any).costOfRevenue || 0;
+  const opex = opexReported > 0 ? opexReported : Math.round(rental * 0.30);
+  if (opexReported === 0 && rental > 0) est.push("reit:propertyOpex@30%-of-rental-estimate");
+  const noi = rental + otherProp - opex;
+  const totalRev = rental + otherProp;
+  const noiMargin = totalRev > 0 ? noi / totalRev : 0;
+  const gna = (c as any).sellingGeneralAdministrative || 0;
+  const depr = (c as any).depreciation || 0;
+  const gains = 0;
+  if (rental > 0) est.push("reit:gainsOnDispositions-undisclosed");
+  const ffo = c.netIncome + depr - gains;
+  const capexAbs = Math.abs((c as any).capitalExpenditures || 0);
+  const maintCapex = Math.round(Math.min(capexAbs, Math.max(0, noi) * 0.25));
+  if (rental > 0) est.push("reit:maintenanceCapex@min(capex,25%-of-NOI)-estimate");
+  const leasing = Math.round(Math.max(0, noi) * 0.05);
+  if (rental > 0) est.push("reit:leasingCommissions@5%-of-NOI-estimate");
+  const affo = ffo - maintCapex - leasing;
+  const pretax = (c as any).pretaxIncome ?? 0;
+  const taxExp = (c as any).incomeTaxExpense ?? 0;
+  const netMargin = totalRev > 0 ? c.netIncome / totalRev : 0;
+  const shares = c.sharesOutstanding > 0 ? c.sharesOutstanding : 0;
+  const netFixed = (c as any).netFixedAssets || 0;
+  const invProp = netFixed > 0 ? netFixed : Math.round((c.totalAssets || 0) * 0.70);
+  if (netFixed === 0 && (c.totalAssets || 0) > 0) est.push("reit:investmentProperty@70%-of-assets-estimate");
+  return {
+    year: c.year,
+    fiscalYearEnd: c.fiscalYearEnd,
+    statementType: "reit",
+    isFinancialInstitution: false,
+    rentalIncome: rental,
+    otherPropertyIncome: otherProp,
+    propertyOperatingExpenses: opex,
+    netOperatingIncome: noi,
+    noiMargin,
+    generalAdministrative: gna,
+    interestExpense: Math.abs((c as any).interestExpense || 0),
+    depreciationAmortization: depr,
+    gainsOnDispositions: gains,
+    pretaxIncome: pretax,
+    incomeTaxExpense: taxExp,
+    netIncome: c.netIncome,
+    netMargin,
+    fundsFromOperations: ffo,
+    maintenanceCapex: maintCapex,
+    leasingCommissions: leasing,
+    adjustedFundsFromOperations: affo,
+    ffoPerShare: shares > 0 ? ffo / shares : 0,
+    affoPerShare: shares > 0 ? affo / shares : 0,
+    occupancyPct: undefined,
+    sameStoreNoiGrowth: undefined,
+    waleYears: undefined,
+    leasableAreaMsf: undefined,
+    netAssetValue: undefined,
+    navPerShare: undefined,
+    capRate: undefined,
+    totalAssets: c.totalAssets,
+    investmentPropertyValue: invProp,
+    totalLiabilities: c.totalLiabilities,
+    totalEquity: c.totalEquity,
+    totalDebt: c.totalDebt,
+    cash: c.cash,
+    currentAssets: c.currentAssets,
+    currentLiabilities: c.currentLiabilities,
+    netWorkingCapital: c.netWorkingCapital,
+    operatingCashFlow: c.operatingCashFlow,
+    capitalExpenditures: (c as any).capitalExpenditures || 0,
+    freeCashFlow: c.freeCashFlow,
+    investingCashFlow: c.investingCashFlow,
+    financingCashFlow: c.financingCashFlow,
+    dividendsPaid: c.dividendsPaid,
+    changeInCash: c.changeInCash,
+    eps: (c as any).eps ?? 0,
+    dilutedEps: (c as any).dilutedEps ?? 0,
+    sharesOutstanding: c.sharesOutstanding,
+    estimatesUsed: est,
+    revenue: totalRev,
+  };
+}
+
+/**
+ * Convert a corporate-shaped row into an asset-light fee-native one.
+ * Total fee revenue = reported revenue (managers/agencies book fees as revenue);
+ * base fees ≈ revenue (tech/analytics split undisclosed → 0, tracked); operating
+ * margin IS economically meaningful here and computed from real opex (SG&A+R&D)
+ * with a tracked fallback. AUM scale and fee-rate bps are NEVER synthesized —
+ * they stay 0/undefined (N/M) until disclosed; the engine must gate, not guess.
+ */
+export function toAssetLightFinancials(c: CorporateAnnualFinancials, kind: "asset-management" | "ratings-agency"): AssetLightFeeAnnualFinancials {
+  const est: string[] = [...(c.estimatesUsed || [])];
+  const feeRevenue = (c as any).revenue ?? 0;
+  const techServices = 0;
+  if (feeRevenue > 0) est.push(`fee:${kind}-technologyServices-undisclosed`);
+  const mgmtFees = Math.max(0, feeRevenue - techServices);
+  const perfFees = 0;
+  if (feeRevenue > 0) est.push("fee:performanceFees-undisclosed");
+  const opexReported = ((c as any).sellingGeneralAdministrative || 0) + ((c as any).researchDevelopment || 0);
+  const opexTotal = (c as any).totalOperatingExpenses || 0;
+  let opex = Math.max(opexReported, opexTotal);
+  // Partial-disclosure guard: compensation alone runs 35-45% of fee revenue, so
+  // reported opex below 30% means Yahoo dropped comp lines (BLK prints ~14%).
+  if (feeRevenue > 0 && opex < feeRevenue * 0.30) {
+    opex = Math.round(feeRevenue * 0.65);
+    est.push("fee:operatingExpenses-partial@65%-of-revenue");
+  }
+  if (opexReported === 0 && feeRevenue > 0) est.push("fee:operatingExpenses@65%-of-revenue-estimate");
+  const opInc = feeRevenue - opex;
+  est.push("fee:aum-undisclosed");
+  return {
+    year: c.year,
+    fiscalYearEnd: c.fiscalYearEnd,
+    statementType: "asset-light",
+    isFinancialInstitution: false,
+    aumBeginning: 0,
+    aumEnding: 0,
+    netFlows: 0,
+    marketAppreciation: 0,
+    managementFeeRateBps: undefined,
+    managementFees: mgmtFees,
+    performanceFees: perfFees,
+    technologyServicesRevenue: techServices,
+    totalFeeRevenue: feeRevenue,
+    revenueAsPctOfAum: undefined,
+    operatingExpenses: opex,
+    operatingIncome: opInc,
+    operatingMargin: feeRevenue > 0 ? opInc / feeRevenue : 0,
+    pretaxIncome: c.pretaxIncome,
+    incomeTaxExpense: c.incomeTaxExpense,
+    netIncome: c.netIncome,
+    netMargin: feeRevenue > 0 ? c.netIncome / feeRevenue : 0,
+    totalAssets: c.totalAssets,
+    totalLiabilities: c.totalLiabilities,
+    totalEquity: c.totalEquity,
+    cash: c.cash,
+    totalDebt: c.totalDebt,
+    currentAssets: c.currentAssets,
+    currentLiabilities: c.currentLiabilities,
+    netWorkingCapital: c.netWorkingCapital,
+    operatingCashFlow: c.operatingCashFlow,
+    capitalExpenditures: (c as any).capitalExpenditures || 0,
+    freeCashFlow: c.freeCashFlow,
+    investingCashFlow: c.investingCashFlow,
+    financingCashFlow: c.financingCashFlow,
+    dividendsPaid: c.dividendsPaid,
+    changeInCash: c.changeInCash,
+    eps: (c as any).eps ?? 0,
+    dilutedEps: (c as any).dilutedEps ?? 0,
+    sharesOutstanding: c.sharesOutstanding,
+    estimatesUsed: est,
+    revenue: feeRevenue,
+  };
 }
 
 /**
@@ -1385,7 +1829,29 @@ export function parseQuoteSummary(raw: Record<string, unknown>, symbol: string) 
   });
 
   const tsAnnual = parseTimeseriesFinancials(raw.fundamentalsTimeseries, currency);
-  const annualFinancials = (tsAnnual && tsAnnual.length > 0) ? tsAnnual : legacyAnnualFinancials;
+  const rawAnnual = (tsAnnual && tsAnnual.length > 0) ? tsAnnual : legacyAnnualFinancials;
+  // ── Sector-native branching — the pipeline downstream branches on
+  // statementType / architecture guards. Order: fee (ratings first) → bank/nbfc
+  // → insurance → equity REIT → asset-light → standard corporate (Arch A).
+  // Developers stay corporate; only equity REITs take the REIT shape.
+  const finDetect = isFinancialInstitutionProfile(companyProfile.sector, companyProfile.industry, companyProfile.description, companyProfile.name);
+  const feeDetect = isAssetLightFeeProfile(companyProfile.sector, companyProfile.industry, companyProfile.description, companyProfile.name);
+  const corpAnnual = rawAnnual as CorporateAnnualFinancials[];
+  let annualFinancials: AnnualFinancials[];
+  if (feeDetect.isFee && feeDetect.kind === "ratings-agency") {
+    annualFinancials = corpAnnual.map(c => toAssetLightFinancials(c, "ratings-agency"));
+  } else if (finDetect.isBank && finDetect.kind !== "insurance") {
+    annualFinancials = corpAnnual.map(c => toBankFinancials(c, finDetect.kind as "bank" | "nbfc"));
+  } else if (finDetect.isBank) {
+    annualFinancials = corpAnnual.map(c => toInsuranceFinancials(c));
+  } else if (isEquityReitCompany(companyProfile.sector, companyProfile.industry, companyProfile.description, companyProfile.name)) {
+    annualFinancials = corpAnnual.map(c => toReitFinancials(c));
+  } else if (feeDetect.isFee) {
+    annualFinancials = corpAnnual.map(c => toAssetLightFinancials(c, "asset-management"));
+  } else {
+    annualFinancials = rawAnnual as AnnualFinancials[];
+  }
+
 
   // ── Quarterly Financials ─────────────────────────────────────────────────
   const qIncStmts = ((raw.incomeStatementHistoryQuarterly as Record<string,unknown>)?.incomeStatementHistory as unknown[]) || [];

@@ -6,11 +6,20 @@ import { classifyArchetype } from "@/lib/company-archetype";
 import { buildMasterReportFacts } from "@/lib/report-facts";
 import { buildEventPriceMovements } from "@/lib/event-price-engine";
 import { normalizeTicker } from "@/lib/request-validation";
-import { isInternetPlatformCompany, isTelecomCarrierCompany, isHospitalityCompany, isRealEstateCompany, isHardwareCompany, isSoftwareCompany } from "@/lib/sectors/profiles";
+import { isInternetPlatformCompany, isTelecomCarrierCompany, isHospitalityCompany, isRealEstateCompany, isHardwareCompany, isSoftwareCompany, classifySector } from "@/lib/sectors/profiles";
+import { isSectorSupported, unsupportedSectorPayload, getArchitectureForSector } from "@/lib/sectors/architectures";
+import { stmtNum } from "@/types/report";
 import { buildCompanyOntology } from "@/lib/company-ontology";
 import { scorePeerSimilarity, gatePeerSet } from "@/lib/peer-similarity";
-import { ModelLifecycle } from "@/lib/financial-kernel";
+import { ModelLifecycle, buildAuditGraph } from "@/lib/financial-kernel";
 import { assessMarketIntegrity } from "@/lib/financial-provenance";
+import { buildCanonicalFacts, sealCanonicalFacts, verifyCanonicalSeal } from "@/lib/canonical-facts";
+import { enforceAccountingIdentities } from "@/lib/accounting-identity-engine";
+import { buildCanonicalForecast } from "@/lib/canonical-forecast";
+import { propagateInvalid } from "@/lib/dependency-propagation";
+import { validateIndependently } from "@/lib/independent-validator";
+import { buildCanonicalReport } from "@/lib/canonical-report";
+import { reconcileAll } from "@/lib/source-reconciliation";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -38,6 +47,16 @@ export async function GET(request: NextRequest) {
         { error: `No financial data found for ${symbol}. This ticker may not have public financials.` },
         { status: 404 }
       );
+    }
+
+    // Step 1 — hard sector gate: sectors whose statement architecture (B–E) is
+    // not yet implemented return an explicit UNSUPPORTED_SECTOR status instead
+    // of a silently mis-modeled Architecture A report. Architecture A sectors
+    // pass through untouched. Gate flags live in src/lib/sectors/architectures.ts
+    // and flip per-sector only after ticker-verified implementation.
+    const gateSector = classifySector(companyProfile.sector, companyProfile.industry, companyProfile.description);
+    if (!isSectorSupported(gateSector.id)) {
+      return NextResponse.json(unsupportedSectorPayload(gateSector.id), { status: 501 });
     }
 
     // Fetch verified real-time ticker news strictly validated for the subject company
@@ -77,6 +96,25 @@ export async function GET(request: NextRequest) {
     const ratiosByYear = annualFinancials.map(f => computeRatios(f, cmp));
     const dupontByYear = annualFinancials.map(f => computeDuPont(f));
     lifecycle.advance("NORMALIZED", "statements parsed + ratios/DuPont computed");
+
+    // P0 #1 — Immutable Canonical Financial Fact Layer
+    const canonicalFacts = sealCanonicalFacts(buildCanonicalFacts({ profile: companyProfile, stockData, annualFinancials }));
+    const sealCheck = verifyCanonicalSeal(canonicalFacts);
+    if (!sealCheck.sealed || !sealCheck.hashOk) {
+      return NextResponse.json({ error: "Canonical fact seal violation — facts mutated after validation." }, { status: 500 });
+    }
+
+    // P0 #2 — Source reconciliation (PRIMARY vs SECONDARY). Currently single-source Yahoo as SECONDARY;
+    // when filings fetch is available, PRIMARY facts will populate here. Material diff = INVALID.
+    // We cross-check Yahoo timeseries against quote marketCap where both exist as a self-consistency proxy.
+    const reconciliation = reconcileAll([
+      { field: "revenue", primary: null, secondary: canonicalFacts.years.length > 0 ? { value: canonicalFacts.years[canonicalFacts.years.length-1].revenue.value, source: canonicalFacts.years[canonicalFacts.years.length-1].revenue.source, tier: "SECONDARY", fact: canonicalFacts.years[canonicalFacts.years.length-1].revenue } : null },
+      { field: "totalDebt", primary: null, secondary: canonicalFacts.years.length > 0 ? { value: canonicalFacts.years[canonicalFacts.years.length-1].totalDebt.value, source: canonicalFacts.years[canonicalFacts.years.length-1].totalDebt.source, tier: "SECONDARY", fact: canonicalFacts.years[canonicalFacts.years.length-1].totalDebt } : null },
+    ]);
+
+    // P0 #3 — Hard Accounting Identity Engine (every year)
+    const identityIssues = enforceAccountingIdentities(canonicalFacts);
+
     // Pre-model integrity screen (P0 #85 VALIDATED stage): share-base and
     // balance-sheet sanity before any valuation math runs.
     const preIntegrity = assessMarketIntegrity({ stockData, annualFinancials });
@@ -84,11 +122,12 @@ export async function GET(request: NextRequest) {
       "VALIDATED",
       preIntegrity.blocked
         ? `integrity BLOCKED: ${preIntegrity.issues.filter((i) => i.severity === "BLOCK").map((i) => i.code).join(",")}`
-        : "integrity screen passed"
+        : identityIssues.some(i=>i.severity==="FAIL") ? `identity FAIL: ${identityIssues.filter(i=>i.severity==="FAIL").map(i=>i.code).join(",")}` : "integrity screen passed"
     );
 
     // Dynamic Sector & Archetype-Calibrated Valuation (Residual Income for Financials / FCFF for non-financials)
     const archetypeProfile = classifyArchetype(companyProfile, stockData, annualFinancials);
+    const sectorIdForDrivers = (buildCompanyOntology(companyProfile, archetypeProfile as never).sectorId as string) || companyProfile.sector || "general";
     const valuationResult = selectAndComputeValuation({
       profile: companyProfile,
       stockData,
@@ -97,6 +136,30 @@ export async function GET(request: NextRequest) {
     });
     const dcf = valuationResult.dcf;
     const valuationCalibration = valuationResult.calibration;
+
+    // P0 #4 — Single Canonical Forecast Model (driver-native, sealed)
+    let canonicalForecast: ReturnType<typeof buildCanonicalForecast> | null = null;
+    try {
+      const latestRev = annualFinancials[annualFinancials.length-1]?.revenue || 0;
+      const baseGrowth = (dcf.assumptions?.revenueGrowthRates?.[0] as number) ?? 0.08;
+      const effMargin = (dcf.assumptions?.ebitMargins?.[0] as number) ?? 0.15;
+      const rawCapex = Math.abs(annualFinancials[annualFinancials.length-1]?.capitalExpenditures || 0) / Math.max(1, latestRev);
+      // stmtNum: depreciation exists on corporate rows and as RE depreciation on
+      // REIT rows; banks/insurers/fee firms carry none (0, never NaN).
+      const lastFin = annualFinancials[annualFinancials.length-1];
+      const rawDept = Math.abs(lastFin ? stmtNum(lastFin, "depreciation", stmtNum(lastFin, "depreciationAmortization")) : 0) / Math.max(1, latestRev);
+      canonicalForecast = buildCanonicalForecast({
+        sectorId: sectorIdForDrivers,
+        operatingArchetype: archetypeProfile.sector || "general",
+        baseRevenue: latestRev,
+        marginalTaxRate: 0.25,
+        wacc: (dcf.assumptions as any)?.wacc ?? 0.095,
+        netDebt: (dcf as any).netDebt ?? 0,
+        sharesOutstanding: (dcf as any).sharesOutstanding ?? stockData.sharesOutstanding ?? 1,
+        cagr: baseGrowth, winsorizedCagr: baseGrowth, winsorizedLive: baseGrowth, baseGrowth, hasLive: false, liveRevGrowth: baseGrowth, years: annualFinancials.length,
+        effectiveMargin: effMargin, rawAvgCapexPct: rawCapex, rawAvgDeptPct: rawDept,
+      });
+    } catch (e) { console.warn("Canonical forecast build failed:", e); }
 
     // Fetch peer data — select listed comparable peers matching geography and industry
     let peers: unknown[] = [];
@@ -379,6 +442,48 @@ export async function GET(request: NextRequest) {
       dcf,
       peers: peers as any[],
     });
+
+    // P0 #7 — Dependency-aware propagation (debt→netDebt→EV→equity→fairValue)
+    const depState = propagateInvalid({
+      netDebt: identityIssues.some(i=>i.code==="BS-IDENTITY"&&i.severity==="FAIL") ? { valid:false, confidence:"UNKNOWN", blockedBy:[] as never, reason:"BS identity FAIL" } : undefined,
+      tax: canonicalFacts.years.some(y=>y.incomeTaxExpense.value===null) ? { valid:true, confidence:"LOW", blockedBy:[], reason:"tax uncertain" } : undefined,
+    });
+
+    // P0 #8 — Independent recalculation (separate code path)
+    // Financial-institution path covers architectures B (bank/nbfc) and C
+    // (insurance): residual-income valuation, FCF≈CFO informational only.
+    const gateArch = getArchitectureForSector(gateSector.id).arch;
+    const isFinArch = gateArch === "B" || gateArch === "C";
+    const independentReport = validateIndependently({
+      facts: canonicalFacts,
+      isFinancialInstitution: isFinArch || (buildCompanyOntology(companyProfile, archetypeProfile as never).sectorId === "bank") || companyProfile.sector?.toLowerCase().includes("bank") || companyProfile.industry?.toLowerCase().includes("insurance") || false,
+      archetype: archetypeProfile.sector,
+      beta: stockData.beta as number | undefined,
+      country: companyProfile.country,
+      dcf: { enterpriseValue: (dcf as any).enterpriseValue, sumPvFcff: (dcf as any).sumPvFcff, pvTerminalValue: (dcf as any).pvTerminalValue, equityValue: (dcf as any).equityValue, netDebt: (dcf as any).netDebt, financeReceivablesOffset: (dcf as any).financeReceivablesOffset, intrinsicValue: (dcf as any).intrinsicValue, fairValuePerShare: (dcf as any).intrinsicValue, sharesOutstanding: (dcf as any).sharesOutstanding ?? stockData.sharesOutstanding ?? 1, currentMarketPrice: stockData.currentPrice, assumptions: dcf.assumptions as any },
+      ledger: { fairValue: (masterReportFacts as any).valuation?.fairValue ?? dcf.intrinsicValue, targetPrice: (masterReportFacts as any).valuation?.fairValue ?? dcf.intrinsicValue, currentPrice: stockData.currentPrice, enterpriseValue: (dcf as any).enterpriseValue, equityValue: (dcf as any).equityValue, netDebt: (dcf as any).netDebt, sharesOutstanding: (dcf as any).sharesOutstanding, wacc: (dcf.assumptions as any)?.wacc, rating: (masterReportFacts as any).rating ?? "HOLD" },
+    });
+
+    // P0 #10 — CanonicalReport (single approved object, sealed)
+    let canonicalReport: ReturnType<typeof buildCanonicalReport> | null = null;
+    try {
+      const auditGraph = canonicalForecast ? buildAuditGraph([]) : { modelVersion:"apex-financial-model-v1", nodes:[], edges:[] };
+      canonicalReport = buildCanonicalReport({
+        ticker: symbol,
+        companyName: companyProfile.name,
+        currency: canonicalFacts.currency,
+        asOf: canonicalFacts.asOf,
+        modelVersion: "apex-financial-model-v1",
+        facts: canonicalFacts,
+        forecast: canonicalForecast ?? { driverEquation:"not built", basis:{}, modelVersion:"apex-financial-model-v1", revenueGrowthRates:[], ebitMargins:[], terminalGrowthRate:0.04, avgCapexPct:0.04, avgDeptPct:0.035, avgNwcChangePct:0.02, projections:[], terminal:{fcffT:0,wacc:0.095,g:0.04,terminalValue:0,pvTerminalValue:0,capped:false,spreadOk:true}, wacc:0.095, netDebt:0, sharesOutstanding:1 },
+        valuation: { enterpriseValue: (dcf as any).enterpriseValue ?? 0, equityValue: (dcf as any).equityValue ?? 0, fairValuePerShare: (dcf as any).intrinsicValue ?? 0, netDebt: (dcf as any).netDebt ?? 0, wacc: (dcf.assumptions as any)?.wacc ?? 0.095, terminalGrowth: (dcf.assumptions as any)?.terminalGrowthRate ?? 0.04 },
+        market: { price: stockData.currentPrice, sharesBasic: canonicalFacts.market.sharesBasic.value, sharesDiluted: canonicalFacts.market.sharesDiluted.value, marketCap: stockData.marketCap },
+        ratios: Object.fromEntries(ratiosByYear.map(r=>[r.year, r.roe])),
+        auditGraph,
+        claims: [],
+      });
+    } catch (e) { console.warn("CanonicalReport build failed:", e); }
+
     lifecycle.advance("MODELED", `valuation ${valuationResult.selectedModel} + ledger + facts built`);
 
     return NextResponse.json({
@@ -396,6 +501,13 @@ export async function GET(request: NextRequest) {
       eventPriceMovements: buildEventPriceMovements(tickerNews, stockData, companyProfile, eventPriceLookup),
       masterReportFacts,
       calibration: valuationCalibration,
+      canonicalFacts,
+      canonicalForecast,
+      canonicalReport,
+      reconciliation,
+      identityIssues,
+      dependencyState: depState,
+      independentReport,
     });
   } catch (error) {
     console.error("Company data fetch error:", error);

@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import ProgressTracker from "@/components/ProgressTracker";
 import type { ReportData, GenerationState, AgentCheckpoint } from "@/types/report";
+import { stmtNum, isInsuranceStatement, isReitStatement, isAssetLightStatement, getStatementArchitecture } from "@/types/report";
 import { generatePEFirmAnalysis } from "@/lib/pe-analysis-engine";
 import { createAssumptionsLedger } from "@/lib/assumptions-ledger";
 import { canPublishReport, canonicalValuation } from "@/lib/canonical";
@@ -711,6 +712,12 @@ export default function ReportClient({ ticker }: Props) {
           const latest = annualFinancials[annualFinancials.length - 1];
           const sectorInfo = classifySector(profile.sector, profile.industry, profile.description);
           const isBankOrNbfc = sectorInfo.isFinancialInstitution;
+          // Statement-architecture routing for sector-native web surfaces (C/D/E get
+          // native labels/rows; A/B render exactly as before).
+          const stmtArch = getStatementArchitecture(latest);
+          const isInsurer = isInsuranceStatement(latest);
+          const isReit = isReitStatement(latest);
+          const isFeeCo = isAssetLightStatement(latest);
 
           const roeVal = latest.totalEquity > 0
             ? latest.netIncome / latest.totalEquity
@@ -908,19 +915,46 @@ export default function ReportClient({ ticker }: Props) {
                   <>
                     <div className={styles.statsGrid}>
                       <div className={styles.statCard}>
-                        <span className={styles.statLabel}>Revenue ({latest.year})</span>
-                        <span className={styles.statVal}>{fmtMoney(latest.revenue)}</span>
-                        <span className={styles.statSub}>{isBankOrNbfc ? "Total Net Revenue" : `Gross Margin: ${fmtPct(latest.grossMargin)}`}</span>
+                        <span className={styles.statLabel}>
+                          {isInsurer ? `Gross Written Premium (${latest.year})` : isReit ? `Rental Income (${latest.year})` : isFeeCo ? `Fee Revenue (${latest.year})` : `Revenue (${latest.year})`}
+                        </span>
+                        <span className={styles.statVal}>
+                          {isInsurer ? fmtMoney(latest.grossWrittenPremium) : isReit ? fmtMoney(latest.rentalIncome) : isFeeCo ? fmtMoney(latest.totalFeeRevenue) : fmtMoney(latest.revenue)}
+                        </span>
+                        <span className={styles.statSub}>
+                          {isInsurer ? `Net Earned Premium: ${fmtMoney(latest.netEarnedPremium)}`
+                            : isReit ? `NOI Margin: ${fmtPct(latest.noiMargin)}`
+                            : isFeeCo ? `Operating Margin: ${fmtPct(latest.operatingMargin)}`
+                            : isBankOrNbfc ? "Total Net Revenue" : `Gross Margin: ${fmtPct(stmtNum(latest, "grossMargin"))}`}
+                        </span>
                       </div>
                       <div className={styles.statCard}>
-                        <span className={styles.statLabel}>{isBankOrNbfc ? "Pre-Tax Income (PBT)" : "EBITDA"}</span>
-                        <span className={styles.statVal}>{isBankOrNbfc ? fmtMoney(latest.pretaxIncome || latest.operatingIncome) : fmtMoney(latest.ebitda)}</span>
-                        <span className={styles.statSub}>{isBankOrNbfc ? "Operating Profit Base" : `Margin: ${fmtPct(latest.ebitdaMargin)}`}</span>
+                        <span className={styles.statLabel}>
+                          {isInsurer ? "Underwriting Result" : isReit ? "Net Operating Income (NOI)" : isFeeCo ? "Operating Income" : isBankOrNbfc ? "Pre-Tax Income (PBT)" : "EBITDA"}
+                        </span>
+                        <span className={styles.statVal}>
+                          {isInsurer ? fmtMoney(latest.underwritingResult) : isReit ? fmtMoney(latest.netOperatingIncome) : isFeeCo ? fmtMoney(latest.operatingIncome) : isBankOrNbfc ? fmtMoney(latest.pretaxIncome || stmtNum(latest, "operatingIncome")) : fmtMoney(stmtNum(latest, "ebitda"))}
+                        </span>
+                        <span className={styles.statSub}>
+                          {isInsurer ? `Combined Ratio: ${(latest.combinedRatio * 100).toFixed(1)}%`
+                            : isReit ? `FFO/Share: ${fmtMoney(latest.ffoPerShare)}`
+                            : isFeeCo ? `Fee Margin: ${fmtPct(latest.operatingMargin)}`
+                            : isBankOrNbfc ? "Operating Profit Base" : `Margin: ${fmtPct(stmtNum(latest, "ebitdaMargin"))}`}
+                        </span>
                       </div>
                       <div className={styles.statCard}>
-                        <span className={styles.statLabel}>{isBankOrNbfc ? "Operating Profit" : "Operating Income (EBIT)"}</span>
-                        <span className={styles.statVal}>{fmtMoney(latest.operatingIncome)}</span>
-                        <span className={styles.statSub}>{isBankOrNbfc ? `Operating Margin: ${fmtPct(latest.ebitMargin)}` : `Margin: ${fmtPct(latest.ebitMargin)}`}</span>
+                        <span className={styles.statLabel}>
+                          {isInsurer ? "Investment Income on Float" : isReit ? "Funds From Operations (FFO)" : isFeeCo ? "AUM / Fee Base" : isBankOrNbfc ? "Operating Profit" : "Operating Income (EBIT)"}
+                        </span>
+                        <span className={styles.statVal}>
+                          {isInsurer ? fmtMoney(latest.investmentIncome) : isReit ? fmtMoney(latest.fundsFromOperations) : isFeeCo ? fmtMoney(latest.aumEnding > 0 ? latest.aumEnding : latest.totalFeeRevenue) : fmtMoney(stmtNum(latest, "operatingIncome"))}
+                        </span>
+                        <span className={styles.statSub}>
+                          {isInsurer ? `Float Yield: ${fmtPct(latest.float > 0 ? latest.investmentIncome / latest.float : 0)}`
+                            : isReit ? `AFFO Payout: ${fmtPct(latest.adjustedFundsFromOperations > 0 ? latest.dividendsPaid / latest.adjustedFundsFromOperations : 0)}`
+                            : isFeeCo ? (latest.aumEnding > 0 ? "Ending AUM" : "Fee Revenue (AUM undisclosed)")
+                            : isBankOrNbfc ? `Operating Margin: ${fmtPct(stmtNum(latest, "ebitMargin"))}` : `Margin: ${fmtPct(stmtNum(latest, "ebitMargin"))}`}
+                        </span>
                       </div>
                       <div className={styles.statCard}>
                         <span className={styles.statLabel}>Net Income (PAT)</span>
@@ -1966,33 +2000,134 @@ export default function ReportClient({ ticker }: Props) {
                         </thead>
                         <tbody>
                           <tr>
-                            <td className="row-header">Total Revenue</td>
+                            <td className="row-header">{stmtArch === "C" ? "Total Income (NEP + Investments)" : stmtArch === "D" ? "Total Rental Income" : stmtArch === "E" ? "Total Fee Revenue" : "Total Revenue"}</td>
                             {annualFinancials.map(f => <td key={f.year} className="align-right">{fmtMoney(f.revenue)}</td>)}
                           </tr>
+                          {stmtArch === "C" ? (<>
+                            <tr>
+                              <td className="row-header">Gross Written Premium</td>
+                              {annualFinancials.map(f => <td key={f.year} className="align-right">{fmtMoney(stmtNum(f, "grossWrittenPremium"))}</td>)}
+                            </tr>
+                            <tr>
+                              <td className="row-header">Net Earned Premium</td>
+                              {annualFinancials.map(f => <td key={f.year} className="align-right">{fmtMoney(stmtNum(f, "netEarnedPremium"))}</td>)}
+                            </tr>
+                            <tr>
+                              <td className="row-header">Claims Incurred</td>
+                              {annualFinancials.map(f => <td key={f.year} className="align-right">{fmtMoney(stmtNum(f, "claimsIncurred"))}</td>)}
+                            </tr>
+                            <tr>
+                              <td className="row-header">Underwriting Expenses</td>
+                              {annualFinancials.map(f => <td key={f.year} className="align-right">{fmtMoney(stmtNum(f, "underwritingExpenses"))}</td>)}
+                            </tr>
+                            <tr>
+                              <td className="row-header">Underwriting Result</td>
+                              {annualFinancials.map(f => <td key={f.year} className="align-right">{fmtMoney(stmtNum(f, "underwritingResult"))}</td>)}
+                            </tr>
+                            <tr>
+                              <td className="row-header">Combined Ratio %</td>
+                              {annualFinancials.map(f => <td key={f.year} className="align-right">{fmtPct(stmtNum(f, "combinedRatio"))}</td>)}
+                            </tr>
+                            <tr>
+                              <td className="row-header">Investment Income on Float</td>
+                              {annualFinancials.map(f => <td key={f.year} className="align-right">{fmtMoney(stmtNum(f, "investmentIncome"))}</td>)}
+                            </tr>
+                            <tr>
+                              <td className="row-header">Policyholder Float</td>
+                              {annualFinancials.map(f => <td key={f.year} className="align-right">{fmtMoney(stmtNum(f, "float"))}</td>)}
+                            </tr>
+                          </>) : stmtArch === "D" ? (<>
+                            <tr>
+                              <td className="row-header">Rental Income</td>
+                              {annualFinancials.map(f => <td key={f.year} className="align-right">{fmtMoney(stmtNum(f, "rentalIncome"))}</td>)}
+                            </tr>
+                            <tr>
+                              <td className="row-header">Property Operating Expenses</td>
+                              {annualFinancials.map(f => <td key={f.year} className="align-right">{fmtMoney(stmtNum(f, "propertyOperatingExpenses"))}</td>)}
+                            </tr>
+                            <tr>
+                              <td className="row-header">Net Operating Income (NOI)</td>
+                              {annualFinancials.map(f => <td key={f.year} className="align-right">{fmtMoney(stmtNum(f, "netOperatingIncome"))}</td>)}
+                            </tr>
+                            <tr>
+                              <td className="row-header">NOI Margin %</td>
+                              {annualFinancials.map(f => <td key={f.year} className="align-right">{fmtPct(stmtNum(f, "noiMargin"))}</td>)}
+                            </tr>
+                            <tr>
+                              <td className="row-header">Funds From Operations (FFO)</td>
+                              {annualFinancials.map(f => <td key={f.year} className="align-right">{fmtMoney(stmtNum(f, "fundsFromOperations"))}</td>)}
+                            </tr>
+                            <tr>
+                              <td className="row-header">Adjusted FFO (AFFO)</td>
+                              {annualFinancials.map(f => <td key={f.year} className="align-right">{fmtMoney(stmtNum(f, "adjustedFundsFromOperations"))}</td>)}
+                            </tr>
+                            <tr>
+                              <td className="row-header">FFO / Share</td>
+                              {annualFinancials.map(f => <td key={f.year} className="align-right">{sym}{stmtNum(f, "ffoPerShare").toFixed(2)}</td>)}
+                            </tr>
+                            <tr>
+                              <td className="row-header">AFFO / Share</td>
+                              {annualFinancials.map(f => <td key={f.year} className="align-right">{sym}{stmtNum(f, "affoPerShare").toFixed(2)}</td>)}
+                            </tr>
+                          </>) : stmtArch === "E" ? (<>
+                            <tr>
+                              <td className="row-header">Management / Advisory Fees</td>
+                              {annualFinancials.map(f => <td key={f.year} className="align-right">{fmtMoney(stmtNum(f, "managementFees"))}</td>)}
+                            </tr>
+                            <tr>
+                              <td className="row-header">Performance Fees</td>
+                              {annualFinancials.map(f => <td key={f.year} className="align-right">{fmtMoney(stmtNum(f, "performanceFees"))}</td>)}
+                            </tr>
+                            <tr>
+                              <td className="row-header">Technology / Platform Services</td>
+                              {annualFinancials.map(f => <td key={f.year} className="align-right">{fmtMoney(stmtNum(f, "technologyServicesRevenue"))}</td>)}
+                            </tr>
+                            <tr>
+                              <td className="row-header">Total Fee Revenue</td>
+                              {annualFinancials.map(f => <td key={f.year} className="align-right">{fmtMoney(stmtNum(f, "totalFeeRevenue"))}</td>)}
+                            </tr>
+                            <tr>
+                              <td className="row-header">Operating Expenses</td>
+                              {annualFinancials.map(f => <td key={f.year} className="align-right">{fmtMoney(stmtNum(f, "operatingExpenses"))}</td>)}
+                            </tr>
+                            <tr>
+                              <td className="row-header">Operating Income</td>
+                              {annualFinancials.map(f => <td key={f.year} className="align-right">{fmtMoney(stmtNum(f, "operatingIncome"))}</td>)}
+                            </tr>
+                            <tr>
+                              <td className="row-header">Operating Margin %</td>
+                              {annualFinancials.map(f => <td key={f.year} className="align-right">{fmtPct(stmtNum(f, "operatingMargin"))}</td>)}
+                            </tr>
+                            <tr>
+                              <td className="row-header">Revenue as % of AUM</td>
+                              {annualFinancials.map(f => <td key={f.year} className="align-right">{stmtNum(f, "aumEnding") > 0 ? fmtPct(stmtNum(f, "revenueAsPctOfAum", Number.NaN)) : "N/M"}</td>)}
+                            </tr>
+                          </>) : (<>
                           <tr>
                             <td className="row-header">Gross Profit</td>
-                            {annualFinancials.map(f => <td key={f.year} className="align-right">{fmtMoney(f.grossProfit)}</td>)}
+                            {annualFinancials.map(f => <td key={f.year} className="align-right">{fmtMoney(stmtNum(f, "grossProfit"))}</td>)}
                           </tr>
                           <tr>
                             <td className="row-header">Gross Margin %</td>
-                            {annualFinancials.map(f => <td key={f.year} className="align-right">{fmtPct(f.grossMargin)}</td>)}
+                            {annualFinancials.map(f => <td key={f.year} className="align-right">{fmtPct(stmtNum(f, "grossMargin"))}</td>)}
                           </tr>
                           <tr>
                             <td className="row-header">EBITDA</td>
-                            {annualFinancials.map(f => <td key={f.year} className="align-right">{fmtMoney(f.ebitda)}</td>)}
+                            {annualFinancials.map(f => <td key={f.year} className="align-right">{fmtMoney(stmtNum(f, "ebitda"))}</td>)}
                           </tr>
                           <tr>
                             <td className="row-header">EBITDA Margin %</td>
-                            {annualFinancials.map(f => <td key={f.year} className="align-right">{fmtPct(f.ebitdaMargin)}</td>)}
+                            {annualFinancials.map(f => <td key={f.year} className="align-right">{fmtPct(stmtNum(f, "ebitdaMargin"))}</td>)}
                           </tr>
                           <tr>
                             <td className="row-header">Operating Income (EBIT)</td>
-                            {annualFinancials.map(f => <td key={f.year} className="align-right">{fmtMoney(f.operatingIncome)}</td>)}
+                            {annualFinancials.map(f => <td key={f.year} className="align-right">{fmtMoney(stmtNum(f, "operatingIncome"))}</td>)}
                           </tr>
                           <tr>
                             <td className="row-header">Depreciation & Amortization</td>
-                            {annualFinancials.map(f => <td key={f.year} className="align-right">{fmtMoney(f.depreciation)}</td>)}
+                            {annualFinancials.map(f => <td key={f.year} className="align-right">{fmtMoney(stmtNum(f, "depreciation", stmtNum(f, "depreciationAmortization")))}</td>)}
                           </tr>
+                          </>)}
                           <tr>
                             <td className="row-header">Net Income (PAT)</td>
                             {annualFinancials.map(f => (
@@ -2013,7 +2148,7 @@ export default function ReportClient({ ticker }: Props) {
                             <td className="row-header">Goodwill &amp; Intangibles</td>
                             {annualFinancials.map(f => (
                               <td key={f.year} className="align-right">
-                                {fmtMoney((f.goodwill || 0) + (f.otherIntangibles || 0))}
+                                {fmtMoney(stmtNum(f, "goodwill") + stmtNum(f, "otherIntangibles"))}
                               </td>
                             ))}
                           </tr>
@@ -2025,7 +2160,7 @@ export default function ReportClient({ ticker }: Props) {
                             <td className="row-header">Tangible Book Value (Ex-Goodwill)</td>
                             {annualFinancials.map(f => (
                               <td key={f.year} className="align-right">
-                                {fmtMoney(f.tangibleBookValue ?? Math.max(0, (f.totalEquity || 0) - (f.goodwill || 0) - (f.otherIntangibles || 0)))}
+                                {fmtMoney(stmtNum(f, "tangibleBookValue", Number.NaN) >= 0 ? stmtNum(f, "tangibleBookValue") : Math.max(0, (f.totalEquity || 0) - stmtNum(f, "goodwill") - stmtNum(f, "otherIntangibles")))}
                               </td>
                             ))}
                           </tr>
@@ -2147,7 +2282,7 @@ export default function ReportClient({ ticker }: Props) {
                             <td className="align-right">{sym}{stockData.currentPrice.toFixed(2)}</td>
                             <td className="align-right">{fmtMoney(stockData.marketCap)}</td>
                             <td className="align-right">{stockData.pe > 0 ? fmtMult(stockData.pe) : "—"}</td>
-                            <td className="align-right">{stockData.enterpriseValue && latest.ebitda > 0 ? fmtMult(stockData.enterpriseValue / latest.ebitda) : "—"}</td>
+                            <td className="align-right">{stockData.enterpriseValue && stmtNum(latest, "ebitda") > 0 ? fmtMult(stockData.enterpriseValue / stmtNum(latest, "ebitda")) : "—"}</td>
                             <td className="align-right">{stockData.pb > 0 ? fmtMult(stockData.pb) : "—"}</td>
                             <td className="align-right">{roeStr}</td>
                             <td className="align-right">{fmtPct(latest.netMargin)}</td>

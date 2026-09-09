@@ -72,9 +72,123 @@ export interface StockData {
   targetMeanPrice: number;
 }
 
-export interface AnnualFinancials {
+/** Discriminant for sector-native vs corporate-native statements. */
+export type StatementType = "corporate" | "bank" | "nbfc" | "insurance" | "reit" | "asset-light";
+
+/**
+ * Statement architecture family (see src/lib/sectors/architectures.ts).
+ * A = standard corporate, B = depository (bank/nbfc), C = insurance,
+ * D = REIT, E = asset-light fee (asset management / ratings agency).
+ */
+export type StatementArchitecture = "A" | "B" | "C" | "D" | "E";
+
+/** Bank-native statement — every field corresponds to a real bank filing line. No corporate-shaped fictions. */
+export interface BankAnnualFinancials {
+  year: string; // e.g. "FY2025"
+  fiscalYearEnd: string;
+  statementType: "bank" | "nbfc";
+  isFinancialInstitution: true;
+  // Income Statement — bank-native
+  netInterestIncome: number; // NII = interestIncome - interestExpense (core spread)
+  nonInterestIncome: number; // fees, commission, treasury, other income
+  totalRevenue: number; // NII + nonInterestIncome (never grossProfit)
+  interestIncome: number;
+  interestExpense: number;
+  provisionForCreditLosses: number;
+  nonInterestExpenses: number; // operating expenses (staff, opex)
+  operatingIncome: number; // pre-provision operating profit (PPOP)
+  pretaxIncome: number;
+  incomeTaxExpense: number;
+  netIncome: number;
+  netMargin: number;
+  // Balance Sheet — bank-native
+  totalAssets: number;
+  totalLiabilities: number;
+  totalEquity: number;
+  cash: number;
+  shortTermInvestments: number;
+  loans: number; // net advances / loan book
+  deposits: number; // customer deposits
+  totalDebt: number; // borrowings (non-deposit)
+  shortTermDebt: number;
+  longTermDebt: number;
+  currentAssets: number;
+  currentLiabilities: number;
+  netWorkingCapital: number; // not used for banks but kept for compat (=CA-CL)
+  // Asset quality & capital — when disclosed
+  grossNPA?: number;
+  netNPA?: number;
+  grossNPAPct?: number;
+  netNPAPct?: number;
+  provisionCoverageRatio?: number;
+  capitalAdequacyRatio?: number;
+  tier1Ratio?: number;
+  netInterestMargin?: number;
+  costToIncome?: number;
+  casaRatio?: number;
+  // Cash Flow (bank cash flow is regulatory, not FCF)
+  operatingCashFlow: number;
+  capitalExpenditures: number;
+  freeCashFlow: number;
+  investingCashFlow: number;
+  financingCashFlow: number;
+  dividendsPaid: number;
+  changeInCash: number;
+  // Common breakdown
+  commonStock?: number;
+  retainedEarnings?: number;
+  goodwill?: number;
+  otherIntangibles?: number;
+  otherCurrentAssets?: number;
+  otherCurrentLiabilities?: number;
+  otherNonCurrentAssets?: number;
+  otherNonCurrentLiabilities?: number;
+  deferredTaxLiabilities?: number;
+  capitalLeaseObligations?: number;
+  netDebt?: number;
+  workingCapital?: number;
+  investedCapital?: number;
+  tangibleBookValue?: number;
+  ebit?: number;
+  issuanceOfDebt?: number;
+  repaymentOfDebt?: number;
+  issuanceOfCapitalStock?: number;
+  repurchases?: number;
+  stockBasedCompensation?: number;
+  deferredIncomeTax?: number;
+  changeInWorkingCapital?: number;
+  changeInReceivables?: number;
+  changeInInventory?: number;
+  changeInPayables?: number;
+  endCashPosition?: number;
+  estimatesUsed?: string[];
+  // Corporate-shaped fictions — zeroed for banks (never synthesized, always N/A = 0, validity NM)
+  revenue: number; // alias to totalRevenue for pipeline compat (always = totalRevenue)
+  costOfRevenue: number;
+  grossProfit: number;
+  grossMargin: number;
+  inventory: number;
+  netReceivables: number;
+  netFixedAssets: number;
+  accountsPayable: number;
+  ebitda: number;
+  ebitdaMargin: number;
+  ebitMargin: number;
+  researchDevelopment: number;
+  sellingGeneralAdministrative: number;
+  totalOperatingExpenses: number;
+  depreciation: number;
+  otherIncome: number;
+  eps: number;
+  dilutedEps: number;
+  sharesOutstanding: number;
+}
+
+export interface CorporateAnnualFinancials {
   year: string; // e.g. "FY2025"
   fiscalYearEnd: string; // e.g. "2025-03-31"
+  statementType?: "corporate";
+  isFinancialInstitution?: false;
   // Income Statement
   revenue: number;
   costOfRevenue: number;
@@ -152,6 +266,263 @@ export interface AnnualFinancials {
   endCashPosition?: number;
   /** Names of fields synthesized from fixed-margin fallbacks (not reported). Empty/undefined = fully reported. */
   estimatesUsed?: string[];
+  // Bank-only — undefined for corporates (never accessed without isBankStatement guard)
+  netInterestIncome?: number | undefined;
+  nonInterestIncome?: number | undefined;
+  totalRevenue?: number | undefined;
+  provisionForCreditLosses?: number | undefined;
+  nonInterestExpenses?: number | undefined;
+  loans?: number | undefined;
+  deposits?: number | undefined;
+  grossNPA?: number | undefined;
+  netNPA?: number | undefined;
+  capitalAdequacyRatio?: number | undefined;
+}
+
+/**
+ * Insurance-native statement — every field corresponds to a real insurer filing line.
+ * Genuinely separate from BankAnnualFinancials: insurers have no deposits, loans,
+ * CASA, NIM, or credit-cost provisioning as core assets — their economics are
+ * underwriting (premium → claims → expenses) plus float investment income.
+ * Corporate fictions (grossProfit, inventory, ebitda, receivables) and bank fields
+ * (deposits, loans, netInterestIncome) are ABSENT by design — accessing them is a
+ * compile error, not a silent zero.
+ */
+export interface InsuranceAnnualFinancials {
+  year: string; // e.g. "FY2025"
+  fiscalYearEnd: string;
+  statementType: "insurance";
+  isFinancialInstitution: true;
+  // Underwriting — insurer-native
+  grossWrittenPremium: number; // GWP
+  netEarnedPremium: number; // NEP (net of reinsurance ceded)
+  claimsIncurred: number; // net claims paid + reserve movement (losses)
+  underwritingExpenses: number; // acquisition (commission) + attributable operating expenses
+  underwritingResult: number; // NEP − claims − underwriting expenses
+  lossRatio: number; // claims / NEP
+  expenseRatio: number; // underwriting expenses / NEP (or GWP — disclosed per-year via estimatesUsed when proxied)
+  combinedRatio: number; // lossRatio + expenseRatio (<1 = underwriting profit)
+  // Investments on float — insurer-native
+  investmentIncome: number; // yield on float (interest, dividends, realized gains attributable)
+  float: number; // investable policyholder funds (reserves + payables − receivables)
+  policyholderLiabilities: number; // outstanding claims + IBNR + unearned premium reserves
+  // Bottom line & capital
+  pretaxIncome: number;
+  incomeTaxExpense: number;
+  netIncome: number;
+  netMargin: number; // netIncome / (netEarnedPremium + investmentIncome)
+  totalAssets: number;
+  totalLiabilities: number;
+  totalEquity: number; // (embedded value proxy when EV undisclosed — never labeled EV)
+  embeddedValue?: number; // disclosed EV for life insurers, when available
+  solvencyRatio?: number; // disclosed solvency margin, when available
+  cash: number;
+  totalDebt: number; // non-policyholder borrowings (sub-debt etc.)
+  currentAssets: number;
+  currentLiabilities: number;
+  netWorkingCapital: number; // compat (=CA−CL); not an insurer KPI
+  // Cash flow (regulatory presentation, not corporate FCF)
+  operatingCashFlow: number;
+  capitalExpenditures: number;
+  freeCashFlow: number;
+  investingCashFlow: number;
+  financingCashFlow: number;
+  dividendsPaid: number;
+  changeInCash: number;
+  eps: number;
+  dilutedEps: number;
+  sharesOutstanding: number;
+  /** Names of fields synthesized from fixed-ratio fallbacks (not reported). Empty/undefined = fully reported. */
+  estimatesUsed?: string[];
+  /** Pipeline-compat alias (= netEarnedPremium + investmentIncome). Corporate/bank code reads revenue; insurer code reads the native fields. */
+  revenue: number;
+}
+
+/**
+ * REIT-native statement — every field corresponds to a real REIT filing line.
+ * REIT economics are rental annuity + occupancy + cap-rate NAV, not unit sales:
+ * FFO/AFFO replace EBITDA/FCF, NOI replaces gross profit, occupancy/WALE/cap-rate
+ * replace inventory/DSO/working-capital. Corporate fictions (grossProfit,
+ * costOfRevenue, inventory, ebitda, receivables) are ABSENT by design.
+ * Applies to equity REITs only — real-estate developers selling units stay on
+ * CorporateAnnualFinancials (Architecture A); see isReitCompany classification.
+ */
+export interface ReitAnnualFinancials {
+  year: string; // e.g. "FY2025"
+  fiscalYearEnd: string;
+  statementType: "reit";
+  isFinancialInstitution?: false;
+  // Property operations — REIT-native
+  rentalIncome: number; // base rent + escalations + recoveries
+  otherPropertyIncome: number; // parking, services, other operating income
+  propertyOperatingExpenses: number; // maintenance, taxes, utilities, management attributable to properties
+  netOperatingIncome: number; // NOI = rental + other − property opex
+  noiMargin: number; // NOI / (rental + other)
+  generalAdministrative: number; // corporate G&A (non-property)
+  interestExpense: number;
+  depreciationAmortization: number; // real-estate depreciation (added back for FFO, never an economic cost signal)
+  gainsOnDispositions: number; // property sale gains (excluded from FFO)
+  pretaxIncome: number;
+  incomeTaxExpense: number;
+  netIncome: number;
+  netMargin: number; // netIncome / (rentalIncome + otherPropertyIncome)
+  // Funds from operations — REIT-native (NAREIT-style: NI + RE depreciation − gains)
+  fundsFromOperations: number; // FFO
+  maintenanceCapex: number; // recurring capex / tenant improvements reserve
+  leasingCommissions: number; // straight-line rent / leasing commission adjustments
+  adjustedFundsFromOperations: number; // AFFO = FFO − maint. capex − leasing adjustments
+  ffoPerShare: number;
+  affoPerShare: number;
+  // Portfolio & valuation — REIT-native
+  occupancyPct?: number; // leased-area occupancy (0–1)
+  sameStoreNoiGrowth?: number; // like-for-like NOI growth
+  waleYears?: number; // weighted average lease expiry
+  leasableAreaMsf?: number; // leasable area, million sq ft
+  netAssetValue?: number; // disclosed NAV, when available
+  navPerShare?: number;
+  capRate?: number; // applied/indicative cap rate, when disclosed
+  // Balance sheet — REIT-native leverage is debt/EBITDA-on-NOI-basis, not corporate WC ratios
+  totalAssets: number;
+  investmentPropertyValue: number; // investment properties at carrying/fair value
+  totalLiabilities: number;
+  totalEquity: number;
+  totalDebt: number;
+  cash: number;
+  currentAssets: number;
+  currentLiabilities: number;
+  netWorkingCapital: number; // compat (=CA−CL); not a REIT KPI
+  // Cash flow
+  operatingCashFlow: number;
+  capitalExpenditures: number;
+  freeCashFlow: number;
+  investingCashFlow: number;
+  financingCashFlow: number;
+  dividendsPaid: number; // distributions to unitholders/shareholders
+  changeInCash: number;
+  eps: number;
+  dilutedEps: number;
+  sharesOutstanding: number;
+  /** Names of fields synthesized from fixed-ratio fallbacks (not reported). Empty/undefined = fully reported. */
+  estimatesUsed?: string[];
+  /** Pipeline-compat alias (= rentalIncome + otherPropertyIncome). REIT code reads the native fields. */
+  revenue: number;
+}
+
+/**
+ * Asset-light fee-native statement — covers asset/wealth managers AND credit
+ * rating agencies (economically similar: fee-based, asset-light, revenue driven
+ * by AUM or subscription/data fees rather than a balance-sheet spread).
+ * Revenue as % of AUM and operating margin ARE meaningful here (unlike banks);
+ * inventory, loans, deposits, combined ratio, NIM are ABSENT by design.
+ */
+export interface AssetLightFeeAnnualFinancials {
+  year: string; // e.g. "FY2025"
+  fiscalYearEnd: string;
+  statementType: "asset-light";
+  isFinancialInstitution?: false;
+  // Fee engine — asset-light-native
+  aumBeginning: number; // beginning-period AUM (ratings agencies: rated debt volume proxy, 0 when undisclosed)
+  aumEnding: number; // ending-period AUM
+  netFlows: number; // net inflows (+)/outflows (−); 0 when undisclosed
+  marketAppreciation: number; // AUM change from market moves (derived, 0 when undisclosed)
+  managementFeeRateBps?: number; // base fee realization (bps of avg AUM)
+  managementFees: number; // base/advisory fees (ratings: rating-fee revenue)
+  performanceFees: number; // performance/incentive fees (ratings: 0)
+  technologyServicesRevenue: number; // platform/analytics/subscription revenue (e.g. Aladdin; ratings: research & analytics)
+  totalFeeRevenue: number; // management + performance + technology services
+  revenueAsPctOfAum?: number; // totalFeeRevenue / avg AUM (the core unit-economics KPI)
+  // Profitability — operating margin IS economically meaningful here
+  operatingExpenses: number;
+  operatingIncome: number;
+  operatingMargin: number;
+  pretaxIncome: number;
+  incomeTaxExpense: number;
+  netIncome: number;
+  netMargin: number;
+  // Balance sheet — minimal capex / working-capital relevance, but real fields
+  totalAssets: number;
+  totalLiabilities: number;
+  totalEquity: number;
+  cash: number;
+  totalDebt: number;
+  currentAssets: number;
+  currentLiabilities: number;
+  netWorkingCapital: number; // compat (=CA−CL)
+  // Cash flow — FCF conversion IS a KPI here (unlike banks)
+  operatingCashFlow: number;
+  capitalExpenditures: number;
+  freeCashFlow: number;
+  investingCashFlow: number;
+  financingCashFlow: number;
+  dividendsPaid: number;
+  changeInCash: number;
+  eps: number;
+  dilutedEps: number;
+  sharesOutstanding: number;
+  /** Names of fields synthesized from fixed-ratio fallbacks (not reported). Empty/undefined = fully reported. */
+  estimatesUsed?: string[];
+  /** Pipeline-compat alias (= totalFeeRevenue). Fee-native code reads the native fields. */
+  revenue: number;
+}
+
+/** Union — pipeline must branch on statementType / architecture guards. */
+export type AnnualFinancials =
+  | CorporateAnnualFinancials
+  | BankAnnualFinancials
+  | InsuranceAnnualFinancials
+  | ReitAnnualFinancials
+  | AssetLightFeeAnnualFinancials;
+
+/** Type guard — true means bank/NBFC-native shape (loan-book/spread economics). Insurance has its own shape. */
+export function isBankStatement(f: AnnualFinancials): f is BankAnnualFinancials {
+  return (f as BankAnnualFinancials).statementType === "bank" || (f as BankAnnualFinancials).statementType === "nbfc";
+}
+
+/** Type guard — true means insurer-native shape (underwriting + float economics). Never touch deposits/loans/NIM. */
+export function isInsuranceStatement(f: AnnualFinancials): f is InsuranceAnnualFinancials {
+  return (f as InsuranceAnnualFinancials).statementType === "insurance";
+}
+
+/** Type guard — true means REIT-native shape (NOI/FFO/AFFO/NAV economics). Never touch grossProfit/inventory/EBITDA. */
+export function isReitStatement(f: AnnualFinancials): f is ReitAnnualFinancials {
+  return (f as ReitAnnualFinancials).statementType === "reit";
+}
+
+/** Type guard — true means asset-light fee shape (AUM/fee-rate economics). Never touch loans/deposits/combined-ratio. */
+export function isAssetLightStatement(f: AnnualFinancials): f is AssetLightFeeAnnualFinancials {
+  return (f as AssetLightFeeAnnualFinancials).statementType === "asset-light";
+}
+
+/** Type guard — true means standard corporate shape (Architecture A). */
+export function isCorporateStatement(f: AnnualFinancials): f is CorporateAnnualFinancials {
+  const st = (f as unknown as Record<string, unknown>).statementType;
+  return st === undefined || st === "corporate";
+}
+
+/**
+ * Compat numeric reader for legacy Architecture-A display paths (narrative
+ * prompts, peer tables, QA bridges) that predate multi-archetype statements.
+ * Returns the field when the row carries it (corporate reported, bank zeroed
+ * N/A), else `fallback` (default 0) — identical runtime to the old single-shape
+ * pipeline. New sector-native surfaces (PDF statement pages, ratio engines, QA
+ * identities) MUST branch on the architecture guards instead of using this.
+ */
+export function stmtNum(f: AnnualFinancials | undefined | null, key: string, fallback = 0): number {
+  if (!f) return fallback;
+  const v = (f as unknown as Record<string, unknown>)[key];
+  return typeof v === "number" && Number.isFinite(v) ? v : fallback;
+}
+
+/**
+ * Architecture family for a statement row. Single routing authority for
+ * ratio engines, drivers, PDF sections, and QA identities.
+ */
+export function getStatementArchitecture(f: AnnualFinancials): StatementArchitecture {
+  if (isInsuranceStatement(f)) return "C";
+  if (isReitStatement(f)) return "D";
+  if (isAssetLightStatement(f)) return "E";
+  if (isBankStatement(f)) return "B";
+  return "A";
 }
 
 export interface QuarterlyFinancials {
