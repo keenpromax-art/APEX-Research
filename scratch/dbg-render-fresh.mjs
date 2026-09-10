@@ -2,7 +2,8 @@ import React from "react";
 import { pdf } from "@react-pdf/renderer";
 import fs from "fs";
 
-const companyData = JSON.parse(fs.readFileSync("C:\\Users\\x1-ca\\AppData\\Local\\Temp\\opencode\\reliance-fresh.json", "utf8"));
+const infile = process.argv[3] || "C:\\Users\\x1-ca\\AppData\\Local\\Temp\\opencode\\reliance-fresh.json";
+const companyData = JSON.parse(fs.readFileSync(infile, "utf8"));
 const { default: ReportDocument } = await import("../src/components/PDFDocument/index.tsx");
 const dcf = companyData.dcf;
 const reportData = {

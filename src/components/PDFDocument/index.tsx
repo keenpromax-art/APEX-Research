@@ -5483,7 +5483,7 @@ const getCuratedPeers = (data: ReportData) => {
   return peers.filter(p => p.pe != null || p.pb != null || p.evToEbitda != null || p.grossMargin != null || p.operatingMargin != null);
 };
 
-const ComparableCompanyAnalysisPage1 = ({ data }: { data: ReportData }) => {
+const ComparableCompanyAnalysisPage1 = ({ data, concise = true }: { data: ReportData; concise?: boolean }) => {
   const ledger = data.assumptionsLedger;
   const peers = getCuratedPeers(data);
   const subjectTicker = data.profile.ticker;
@@ -5605,8 +5605,8 @@ const ComparableCompanyAnalysisPage1 = ({ data }: { data: ReportData }) => {
               </Text>
             );
           })()}
-          <Text style={[S.compactCellBold, { width: "16%", textAlign: "right" }]}>{data.annualFinancials[data.annualFinancials.length - 1]?.freeCashFlow && data.annualFinancials[data.annualFinancials.length - 1]!.freeCashFlow > 0 ? `${fmtNum(data.stockData.marketCap / data.annualFinancials[data.annualFinancials.length - 1]!.freeCashFlow, 1)}x` : "N/A"}</Text>
-          <Text style={[S.compactCellBold, { width: "16%", textAlign: "right" }]}>{data.annualFinancials[data.annualFinancials.length - 1]?.revenue ? `${fmtNum(data.stockData.marketCap / data.annualFinancials[data.annualFinancials.length - 1]!.revenue, 1)}x` : "N/A"}</Text>
+          <Text style={[S.compactCellBold, { width: "16%", textAlign: "right" }]}>{data.annualFinancials[data.annualFinancials.length - 1]?.freeCashFlow && data.annualFinancials[data.annualFinancials.length - 1]!.freeCashFlow > 0 && data.stockData.marketCap > 0 ? `${fmtNum(data.stockData.marketCap / data.annualFinancials[data.annualFinancials.length - 1]!.freeCashFlow, 1)}x` : "N/A"}</Text>
+          <Text style={[S.compactCellBold, { width: "16%", textAlign: "right" }]}>{data.annualFinancials[data.annualFinancials.length - 1]?.revenue && data.stockData.marketCap > 0 ? `${fmtNum(data.stockData.marketCap / data.annualFinancials[data.annualFinancials.length - 1]!.revenue, 1)}x` : "N/A"}</Text>
         </View>
       </View>
 
@@ -5753,7 +5753,11 @@ const ComparableCompanyAnalysisPage1 = ({ data }: { data: ReportData }) => {
         N/A = not disclosed (never estimated). Peer multiples print only when directly reported; derived ladders are prohibited.
       </Text>
 
-      {/* Dense 2-Column Buy-Side Relative Valuation Synthesis Box */}
+      {/* Dense 2-Column Buy-Side Relative Valuation Synthesis Box (full mode
+          only: in concise mode the four multiple tables plus the N/A footnote
+          carry the verdict, and this boilerplate both spills the page and can
+          contradict the rating — e.g. "attractive multiple" under a SELL) */}
+      {!concise && (
       <View style={{ padding: 5, backgroundColor: COLORS.offWhite, borderWidth: 0.5, borderColor: COLORS.hairlineLight }}>
         <Text style={{ fontSize: 6.8, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 3 }}>
           Relative Valuation &amp; Peer Multiple Synthesis
@@ -5891,6 +5895,7 @@ const ComparableCompanyAnalysisPage1 = ({ data }: { data: ReportData }) => {
           })()}
         </View>
       </View>
+      )}
 
       <PageFooter companyName={data.profile.name} />
     </Page>
@@ -7531,7 +7536,7 @@ export const ReportDocument = ({ data, concise = true }: { data: ReportData; con
     <CashFlowDetailedPage data={data} />
 
     {/* Page 8/16: Comparable Company Analysis (Valuation, Returns & Growth) */}
-    <ComparableCompanyAnalysisPage1 data={data} />
+    <ComparableCompanyAnalysisPage1 data={data} concise={concise} />
 
     {!concise && (
       <>

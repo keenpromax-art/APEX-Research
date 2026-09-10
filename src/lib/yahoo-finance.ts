@@ -939,7 +939,9 @@ export async function fetchPeerQuotes(symbols: string[]): Promise<Record<string,
   }
 
   // Enrich each peer with full fundamental metrics (EV/EBITDA, EV/Sales, ROE, margins, leverage, growth, yield)
-  const peerModules = "defaultKeyStatistics,financialData,summaryDetail";
+  // assetProfile included: without sector/industry the similarity gate sees
+  // "no scored peers" and wipes the whole set (peers: [] despite good quotes).
+  const peerModules = "defaultKeyStatistics,financialData,summaryDetail,assetProfile";
   const enriched = await Promise.all(
     symbols.map(async (sym) => {
       const baseQuote =
@@ -968,6 +970,7 @@ export async function fetchPeerQuotes(symbols: string[]): Promise<Record<string,
           const ks = resObj.defaultKeyStatistics || {};
           const fd = resObj.financialData || {};
           const sd = resObj.summaryDetail || {};
+          const ap = resObj.assetProfile || {};
 
           const safeVal = (v: any): number | null => {
             if (v === null || v === undefined) return null;
@@ -1022,6 +1025,10 @@ export async function fetchPeerQuotes(symbols: string[]): Promise<Record<string,
             marketCap: safeVal(sd.marketCap) ?? safeVal(baseQuote.marketCap),
             regularMarketPrice: safeVal(sd.regularMarketPrice) ?? safeVal(baseQuote.regularMarketPrice),
             beta: peerBeta,
+            // Identity for the similarity gate (quote endpoint omits these).
+            sector: (ap.sector as string) || (baseQuote.sector as string) || null,
+            industry: (ap.industry as string) || (baseQuote.industry as string) || null,
+            currency: (ap.currency as string) || (baseQuote.currency as string) || null,
           };
         }
       } catch {
