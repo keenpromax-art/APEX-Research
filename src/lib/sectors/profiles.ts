@@ -731,6 +731,7 @@ export function isTelecomCarrierCompany(
     industryLower.includes("oil") || industryLower.includes("gas") || industryLower.includes("energy") ||
     industryLower.includes("refin") || industryLower.includes("petro") || industryLower.includes("retail") ||
     industryLower.includes("bank") || industryLower.includes("pharma") || industryLower.includes("software") ||
+    industryLower.includes("auto") || // auto-parts makers describe "wireless chargers"/telematics as product features (Uno Minda) — not carriers
     industryLower.includes("technology services");
   return !clearlyOther;
 }
@@ -860,11 +861,16 @@ export function classifySector(
   const sectorLower = `${sector || ""}`.toLowerCase();
   const industryLower = `${industry || ""}`.toLowerCase();
 
-  // 1. NBFC & Microfinance
+  // 1. NBFC & Microfinance (industry-anchored; runs before the internet-platform
+  // check so lender descriptions mentioning apps never misroute, e.g. Muthoot).
+  // "Credit Services" is Yahoo's lender category (Shriram/Chola/Muthoot/CreditAccess/
+  // IIFL/IREDA/Affirm) — categorically distinct from "Credit Ratings" (agencies),
+  // exchanges, and brokers, none of which contain this substring.
   if (
     combined.includes("microfinance") ||
     combined.includes("nbfc") ||
     industryLower.includes("consumer finance") ||
+    industryLower.includes("credit services") ||
     combined.includes("rural lending") ||
     combined.includes("spandana") ||
     combined.includes("housing finance")
@@ -872,14 +878,35 @@ export function classifySector(
     return NBFC_PROFILE;
   }
 
+  // 1b. Financial-sector holding companies & conglomerates (e.g. Bajaj Finserv):
+  // holding structures describe operating subsidiaries across sectors (lending,
+  // insurance lifecos, manufacturing) but underwrite nothing themselves. They are
+  // neither lenders (no loan book of their own) nor insurers (no policyholder
+  // liabilities) — route GENERAL (corporate statements + FCFF) instead of inheriting
+  // a subsidiary's sector via description contamination ("industrial house" heritage,
+  // insurer subsidiary names). Operating conglomerates in industrial sectors
+  // (Siemens/3M/Honeywell) are unaffected — this requires a financial sector.
+  if (
+    (sectorLower.includes("financial") || sectorLower.includes("bank")) &&
+    (industryLower.includes("conglomerate") || industryLower.includes("holding"))
+  ) {
+    return GENERAL_PROFILE;
+  }
+
   // 2. Insurance — require industry/sector to be insurance (description mentions like "serves insurance" are client verticals, not own industry).
   // Subsidiary-name triggers (SBI Life, HDFC Life, ...) MUST NOT fire for banks:
   // universal banks describe insurance subsidiaries, but their industry is banking.
   // A genuine insurer never carries a banking industry label.
+  // Holding companies / conglomerates (e.g. Bajaj Finserv) describe insurance
+  // SUBSIDIARIES but are not underwriters — their industry is never insurance
+  // itself, so conglomerate/holding industries are excluded from the subsidiary
+  // triggers (genuine insurers never carry those industries either).
   if (
     industryLower.includes("insurance") ||
     sectorLower.includes("insurance") ||
-    (!industryLower.includes("bank") && (
+    (!industryLower.includes("bank") &&
+     !industryLower.includes("conglomerate") &&
+     !industryLower.includes("holding") && (
       combined.includes("life assurance") ||
       combined.includes("general insurance") ||
       combined.includes("reinsurance") ||

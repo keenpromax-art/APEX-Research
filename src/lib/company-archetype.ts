@@ -70,8 +70,12 @@ export function classifyArchetype(
   const text = `${ticker} ${name} ${s} ${ind} ${desc}`;
 
   // ── 1. GICS Sector Classification ──────────────────────────────────────
+  // Precedence mirrors classifySector (#1–#5 financial first): lenders, raters,
+  // managers, banks, and holdings resolve BEFORE platform/telecom keyword checks.
+  // Otherwise lender app language / carrier-mentioning descriptions misroute
+  // (Muthoot/UNOMINDA precedents) and disagree with the sector classifier —
+  // a guaranteed QA block either way.
   let sector: GICSSector = "general_industrial";
-
   // Internet platform / social / digital advertising MUST be evaluated before
   // telecom: "Communication Services" covers both carriers AND platforms, and
   // platform descriptions contain "consumer hardware" (Meta Reality Labs).
@@ -83,15 +87,63 @@ export function classifyArchetype(
     profile.name
   );
 
+  // Company-name triggers use word boundaries: bare substring matching false-positives
+  // on ordinary vocabulary (e.g. "uber" inside "Kubernetes" routed a server maker to
+  // food delivery). Multi-word concept phrases keep includes() (spaces prevent this).
+  const gigNameHit = /\b(swiggy|zomato|doordash|uber|instamart|blinkit)\b/.test(text);
   if (
-    text.includes("swiggy") ||
-    text.includes("zomato") ||
-    text.includes("doordash") ||
-    text.includes("uber") ||
+    ind.includes("financial data") ||
+    ind.includes("rating") ||
+    ind.includes("analytics") ||
+    ind.includes("exchange") ||
+    name.includes("crisil") ||
+    name.includes("icra") ||
+    name.includes("care") ||
+    name.includes("moody") ||
+    name.includes("s&p")
+  ) {
+    sector = "financial_data_ratings";
+  } else if (
+    text.includes("microfinance") ||
+    text.includes("nbfc") ||
+    text.includes("spandana") ||
+    text.includes("rural lending") ||
+    text.includes("housing finance") ||
+    ind.includes("consumer finance") ||
+    ind.includes("credit services")
+  ) {
+    // "Credit Services" is Yahoo's lender category (Shriram/Chola/Muthoot/CreditAccess/
+    // IIFL/IREDA) — parity with classifySector, which also checks NBFC first.
+    sector = "nbfc";
+  } else if (
+    ind.includes("asset management") ||
+    ind.includes("wealth management") ||
+    ind.includes("investment management") ||
+    name.includes("blackrock") ||
+    text.includes("blackrock amc") ||
+    text.includes("hdfc amc")
+  ) {
+    sector = "asset_management";
+  } else if (
+    (s.includes("financial") || s.includes("bank")) &&
+    (ind.includes("conglomerate") || ind.includes("holding"))
+  ) {
+    // Financial-sector holdings (Bajaj Finserv precedent): underwrite nothing —
+    // general industrial, never a subsidiary's sector.
+    sector = "general_industrial";
+  } else if (
+    s.includes("financial") ||
+    ind.includes("bank") ||
+    ind.includes("insurance") ||
+    ind.includes("lending")
+  ) {
+    sector = "banking_financials";
+    // (gig/platform/telecom continue the financial-first chain; their shared
+    // predicates are declared above next to the sector init.)
+  } else if (
+    gigNameHit ||
     text.includes("food delivery") ||
     text.includes("quick commerce") ||
-    text.includes("instamart") ||
-    text.includes("blinkit") ||
     text.includes("dark store") ||
     text.includes("hyperlocal") ||
     text.includes("ride hailing") ||
@@ -113,51 +165,19 @@ export function classifyArchetype(
     // connectivity, e.g. Apple). NOTE: bare sector `includes("communication")` is
     // intentionally NOT used — Communication Services includes internet platforms.
     sector = "telecom";
-  } else if (
-    ind.includes("financial data") ||
-    ind.includes("rating") ||
-    ind.includes("analytics") ||
-    ind.includes("exchange") ||
-    name.includes("crisil") ||
-    name.includes("icra") ||
-    name.includes("care") ||
-    name.includes("moody") ||
-    name.includes("s&p")
-  ) {
-    sector = "financial_data_ratings";
-  } else if (
-    text.includes("microfinance") ||
-    text.includes("nbfc") ||
-    text.includes("spandana") ||
-    text.includes("rural lending") ||
-    text.includes("housing finance") ||
-    ind.includes("consumer finance")
-  ) {
-    sector = "nbfc";
-  } else if (
-    ind.includes("asset management") ||
-    ind.includes("wealth management") ||
-    ind.includes("investment management") ||
-    name.includes("blackrock") ||
-    text.includes("blackrock amc") ||
-    text.includes("hdfc amc")
-  ) {
-    sector = "asset_management";
-  } else if (
-    s.includes("financial") ||
-    ind.includes("bank") ||
-    ind.includes("insurance") ||
-    ind.includes("lending")
-  ) {
-    sector = "banking_financials";
+  // Financial branches live at the TOP of this chain (financial-first precedence);
+  // their duplicate lower copies were removed as unreachable dead code.
   } else if (
     s.includes("health") ||
     ind.includes("pharma") ||
     ind.includes("biotech") ||
-    ind.includes("drug") ||
-    desc.includes("pharmaceutical") ||
-    desc.includes("formulation")
+    ind.includes("drug")
   ) {
+    // Industry/sector-gated (parity with classifySector §5): description words like
+    // "pharmaceuticals"/"formulations" are CUSTOMER verticals or product-form words
+    // (IGL serves pharma customers; agrochemical makers sell "formulations") — never
+    // own-industry evidence. Genuine pharma always carries Healthcare sector or a
+    // pharma/biotech/drug industry label.
     sector = "pharma_healthcare";
   } else if (
     isHardwareCompany(profile.sector, profile.industry, profile.description, profile.name) ||
