@@ -214,6 +214,44 @@ export const pdfStyles = StyleSheet.create({
     color: COLORS.slateDark,
     letterSpacing: 0.2,
   },
+  // ── Editorial System (light-editorial interior: serif headlines, single
+  // red accent; cover is intentionally untouched — same look and feel) ──
+  serifTitle: {
+    fontSize: 12.5,
+    fontFamily: "Times-Bold",
+    color: COLORS.slateDark,
+    letterSpacing: 0.1,
+  },
+  serifHeadline: {
+    fontSize: 13.5,
+    fontFamily: "Times-Bold",
+    color: COLORS.slateDark,
+    lineHeight: 1.25,
+    marginBottom: 6,
+    paddingBottom: 4,
+    borderBottomWidth: 0.5,
+    borderBottomColor: COLORS.hairlineLight,
+  },
+  pullQuoteBox: {
+    borderLeftWidth: 2.5,
+    borderLeftColor: COLORS.primaryRed,
+    paddingLeft: 8,
+    paddingVertical: 2,
+    marginVertical: 5,
+  },
+  pullQuoteText: {
+    fontSize: 9.5,
+    fontFamily: "Times-Italic",
+    color: COLORS.slateDark,
+    lineHeight: 1.4,
+  },
+  pullQuoteAttr: {
+    fontSize: 6.5,
+    fontFamily: "Helvetica-Bold",
+    color: COLORS.textMuted,
+    marginTop: 2,
+    letterSpacing: 0.4,
+  },
   subsectionTitle: {
     fontSize: FONT_SIZES.subsectionTitle,
     fontFamily: "Helvetica-Bold",

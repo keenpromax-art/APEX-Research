@@ -366,6 +366,15 @@ const ProvenanceTag = ({
   );
 };
 
+// Editorial pull quote — serif voice with the single red accent bar. Replaces a
+// same-height prose summary (never added on top) so pagination is unaffected.
+const PullQuote = ({ quote, attr }: { quote: string; attr?: string }) => (
+  <View style={S.pullQuoteBox}>
+    <Text style={S.pullQuoteText}>{quote}</Text>
+    {attr ? <Text style={S.pullQuoteAttr}>{attr}</Text> : null}
+  </View>
+);
+
 const InstitutionalKPIStrip = ({ data }: { data: ReportData }) => {
   const kpis = getInstitutionalKPIs(data);
   const cols = [
@@ -471,7 +480,7 @@ const InstitutionalMasthead = ({ data, sectionTitle }: { data: ReportData; secti
             marginBottom: 6,
           }}
         >
-          <Text style={{ fontSize: 11, fontFamily: "Helvetica-Bold", color: COLORS.slateDark }}>
+          <Text style={S.serifTitle}>
             {sectionTitle}
           </Text>
         </View>
@@ -1812,9 +1821,10 @@ const FundamentalAnalysisPage = ({ data }: { data: ReportData }) => {
             Valuation, Growth and Profitability <Text style={{ fontSize: 6.8, color: COLORS.textMuted, fontFamily: "Helvetica" }}>{genDate}</Text>
           </Text>
 
-          <Text style={S.bodyText}>
-            Our fair value estimate for {data.profile.name} is {sym}{fmtNum(fv, 2)} per share, which implies a forward price/earnings multiple of {fwdPE} times and an enterprise value to EBITDA multiple of {evEbitdaLatest} times. At current market trading levels of {sym}{fmtNum(cmp, 2)}, the shares trade at a Price/Fair Value ratio of {pfRatio}, placing the stock in our {kpis.stars.split("★").length - 1}-star rating category.
-          </Text>
+          <PullQuote
+            attr={`FAIR VALUE · ${pfRatio}x PRICE-TO-FAIR · ${kpis.stars.split("★").length - 1}-STAR`}
+            quote={`Our fair value estimate for ${data.profile.name} is ${sym}${fmtNum(fv, 2)} per share — ${fwdPE}x forward earnings and ${evEbitdaLatest}x EV/EBITDA. At ${sym}${fmtNum(cmp, 2)}, the market prices this at ${pfRatio}x fair value.`}
+          />
 
           <Text style={S.bodyText}>
             {pe.dcfCommentary || `We project revenue compounding across ${data.profile.name}'s core operational franchises, supported by secular expansion in ${data.profile.industry}. The business generates sustainable returns on capital, anchored by competitive scale advantages and high customer retention.`}
@@ -2324,8 +2334,9 @@ const MoatAndPriceFairValuePage = ({ data }: { data: ReportData }) => {
           <Text style={S.bodyText}>
             {pe.businessStrategyCommentary}
           </Text>
-          <Text style={S.bodyText}>
-            {(() => {
+          <PullQuote
+            attr="CANONICAL MOAT · ROIC-vs-WACC EVIDENCE"
+            quote={(() => {
               const cm = canonicalMoat(data);
               return cm.rating === "Wide"
                 ? `In summary, the ${cm.rating} composite moat (${cm.trend} trend) is supported by the evidenced pillars above; durability horizons are capped accordingly.`
@@ -2333,7 +2344,7 @@ const MoatAndPriceFairValuePage = ({ data }: { data: ReportData }) => {
                 ? `In summary, a ${cm.rating} composite moat (${cm.trend} trend) is evidenced — advantages exist but are contestable, as the capped pillar horizons reflect. No wide-moat claim is made.`
                 : `In summary, no durable economic moat is evidenced (${cm.trend} trend). Pillar language above must be read as transient strengths, not structural barriers.`;
             })()}
-          </Text>
+          />
         </View>
       </View>
 
