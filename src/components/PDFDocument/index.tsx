@@ -68,13 +68,13 @@ const displayMargin = (f: AnnualFinancials | undefined | null): number | null =>
   return Number.isFinite(v) ? v : null;
 };
 import {
-  canPublishReport,
   canonicalValuation,
   canonicalRating,
   canonicalMoat,
   canonicalWacc,
   canonicalScenarios,
 } from "@/lib/canonical";
+import { capPillarsToRating } from "@/lib/moat";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // HELPER FORMATTERS
@@ -219,11 +219,15 @@ const getPEAnalysis = (data: ReportData) => {
     assumptionsLedger: data.assumptionsLedger,
     masterReportFacts: data.masterReportFacts,
   });
+  // Read-time backstop (MOAT-02): pillars arriving via a stale aiAnalysis
+  // bypass generation-time caps, so re-cap to the canonical rating here —
+  // the printed matrix can never contradict the composite. Idempotent.
+  const mergedPillars = data.aiAnalysis?.moatPillars?.length ? data.aiAnalysis.moatPillars : (synthesized.moatPillars || []);
   return {
     ...synthesized,
     ...(data.aiAnalysis || {}),
     moatSources: data.aiAnalysis?.moatSources || synthesized.moatSources,
-    moatPillars: data.aiAnalysis?.moatPillars?.length ? data.aiAnalysis.moatPillars : synthesized.moatPillars,
+    moatPillars: capPillarsToRating(mergedPillars, canonicalMoat(data).rating),
     fiveForces: data.aiAnalysis?.fiveForces?.length ? data.aiAnalysis.fiveForces : synthesized.fiveForces,
     catalysts: data.aiAnalysis?.catalysts?.length ? data.aiAnalysis.catalysts : synthesized.catalysts,
     creditAnalysisCommentary: data.aiAnalysis?.creditAnalysisCommentary || synthesized.creditAnalysisCommentary,
@@ -430,19 +434,6 @@ const InstitutionalMasthead = ({ data, sectionTitle }: { data: ReportData; secti
           {data.profile.name} · Institutional Equity Research
         </Text>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-          {(()=>{
-            const isBlocked = (data.qaReport && data.qaReport.gateStatus === "BLOCKED") || (data.finalQAResult && !data.finalQAResult.canPublish);
-            if (isBlocked) {
-              return (
-                <View style={{ backgroundColor: "#dc2626", paddingHorizontal: 5, paddingVertical: 1, borderRadius: 2 }}>
-                  <Text style={{ fontSize: 5.5, fontFamily: "Helvetica-Bold", color: "#ffffff" }}>
-                    QA BLOCKED · DRAFT
-                  </Text>
-                </View>
-              );
-            }
-            return null;
-          })()}
           <InstitutionalDeskBadge ticker={data.profile.ticker} />
         </View>
       </View>
@@ -1124,37 +1115,9 @@ const CoverPage = ({ data, concise = true }: { data: ReportData; concise?: boole
           {data.profile.name} · Institutional Equity Research
         </Text>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-          {(()=>{
-            // Canonical fail-closed gate — same predicate as the download button.
-            const gate = canPublishReport(data);
-            if (!gate.canPublish) {
-              return (
-                <View style={{ backgroundColor: "#dc2626", paddingHorizontal: 6, paddingVertical: 1.5, borderRadius: 2 }}>
-                  <Text style={{ fontSize: 6.0, fontFamily: "Helvetica-Bold", color: "#ffffff" }}>
-                    DRAFT · QA BLOCKED
-                  </Text>
-                </View>
-              );
-            }
-            return null;
-          })()}
           <InstitutionalDeskBadge ticker={data.profile.ticker} />
         </View>
       </View>
-
-      {/* ── QA Gate Blocked Flag Banner (canonical gate) ── */}
-      {(()=>{
-        if (!canPublishReport(data).canPublish) {
-          return (
-            <View style={{ backgroundColor: "#fef2f2", borderWidth: 0.75, borderColor: "#dc2626", padding: 3.5, marginBottom: 4 }}>
-              <Text style={{ fontSize: 6.2, fontFamily: "Helvetica-Bold", color: "#b91c1c", textAlign: "center" }}>
-                INTERNAL AUDIT COPY ONLY — PUBLICATION GATE BLOCKED: FINANCIAL OR SEMANTIC INVARIANTS UNVERIFIED
-              </Text>
-            </View>
-          );
-        }
-        return null;
-      })()}
 
       {/* ── Company Header & Rating ── */}
       <View

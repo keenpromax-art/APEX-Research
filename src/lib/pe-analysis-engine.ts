@@ -19,7 +19,7 @@ import { stmtNum, isReitStatement, isAssetLightStatement } from "@/types/report"
 import { formatPct, formatLargeNum } from "./calculations";
 import { classifyArchetype, type GICSSector, type FinancialArchetype } from "./company-archetype";
 import { buildCompanyOntology } from "./company-ontology";
-import { resolveMoatRating, capPillarsToRating } from "./moat";
+import { resolveMoatRating, capPillarsToRating, harmonizeMoatSources } from "./moat";
 
 export interface PEAnalysisInput {
   profile: CompanyProfile;
@@ -470,23 +470,10 @@ export function generatePEFirmAnalysis(input: PEAnalysisInput): AIAnalysis {
   moatPillars = capPillarsToRating(moatPillars, canonicalMoat);
 
   // Harmonize moat narrative prose with the canonical rating: scrub Wide-claims
-  // from moatSources when the composite is Narrow/None. Pillars alone were
-  // patched before while moatSources still claimed Wide economics (MOAT-01/02 gap).
+  // from moatSources when the composite is Narrow/None (shared mapping in
+  // moat.ts — the LLM assembly path applies the same harmonization).
   if (canonicalMoat === "Narrow" || canonicalMoat === "None") {
-    const scrubWide = (s: string) => (s || "")
-      .replace(/wide[\s-]economic[\s-]moat/gi, `${canonicalMoat} economic moat`)
-      .replace(/wide structural moat/gi, `${canonicalMoat} structural moat`)
-      .replace(/wide moat/gi, `${canonicalMoat} moat`)
-      .replace(/unassailable|insurmountable|impenetrable/gi, "defensible")
-      .replace(/multi-decade/gi, "multi-year");
-    moatSources = {
-      switchingCosts: scrubWide(moatSources.switchingCosts),
-      intangibleAssets: scrubWide(moatSources.intangibleAssets),
-      costAdvantage: scrubWide(moatSources.costAdvantage),
-      moatTrend: canonicalMoat === "None"
-        ? "Negative: no durable advantage evidenced; returns trail cost of capital."
-        : moatSources.moatTrend,
-    };
+    moatSources = harmonizeMoatSources(moatSources, canonicalMoat);
   }
 
   // ─────────────────────────────────────────────────────────────────────────────

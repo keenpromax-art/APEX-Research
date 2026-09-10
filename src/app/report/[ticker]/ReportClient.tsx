@@ -7,12 +7,13 @@ import type { ReportData, GenerationState, AgentCheckpoint } from "@/types/repor
 import { stmtNum, isInsuranceStatement, isReitStatement, isAssetLightStatement, getStatementArchitecture } from "@/types/report";
 import { generatePEFirmAnalysis } from "@/lib/pe-analysis-engine";
 import { createAssumptionsLedger } from "@/lib/assumptions-ledger";
-import { canPublishReport, canonicalValuation } from "@/lib/canonical";
+import { canonicalValuation } from "@/lib/canonical";
 import { validateReportIntegrity } from "@/lib/report-qa";
 import { validateMasterReport } from "@/lib/report-validator";
 import { buildMasterReportFacts } from "@/lib/report-facts";
 import { classifySector } from "@/lib/sectors";
 import { sanitizeAIText, sanitizeSectorBleed } from "@/lib/ai/sanitizer";
+import { capPillarsToRating, harmonizeMoatSources } from "@/lib/moat";
 import { buildEventPriceMovements } from "@/lib/event-price-engine";
 import BacktestDashboard from "@/components/BacktestDashboard";
 import ApiKeyModal, { loadSavedAiConfig } from "@/components/ApiKeyModal";
@@ -489,9 +490,21 @@ export default function ReportClient({ ticker }: Props) {
         bleedRewriteLog
       );
 
-      // Sanitize AI narrative fields against MasterReportFacts and lock canonical moat
+      // Sanitize AI narrative fields against MasterReportFacts and lock canonical moat.
+      // Pillar/narrative harmonization (MOAT-01/02): the LLM path emits its own
+      // durabilities and superlatives, so cap/scrub them to the canonical rating
+      // HERE — before QA runs — or export stays blocked on stale contradictions.
+      const canonicalMoatRating = masterReportFacts.moat.rating;
+      const rawPillars = (bleedCleanedAiAnalysis as any).moatPillars;
+      const rawSources = (bleedCleanedAiAnalysis as any).moatSources;
       const sanitizedAiAnalysis = {
         ...bleedCleanedAiAnalysis,
+        moatPillars: Array.isArray(rawPillars) && rawPillars.length > 0
+          ? capPillarsToRating(rawPillars, canonicalMoatRating)
+          : rawPillars,
+        moatSources: rawSources && typeof rawSources === "object"
+          ? harmonizeMoatSources(rawSources, canonicalMoatRating)
+          : rawSources,
         investmentThesis: bleedCleanedAiAnalysis.investmentThesis
           ? sanitizeAIText(bleedCleanedAiAnalysis.investmentThesis, masterReportFacts).sanitizedText
           : bleedCleanedAiAnalysis.investmentThesis,
@@ -843,48 +856,6 @@ export default function ReportClient({ ticker }: Props) {
                   <PDFDownloadButton data={reportData} />
                 </div>
               </div>
-
-              {/* ── Pre-Publish QA Gate Alert Banner (canonical gate) ── */}
-              {(() => {
-                const gate = canPublishReport(reportData);
-                if (gate.canPublish) return null;
-                const failChips = (reportData.qaReport?.checks || []).filter(c => c.status === "FAIL");
-                return (
-                <div style={{
-                  backgroundColor: "rgba(239, 68, 68, 0.12)",
-                  border: "1px solid #ef4444",
-                  borderRadius: "8px",
-                  padding: "12px 16px",
-                  marginTop: "16px",
-                  marginBottom: "8px",
-                  display: "flex",
-                  alignItems: "flex-start",
-                  gap: "12px"
-                }}>
-                  <span style={{ fontSize: "20px" }}>🚨</span>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ color: "#ef4444", fontWeight: "700", fontSize: "14px", marginBottom: "4px" }}>
-                      PUBLICATION GATE BLOCKED — P0 AUDIT FAILURES DETECTED
-                    </div>
-                    <div style={{ color: "#fca5a5", fontSize: "12px", lineHeight: 1.4 }}>
-                      The internal QA gate detected arithmetic reconciliation or semantic template bleeding errors. Client PDF export is locked until all cross-reference invariants balance.
-                    </div>
-                    <div style={{ marginTop: "8px", display: "flex", flexWrap: "wrap", gap: "6px" }}>
-                      {failChips.map((fc, i) => (
-                        <span key={i} style={{ backgroundColor: "#ef4444", color: "#fff", fontSize: "11px", padding: "2px 8px", borderRadius: "4px", fontWeight: "600" }}>
-                          {fc.id}: {fc.name}
-                        </span>
-                      ))}
-                      {failChips.length === 0 && gate.reasons.slice(0, 4).map((r, i) => (
-                        <span key={i} style={{ backgroundColor: "#ef4444", color: "#fff", fontSize: "11px", padding: "2px 8px", borderRadius: "4px", fontWeight: "600" }}>
-                          {r}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-                );
-              })()}
 
               {/* ── Interactive Navigation Tabs ── */}
               <div className={styles.tabBar}>

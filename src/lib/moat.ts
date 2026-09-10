@@ -188,6 +188,33 @@ export function resolveMoatRating(
 }
 
 /**
+ * Scrub Wide-moat prose from moat sources when the composite is Narrow/None.
+ * Shared by deterministic generation (pe-analysis) and report assembly
+ * (ReportClient LLM path) — one mapping, every caller, so narrative can
+ * never contradict the composite rating (MOAT-01).
+ */
+export function harmonizeMoatSources<
+  S extends { switchingCosts: string; intangibleAssets: string; costAdvantage: string; moatTrend: string }
+>(sources: S, rating: MoatRating): S {
+  if (rating !== "Narrow" && rating !== "None") return sources;
+  const scrubWide = (s: string) => (s || "")
+    .replace(/wide[\s-]economic[\s-]moat/gi, `${rating} economic moat`)
+    .replace(/wide structural moat/gi, `${rating} structural moat`)
+    .replace(/wide moat/gi, `${rating} moat`)
+    .replace(/unassailable|insurmountable|impenetrable/gi, "defensible")
+    .replace(/multi-decade/gi, "multi-year");
+  return {
+    ...sources,
+    switchingCosts: scrubWide(sources.switchingCosts),
+    intangibleAssets: scrubWide(sources.intangibleAssets),
+    costAdvantage: scrubWide(sources.costAdvantage),
+    moatTrend: rating === "None"
+      ? "Negative: no durable advantage evidenced; returns trail cost of capital."
+      : sources.moatTrend,
+  };
+}
+
+/**
  * Cap pillar durabilities at the composite rating (shared by pe-analysis
  * self-harmonization and the LLM-assembly backstop — one mapping, two callers).
  * Wide pillars survive only under a Wide composite; anything else is a

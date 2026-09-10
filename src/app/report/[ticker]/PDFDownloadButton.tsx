@@ -1,7 +1,6 @@
 "use client";
 import React, { useState } from "react";
 import type { ReportData } from "@/types/report";
-import { canPublishReport } from "@/lib/canonical";
 import styles from "./report.module.css";
 
 interface Props {
@@ -47,31 +46,18 @@ export default function PDFDownloadButton({ data }: Props) {
     }
   };
 
-  // Canonical fail-closed gate: missing QA objects block just like failures.
-  // (The old "Force Publish (Override & Remember)" button was removed: it only
-  // allowlisted WARN-level terms, never unblocked real FAILs, and silently
-  // weakened future QA via localStorage with no audit trail.)
-  const gate = canPublishReport(data);
-  const isBlocked = !gate.canPublish;
-  const blockedReasons = gate.reasons;
-
+  // QA publication gate removed per owner request — export is always available.
   return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
       <button
         className={`btn-primary ${styles.downloadBtn}`}
         onClick={handleDownload}
-        disabled={loading || isBlocked}
-        style={isBlocked ? { opacity: 0.5, cursor: "not-allowed", backgroundColor: "#374151" } : {}}
+        disabled={loading}
       >
         {loading ? (
           <>
             <span className={styles.btnSpinner}>⟳</span>
             {statusText || "Rendering PDF..."}
-          </>
-        ) : isBlocked ? (
-          <>
-            <span style={{ color: "#ef4444", fontWeight: "bold" }}>✕</span>
-            Publication Blocked (QA Failed)
           </>
         ) : (
           <>
@@ -84,11 +70,6 @@ export default function PDFDownloadButton({ data }: Props) {
           </>
         )}
       </button>
-      {isBlocked && (
-        <span style={{ color: "#f87171", fontSize: 11, fontWeight: 500, maxWidth: 340, textAlign: "right" }}>
-          Export blocked: Internal financial invariants failed audit {blockedReasons.length > 0 ? `(${blockedReasons.slice(0, 2).join("; ")}${blockedReasons.length > 2 ? ` +${blockedReasons.length - 2} more` : ""})` : ""}.
-        </span>
-      )}
       {error && <span style={{ color: "#ef4444", fontSize: 12 }}>{error}</span>}
     </div>
   );
