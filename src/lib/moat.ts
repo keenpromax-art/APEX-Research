@@ -7,6 +7,9 @@
  * AI analysts are strictly forbidden from altering or contradictory relabeling of the canonical moat.
  */
 
+import type { AnnualFinancials } from "@/types/report";
+import { stmtNum } from "@/types/report";
+
 export type MoatRating = "None" | "Narrow" | "Wide";
 export type MoatTrend = "Improving" | "Stable" | "Declining";
 
@@ -148,4 +151,66 @@ export function evaluateCanonicalMoat(params: {
     drivers,
     rationale
   };
+}
+
+/**
+ * Statement-driven canonical rating resolver — the single authority used by
+ * pillar generation (pe-analysis), LLM prompt injection, and assembly caps.
+ * Mirrors report-facts' moat inputs exactly (ROCE = operatingIncome /
+ * capitalEmployed per calculations.ts; NaN-safe gross margins; latest D/E),
+ * so every surface derives the SAME rating from the SAME statements instead of
+ * each guessing (which is what produced Wide pillars under a None composite).
+ */
+export function resolveMoatRating(
+  annualFinancials: AnnualFinancials[],
+  wacc: number
+): MoatRating {
+  const roceHistory = (annualFinancials || []).map((f) => {
+    const opInc = stmtNum(f, "operatingIncome");
+    const ce = f.totalAssets - f.currentLiabilities;
+    // Mirror computeRatios exactly (incl. negative-denominator quotients and
+    // zero-denominator 0s) so this resolver agrees with report-facts' rating.
+    const r = ce === 0 ? 0 : opInc / ce;
+    return Number.isFinite(r) ? r : 0;
+  });
+  const grossMarginHistory = (annualFinancials || []).map((f) =>
+    f.revenue > 0 ? stmtNum(f, "grossProfit", Number.NaN) / f.revenue : 0
+  );
+  const latest = annualFinancials[annualFinancials.length - 1];
+  const debtToEquity =
+    latest && latest.totalEquity > 0 ? latest.totalDebt / latest.totalEquity : 0;
+  return evaluateCanonicalMoat({
+    roceHistory,
+    wacc,
+    grossMarginHistory,
+    debtToEquity,
+  }).rating;
+}
+
+/**
+ * Cap pillar durabilities at the composite rating (shared by pe-analysis
+ * self-harmonization and the LLM-assembly backstop — one mapping, two callers).
+ * Wide pillars survive only under a Wide composite; anything else is a
+ * generation error, never a discovery (pillars are subordinate breakdowns).
+ */
+export function capPillarsToRating<
+  P extends { pillar: string; durability: string; rationale: string }
+>(pillars: P[], rating: MoatRating): P[] {
+  if (rating === "Wide") return pillars;
+  if (rating === "Narrow") {
+    return pillars.map((p) =>
+      p.durability.startsWith("Wide")
+        ? {
+            ...p,
+            durability: "Narrow (7-10 Yrs)",
+            rationale: `${p.rationale.replace(/multi-decade|unassailable|permanent|unassailable legal barriers/gi, "defensible")} (Durability capped to composite Narrow moat.)`,
+          }
+        : p
+    );
+  }
+  return pillars.map((p) => ({
+    ...p,
+    durability: "None (< 3 Yrs)",
+    rationale: "Vulnerable to competitive encroachment and margin erosion without structural barriers.",
+  }));
 }
