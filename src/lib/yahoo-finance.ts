@@ -61,9 +61,12 @@ function isFinancialInstitutionProfile(sector: string, industry: string, descrip
   const desc = (description || "").toLowerCase();
   const nm = (name || "").toLowerCase();
   const text = `${sec} ${ind} ${desc} ${nm}`;
-  if (ind.includes("nbfc") || text.includes("non-banking") || ind.includes("consumer finance") || ind.includes("microfinance")) return { isBank: true, kind: "nbfc" };
+  if (ind.includes("nbfc") || text.includes("non-banking") || ind.includes("consumer finance") || ind.includes("microfinance") || ind.includes("credit services")) return { isBank: true, kind: "nbfc" };
   if (ind.includes("insurance") || sec.includes("insurance")) return { isBank: true, kind: "insurance" };
-  if (ind.includes("bank") || sec.includes("bank") || ind.includes("capital markets") || ind.includes("financial") && (text.includes("bank") || ind.includes("asset management"))) {
+  // NOTE: "capital markets" is deliberately NOT a bank signal (exchanges, depositories
+  // like CDSL, and brokers carry it — none are depositories). Genuine banks report
+  // banking industries or match the name list below.
+  if (ind.includes("bank") || sec.includes("bank") || ind.includes("financial") && (text.includes("bank") || ind.includes("asset management"))) {
     // asset management is NOT bank — exclude
     if (ind.includes("asset management") || ind.includes("wealth management")) return { isBank: false, kind: "corporate" };
     if (sec.includes("financial") && ind.includes("bank") || sec.includes("bank") || ind === "banks" || ind.includes("banks -")) return { isBank: true, kind: "bank" };
@@ -106,7 +109,12 @@ export function isAssetLightFeeProfile(sector: string, industry: string, descrip
 
 /** Convert a corporate-shaped AnnualFinancials into a bank-native one — never invents grossProfit/inventory. */
 export function toBankFinancials(c: CorporateAnnualFinancials, kind: "bank" | "nbfc"): BankAnnualFinancials {
-  const totalRev = (c as any).revenue ?? (c as any).totalRevenue ?? 0;
+  // totalRevenue = NII + non-interest income holds EXACTLY by construction below
+  // (ARCH-01/STMT-02 verify it): nonII is the residual and may print negative when
+  // Yahoo's revenue line scopes narrower than its interest split (e.g. Shriram FY26
+  // NII exceeds totalRev by 0.4%) — tagged, never clamped (clamping fabricated the
+  // breach). A degenerate (≤0) reported total is rebuilt from real parts instead.
+  let totalRev = (c as any).revenue ?? (c as any).totalRevenue ?? 0;
   // For banks, interestIncome/Expense are real; if missing, split totalRevenue 70/30 as NII vs fees (conservative, tracked)
   const est: string[] = [...(c.estimatesUsed || [])];
   // Strip corporate-fiction estimates: inventory/receivables/costOfRevenue are not bank concepts
@@ -122,7 +130,13 @@ export function toBankFinancials(c: CorporateAnnualFinancials, kind: "bank" | "n
   }
   const netInterestIncome = interestIncome >0 && interestExpense>0 ? interestIncome - interestExpense : (totalRev>0 ? Math.round(totalRev*0.62) : 0);
   if (interestIncome===0 && totalRev>0) filtered.push("bank:netInterestIncome@62%-of-totalRev-estimate");
-  const nonInterestIncome = totalRev>0 ? Math.max(0, totalRev - netInterestIncome) : 0;
+  let nonInterestIncome = totalRev - netInterestIncome;
+  if (totalRev > 0 && nonInterestIncome < 0) filtered.push("bank:nonInterestIncome-negative-residual");
+  if (totalRev <= 0 && (netInterestIncome !== 0 || nonInterestIncome !== 0)) {
+    totalRev = netInterestIncome + Math.max(0, nonInterestIncome);
+    filtered.push("bank:totalRevenue-rebuilt-from-parts");
+    nonInterestIncome = totalRev - netInterestIncome;
+  }
   const provision = (c as any).provisionForCreditLosses || 0;
   // Opex takes the fuller of the SG&A+R&D split and the total operating-expense
   // line (splits routinely exclude compensation for managers/insurers while the
@@ -1388,9 +1402,18 @@ export function parseQuoteSummary(raw: Record<string, unknown>, symbol: string) 
     open: safeNum((priceData.regularMarketOpen as Record<string,unknown>)?.raw),
     dayHigh: safeNum((priceData.regularMarketDayHigh as Record<string,unknown>)?.raw),
     dayLow: safeNum((priceData.regularMarketDayLow as Record<string,unknown>)?.raw),
+    // Market cap falls back to price × resolved shares when the quote omits it
+    // (transient module gaps rendered the header "₹0" while EV stayed correct).
+    // Grounded derivation (two quoted fields), never a constant synthesis.
     marketCap:
       safeNum((priceData.marketCap as Record<string,unknown>)?.raw) ||
-      safeNum((summary.marketCap as Record<string,unknown>)?.raw),
+      safeNum((summary.marketCap as Record<string,unknown>)?.raw) ||
+      (() => {
+        const px =
+          safeNum((priceData.regularMarketPrice as Record<string,unknown>)?.raw) ||
+          safeNum(finData.currentPrice as Record<string,unknown>);
+        return px > 0 && derivedSharesOutstanding > 0 ? px * derivedSharesOutstanding : 0;
+      })(),
     enterpriseValue: safeNum((keyStats.enterpriseValue as Record<string,unknown>)?.raw),
     // Never fall back to price-as-P/E: a missing trailingPE is 0 (renders N/M),
     // not the share price masquerading as a 250x multiple.
