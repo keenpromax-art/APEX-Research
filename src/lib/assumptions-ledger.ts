@@ -85,10 +85,21 @@ export function createAssumptionsLedger({
   // 1. DCF Arithmetic Bridge
   // For non-financials: EV = sumPvFcff + pvTerminalValue, Equity Value = EV - Net Debt
   // For financials (Banks/NBFCs): Equity Value is modeled directly via Residual Income / Justified P/B
+  // Predicate MUST agree with the valuation selector + QA bridge guards: only lenders
+  // (banks/NBFCs/insurers — deposits/borrowings are operating liabilities) ride the
+  // residual-income path. A bare `sector includes "financial"` catch-all previously
+  // forced brokers/exchanges/AMCs (fee businesses the selector values via FCFF) onto
+  // the RI ledger (netDebt=0, RI equity) while DCF/QA treated them as corporate —
+  // a three-way contradiction that blocked every such report (ANGELONE-class).
+  // Brokers/AMCs/exchanges with "Financial Services" sectors now stay corporate
+  // unless an explicit lender/insurer signal below (or the RI-model signature) fires.
+  const industryLower = (profile.industry || "").toLowerCase();
+  // NOTE: no `industry includes "insurance"` arm — classifySector already covers genuine
+  // insurers, and adding one would re-split insurance brokers (selector: RI-consistent
+  // financial; ledger must agree). Lender/insurer detection lives in classifySector.
   const isBankOrNbfc = classifySector(profile.sector, profile.industry, profile.description).isFinancialInstitution ||
-    (profile.sector || "").toLowerCase().includes("financial") || 
-    (profile.industry || "").toLowerCase().includes("bank") ||
-    (profile.industry || "").toLowerCase().includes("nbfc") ||
+    industryLower.includes("bank") ||
+    industryLower.includes("nbfc") ||
     (dcf.sumPvFcff === 0 && dcf.equityValue > 0);
 
   const sumPvFcff = Number(dcf.sumPvFcff) || 0;

@@ -787,6 +787,8 @@ export function isSoftwareCompany(
   if (
     industryLower.includes("application software") ||
     industryLower.includes("systems software") ||
+    industryLower.includes("software - infrastructure") ||
+    industryLower.includes("software - application") ||
     industryLower.includes("saas") ||
     (industryLower.includes("software") && industryLower.includes("application"))
   ) return true;

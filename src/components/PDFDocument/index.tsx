@@ -1283,62 +1283,142 @@ const CoverPage = ({ data, concise = true }: { data: ReportData; concise?: boole
 
         {/* Column 2: Center Column (49% width) */}
         <View style={{ width: "49%", paddingRight: 6, borderRightWidth: 0.5, borderRightColor: COLORS.hairlineLight }}>
+          {/* Eyebrow + title lockup — matches masthead / section-title system */}
+          <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 2 }}>
+            <Text style={{ fontSize: 6.0, fontFamily: "Helvetica-Bold", color: COLORS.primaryRed, letterSpacing: 0.8 }}>
+              EXECUTIVE SUMMARY — INVESTMENT THESIS
+            </Text>
+            <Text style={{ fontSize: 6.0, color: COLORS.textMuted }}>{genDate}</Text>
+          </View>
+          <Text style={{ fontSize: 11, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, lineHeight: 1.2, marginBottom: 2 }}>
+            Investment Thesis &amp; Strategy
+          </Text>
+          <View style={{ height: 0.75, backgroundColor: COLORS.hairline, marginBottom: 4 }} />
+
+          {/* Lead thesis — red rule gives it editorial weight vs. plain grey paragraph */}
+          <View style={{ borderLeftWidth: 2, borderLeftColor: COLORS.primaryRed, paddingLeft: 6, marginBottom: 4 }}>
+            <Text style={{ fontSize: 7.2, color: COLORS.textPrimary, lineHeight: 1.45, textAlign: "justify" }}>
+              {(() => {
+                const t = pe.investmentThesis || pe.companyOverview;
+                return completeSentence(t, 320);
+              })()}
+            </Text>
+          </View>
+
           <View
             style={{
               flexDirection: "row",
-              justifyContent: "space-between",
-              alignItems: "baseline",
-              marginBottom: 3,
+              alignItems: "center",
+              gap: 4,
               borderBottomWidth: 0.5,
               borderBottomColor: COLORS.hairlineLight,
-              paddingBottom: 1.5,
+              paddingBottom: 2,
+              marginBottom: 2.5,
             }}
           >
-            <Text style={{ fontSize: 8.5, fontFamily: "Helvetica-Bold", color: COLORS.slateDark }}>
-              Investment Thesis &amp; Strategy
-            </Text>
-            <Text style={{ fontSize: 6.5, color: COLORS.textMuted }}>{genDate}</Text>
-          </View>
-
-          <Text style={{ fontSize: 6.4, color: COLORS.textSecondary, lineHeight: 1.25, textAlign: "justify", marginBottom: 2 }}>
-            {(() => {
-              const t = pe.investmentThesis || pe.companyOverview;
-              return completeSentence(t, 240);
-            })()}
-          </Text>
-
-          <View style={{ marginTop: 1, marginBottom: 1, borderBottomWidth: 0.5, borderBottomColor: COLORS.hairlineLight, paddingBottom: 1 }}>
-            <Text style={{ fontSize: 7.5, fontFamily: "Helvetica-Bold", color: COLORS.slateDark }}>
-              Competitive Moat &amp; Unit Economics
+            <Text style={{ fontSize: 6.0, fontFamily: "Helvetica-Bold", color: COLORS.primaryRed }}>01</Text>
+            <Text style={{ fontSize: 6.5, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, letterSpacing: 0.5 }}>
+              COMPETITIVE MOAT &amp; UNIT ECONOMICS
             </Text>
           </View>
-          <Text style={{ fontSize: 6.4, color: COLORS.textSecondary, lineHeight: 1.25, textAlign: "justify", marginBottom: 2 }}>
+          <Text style={{ fontSize: 7.0, color: COLORS.textPrimary, lineHeight: 1.45, textAlign: "justify", marginBottom: 4 }}>
             {(() => {
               const t = ledger?.moatBridge || pe.competitiveMoat || pe.moatSources?.switchingCosts || `Entrenched competitive moat (${ledger?.moatRating || "Narrow"}) protecting operational margins and capital returns.`;
-              return completeSentence(t, 180);
+              return completeSentence(t, 260);
             })()}
           </Text>
 
-          <View style={{ marginTop: 1, marginBottom: 1, borderBottomWidth: 0.5, borderBottomColor: COLORS.hairlineLight, paddingBottom: 1 }}>
-            <Text style={{ fontSize: 7.5, fontFamily: "Helvetica-Bold", color: COLORS.slateDark }}>
-              Valuation Assessment &amp; Research Verdict
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 4,
+              borderBottomWidth: 0.5,
+              borderBottomColor: COLORS.hairlineLight,
+              paddingBottom: 2,
+              marginBottom: 2.5,
+            }}
+          >
+            <Text style={{ fontSize: 6.0, fontFamily: "Helvetica-Bold", color: COLORS.primaryRed }}>02</Text>
+            <Text style={{ fontSize: 6.5, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, letterSpacing: 0.5 }}>
+              VALUATION ASSESSMENT &amp; RESEARCH VERDICT
             </Text>
           </View>
-          <Text style={{ fontSize: 6.4, color: COLORS.textSecondary, lineHeight: 1.25, textAlign: "justify", marginBottom: 2 }}>
-            {(() => {
-              const t = pe.investmentConclusion;
-              return completeSentence(t, 180);
-            })()}
-          </Text>
 
-          {/* Conclusion traceability: every headline claim points at its evidence section */}
-          <View style={{ padding: 3, backgroundColor: COLORS.offWhite, borderWidth: 0.5, borderColor: COLORS.hairlineLight, marginBottom: 2 }}>
-            <Text style={{ fontSize: 5.6, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 1 }}>
-              How To Verify Every Claim Above
+          {/* Verdict callout — rating badge + canonical target, never buried in grey body copy */}
+          {(() => {
+            const verdict = canonicalRating(data);
+            const badgeBg = verdict === "BUY" ? COLORS.green : verdict === "SELL" ? COLORS.red : COLORS.amber;
+            const upside = fv ? ((fv - cmp) / (cmp || 1)) * 100 : NaN;
+            return (
+              <View
+                style={{
+                  borderWidth: 0.5,
+                  borderColor: COLORS.hairlineLight,
+                  borderLeftWidth: 2,
+                  borderLeftColor: badgeBg,
+                  backgroundColor: COLORS.white,
+                  padding: 5,
+                  marginBottom: 3,
+                }}
+              >
+                <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 2.5 }}>
+                  <Text style={{ fontSize: 6.0, fontFamily: "Helvetica-Bold", color: COLORS.textMuted, letterSpacing: 0.6 }}>
+                    RESEARCH VERDICT
+                  </Text>
+                  <View style={{ backgroundColor: badgeBg, borderRadius: 2, paddingHorizontal: 6, paddingVertical: 1.5 }}>
+                    <Text style={{ fontSize: 6.5, fontFamily: "Helvetica-Bold", color: COLORS.white, letterSpacing: 0.4 }}>
+                      {verdict}
+                    </Text>
+                  </View>
+                </View>
+                <Text style={{ fontSize: 7.0, color: COLORS.textPrimary, lineHeight: 1.45, textAlign: "justify", marginBottom: 2.5 }}>
+                  {completeSentence(pe.investmentConclusion, 260)}
+                </Text>
+                <View style={{ height: 0.5, backgroundColor: COLORS.hairlineFaint, marginBottom: 2.5 }} />
+                <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "baseline" }}>
+                  <Text style={{ fontSize: 6.2, fontFamily: "Helvetica-Bold", color: COLORS.slateDark }}>
+                    Target {cmpSym}
+                    {fmtNum(fv, 2)}
+                  </Text>
+                  <Text style={{ fontSize: 6.2, color: COLORS.textSecondary }}>
+                    CMP {cmpSym}
+                    {fmtNum(cmp, 2)}
+                  </Text>
+                  <Text
+                    style={{
+                      fontSize: 6.2,
+                      fontFamily: "Helvetica-Bold",
+                      color: isFinite(upside) && upside >= 0 ? COLORS.green : COLORS.red,
+                    }}
+                  >
+                    {isFinite(upside) ? `${upside >= 0 ? "+" : ""}${upside.toFixed(1)}% implied` : "—"}
+                  </Text>
+                </View>
+              </View>
+            );
+          })()}
+
+          {/* Evidence map — footnote-grade audit trail, not a grey developer note */}
+          <View style={{ borderTopWidth: 0.75, borderTopColor: COLORS.hairline, paddingTop: 3, marginTop: 1, marginBottom: 2 }}>
+            <Text style={{ fontSize: 5.8, fontFamily: "Helvetica-Bold", color: COLORS.textMuted, letterSpacing: 0.6, marginBottom: 2.5 }}>
+              EVIDENCE MAP — WHERE TO VERIFY
             </Text>
-            <Text style={{ fontSize: 5.0, color: COLORS.textSecondary, lineHeight: 1.3 }}>
-              Thesis drivers → Financial Statements &amp; Assumption Evidence Trail · Moat width → Moat Matrix (durability basis per pillar) · Target &amp; rating → DCF Bridge + QA checksum (all three print one canonical number) · Scenarios → Scenario Matrix (operating assumptions per case) · Peers → Comparable Companies (selection criteria + medians).
-            </Text>
+            {[
+              ["Thesis drivers", "Financial Statements & Assumption Evidence Trail"],
+              ["Moat rating", "Moat Matrix — durability basis per pillar"],
+              ["Target & rating", "DCF Bridge + QA Checksum — one canonical number"],
+              ["Scenarios", "Scenario Matrix — operating assumptions per case"],
+              ["Peers", "Comparable Companies — selection criteria + medians"],
+            ].map(([label, ref], i) => (
+              <View key={i} style={{ flexDirection: "row", marginBottom: 1.4 }}>
+                <Text style={{ fontSize: 6.2, fontFamily: "Helvetica-Bold", color: COLORS.primaryRed, marginRight: 3 }}>•</Text>
+                <Text style={{ fontSize: 6.0, fontFamily: "Helvetica-Bold", color: COLORS.textPrimary }}>
+                  {label}
+                  <Text style={{ fontFamily: "Helvetica", color: COLORS.textMuted }}>  —  {ref}</Text>
+                </Text>
+              </View>
+            ))}
           </View>
 
           {/* Sector-Specific Strategic Value Creation Drivers */}
@@ -4964,6 +5044,14 @@ const IncomeStatementDetailedPage = ({ data, concise = true }: { data: ReportDat
   const { currency } = data.profile;
   const models = buildFiveYearStatementModel(data);
   const pe = getPEAnalysis(data);
+  // Concise density: rows shave ~1.2pt each (≈40pt across the page's 36 rows)
+  // so data-rich names (R&D row present) still close the page exactly. The
+  // difference is visually negligible; the alternative is a phantom blank page
+  // when content lands epsilon past capacity. Full mode keeps roomy rows.
+  const rowStyle = (ri: number) =>
+    concise
+      ? [(ri % 2 === 0 ? S.compactRow : S.compactRowAlt), { minHeight: 14, paddingVertical: 0.8 }]
+      : (ri % 2 === 0 ? S.compactRow : S.compactRowAlt);
 
   return (
     <Page size="A4" style={S.page}>
@@ -5012,7 +5100,7 @@ const IncomeStatementDetailedPage = ({ data, concise = true }: { data: ReportDat
         ].map(([lbl, ...vals], ri) => {
           const isBold = [0, 2, 7, 10, 13, 16, 18, 20, 22, 23].includes(ri);
           return (
-            <View key={ri} style={ri % 2 === 0 ? S.compactRow : S.compactRowAlt}>
+            <View key={ri} style={rowStyle(ri)}>
               <Text style={[isBold ? S.compactCellBold : S.compactCell, { width: "33%" }]}>{lbl}</Text>
               {vals.map((v, ci) => (
                 <Text key={ci} style={[isBold ? S.compactCellBoldRight : S.compactCellRight, { flex: 1, paddingRight: 3, fontSize: 5.4 }]}>{v}</Text>
@@ -5060,7 +5148,7 @@ const IncomeStatementDetailedPage = ({ data, concise = true }: { data: ReportDat
               row("Net margin Δ (pp)", dpp(nm), (v) => `${v >= 0 ? "+" : ""}${(v * 100).toFixed(1)}pp`),
             ];
           })().map(([lbl, ...vals], ri) => (
-            <View key={ri} style={ri % 2 === 0 ? S.compactRow : S.compactRowAlt}>
+            <View key={ri} style={rowStyle(ri)}>
               <Text style={[S.compactCellBold, { width: "34%" }]}>{lbl}</Text>
               {vals.map((v, ci) => (
                 <Text key={ci} style={[S.compactCellRight, { flex: 1, paddingRight: 3, fontSize: 5.4 }]}>{v}</Text>
@@ -5069,7 +5157,9 @@ const IncomeStatementDetailedPage = ({ data, concise = true }: { data: ReportDat
           ))}
         </View>
         <Text style={{ fontSize: 5.0, color: COLORS.textMuted, marginTop: concise ? 0 : 1 }}>
-          Driver attribution beyond these deltas (price vs volume vs mix) requires segment disclosure, which the feed does not provide — narrative claims beyond this walk are flagged by QA.
+          {concise
+            ? "Price/volume/mix attribution needs segment disclosure (feed lacks it) — flagged by QA."
+            : "Driver attribution beyond these deltas (price vs volume vs mix) requires segment disclosure, which the feed does not provide — narrative claims beyond this walk are flagged by QA."}
         </Text>
       </View>
 
@@ -5105,7 +5195,7 @@ const IncomeStatementDetailedPage = ({ data, concise = true }: { data: ReportDat
         ].map(([lbl, ...vals], ri) => {
           const isBold = [0, 3, 4, 6].includes(ri);
           return (
-            <View key={ri} style={ri % 2 === 0 ? S.compactRow : S.compactRowAlt}>
+            <View key={ri} style={rowStyle(ri)}>
               <Text style={[isBold ? S.compactCellBold : S.compactCell, { width: "33%" }]}>{lbl}</Text>
               {vals.map((v, ci) => (
                 <Text key={ci} style={[isBold ? S.compactCellBoldRight : S.compactCellRight, { flex: 1, paddingRight: 3, fontSize: 5.4 }]}>{v}</Text>
@@ -5116,7 +5206,7 @@ const IncomeStatementDetailedPage = ({ data, concise = true }: { data: ReportDat
       </View>
 
       {/* Dense 2-Column Buy-Side Operating Analysis Box (full mode only: in
-          concise mode this narrative duplicates the cover/fundamental prose and
+          concise mode this narrative duplicates the cover prose and
           its length spills the statement onto a second page) */}
       {!concise && (
       <View style={{ padding: 5.5, backgroundColor: COLORS.offWhite, borderWidth: 0.5, borderColor: COLORS.hairlineLight, marginBottom: 3 }}>

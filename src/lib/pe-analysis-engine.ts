@@ -86,8 +86,11 @@ export function generatePEFirmAnalysis(input: PEAnalysisInput): AIAnalysis {
   const buildThesisEvidenceLead = (): string => {
     const parts: string[] = [];
     const nFY = annualFinancials.length;
-    if (nFY >= 2 && prev.revenue > 0 && rev > 0) {
-      const cagr = Math.pow(rev / prev.revenue, 1 / (nFY - 1)) - 1;
+    // CAGR anchors on FIRST-to-last (a one-year jump annualised over the whole
+    // window printed 5.6% for a 16.1% compounder — the exponent must match the span).
+    const first = annualFinancials[0] || prev;
+    if (nFY >= 2 && first.revenue > 0 && rev > 0) {
+      const cagr = Math.pow(rev / first.revenue, 1 / (nFY - 1)) - 1;
       parts.push(
         `${profile.name} compounded revenue at ${formatPct(cagr)} p.a. across the last ${nFY} reported years to ${formatLargeNum(rev, cur)}, with trailing ${earnLabel} margin at ${formatPct(ebitdaMargin)} and net margin at ${formatPct(netMargin)}.`
       );

@@ -999,8 +999,10 @@ export function computeWACC(
   // the entire 5-year forecast at trough. Now we take the average of
   // positive through-cycle EBIT margins (or median if all are negative),
   // dropping a distressed outlier when the archetype is DISTRESSED — a true
-  // mid-cycle anchor. Bounded 2–14% so an outlier history cannot produce
-  // absurd margins.
+  // mid-cycle anchor. Bounded below by the cyclical floor; the ceiling respects
+  // demonstrated profitability (90% of trailing margin, minimum 14%) so the
+  // 14% cap that fixed trough-anchoring for cyclicals cannot decapitate
+  // structural high-margin compounders (MSFT ~47% → $165 SELL was this bug).
   let midCycleMargin: number | undefined;
   if (annualFinancials && annualFinancials.length >= 2) {
     const hist = annualFinancials
@@ -1018,14 +1020,19 @@ export function computeWACC(
   }
   const archetypeBaseMargin = archetypeProfile?.scenarioMargins?.baseMargin;
   // Priority: mid-cycle history > archetype trough > latest > live > 14% fallback.
-  // Mid-cycle is clamped to 2–14% to prevent absurd anchors on thin histories.
+  // Mid-cycle is floored at 2–3% and ceiled at demonstrated profitability
+  // (90% of trailing, min 14%) to prevent absurd anchors on thin histories.
   // For auto/industrial cyclicals we floor at 3% (normalized through-cycle
   // trough for manufacturing) so a deep-cycle year does not permanently depress
   // the explicit forecast — the bridge then remains economically coherent.
   const cyclicalFloor = archetypeProfile?.sector === "auto_manufacturing" || archetypeProfile?.sector === "renewables" ? 0.03 : 0.02;
   const finEbitMargin = getMarginAnchor(fin).value;
+  // Demonstrated-margin ceiling: never anchor more than 10% below what the
+  // company already earns (trailing), with a 14% floor for turnarounds whose
+  // trailing margin is depressed. Cyclical trough protection unchanged.
+  const marginCeiling = Math.max(0.14, (finEbitMargin > 0 ? finEbitMargin : 0) * 0.9);
   const effectiveMargin = midCycleMargin !== undefined
-    ? Math.max(cyclicalFloor, Math.min(0.14, midCycleMargin))
+    ? Math.max(cyclicalFloor, Math.min(marginCeiling, midCycleMargin))
     : (archetypeBaseMargin !== undefined && archetypeBaseMargin > 0)
     ? archetypeBaseMargin
     : (finEbitMargin > 0.03
@@ -1045,14 +1052,18 @@ export function computeWACC(
     wacc,
     terminalGrowthRate: 0.04, // 4.0% long-term nominal GDP anchor — single source of truth
     parameterSource: `Country CAPM table v2026-09 (${cp.label})`,
+    midCycleMargin,
+    marginCeiling,
     inputProvenance: { ...provenance },
     revenueGrowthRates: [0.18, 0.16, 0.14, 0.12, 0.10],
+    // Same demonstrated-margin respect as the driver branches: these seed the
+    // forecast ramp and must never decapitate it (26% here printed $165 on MSFT).
     ebitMargins: [
-      Math.min(effectiveMargin + 0.010, 0.26),
-      Math.min(effectiveMargin + 0.018, 0.27),
-      Math.min(effectiveMargin + 0.024, 0.28),
-      Math.min(effectiveMargin + 0.028, 0.29),
-      Math.min(effectiveMargin + 0.030, 0.30),
+      Math.min(effectiveMargin + 0.010, Math.max(0.26, effectiveMargin * 1.02)),
+      Math.min(effectiveMargin + 0.018, Math.max(0.27, effectiveMargin * 1.02)),
+      Math.min(effectiveMargin + 0.024, Math.max(0.28, effectiveMargin * 1.02)),
+      Math.min(effectiveMargin + 0.028, Math.max(0.29, effectiveMargin * 1.02)),
+      Math.min(effectiveMargin + 0.030, Math.max(0.30, effectiveMargin * 1.02)),
     ],
   };
 }
@@ -1349,13 +1360,15 @@ export function computeDCF(
   const latestAnchor = getMarginAnchor(latest);
   const latestEbitMarginForSource = latestAnchor.value;
   const marginSource =
-    (archetypeProfile?.scenarioMargins?.baseMargin ?? 0) > 0
-      ? `archetype base margin ${(((archetypeProfile?.scenarioMargins?.baseMargin) || 0) * 100).toFixed(1)}%`
-      : latestEbitMarginForSource > 0.03
-        ? `reported ${latestAnchor.label} margin ${(latestEbitMarginForSource * 100).toFixed(1)}%`
-        : stockData.operatingMargins > 0
-          ? `live operating margin ${(stockData.operatingMargins * 100).toFixed(1)}%`
-          : `14% default (no margin basis — treat with caution)`;
+    (assumptions.midCycleMargin ?? undefined) !== undefined
+      ? `mid-cycle history ${(((assumptions.midCycleMargin) as number) * 100).toFixed(1)}% (through-cycle anchor, ceiling ${(((assumptions.marginCeiling) as number) * 100).toFixed(1)}%)`
+      : (archetypeProfile?.scenarioMargins?.baseMargin ?? 0) > 0
+        ? `archetype base margin ${(((archetypeProfile?.scenarioMargins?.baseMargin) || 0) * 100).toFixed(1)}%`
+        : latestEbitMarginForSource > 0.03
+          ? `reported ${latestAnchor.label} margin ${(latestEbitMarginForSource * 100).toFixed(1)}%`
+          : stockData.operatingMargins > 0
+            ? `live operating margin ${(stockData.operatingMargins * 100).toFixed(1)}%`
+            : `14% default (no margin basis — treat with caution)`;
   const assumptionBasis: Record<string, string> = {
     revenueGrowth: `${driver.driverEquation}; 55% hist CAGR (${(cagr * 100).toFixed(1)}% over ${Math.max(1, years - 1)}y, winsorized ${(winsorizedCagr * 100).toFixed(1)}%) + 45% live (${hasLive ? `${(liveRevGrowth * 100).toFixed(1)}%, winsorized ${(winsorizedLive * 100).toFixed(1)}%` : "n/a"}) → base ${(baseGrowth * 100).toFixed(1)}% driver-shaped fade${continuityCapped ? ` — CONTINUITY-CAPPED: live leg cut to hist+10pp (${(effWinsorizedLive * 100).toFixed(1)}%) so a quarterly spike cannot rebase the 5y trajectory` : ""}`,
     ebitMargin: `Driver-shaped (${sectorIdForDrivers}): base from ${marginSource}; explicit path ${driver.ebitMargins.map((m) => `${(m * 100).toFixed(1)}%`).join(" → ")}`,

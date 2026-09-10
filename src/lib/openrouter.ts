@@ -33,6 +33,14 @@ import {
   classifyLlmFailure,
   type LlmFailureKind,
 } from "./ai-providers";
+import {
+  WRITER_CHECKER_MAX_ATTEMPTS,
+  checkStrategistDraft,
+  checkMoatDraft,
+  buildStrategistRefinePrompt,
+  buildMoatRefinePrompt,
+  type WriterCheckerGroundTruth,
+} from "./writer-checker-loop";
 
 export { RateLimitError };
 
@@ -414,15 +422,13 @@ Return a valid JSON object matching this structure EXACTLY:
 }
 Return ONLY raw JSON, no markdown formatting.`;
 
-  const response = await callOpenRouterWithFailover([
-    {
-      role: "system",
-      content: "You are the Lead Equity Research Director at a Tier-1 Investment Bank. You author definitive institutional research with deep quantitative rigor and zero boilerplate.",
-    },
-    { role: "user", content: prompt },
-  ], 2500, 0.35, customConfig);
+  const writerSystem = "You are the Lead Equity Research Director at a Tier-1 Investment Bank. You author definitive institutional research with deep quantitative rigor and zero boilerplate.";
 
-  return extractJsonFromResponse(response, {
+  // Writer → checker → rewrite cycle: the strategist drafts, the
+  // deterministic gate plus a second (checker) AI verify, and the writer
+  // revises from feedback until both pass or attempts run out.
+  const truth = buildWriterCheckerTruth(profile, stockData, dcf, resolveMoatRating(annualFinancials, dcf.assumptions?.wacc ?? 0.095));
+  const emptyStrategist = {
     investmentThesis: "",
     companyOverview: "",
     investmentConclusion: "",
@@ -430,7 +436,41 @@ Return ONLY raw JSON, no markdown formatting.`;
     swotWeaknesses: [],
     swotOpportunities: [],
     swotThreats: [],
-  });
+  };
+  let best: typeof emptyStrategist | null = null;
+  let bestIssueCount = Number.POSITIVE_INFINITY;
+  let feedback: string[] | null = null;
+
+  for (let attempt = 1; attempt <= WRITER_CHECKER_MAX_ATTEMPTS; attempt++) {
+    const userPrompt = feedback && best
+      ? buildStrategistRefinePrompt(truth, best, feedback)
+      : prompt;
+    const response = await callOpenRouterWithFailover([
+      { role: "system", content: writerSystem },
+      { role: "user", content: userPrompt },
+    ], 2500, 0.35, customConfig);
+
+    const draft = extractJsonFromResponse(response, emptyStrategist);
+    const det = checkStrategistDraft(draft, truth);
+    if (draft.investmentThesis && det.issues.length < bestIssueCount) {
+      best = draft;
+      bestIssueCount = det.issues.length;
+    }
+    if (!det.pass) {
+      console.warn(`[writer-checker] strategist attempt ${attempt}/${WRITER_CHECKER_MAX_ATTEMPTS} rejected (deterministic): ${det.issues[0]}`);
+      if (attempt >= WRITER_CHECKER_MAX_ATTEMPTS) break;
+      feedback = det.issues;
+      continue;
+    }
+    // Deterministic gate passed — ask the second AI to confirm.
+    const llm = await runStrategistLlmChecker(draft, truth, customConfig);
+    if (llm.pass) return draft;
+    console.warn(`[writer-checker] strategist attempt ${attempt}/${WRITER_CHECKER_MAX_ATTEMPTS} rejected (checker AI): ${llm.issues[0]}`);
+    if (attempt >= WRITER_CHECKER_MAX_ATTEMPTS) break;
+    feedback = [...det.issues, ...llm.issues].slice(0, 8);
+  }
+  if (best && best.investmentThesis) return best;
+  return emptyStrategist;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -541,6 +581,108 @@ export function moatDurabilityExamples(rating: MoatRating): { ceiling: string; e
   return { ceiling: "None (< 3 Yrs)", ex: ["None (< 3 Yrs)", "None (< 3 Yrs)", "None (< 3 Yrs)"] };
 }
 
+// ─────────────────────────────────────────────────────────────
+// Writer-Checker cycle: second-AI semantic checkers (lite tier)
+// The deterministic gate in writer-checker-loop.ts is authoritative;
+// these LLM checkers add judgment on coherence/vagueness. Best-effort:
+// a checker outage resolves to PASS so the deterministic verdict stands.
+// ─────────────────────────────────────────────────────────────
+function buildWriterCheckerTruth(
+  profile: CompanyProfile,
+  stockData: StockData,
+  dcf: DCFResult,
+  canonicalMoat: MoatRating,
+  roicSpreadPp?: number
+): WriterCheckerGroundTruth {
+  const cmp = Number(dcf.currentMarketPrice ?? stockData.currentPrice ?? 0) || 0;
+  const fv = Number(dcf.intrinsicValue ?? cmp) || cmp;
+  const upside = Number.isFinite(dcf.upsideDownside ?? NaN)
+    ? (dcf.upsideDownside as number)
+    : cmp > 0
+      ? (fv - cmp) / cmp
+      : 0;
+  return {
+    companyName: profile.name,
+    ticker: profile.ticker,
+    sector: profile.sector || "",
+    industry: profile.industry || "",
+    description: (profile as { description?: string }).description || "",
+    currency: profile.currency || "USD",
+    cmp,
+    fv,
+    upside,
+    verdict: (dcf.verdict || "HOLD").toUpperCase(),
+    wacc: dcf.assumptions?.wacc ?? 0.095,
+    terminalGrowthRate: dcf.assumptions?.terminalGrowthRate ?? 0.03,
+    canonicalMoat,
+    roicSpreadPp,
+  };
+}
+
+async function runStrategistLlmChecker(
+  draft: { investmentThesis?: string; companyOverview?: string; investmentConclusion?: string },
+  truth: WriterCheckerGroundTruth,
+  customConfig?: CustomKeyConfig | null
+): Promise<{ pass: boolean; issues: string[] }> {
+  const fallback = { pass: true, issues: [] as string[] };
+  try {
+    const res = await callOpenRouterWithFailover([
+      {
+        role: "system",
+        content: "You are the Thesis Checker on an institutional equity desk. You verify a colleague's thesis draft for stance errors, vague filler, and internal contradictions. Reply with raw JSON {pass:boolean, issues:string[]} only — no prose.",
+      },
+      {
+        role: "user",
+        content: [
+          `Ground truth: ${truth.companyName} verdict ${truth.verdict}, fair value ${truth.fv.toFixed(2)}, CMP ${truth.cmp.toFixed(2)}, upside ${(truth.upside * 100).toFixed(1)}%.`,
+          `Draft thesis: ${(draft.investmentThesis || "").slice(0, 1200)}`,
+          `Draft conclusion: ${(draft.investmentConclusion || "").slice(0, 600)}`,
+          `Check: (1) conclusion states ${truth.verdict} with no opposing stance words; (2) no generic filler without numbers; (3) thesis and conclusion do not contradict each other.`,
+          `Return {"pass":true,"issues":[]} if clean, else {"pass":false,"issues":["<one sentence per problem>"]}.`,
+        ].join("\n"),
+      },
+    ], 500, 0.1, customConfig);
+    const parsed = extractJsonFromResponse<{ pass?: boolean; issues?: string[] }>(res, fallback);
+    if (typeof parsed.pass !== "boolean") return fallback;
+    return { pass: parsed.pass, issues: Array.isArray(parsed.issues) ? parsed.issues.filter((s) => typeof s === "string").slice(0, 5) : [] };
+  } catch (err) {
+    if (err instanceof RateLimitError) throw err;
+    return fallback;
+  }
+}
+
+async function runMoatLlmChecker(
+  draft: { competitiveMoat?: string; moatPillars?: { pillar?: string; durability?: string; rationale?: string }[] },
+  truth: WriterCheckerGroundTruth,
+  customConfig?: CustomKeyConfig | null
+): Promise<{ pass: boolean; issues: string[] }> {
+  const fallback = { pass: true, issues: [] as string[] };
+  try {
+    const res = await callOpenRouterWithFailover([
+      {
+        role: "system",
+        content: "You are the Moat Checker on an institutional equity desk. You verify a colleague's moat draft stays within the canonical composite rating. Reply with raw JSON {pass:boolean, issues:string[]} only.",
+      },
+      {
+        role: "user",
+        content: [
+          `Canonical composite moat: ${truth.canonicalMoat} (pillars are subordinate — never upgrades).`,
+          `Narrative: ${(draft.competitiveMoat || "").slice(0, 900)}`,
+          `Pillars: ${(draft.moatPillars || []).map((p) => `${p?.pillar}: ${p?.durability}`).join(" | ").slice(0, 500)}`,
+          `Check: (1) no pillar outranks ${truth.canonicalMoat}; (2) no wide-moat superlatives under Narrow/None; (3) rationales are company-specific, not generic.`,
+          `Return {"pass":true,"issues":[]} if clean, else {"pass":false,"issues":["<one sentence per problem>"]}.`,
+        ].join("\n"),
+      },
+    ], 500, 0.1, customConfig);
+    const parsed = extractJsonFromResponse<{ pass?: boolean; issues?: string[] }>(res, fallback);
+    if (typeof parsed.pass !== "boolean") return fallback;
+    return { pass: parsed.pass, issues: Array.isArray(parsed.issues) ? parsed.issues.filter((s) => typeof s === "string").slice(0, 5) : [] };
+  } catch (err) {
+    if (err instanceof RateLimitError) throw err;
+    return fallback;
+  }
+}
+
 async function runMoatAndStrategyAnalyst(
   profile: CompanyProfile,
   stockData: StockData,
@@ -630,20 +772,51 @@ Return a valid JSON object matching this structure EXACTLY:
 }
 Return ONLY raw JSON, no markdown formatting.`;
 
-  const response = await callOpenRouterWithFailover([
-    {
-      role: "system",
-      content: "You are the Head of Economic Moats and Competitive Advantage Period (CAP) Analysis. You evaluate barrier durability with rigorous microeconomic depth.",
-    },
-    { role: "user", content: prompt },
-  ], 2500, 0.35, customConfig);
+  const writerSystem = "You are the Head of Economic Moats and Competitive Advantage Period (CAP) Analysis. You evaluate barrier durability with rigorous microeconomic depth.";
 
-  return extractJsonFromResponse(response, {
+  // Writer → checker → rewrite cycle: same contract as the strategist —
+  // draft, deterministic ceiling gate + second-AI check, revise to pass.
+  const effectiveMoat: MoatRating = canonicalMoat ?? resolveMoatRating(annualFinancials, dcf.assumptions?.wacc ?? 0.095);
+  const truth = buildWriterCheckerTruth(profile, stockData, dcf, effectiveMoat, roicSpread);
+  const emptyMoat = {
     moatSources: { switchingCosts: "", intangibleAssets: "", costAdvantage: "", moatTrend: "Positive" },
     fiveForces: [],
     moatPillars: [],
     competitiveMoat: "",
-  });
+  };
+  let best: typeof emptyMoat | null = null;
+  let bestIssueCount = Number.POSITIVE_INFINITY;
+  let feedback: string[] | null = null;
+
+  for (let attempt = 1; attempt <= WRITER_CHECKER_MAX_ATTEMPTS; attempt++) {
+    const userPrompt = feedback && best
+      ? buildMoatRefinePrompt(truth, best, feedback)
+      : prompt;
+    const response = await callOpenRouterWithFailover([
+      { role: "system", content: writerSystem },
+      { role: "user", content: userPrompt },
+    ], 2500, 0.35, customConfig);
+
+    const draft = extractJsonFromResponse(response, emptyMoat);
+    const det = checkMoatDraft(draft, truth);
+    if (draft.competitiveMoat && det.issues.length < bestIssueCount) {
+      best = draft;
+      bestIssueCount = det.issues.length;
+    }
+    if (!det.pass) {
+      console.warn(`[writer-checker] moat attempt ${attempt}/${WRITER_CHECKER_MAX_ATTEMPTS} rejected (deterministic): ${det.issues[0]}`);
+      if (attempt >= WRITER_CHECKER_MAX_ATTEMPTS) break;
+      feedback = det.issues;
+      continue;
+    }
+    const llm = await runMoatLlmChecker(draft, truth, customConfig);
+    if (llm.pass) return draft;
+    console.warn(`[writer-checker] moat attempt ${attempt}/${WRITER_CHECKER_MAX_ATTEMPTS} rejected (checker AI): ${llm.issues[0]}`);
+    if (attempt >= WRITER_CHECKER_MAX_ATTEMPTS) break;
+    feedback = [...det.issues, ...llm.issues].slice(0, 8);
+  }
+  if (best && best.competitiveMoat) return best;
+  return emptyMoat;
 }
 
 // ─────────────────────────────────────────────────────────────

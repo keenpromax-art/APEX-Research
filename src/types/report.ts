@@ -621,6 +621,9 @@ export interface DCFAssumptions {
   ebitMargins: number[];
   /** Human-readable source of RF/ERP/tax parameters, e.g. "Country CAPM table v2026-09 (US)". */
   parameterSource?: string;
+  /** Through-cycle margin anchor + demonstrated ceiling (margin provenance). */
+  midCycleMargin?: number;
+  marginCeiling?: number;
   /** Per-input WACC provenance (P0 #15 — sourcing quarantined from formula). */
   inputProvenance?: { beta: string; weights: string; country: string; spread: string; clamp: string };
 }

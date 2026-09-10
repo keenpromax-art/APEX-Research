@@ -344,7 +344,10 @@ export async function GET(request: NextRequest) {
         }
       }
 
-      const filteredPeers = peerTickers.filter(t => t.toUpperCase() !== symbol.toUpperCase()).slice(0, 4);
+      // Up to 6 peers (never fewer than the curated set when it qualifies) —
+      // the old slice(0, 4) silently dropped the 5th/6th comparable (NOW for
+      // MSFT) even when the similarity gate would have passed them.
+      const filteredPeers = peerTickers.filter(t => t.toUpperCase() !== symbol.toUpperCase()).slice(0, 6);
 
       if (filteredPeers.length > 0) {
         const peerRaw = await fetchPeerQuotes(filteredPeers);

@@ -110,51 +110,55 @@ export function computeDriverForecast(params: {
   const fade = getFadeShape(sectorId);
   const revenueGrowthRates = fade.map((f) => inputs.baseGrowth * f);
 
-  // Margin ramp: hospitality EBITDAR-derived, auto cycle-capped, IT sticky, default generic
+  // Margin ramp: hospitality EBITDAR-derived, auto cycle-capped, IT sticky, default generic.
+  // Every branch cap is max(branchCap, 102% of the effective-margin seed) — caps
+  // bind runaway ramps off low seeds only and can never cut the forecast below
+  // demonstrated profitability (the 14%-style decapitation that printed a $165
+  // SELL on a 47%-margin compounder).
   let ebitMargins: number[];
   let driverEquation: string;
   if (sectorId === "hospitality" || sectorId === "real-estate" || String(operatingArchetype).startsWith("hospitality")) {
-    ebitMargins = [0.01, 0.018, 0.024, 0.028, 0.03].map((r) => Math.min(inputs.effectiveMargin + r, 0.3));
+    ebitMargins = [0.01, 0.018, 0.024, 0.028, 0.03].map((r) => Math.min(inputs.effectiveMargin + r, Math.max(0.3, inputs.effectiveMargin * 1.02)));
     driverEquation = "Revenue = Available Room Nights × Occupancy% × ADR × (1 + F&B/MICE mix) + fee annuity; GOP → EBITDAR − rent → EBIT";
   } else if (sectorId === "auto" || operatingArchetype === "auto_manufacturing") {
-    ebitMargins = [0.008, 0.014, 0.018, 0.021, 0.023].map((r) => Math.min(inputs.effectiveMargin + r, 0.22));
+    ebitMargins = [0.008, 0.014, 0.018, 0.021, 0.023].map((r) => Math.min(inputs.effectiveMargin + r, Math.max(0.22, inputs.effectiveMargin * 1.02)));
     driverEquation = "Revenue = Σ(model deliveries × ASP) + parts/services + storage; margin ex-regulatory-credits, cost-down vs price-cuts";
   } else if (sectorId === "technology-hardware" || operatingArchetype === "technology_hardware") {
     // Hardware: segment units × ASP × mix; gross margin via mix/component economics;
     // inventory + channel working capital explicit. No NRR/MSA/consulting compounding.
-    ebitMargins = [0.006, 0.012, 0.017, 0.021, 0.024].map((r) => Math.min(inputs.effectiveMargin + r, 0.28));
+    ebitMargins = [0.006, 0.012, 0.017, 0.021, 0.024].map((r) => Math.min(inputs.effectiveMargin + r, Math.max(0.28, inputs.effectiveMargin * 1.02)));
     driverEquation = "Revenue = Σ(segment units × ASP × mix) + services attach; gross margin = mix − component costs (memory/display/silicon); WC = channel + finished-goods inventory − supplier payables";
   } else if (sectorId === "technology-software" || sectorId === "it-services" || operatingArchetype === "technology_software") {
-    ebitMargins = [0.008, 0.014, 0.019, 0.023, 0.026].map((r) => Math.min(inputs.effectiveMargin + r, 0.32));
+    ebitMargins = [0.008, 0.014, 0.019, 0.023, 0.026].map((r) => Math.min(inputs.effectiveMargin + r, Math.max(0.32, inputs.effectiveMargin * 1.02)));
     driverEquation = "Revenue = billed headcount × utilization × realization + TCV conversion; margin = pricing − wage inflation − attrition drag";
   } else if (sectorId === "internet-platform") {
-    ebitMargins = [0.01, 0.018, 0.024, 0.028, 0.03].map((r) => Math.min(inputs.effectiveMargin + r, 0.38));
+    ebitMargins = [0.01, 0.018, 0.024, 0.028, 0.03].map((r) => Math.min(inputs.effectiveMargin + r, Math.max(0.38, inputs.effectiveMargin * 1.02)));
     driverEquation = "Revenue = DAU/MAU × ad impressions × average price per ad; margin = ad leverage − AI infra capex − Reality Labs drag";
   } else if (sectorId === "internet-retail") {
-    ebitMargins = [0.006, 0.012, 0.017, 0.021, 0.024].map((r) => Math.min(inputs.effectiveMargin + r, 0.2));
+    ebitMargins = [0.006, 0.012, 0.017, 0.021, 0.024].map((r) => Math.min(inputs.effectiveMargin + r, Math.max(0.2, inputs.effectiveMargin * 1.02)));
     driverEquation = "Revenue = orders × AOV × take rate; margin = contribution − fulfillment − incentives";
   } else if (sectorId === "bank" || sectorId === "nbfc") {
     // Depository forecast is loan-growth/NIM-driven (residual-income corroboration;
     // banks never ride the FCFF path, so this shapes narrative + canonical forecast only).
-    ebitMargins = [0.006, 0.011, 0.015, 0.018, 0.02].map((r) => Math.min(inputs.effectiveMargin + r, 0.3));
+    ebitMargins = [0.006, 0.011, 0.015, 0.018, 0.02].map((r) => Math.min(inputs.effectiveMargin + r, Math.max(0.3, inputs.effectiveMargin * 1.02)));
     driverEquation = "Advances(t+1) = advances(t) × (1 + credit growth); NII = avg advances × NIM; PPOP = NII + fees − opex; PAT = PPOP − credit costs − tax; book via retained earnings + CRAR";
   } else if (sectorId === "insurance") {
     // Insurer forecast is premium/underwriting/float-driven (residual-income corroboration).
-    ebitMargins = [0.006, 0.011, 0.015, 0.018, 0.02].map((r) => Math.min(inputs.effectiveMargin + r, 0.28));
+    ebitMargins = [0.006, 0.011, 0.015, 0.018, 0.02].map((r) => Math.min(inputs.effectiveMargin + r, Math.max(0.28, inputs.effectiveMargin * 1.02)));
     driverEquation = "GWP × retention → NEP; claims (loss ratio) + acquisition/opex (expense ratio) → underwriting result; + float × investment yield → PAT; solvency via retained earnings";
   } else if (sectorId === "real-estate") {
     // REIT forecast is lease-annuity-driven: area × occupancy × rent × escalation → NOI → FFO → AFFO.
-    ebitMargins = [0.008, 0.014, 0.019, 0.023, 0.026].map((r) => Math.min(inputs.effectiveMargin + r, 0.32));
+    ebitMargins = [0.008, 0.014, 0.019, 0.023, 0.026].map((r) => Math.min(inputs.effectiveMargin + r, Math.max(0.32, inputs.effectiveMargin * 1.02)));
     driverEquation = "Rental = leasable area × occupancy × rent/sqft × (1 + escalation); NOI = rental − property opex; FFO = NI + RE depreciation − gains; AFFO = FFO − maint. capex − leasing";
   } else if (sectorId === "asset-management" || sectorId === "ratings-agency") {
     // Fee-franchise forecast is AUM/flow/fee-rate-driven with operating leverage (capex-light, WC-light).
-    ebitMargins = [0.01, 0.018, 0.024, 0.028, 0.031].map((r) => Math.min(inputs.effectiveMargin + r, 0.4));
+    ebitMargins = [0.01, 0.018, 0.024, 0.028, 0.031].map((r) => Math.min(inputs.effectiveMargin + r, Math.max(0.4, inputs.effectiveMargin * 1.02)));
     driverEquation = "Fee revenue = avg AUM × fee realization (bps) + performance fees + platform/analytics; margin = operating leverage − compensation ratio; FCF ≈ NI (capex-light)";
   } else if (sectorId === "telecom") {
-    ebitMargins = [0.008, 0.015, 0.02, 0.024, 0.027].map((r) => Math.min(inputs.effectiveMargin + r, 0.35));
+    ebitMargins = [0.008, 0.015, 0.02, 0.024, 0.027].map((r) => Math.min(inputs.effectiveMargin + r, Math.max(0.35, inputs.effectiveMargin * 1.02)));
     driverEquation = "Revenue = subscribers × ARPU (tariff × mix); margin = operating leverage − network opex − spectrum amortization";
   } else if (sectorId === "pharma") {
-    ebitMargins = [0.008, 0.015, 0.02, 0.024, 0.027].map((r) => Math.min(inputs.effectiveMargin + r, 0.3));
+    ebitMargins = [0.008, 0.015, 0.02, 0.024, 0.027].map((r) => Math.min(inputs.effectiveMargin + r, Math.max(0.3, inputs.effectiveMargin * 1.02)));
     driverEquation = "Revenue = volumes × realization by market (domestic chronic + US generics + API); margin = mix − R&D − USFDA remediation";
   } else if (operatingArchetype === "energy_petrochem") {
     // Energy / diversified-conglomerate: segment-mix economics named explicitly
@@ -164,10 +168,10 @@ export function computeDriverForecast(params: {
     // operating-mix disclosure, never hallucinated units. Capex floor reflects
     // concurrent buildouts (network, stores, giga-factories); fade is
     // cycle-aware (commodity mid-cycle reversion), not SaaS compounding.
-    ebitMargins = [0.008, 0.014, 0.019, 0.023, 0.026].map((r) => Math.min(inputs.effectiveMargin + r, 0.28));
+    ebitMargins = [0.008, 0.014, 0.019, 0.023, 0.026].map((r) => Math.min(inputs.effectiveMargin + r, Math.max(0.28, inputs.effectiveMargin * 1.02)));
     driverEquation = "Revenue = Σ(segment mix: O2C throughput × refining/petrochem margin + Digital subscribers × ARPU + Retail throughput + E&P volumes + New Energy) — consolidated, segment split undisclosed; margin = mix shift to consumer/tech + O2C mid-cycle − New Energy drag; WC consolidated across segments (no single-CCC read-across)";
   } else {
-    ebitMargins = [0.01, 0.018, 0.024, 0.028, 0.03].map((r) => Math.min(inputs.effectiveMargin + r, 0.3));
+    ebitMargins = [0.01, 0.018, 0.024, 0.028, 0.03].map((r) => Math.min(inputs.effectiveMargin + r, Math.max(0.3, inputs.effectiveMargin * 1.02)));
     driverEquation = "Revenue = volume × realization × mix (consolidated; segment split undisclosed — no unit hallucination)";
   }
 
