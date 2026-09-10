@@ -1068,9 +1068,10 @@ const buildFiveYearStatementModel = (data: ReportData): StatementColumn[] => {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PAGE 1: COVER PAGE
-// 3-Column Institutional Architecture with 23-Topic Table of Contents
+// 3-Column Institutional Architecture with Table of Contents (concise-aware:
+// 10 pages by default, 24 in full mode)
 // ─────────────────────────────────────────────────────────────────────────────
-const CoverPage = ({ data }: { data: ReportData }) => {
+const CoverPage = ({ data, concise = true }: { data: ReportData; concise?: boolean }) => {
   const ledger = data.assumptionsLedger;
   const { currency } = data.profile;
   const cmpSym =
@@ -1209,20 +1210,31 @@ const CoverPage = ({ data }: { data: ReportData }) => {
           </Text>
           <View style={{ height: 0.5, backgroundColor: COLORS.hairlineLight, marginBottom: 4 }} />
 
-          {/* Sectional Table of Contents (24 Pages) */}
+          {/* Sectional Table of Contents (concise: 10 pages; full: 24 pages) */}
           <Text style={{ fontSize: 6.5, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2.0 }}>
             Report Contents
           </Text>
-          {[
-            ["Executive Summary & Thesis", "1–5"],
-            ["Credit & Solvency Analysis", "6–7"],
-            ["Management & Governance", "8–9"],
-            ["Catalysts & Market Reaction", "10–12"],
-            ["Multi-Year Statement Models", "13–15"],
-            ["Comparable Company Comps", "16–17"],
-            ["Valuation & Credit Models", "18–21"],
-            ["Statutory Disclosures & QA", "22–24"],
-          ].map(([section, pageNum], idx) => (
+          {(concise
+            ? [
+                ["Executive Summary & Thesis", "1"],
+                ["Valuation: DCF, Scenarios & Sensitivity", "2"],
+                ["Moat & Price / Fair Value", "3"],
+                ["Bulls / Bears, Risks & Catalysts", "4"],
+                ["Multi-Year Statement Models", "5–7"],
+                ["Comparable Company Comps", "8"],
+                ["QA Checksum & Disclosures", "9–10"],
+              ]
+            : [
+                ["Executive Summary & Thesis", "1–5"],
+                ["Credit & Solvency Analysis", "6–7"],
+                ["Management & Governance", "8–9"],
+                ["Catalysts & Market Reaction", "10–12"],
+                ["Multi-Year Statement Models", "13–15"],
+                ["Comparable Company Comps", "16–17"],
+                ["Valuation & Credit Models", "18–21"],
+                ["Statutory Disclosures & QA", "22–24"],
+              ]
+          ).map(([section, pageNum], idx) => (
             <View key={idx} style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 1.8 }}>
               <Text style={{ fontSize: 5.8, color: COLORS.textSecondary, maxWidth: "78%" }}>{section}</Text>
               <Text style={{ fontSize: 5.8, fontFamily: "Helvetica-Bold", color: COLORS.slateDark }}>{pageNum}</Text>
@@ -4924,7 +4936,7 @@ const EstimateFootnote = ({ data }: { data: ReportData }) => {
     </View>
   );
 };
-const IncomeStatementDetailedPage = ({ data }: { data: ReportData }) => {
+const IncomeStatementDetailedPage = ({ data, concise = true }: { data: ReportData; concise?: boolean }) => {
   // Architectures B–E render sector-native statements + key ratios (SectorStatements),
   // REPLACING the generic corporate tables — never layered on top of them.
   if (shouldUseNativeStatements(data)) {
@@ -5045,7 +5057,7 @@ const IncomeStatementDetailedPage = ({ data }: { data: ReportData }) => {
             </View>
           ))}
         </View>
-        <Text style={{ fontSize: 5.0, color: COLORS.textMuted, marginTop: 1 }}>
+        <Text style={{ fontSize: 5.0, color: COLORS.textMuted, marginTop: concise ? 0 : 1 }}>
           Driver attribution beyond these deltas (price vs volume vs mix) requires segment disclosure, which the feed does not provide — narrative claims beyond this walk are flagged by QA.
         </Text>
       </View>
@@ -5054,7 +5066,7 @@ const IncomeStatementDetailedPage = ({ data }: { data: ReportData }) => {
       <Text style={{ fontSize: 7.8, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2 }}>
         Common-Size Margin Structure &amp; Operating Leverage Progression (% of Net Revenue)
       </Text>
-      <View style={[S.compactTable, { marginBottom: 3 }]}>
+      <View style={[S.compactTable, { marginBottom: concise ? 0 : 3 }]}>
         <View style={S.compactRowHeader}>
           <Text style={[S.compactCellHeader, { width: "33%" }]}>Margin / Cost Ratio</Text>
           {models.map((m, i) => (
@@ -5066,7 +5078,14 @@ const IncomeStatementDetailedPage = ({ data }: { data: ReportData }) => {
         {[
           ["Gross Profit Margin %", ...models.map(m => fmtPct(m.grossProfit / m.revenue))],
           ["Selling, General & Administrative %", ...models.map(m => fmtPct(m.sga / m.revenue))],
-          ["Research & Development Intensity %", ...models.map(m => fmtPct(m.rd / m.revenue))],
+          // Materiality-gated on REPORTED history (not the forecast model, which
+          // synthesizes an opex-spread R&D share even for zero-R&D companies):
+          // R&D intensity is noise (a 0.0% history row) for names that do no R&D —
+          // hide it in concise mode unless reported R&D ever exceeds 50bps of
+          // revenue. Full mode always shows it; R&D names keep it in concise.
+          ...((!concise || data.annualFinancials.some((f) => (f.revenue > 0 ? stmtNum(f, "researchDevelopment") / f.revenue : 0) > 0.005)
+            ? [["Research & Development Intensity %", ...models.map(m => fmtPct(m.rd / m.revenue))]]
+            : []) as string[][]),
           ["Operating Margin (EBIT) %", ...models.map(m => fmtPct(m.operatingIncome / m.revenue))],
           ["EBITDA Margin %", ...models.map(m => fmtPct(m.ebitda / m.revenue))],
           ["Effective Income Tax Rate %", ...models.map(m => fmtPct(m.tax / (m.pretaxIncome || 1)))],
@@ -5085,7 +5104,10 @@ const IncomeStatementDetailedPage = ({ data }: { data: ReportData }) => {
         })}
       </View>
 
-      {/* Dense 2-Column Buy-Side Operating Analysis Box */}
+      {/* Dense 2-Column Buy-Side Operating Analysis Box (full mode only: in
+          concise mode this narrative duplicates the cover/fundamental prose and
+          its length spills the statement onto a second page) */}
+      {!concise && (
       <View style={{ padding: 5.5, backgroundColor: COLORS.offWhite, borderWidth: 0.5, borderColor: COLORS.hairlineLight, marginBottom: 3 }}>
         <Text style={{ fontSize: 7.8, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2 }}>
           Operating Leverage &amp; Margin Trajectory Analysis
@@ -5130,6 +5152,7 @@ const IncomeStatementDetailedPage = ({ data }: { data: ReportData }) => {
           })()}
         </View>
       </View>
+      )}
 
       <PageFooter companyName={data.profile.name} />
     </Page>
@@ -7428,9 +7451,13 @@ const QualityAssuranceChecksumPage = ({ data }: { data: ReportData }) => {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// MAIN DOCUMENT EXPORT — 24 DENSE, TRADEMARK-SAFE PAGES WITH ZERO GAPS
+// MAIN DOCUMENT EXPORT — concise (10 pages, default) or full (24 pages).
+// Concise keeps every load-bearing surface: thesis, DCF/scenarios/sensitivity,
+// moat + pillars, bulls/bears/risks, all three statements, comps, QA, statutory
+// disclaimer. Full adds reference/boilerplate depth (five-forces, credit
+// scorecards, governance, event study, methodology, AI disclosure).
 // ─────────────────────────────────────────────────────────────────────────────
-export const ReportDocument = ({ data }: { data: ReportData }) => (
+export const ReportDocument = ({ data, concise = true }: { data: ReportData; concise?: boolean }) => (
   <Document
     title={`${data.profile.name} — Institutional Equity Research Report`}
     author={data.analystName}
@@ -7439,8 +7466,8 @@ export const ReportDocument = ({ data }: { data: ReportData }) => (
     creator="Institutional Equity Research Desk"
     producer="Institutional Equity Research Desk"
   >
-    {/* Page 1: 3-Column Institutional Cover Page with 23-Topic TOC */}
-    <CoverPage data={data} />
+    {/* Page 1: 3-Column Institutional Cover Page with TOC */}
+    <CoverPage data={data} concise={concise} />
 
     {/* Page 2: Fundamental & Valuation Analysis (Scenarios & Sensitivity Matrix) */}
     <FundamentalAnalysisPage data={data} />
@@ -7448,67 +7475,83 @@ export const ReportDocument = ({ data }: { data: ReportData }) => (
     {/* Page 3: Competitive Moat & Price/Fair Value (Stepped Chart & Moat Matrix) */}
     <MoatAndPriceFairValuePage data={data} />
 
-    {/* Page 4: Moat Sources & Scale Advantages (Five Forces Matrix) */}
-    <MoatSourcesPage data={data} />
+    {!concise && (
+      <>
+        {/* Page 4: Moat Sources & Scale Advantages (Five Forces Matrix) */}
+        <MoatSourcesPage data={data} />
+      </>
+    )}
 
-    {/* Page 5: Bulls Say / Bears Say & Stewardship (Catalysts & Risks Table) */}
+    {/* Page 4/5: Bulls Say / Bears Say & Stewardship (Catalysts & Risks Table) */}
     <BullsSayBearsSayPage data={data} />
 
-    {/* Page 6: Institutional Credit Analysis (Cash Flow, Cushion Chart & Ratios) */}
-    <CreditAnalysisPage1 data={data} />
+    {!concise && (
+      <>
+        {/* Page 6: Institutional Credit Analysis (Cash Flow, Cushion Chart & Ratios) */}
+        <CreditAnalysisPage1 data={data} />
 
-    {/* Page 7: Capital Structure & Enterprise Risk (Risk Mitigation Matrix) */}
-    <CreditAnalysisPage2 data={data} />
+        {/* Page 7: Capital Structure & Enterprise Risk (Risk Mitigation Matrix) */}
+        <CreditAnalysisPage2 data={data} />
 
-    {/* Page 8: Management & Governance (Activity, Funds & Governance Scorecard) */}
-    <ManagementAndOwnershipPage1 data={data} />
+        {/* Page 8: Management & Governance (Activity, Funds & Governance Scorecard) */}
+        <ManagementAndOwnershipPage1 data={data} />
 
-    {/* Page 9: Capital Allocation & Corporate Strategy (Deployment Table) */}
-    <ManagementAndOwnershipPage2 data={data} />
+        {/* Page 9: Capital Allocation & Corporate Strategy (Deployment Table) */}
+        <ManagementAndOwnershipPage2 data={data} />
 
-    {/* Page 10: Event-Based Price Movement & Market Reaction Analysis */}
-    <EventBasedPriceMovementPage data={data} />
+        {/* Page 10: Event-Based Price Movement & Market Reaction Analysis */}
+        <EventBasedPriceMovementPage data={data} />
 
-    {/* Page 11: Corporate Disclosures & Catalyst Transmission */}
-    <CorporateDisclosuresAndCatalystsPage data={data} />
+        {/* Page 11: Corporate Disclosures & Catalyst Transmission */}
+        <CorporateDisclosuresAndCatalystsPage data={data} />
 
-    {/* Page 12: Analyst Forecasts & Financial Summary (6 Comprehensive Tables) */}
-    <AnalystForecastsSummaryPage data={data} />
+        {/* Page 12: Analyst Forecasts & Financial Summary (6 Comprehensive Tables) */}
+        <AnalystForecastsSummaryPage data={data} />
+      </>
+    )}
 
-    {/* Page 13: Income Statement Multi-Year Model (24 line items in Millions) */}
-    <IncomeStatementDetailedPage data={data} />
+    {/* Page 5–7/13–15: Income Statement Multi-Year Model (24 line items in Millions) */}
+    <IncomeStatementDetailedPage data={data} concise={concise} />
 
-    {/* Page 14: Balance Sheet Multi-Year Model (23 line items in Millions) */}
+    {/* Balance Sheet Multi-Year Model (23 line items in Millions) */}
     <BalanceSheetDetailedPage data={data} />
 
-    {/* Page 15: Cash Flow Multi-Year Model (21 line items in Millions) */}
+    {/* Cash Flow Multi-Year Model (21 line items in Millions) */}
     <CashFlowDetailedPage data={data} />
 
-    {/* Page 16: Comparable Company Analysis (Valuation, Returns & Growth) */}
+    {/* Page 8/16: Comparable Company Analysis (Valuation, Returns & Growth) */}
     <ComparableCompanyAnalysisPage1 data={data} />
 
-    {/* Page 17: Comparable Company Analysis (Profitability, Leverage & Liquidity) */}
-    <ComparableCompanyAnalysisPage2 data={data} />
+    {!concise && (
+      <>
+        {/* Page 17: Comparable Company Analysis (Profitability, Leverage & Liquidity) */}
+        <ComparableCompanyAnalysisPage2 data={data} />
 
-    {/* Page 18: Institutional Research Methodology (5-Stage Valuation Process) */}
-    <ResearchMethodologyValuationPage1 data={data} />
+        {/* Page 18: Institutional Research Methodology (5-Stage Valuation Process) */}
+        <ResearchMethodologyValuationPage1 data={data} />
 
-    {/* Page 19: Valuation Uncertainty & Margin of Safety Framework (Star Bands) */}
-    <ResearchMethodologyValuationPage2 data={data} />
+        {/* Page 19: Valuation Uncertainty & Margin of Safety Framework (Star Bands) */}
+        <ResearchMethodologyValuationPage2 data={data} />
 
-    {/* Page 20: Corporate Credit Rating Framework (5-Stage Credit Pipeline) */}
-    <CreditRatingApproachPage1 data={data} />
+        {/* Page 20: Corporate Credit Rating Framework (5-Stage Credit Pipeline) */}
+        <CreditRatingApproachPage1 data={data} />
 
-    {/* Page 21: Corporate Credit Assessment & Solvency Scorecard */}
-    <CreditRatingApproachPage2 data={data} />
+        {/* Page 21: Corporate Credit Assessment & Solvency Scorecard */}
+        <CreditRatingApproachPage2 data={data} />
+      </>
+    )}
 
-    {/* Page 22: Statutory Disclosures & Limitation of Liability */}
+    {/* Page 9–10/22–24: Statutory Disclosures & Limitation of Liability */}
     <InstitutionalDisclaimerPage data={data} />
 
-    {/* Page 23: Analyst Certifications & Mandatory AI Safe Harbor */}
-    <AnalystAIDisclosurePage data={data} />
+    {!concise && (
+      <>
+        {/* Page 23: Analyst Certifications & Mandatory AI Safe Harbor */}
+        <AnalystAIDisclosurePage data={data} />
+      </>
+    )}
 
-    {/* Page 24: Pre-Publish QA & Valuation Consistency Checksum */}
+    {/* Pre-Publish QA & Valuation Consistency Checksum */}
     <QualityAssuranceChecksumPage data={data} />
   </Document>
 );
