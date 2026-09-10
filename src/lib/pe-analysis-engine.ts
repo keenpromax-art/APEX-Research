@@ -19,6 +19,7 @@ import { stmtNum, isReitStatement, isAssetLightStatement } from "@/types/report"
 import { formatPct, formatLargeNum } from "./calculations";
 import { classifyArchetype, type GICSSector, type FinancialArchetype } from "./company-archetype";
 import { buildCompanyOntology } from "./company-ontology";
+import { resolveMoatRating, capPillarsToRating } from "./moat";
 
 export interface PEAnalysisInput {
   profile: CompanyProfile;
@@ -455,28 +456,15 @@ export function generatePEFirmAnalysis(input: PEAnalysisInput): AIAnalysis {
     ];
   }
 
-  // Harmonize Moat Pillars with canonical Moat Rating to prevent contradictions
-  const canonicalMoat = (input.assumptionsLedger as any)?.moatRating || (input as any).masterReportFacts?.moat?.rating;
-  if (canonicalMoat === "Narrow") {
-    // All Wide-durability pillars are downgraded: keeping a single "Wide" pillar
-    // under a Narrow composite tripped the MOAT-02 gate and contradicted the rating.
-    moatPillars = moatPillars.map(p => {
-      if (p.durability.startsWith("Wide")) {
-        return {
-          ...p,
-          durability: "Narrow (7-10 Yrs)",
-          rationale: `${p.rationale.replace(/multi-decade|unassailable|permanent|unassailable legal barriers/gi, "defensible")} (Durability capped to composite Narrow moat.)`
-        };
-      }
-      return p;
-    });
-  } else if (canonicalMoat === "None") {
-    moatPillars = moatPillars.map(p => ({
-      ...p,
-      durability: "None (< 3 Yrs)",
-      rationale: "Vulnerable to competitive encroachment and margin erosion without structural barriers."
-    }));
-  }
+  // Harmonize Moat Pillars with canonical Moat Rating to prevent contradictions.
+  // The rating resolves self-sufficiently from statements (no input-rating
+  // dependency — callers that omit ledger/masterFacts previously skipped
+  // harmonization entirely, emitting Wide pillars under None composites).
+  const canonicalMoat =
+    (input.assumptionsLedger as any)?.moatRating ||
+    (input as any).masterReportFacts?.moat?.rating ||
+    resolveMoatRating(annualFinancials, dcf.assumptions?.wacc ?? 0.095);
+  moatPillars = capPillarsToRating(moatPillars, canonicalMoat);
 
   // Harmonize moat narrative prose with the canonical rating: scrub Wide-claims
   // from moatSources when the composite is Narrow/None. Pillars alone were
@@ -1368,8 +1356,15 @@ export function generatePEFirmAnalysis(input: PEAnalysisInput): AIAnalysis {
     : archProfile.archetype === "DISTRESSED"
     ? `The balance sheet is heavily leveraged, requiring active debt servicing management and statutory compliance monitoring. Liquidity preservation remains paramount.`
     : `The balance sheet displays solid solvency characteristics with conservative debt gearing and strong liquidity buffers supporting operational stability.`;
-  const cashFlowCommentary = archProfile.archetype === "EARLY_PLATFORM_GROWTH" || archProfile.archetype === "DISTRESSED"
-    ? `Operating cash flows are prioritized toward funding critical network infrastructure and working capital requirements, with disciplined liquidity controls.`
+  // FCF-gated cash narrative (items 7/16): the canonical forecast's FCFF path is
+  // the single truth — when any of the first 3 forecast years print negative
+  // FCFF, prose must describe the investment phase, never "self-funding".
+  const projFcff: number[] = Array.isArray((dcf as { projections?: Array<{ fcff?: number }> }).projections)
+    ? (dcf as { projections: Array<{ fcff?: number }> }).projections.map((p) => Number(p.fcff) || 0)
+    : [];
+  const forecastBurnsCash = projFcff.slice(0, 3).some((f) => f < 0);
+  const cashFlowCommentary = archProfile.archetype === "EARLY_PLATFORM_GROWTH" || archProfile.archetype === "DISTRESSED" || forecastBurnsCash
+    ? `Operating cash flows are prioritized toward funding critical network infrastructure and working capital requirements, with disciplined liquidity controls.${forecastBurnsCash ? ` The canonical forecast prints negative free cash flow in the near explicit period — growth is bought with external funding, not self-funded.` : ""}`
     : `Operating cash conversion is robust, generating sufficient free cash flow to comfortably fund ongoing capital reinvestment and disciplined shareholder distributions.`;
   const dupontCommentary = `DuPont return analysis demonstrates that return on equity is anchored by operational asset turnover and stable net profit margins rather than excessive financial leverage.`;
   const ratioCommentary = `Financial solvency, liquidity, and asset turnover ratios remain consistent with institutional research criteria, reflecting prudent risk management standards.`;

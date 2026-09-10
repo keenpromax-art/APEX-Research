@@ -29,11 +29,15 @@ export interface CanonicalForecast {
     ebit: number;
     nopat: number;
     depreciation: number;
+    /** Derived forecast EBITDA (EBIT + depreciation) — exact by construction. */
+    ebitda: number;
     capex: number;
     changeInWorkingCapital: number;
     fcff: number;
     discountFactor: number;
     pvFcff: number;
+    /** Closing net PPE stock (present only under PP&E roll-forward depreciation). */
+    ppe?: number;
   }>;
   terminal: { fcffT: number; wacc: number; g: number; terminalValue: number; pvTerminalValue: number; capped: boolean; spreadOk: boolean };
   wacc: number;
@@ -62,6 +66,9 @@ export function buildCanonicalForecast(params: {
   effectiveMargin: number;
   rawAvgCapexPct: number;
   rawAvgDeptPct: number;
+  rawAvgDepOnPpe?: number;
+  ppeBase?: number;
+  continuityCapped?: boolean;
 }): CanonicalForecast {
   const driver: DriverForecast = computeDriverForecast({
     sectorId: params.sectorId,
@@ -77,6 +84,9 @@ export function buildCanonicalForecast(params: {
       effectiveMargin: params.effectiveMargin,
       rawAvgCapexPct: params.rawAvgCapexPct,
       rawAvgDeptPct: params.rawAvgDeptPct,
+      rawAvgDepOnPpe: params.rawAvgDepOnPpe,
+      ppeBase: params.ppeBase,
+      continuityCapped: params.continuityCapped,
     },
   });
   const wacc = params.wacc;
@@ -85,36 +95,50 @@ export function buildCanonicalForecast(params: {
   const tax = params.marginalTaxRate;
   const projections: CanonicalForecast["projections"] = [];
   const fcffs: number[] = [];
+  // Parity with the DCF path (calculations.ts): 1.1× D&A capex floor, PP&E
+  // roll-forward depreciation when anchored, derived EBITDA.
+  const usePpeDep = driver.depOnPpeRate !== null && (params.ppeBase ?? 0) > 0;
+  let ppeStock = params.ppeBase ?? 0;
   driver.revenueGrowthRates.forEach((gr, i) => {
     rev = rev * (1 + gr);
     const m = driver.ebitMargins[Math.min(i, driver.ebitMargins.length - 1)] ?? 0.15;
     const ebit = rev * m;
     const nopat = ebit * (1 - tax);
-    const dep = rev * driver.avgDeptPct;
-    const capex = rev * driver.avgCapexPct;
+    const dep = usePpeDep ? ppeStock * (driver.depOnPpeRate as number) : rev * driver.avgDeptPct;
+    const capex = rev * Math.max(driver.avgCapexPct, driver.avgDeptPct * 1.1);
     const dwc = rev * driver.avgNwcChangePct;
+    if (usePpeDep) ppeStock = ppeStock + capex - dep;
     const fcff = computeFCFF({ nopat, depreciation: dep, capex, changeInWorkingCapital: dwc });
     fcffs.push(fcff);
   });
   const { pvFcff } = discountFCFF(fcffs, wacc);
   const tvRes = gordonTerminalValue({ terminalYearFcff: fcffs[fcffs.length - 1], wacc, terminalGrowth: g, terminalRevenue: rev, marginalTaxRate: tax });
   const pvTv = tvRes.terminalValue * Math.pow(1 + wacc, -5);
+  // Second pass recomputes the identical recursion so PP&E stock, depreciation
+  // and EBITDA match the first pass exactly (no drift between fcff[] and rows).
+  let rev2 = params.baseRevenue;
+  let ppe2 = params.ppeBase ?? 0;
   fcffs.forEach((f, i) => {
-    let r = params.baseRevenue;
-    for (let k = 0; k <= i; k++) r *= 1 + driver.revenueGrowthRates[k];
+    rev2 = rev2 * (1 + driver.revenueGrowthRates[i]);
+    const r = rev2;
     const m = driver.ebitMargins[Math.min(i, driver.ebitMargins.length - 1)] ?? 0.15;
     const ebit = r * m;
+    const dep = usePpeDep ? ppe2 * (driver.depOnPpeRate as number) : r * driver.avgDeptPct;
+    const capex = r * Math.max(driver.avgCapexPct, driver.avgDeptPct * 1.1);
+    if (usePpeDep) ppe2 = ppe2 + capex - dep;
     projections.push({
       year: i + 1,
       revenue: r,
       ebit,
       nopat: ebit * (1 - tax),
-      depreciation: r * driver.avgDeptPct,
-      capex: r * driver.avgCapexPct,
+      depreciation: dep,
+      ebitda: ebit + dep,
+      capex,
       changeInWorkingCapital: r * driver.avgNwcChangePct,
       fcff: f,
       discountFactor: Math.pow(1 + wacc, -(i + 0.5)),
       pvFcff: pvFcff[i],
+      ...(usePpeDep ? { ppe: ppe2 } : {}),
     });
   });
   const forecast: CanonicalForecast = {

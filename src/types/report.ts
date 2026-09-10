@@ -594,11 +594,15 @@ export interface DCFProjection {
   taxPayment: number;
   nopat: number;
   depreciation: number;
+  /** Derived forecast EBITDA (EBIT + depreciation) — exact by construction. */
+  ebitda: number;
   capex: number;
   changeInWorkingCapital: number;
   fcff: number;
   discountFactor: number;
   pvFcff: number;
+  /** Closing net PPE stock (present only under PP&E roll-forward depreciation). */
+  ppe?: number;
 }
 
 export interface DCFAssumptions {

@@ -22,6 +22,7 @@ import type {
 } from "@/types/report";
 import { stmtNum } from "@/types/report";
 import { formatPct, formatLargeNum } from "./calculations";
+import { resolveMoatRating, capPillarsToRating, type MoatRating } from "./moat";
 import { generatePEFirmAnalysis } from "./pe-analysis-engine";
 import { buildCompanyOntology } from "./company-ontology";
 import {
@@ -529,12 +530,24 @@ Return ONLY raw JSON, no markdown formatting.`;
 // AGENT 3: Economic Moat, Value Chain & Strategy Specialist
 // Focus: Porter's Five Forces, 4 Moat Sources (Cost, Switching, IP, Network)
 // ─────────────────────────────────────────────────────────────
+/**
+ * Durability ceiling + conforming examples for a composite rating. The JSON
+ * schema examples below interpolate these so the model copies capped formats
+ * instead of defaulting every pillar to Wide (the systematic MOAT-02 trip).
+ */
+export function moatDurabilityExamples(rating: MoatRating): { ceiling: string; ex: [string, string, string] } {
+  if (rating === "Wide") return { ceiling: "Wide (up to 20+ Yrs)", ex: ["15+ Years", "10-20 Years", "10-15 Years"] };
+  if (rating === "Narrow") return { ceiling: "Narrow (7-10 Yrs)", ex: ["Narrow (7-10 Yrs)", "Narrow (5-8 Yrs)", "Narrow (7-10 Yrs)"] };
+  return { ceiling: "None (< 3 Yrs)", ex: ["None (< 3 Yrs)", "None (< 3 Yrs)", "None (< 3 Yrs)"] };
+}
+
 async function runMoatAndStrategyAnalyst(
   profile: CompanyProfile,
   stockData: StockData,
   annualFinancials: AnnualFinancials[],
   dcf: DCFResult,
-  customConfig?: CustomKeyConfig | null
+  customConfig?: CustomKeyConfig | null,
+  canonicalMoat?: MoatRating
 ): Promise<{
   moatSources: {
     switchingCosts: string;
@@ -557,13 +570,32 @@ async function runMoatAndStrategyAnalyst(
   const roic = latestOpInc ? Math.max(0, nopat / investedCap) : (stockData.returnOnAssets || 0.12);
   const roicSpread = (roic - wacc) * 100;
 
+  // Canonical composite moat gates everything below: pillar durabilities must not
+  // exceed it, and Narrow/None composites forbid wide-moat superlatives outright
+  // (MOAT-01/MOAT-02 block contradictions — a Wide pillar under None is always a
+  // generation error, never a discovery).
+  const ratingLine = canonicalMoat
+    ? `
+- CANONICAL COMPOSITE MOAT (model truth, computed from ROCE vs WACC): ${canonicalMoat}.`
+    : "";
+  const ceilingBlock = canonicalMoat
+    ? (() => {
+      const { ceiling } = moatDurabilityExamples(canonicalMoat);
+      const widthLine = canonicalMoat === "Wide"
+        ? `You may evidence durable advantages up to ${ceiling}.`
+        : `Do NOT use wide-moat superlatives anywhere (wide/durable/formidable/unassailable/expanding moat, widening moat): describe limited, contested, or absent advantages plainly. Every pillar durability must read at or below ${ceiling}. Pillars are subordinate breakdowns of the composite above — never independent upgrades.`;
+      return `
+- HARD CONSTRAINT on moat width: ${widthLine}`;
+    })()
+    : "";
+  const ex = canonicalMoat ? moatDurabilityExamples(canonicalMoat).ex : (["15+ Years", "10-20 Years", "10-15 Years"] as [string, string, string]);
   const prompt = `You are the Head of Economic Moats and Industrial Organization Strategy (Morningstar / Michael Porter Framework).
 Evaluate the competitive defensibility, Porter's Five Forces, and structural moat sources for ${profile.name} (${profile.ticker}, ${profile.industry}):
 
 Financial & Competitive Context:
 - Gross Margin: ${formatPct(stmtNum(latest, "grossMargin"))} | EBITDA Margin: ${formatPct(stmtNum(latest, "ebitdaMargin"))} | Net Margin: ${formatPct(latest.netMargin)}
 - Capital Return (ROIC): ${formatPct(roic)} | Cost of Capital (WACC): ${(wacc * 100).toFixed(1)}% | ROIC Economic Spread: ${roicSpread >= 0 ? "+" : ""}${roicSpread.toFixed(1)}% | ROE: ${formatPct(roe)}
-- Enterprise Scale: Market Cap = ${formatLargeNum(stockData.marketCap || 0, profile.currency)}, Revenue = ${formatLargeNum(latest.revenue, profile.currency)}
+- Enterprise Scale: Market Cap = ${formatLargeNum(stockData.marketCap || 0, profile.currency)}, Revenue = ${formatLargeNum(latest.revenue, profile.currency)}${ratingLine}${ceilingBlock}
 - Strict Directive: Never confuse ROE with ROIC. Economic spread is strictly ROIC minus WACC. If ROIC spread is negative or near zero, do not claim returns substantially exceed cost of capital.
 
 Directives:
@@ -591,9 +623,9 @@ Return a valid JSON object matching this structure EXACTLY:
     { "force": "Competitive Rivalry", "level": "Moderate", "commentary": "Detailed sentence on market structure and rivalry in this sector." }
   ],
   "moatPillars": [
-    { "pillar": "Primary Defensibility Pillar per Sector Guardrail", "durability": "15+ Years", "rationale": "Detailed rationale tied to evidenced barriers, not imported boilerplate." },
-    { "pillar": "Secondary Recurring-Revenue Pillar per Sector Guardrail", "durability": "10-20 Years", "rationale": "Detailed rationale on the company's actual recurring mechanism where evidenced." },
-    { "pillar": "Scale or Cost Pillar per Sector Guardrail", "durability": "10-15 Years", "rationale": "Detailed rationale on evidenced scale or cost advantages." }
+    { "pillar": "Primary Defensibility Pillar per Sector Guardrail", "durability": "${ex[0]}", "rationale": "Detailed rationale tied to evidenced barriers, not imported boilerplate." },
+    { "pillar": "Secondary Recurring-Revenue Pillar per Sector Guardrail", "durability": "${ex[1]}", "rationale": "Detailed rationale on the company's actual recurring mechanism where evidenced." },
+    { "pillar": "Scale or Cost Pillar per Sector Guardrail", "durability": "${ex[2]}", "rationale": "Detailed rationale on evidenced scale or cost advantages." }
   ]
 }
 Return ONLY raw JSON, no markdown formatting.`;
@@ -681,7 +713,7 @@ Return a valid JSON object matching this structure EXACTLY:
   "ebitCommentary": "1 detailed paragraph on operational leverage, depreciation schedule sanity, and core economic EBIT compounding.",
   "patCommentary": "2 detailed paragraphs on net earnings quality, effective tax rate stability, statutory adjustments, and diluted EPS trajectory.",
   "balanceSheetCommentary": "2 detailed paragraphs on capital structure health, net working capital days, cash conversion cycle, debt composition, and asset tangibility.",
-  "cashFlowCommentary": "2 detailed paragraphs analyzing operating cash flow conversion (OCF/EBITDA), growth vs maintenance capex intensity, and free cash flow self-funding capability.",
+  "cashFlowCommentary": "2 detailed paragraphs analyzing operating cash flow conversion (OCF/EBITDA), growth vs maintenance capex intensity, and free cash flow self-funding capability. HARD CONSTRAINT: the canonical forecast FCFF path is provided in context — if any of forecast years 1-3 print negative FCFF, describe the investment phase honestly (growth funded externally); NEVER claim self-funding, robust cash generation, or comfortable distribution coverage in that case.",
   "dupontCommentary": "2 detailed paragraphs forensically dissecting whether ROE expansion is driven by operational margin expansion and asset turnover efficiency, or distorted by financial leverage gearing.",
   "ratioCommentary": "2 detailed paragraphs evaluating liquidity (Current/Quick ratios), debt-to-equity leverage, and capital efficiency return ratios."
 }
@@ -1200,6 +1232,10 @@ export async function generateAIAnalysis(
   // Always build the deep PE foundation first (100% deterministic & sector-tailored).
   // The canonical ledger (when precomputed) harmonizes moat pillars/narrative.
   const peBase = generatePEFirmAnalysis({ profile, stockData, annualFinancials, dcf, news, assumptionsLedger: precomputedLedger ?? undefined });
+  // Canonical composite moat — single authority for the moat-agent prompt ceiling
+  // AND the assembly cap below (peBase is self-harmonized since the pe-analysis
+  // fix; the LLM path needs the same rating or it emits Wide pillars everywhere).
+  const canonicalMoatRating: MoatRating = resolveMoatRating(annualFinancials, dcf.assumptions?.wacc ?? 0.095);
 
   let completedCount = 0;
   const total = AI_AGENT_PERSONAS.length;
@@ -1219,7 +1255,7 @@ export async function generateAIAnalysis(
   const agentDefs: AgentDef[] = [
     { id: "strategist", meta: AI_AGENT_PERSONAS[0], run: () => runLeadEquityStrategist(profile, stockData, dcf, annualFinancials, customConfig), auditNote: () => `Agent complete — queued for council audit (target vs DCF ledger check pending).` },
     { id: "news", meta: AI_AGENT_PERSONAS[1], run: () => runNewsIntelligenceAnalyst(profile, stockData, annualFinancials, news, customConfig), auditNote: () => "Agent complete — queued for council audit (catalyst authentication pending)." },
-    { id: "moat", meta: AI_AGENT_PERSONAS[2], run: () => runMoatAndStrategyAnalyst(profile, stockData, annualFinancials, dcf, customConfig), auditNote: () => `Agent complete — queued for council audit (moat-spread validation pending).` },
+    { id: "moat", meta: AI_AGENT_PERSONAS[2], run: () => runMoatAndStrategyAnalyst(profile, stockData, annualFinancials, dcf, customConfig, canonicalMoatRating), auditNote: () => `Agent complete — queued for council audit (moat-spread validation pending).` },
     { id: "forensic", meta: AI_AGENT_PERSONAS[3], run: () => runForensicFinancialAnalyst(profile, annualFinancials, customConfig), auditNote: () => "Agent complete — queued for council audit (DuPont reconciliation pending)." },
     { id: "credit", meta: AI_AGENT_PERSONAS[4], run: () => runCreditSolvencyAnalyst(profile, annualFinancials, stockData, customConfig), auditNote: () => "Agent complete — queued for council audit (solvency cross-check pending)." },
     { id: "governance", meta: AI_AGENT_PERSONAS[5], run: () => runGovernanceCapitalAnalyst(profile, stockData, annualFinancials, dcf, customConfig), auditNote: () => "Agent complete — queued for council audit (stewardship review pending)." },
@@ -1363,7 +1399,14 @@ export async function generateAIAnalysis(
       competitiveMoat: a3?.competitiveMoat || peBase.competitiveMoat,
       moatSources: a3?.moatSources?.switchingCosts ? a3.moatSources : peBase.moatSources,
       fiveForces: a3?.fiveForces?.length ? a3.fiveForces : peBase.fiveForces,
-      moatPillars: a3?.moatPillars?.length ? a3.moatPillars : peBase.moatPillars,
+      // Generation-time consistency enforcement (same precedent as pe-analysis
+      // self-harmonization): pillar durabilities are capped at the canonical
+      // composite. A defiant Wide-under-None pillar is always a generation error,
+      // never a discovery — MOAT-02 exists to catch exactly this.
+      moatPillars: capPillarsToRating(
+        a3?.moatPillars?.length ? a3.moatPillars : peBase.moatPillars,
+        canonicalMoatRating
+      ),
 
       // Agent 4: Forensic Financial Analyst & DuPont
       revenueCommentary: a4?.revenueCommentary || peBase.revenueCommentary,

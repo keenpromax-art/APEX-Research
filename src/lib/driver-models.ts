@@ -21,6 +21,8 @@ export interface DriverForecast {
   terminalGrowthRate: number;
   driverEquation: string;
   basis: Record<string, string>;
+  /** D&A rate on opening net PPE when a usable PPE stock exists; null → revenue-based fallback. */
+  depOnPpeRate: number | null;
 }
 
 interface DriverInputs {
@@ -34,6 +36,12 @@ interface DriverInputs {
   effectiveMargin: number;
   rawAvgCapexPct: number;
   rawAvgDeptPct: number;
+  /** Mean(D&A_t / netPPE_{t-1}) over history; 0/missing → revenue-based D&A. */
+  rawAvgDepOnPpe?: number;
+  /** Latest net PPE stock (forecast opening balance); missing → revenue-based D&A. */
+  ppeBase?: number;
+  /** True when the continuity guard trimmed a live-growth spike (disclosure). */
+  continuityCapped?: boolean;
 }
 
 /** Sector-native fade shapes: how fast base growth decays over 5y. */
@@ -148,15 +156,33 @@ export function computeDriverForecast(params: {
   } else if (sectorId === "pharma") {
     ebitMargins = [0.008, 0.015, 0.02, 0.024, 0.027].map((r) => Math.min(inputs.effectiveMargin + r, 0.3));
     driverEquation = "Revenue = volumes × realization by market (domestic chronic + US generics + API); margin = mix − R&D − USFDA remediation";
+  } else if (operatingArchetype === "energy_petrochem") {
+    // Energy / diversified-conglomerate: segment-mix economics named explicitly
+    // (O2C throughput×crack margin + Digital subs×ARPU + Retail throughput +
+    // E&P volumes + New Energy buildout). Yahoo carries no segment split, so the
+    // equation stays revenue-linked and labeled consolidated — segment NAMES are
+    // operating-mix disclosure, never hallucinated units. Capex floor reflects
+    // concurrent buildouts (network, stores, giga-factories); fade is
+    // cycle-aware (commodity mid-cycle reversion), not SaaS compounding.
+    ebitMargins = [0.008, 0.014, 0.019, 0.023, 0.026].map((r) => Math.min(inputs.effectiveMargin + r, 0.28));
+    driverEquation = "Revenue = Σ(segment mix: O2C throughput × refining/petrochem margin + Digital subscribers × ARPU + Retail throughput + E&P volumes + New Energy) — consolidated, segment split undisclosed; margin = mix shift to consumer/tech + O2C mid-cycle − New Energy drag; WC consolidated across segments (no single-CCC read-across)";
   } else {
     ebitMargins = [0.01, 0.018, 0.024, 0.028, 0.03].map((r) => Math.min(inputs.effectiveMargin + r, 0.3));
     driverEquation = "Revenue = volume × realization × mix (consolidated; segment split undisclosed — no unit hallucination)";
   }
 
-  // Capex / NWC overlays
-  let avgCapexPct = Math.min(0.08, Math.max(0.025, inputs.rawAvgCapexPct || 0.04));
+  // Capex / NWC overlays. General cap is 12% (the old 8% halved reported
+  // intensity for capex-heavy names — Reliance runs 11–17% — and manufactured
+  // negative-to-positive FCF distortion vs history).
+  let avgCapexPct = Math.min(0.12, Math.max(0.025, inputs.rawAvgCapexPct || 0.04));
   let avgDeptPct = Math.min(0.06, Math.max(0.02, inputs.rawAvgDeptPct || 0.035));
   let avgNwcChangePct = 0.02;
+  // PP&E-anchored depreciation: when D&A-on-opening-PPE history is available the
+  // forecast depreciates the PP&E stock (roll-forward) instead of revenue. Rate
+  // and base arrive via inputs; builders own the stock recursion.
+  const depOnPpeRate = inputs.rawAvgDepOnPpe && inputs.rawAvgDepOnPpe > 0 && inputs.rawAvgDepOnPpe < 0.5 && (inputs.ppeBase ?? 0) > 0
+    ? inputs.rawAvgDepOnPpe
+    : null;
   if (sectorId === "technology-hardware") { avgCapexPct = Math.max(avgCapexPct, 0.05); avgDeptPct = Math.max(avgDeptPct, 0.035); avgNwcChangePct = 0.025; }
   else if (sectorId === "technology-software") { avgCapexPct = Math.min(avgCapexPct, 0.03); avgNwcChangePct = 0.015; }
   else if (sectorId === "hospitality") { avgCapexPct = Math.max(avgCapexPct, 0.06); avgDeptPct = Math.max(avgDeptPct, 0.04); avgNwcChangePct = 0.012; }
@@ -167,14 +193,18 @@ export function computeDriverForecast(params: {
   else if (sectorId === "internet-platform") { avgCapexPct = Math.max(avgCapexPct, 0.05); avgNwcChangePct = 0.012; }
   else if (sectorId === "bank" || sectorId === "nbfc" || sectorId === "insurance") { avgCapexPct = Math.min(avgCapexPct, 0.025); avgDeptPct = Math.min(avgDeptPct, 0.02); avgNwcChangePct = 0.005; }
   else if (sectorId === "asset-management" || sectorId === "ratings-agency") { avgCapexPct = Math.min(avgCapexPct, 0.025); avgNwcChangePct = 0.01; }
+  else if (operatingArchetype === "energy_petrochem") { avgCapexPct = Math.max(avgCapexPct, 0.08); avgNwcChangePct = 0.018; }
 
   const terminalGrowthRate = getSectorTerminalGrowth(sectorId);
   const basis: Record<string, string> = {
-    revenueGrowth: `${driverEquation}; base ${(inputs.baseGrowth * 100).toFixed(1)}% fading ×${fade.slice(1).join("/")}`,
+    revenueGrowth: `${driverEquation}; base ${(inputs.baseGrowth * 100).toFixed(1)}% fading ×${fade.slice(1).join("/")}${inputs.continuityCapped ? ` (continuity-capped: live spike cut to hist+10pp — see diagnostics)` : ""}`,
     ebitMargin: `Driver-shaped ramp on effective margin ${(inputs.effectiveMargin * 100).toFixed(1)}% (${sectorId})`,
     terminal: `${(terminalGrowthRate * 100).toFixed(1)}% sector anchor (${sectorId})`,
+    depreciation: depOnPpeRate !== null
+      ? `PP&E roll-forward: D&A ${(depOnPpeRate * 100).toFixed(2)}% of opening net PPE (hist mean ${(inputs.rawAvgDeptPct * 100).toFixed(1)}% of revenue shown for reference)`
+      : `D&A ${(avgDeptPct * 100).toFixed(1)}% of revenue (no usable PPE stock — revenue-based fallback)`,
   };
-  return { revenueGrowthRates, ebitMargins, avgCapexPct, avgDeptPct, avgNwcChangePct, terminalGrowthRate, driverEquation, basis };
+  return { revenueGrowthRates, ebitMargins, avgCapexPct, avgDeptPct, avgNwcChangePct, terminalGrowthRate, driverEquation, basis, depOnPpeRate };
 }
 
 // ─────────────────────────────────────────────

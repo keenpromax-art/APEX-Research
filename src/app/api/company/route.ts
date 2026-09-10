@@ -148,6 +148,17 @@ export async function GET(request: NextRequest) {
       // REIT rows; banks/insurers/fee firms carry none (0, never NaN).
       const lastFin = annualFinancials[annualFinancials.length-1];
       const rawDept = Math.abs(lastFin ? stmtNum(lastFin, "depreciation", stmtNum(lastFin, "depreciationAmortization")) : 0) / Math.max(1, latestRev);
+      // PP&E-anchored D&A for the sealed forecast (parity with the DCF path):
+      // mean(D&A_t / netPPE_{t-1}), needs ≥2 pairs.
+      const routePpePairs: number[] = [];
+      for (let pi = 1; pi < annualFinancials.length; pi++) {
+        const prevPpe = Number(stmtNum(annualFinancials[pi - 1] as never, "netFixedAssets")) || 0;
+        const rRev = Number((annualFinancials[pi] as { revenue?: number }).revenue) || 0;
+        if (prevPpe > 0 && rRev > 0) {
+          routePpePairs.push(Math.abs(stmtNum(annualFinancials[pi] as never, "depreciation", stmtNum(annualFinancials[pi] as never, "depreciationAmortization"))) / prevPpe);
+        }
+      }
+      const routePpeBase = Number(stmtNum(lastFin as never, "netFixedAssets")) || 0;
       canonicalForecast = buildCanonicalForecast({
         sectorId: sectorIdForDrivers,
         operatingArchetype: archetypeProfile.sector || "general",
@@ -158,6 +169,8 @@ export async function GET(request: NextRequest) {
         sharesOutstanding: (dcf as any).sharesOutstanding ?? stockData.sharesOutstanding ?? 1,
         cagr: baseGrowth, winsorizedCagr: baseGrowth, winsorizedLive: baseGrowth, baseGrowth, hasLive: false, liveRevGrowth: baseGrowth, years: annualFinancials.length,
         effectiveMargin: effMargin, rawAvgCapexPct: rawCapex, rawAvgDeptPct: rawDept,
+        rawAvgDepOnPpe: routePpePairs.length >= 2 ? routePpePairs.reduce((s, r) => s + r, 0) / routePpePairs.length : 0,
+        ppeBase: routePpeBase,
       });
     } catch (e) { console.warn("Canonical forecast build failed:", e); }
 
@@ -457,7 +470,11 @@ export async function GET(request: NextRequest) {
     const independentReport = validateIndependently({
       facts: canonicalFacts,
       isFinancialInstitution: isFinArch || (buildCompanyOntology(companyProfile, archetypeProfile as never).sectorId === "bank") || companyProfile.sector?.toLowerCase().includes("bank") || companyProfile.industry?.toLowerCase().includes("insurance") || false,
-      archetype: archetypeProfile.sector,
+      // IndependentInputs.archetype expects the FinancialArchetype ("DISTRESSED" /
+      // "EARLY_PLATFORM_GROWTH" for risk spreads) — NOT the GICS operating sector.
+      // Passing .sector here zeroed the distress spread in re-solution while the model
+      // applied +200bps, false-failing IND-04 for every distressed company.
+      archetype: archetypeProfile.archetype,
       beta: stockData.beta as number | undefined,
       country: companyProfile.country,
       dcf: { enterpriseValue: (dcf as any).enterpriseValue, sumPvFcff: (dcf as any).sumPvFcff, pvTerminalValue: (dcf as any).pvTerminalValue, equityValue: (dcf as any).equityValue, netDebt: (dcf as any).netDebt, financeReceivablesOffset: (dcf as any).financeReceivablesOffset, intrinsicValue: (dcf as any).intrinsicValue, fairValuePerShare: (dcf as any).intrinsicValue, sharesOutstanding: (dcf as any).sharesOutstanding ?? stockData.sharesOutstanding ?? 1, currentMarketPrice: stockData.currentPrice, assumptions: dcf.assumptions as any },

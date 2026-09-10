@@ -633,18 +633,39 @@ function checkStatementIntegrity(inp: IndependentInputs, issues: IndependentIssu
         magnitude: magnitudeTolerance(0, v(y.interestExpense) as number, { absTol: 1, relTol: 0.01, materiality: 1 }),
       });
     }
-    // 3. EBITDA taxonomy: reported vs operatingIncome + depreciation (WARN-only:
-    // definitional variance — other operating income — is legitimate).
-    if (v(y.ebitda) !== null && v(y.operatingIncome) !== null && v(y.depreciation) !== null) {
+    // 3. EBITDA taxonomy: reported vs EBIT + depreciation. EBIT (not operating
+    // income) is the anchor — Yahoo EBITDA = EBIT + D&A exactly for compliant
+    // feeds (Reliance FY23–26 reconcile to the rupee); opInc excludes interest/
+    // other income that EBITDA includes, so opInc+D&A false-fails by ~7–13%.
+    // Corporate-only: bank/insurer/REIT shapes carry zero/absent EBITDA by
+    // design (no EBITDA construct) — judging them here false-FAILs every year.
+    // WARN on tolerance drift (definitional variance legitimate); FAIL past 15%
+    // of reported EBITDA (taxonomy break blocks valuation).
+    if (!isBankYear && v(y.ebitda) !== null && v(y.depreciation) !== null && (v((y as any).ebit) !== null || v(y.operatingIncome) !== null)) {
       evaluated++;
-      const expected = (v(y.operatingIncome) as number) + (v(y.depreciation) as number);
+      const ebitVal = v((y as any).ebit) !== null ? (v((y as any).ebit) as number) : (v(y.operatingIncome) as number);
+      const ebitLabel = v((y as any).ebit) !== null ? "EBIT" : "opInc(fallback)";
+      const expected = ebitVal + (v(y.depreciation) as number);
       const t = magnitudeTolerance(expected, v(y.ebitda) as number, { absTol: Math.max(1000, Math.abs(expected) * 0.02), relTol: 0.05, materiality: Math.max(1000, Math.abs(expected) * 0.05) });
       if (!t.pass) {
-        warns++;
-        issues.push({ code: "STMT-01", severity: "WARN", message: `${y.year} EBITDA taxonomy drift: reported ${fmt0(v(y.ebitda) as number)} vs opInc+D&A ${fmt0(expected)} (${t.detail}) — definitional variance possible.`, expected: fmt0(expected), actual: fmt0(v(y.ebitda) as number), magnitude: t });
+        const gapRel = Math.abs((v(y.ebitda) as number) - expected) / Math.max(1, Math.abs(v(y.ebitda) as number));
+        if (gapRel > 0.15) {
+          pushFail(issues, {
+            code: "STMT-01", severity: "FAIL",
+            message: `FATAL: ${y.year} EBITDA taxonomy break: reported ${fmt0(v(y.ebitda) as number)} vs ${ebitLabel}+D&A ${fmt0(expected)} (${(gapRel * 100).toFixed(1)}% > 15%) — blocks valuation; verify EBITDA definition before trusting multiples.`,
+            expected: fmt0(expected), actual: fmt0(v(y.ebitda) as number),
+            magnitude: magnitudeTolerance(expected, v(y.ebitda) as number, { absTol: 1, relTol: 0.15, materiality: 1 }),
+          });
+        } else {
+          warns++;
+          issues.push({ code: "STMT-01", severity: "WARN", message: `${y.year} EBITDA taxonomy drift: reported ${fmt0(v(y.ebitda) as number)} vs ${ebitLabel}+D&A ${fmt0(expected)} (${t.detail}) — definitional variance possible.`, expected: fmt0(expected), actual: fmt0(v(y.ebitda) as number), magnitude: t });
+        }
       }
     }
-    // 4. Debt maturity: short + long ≈ total (WARN-only: classification drift).
+    // 4. Debt maturity: short + long + leases ≈ total. The residual that used to
+    // false-warn (~6% for Reliance) IS the finance-lease liability — totalDebt
+    // already includes it (std+ltd+capitalLeaseObligations = total to the rupee).
+    // WARN on tolerance drift; FAIL past 10% (unexplained debt blocks valuation).
     // Skip when split fields are both zero/undisclosed (only totalDebt reported) — not a drift, just missing split.
     if (v(y.shortTermDebt) !== null && v(y.longTermDebt) !== null && v(y.totalDebt) !== null && (v(y.totalDebt) as number) > 0) {
       const sd = Number(v(y.shortTermDebt) ?? 0);
@@ -653,11 +674,22 @@ function checkStatementIntegrity(inp: IndependentInputs, issues: IndependentIssu
         // Split not disclosed — nothing to validate.
       } else {
         evaluated++;
-        const expected = sd + ld;
+        const leases = Number(v((y as any).capitalLeaseObligations) ?? 0);
+        const expected = sd + ld + leases;
         const t = magnitudeTolerance(expected, v(y.totalDebt) as number, { absTol: Math.max(1000, expected * 0.02), relTol: 0.05, materiality: Math.max(1000, expected * 0.1) });
         if (!t.pass) {
-          warns++;
-          issues.push({ code: "STMT-01", severity: "WARN", message: `${y.year} debt-maturity split drift: short+long ${fmt0(expected)} vs total ${fmt0(v(y.totalDebt) as number)} (${t.detail}).`, expected: fmt0(expected), actual: fmt0(v(y.totalDebt) as number), magnitude: t });
+          const gapRel = Math.abs((v(y.totalDebt) as number) - expected) / Math.max(1, Math.abs(v(y.totalDebt) as number));
+          if (gapRel > 0.10) {
+            pushFail(issues, {
+              code: "STMT-01", severity: "FAIL",
+              message: `FATAL: ${y.year} debt-split break: short+long+leases ${fmt0(expected)} vs total ${fmt0(v(y.totalDebt) as number)} (${(gapRel * 100).toFixed(1)}% > 10%) — unexplained debt blocks valuation.`,
+              expected: fmt0(expected), actual: fmt0(v(y.totalDebt) as number),
+              magnitude: magnitudeTolerance(expected, v(y.totalDebt) as number, { absTol: 1, relTol: 0.10, materiality: 1 }),
+            });
+          } else {
+            warns++;
+            issues.push({ code: "STMT-01", severity: "WARN", message: `${y.year} debt-maturity split drift: short+long+leases ${fmt0(expected)} vs total ${fmt0(v(y.totalDebt) as number)} (${t.detail}).`, expected: fmt0(expected), actual: fmt0(v(y.totalDebt) as number), magnitude: t });
+          }
         }
       }
     }

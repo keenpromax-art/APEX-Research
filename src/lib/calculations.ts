@@ -1089,8 +1089,18 @@ export function computeDCF(
   const hasLive = Number.isFinite(liveRevGrowth) && liveRevGrowth !== 0;
   const winsorizedLive = Math.max(0.04, Math.min(0.35, hasLive ? liveRevGrowth : cagr));
   const winsorizedCagr = Math.max(0.04, Math.min(0.30, cagr > 0 ? cagr : 0.14));
+  // Continuity guard: a live quarterly spike (Reliance +29.7% vs 6.4% hist CAGR)
+  // must not rebase the 5y trajectory by itself. When live exceeds hist by >10pp,
+  // the live leg is cut to hist+10pp and the cap is disclosed (diagnostics +
+  // assumption basis). Fixtures without a spike are untouched.
+  let continuityCapped = false;
+  let effWinsorizedLive = winsorizedLive;
+  if (hasLive && winsorizedLive > winsorizedCagr + 0.10) {
+    effWinsorizedLive = winsorizedCagr + 0.10;
+    continuityCapped = true;
+  }
   const baseGrowth = hasLive
-    ? 0.55 * winsorizedCagr + 0.45 * winsorizedLive
+    ? 0.55 * winsorizedCagr + 0.45 * effWinsorizedLive
     : winsorizedCagr;
 
   // Priority 3: sector/segment driver forecast (replaces single generic CAGR).
@@ -1104,6 +1114,19 @@ export function computeDCF(
   const rawAvgDeptPct =
     annualFinancials.reduce((s, f) => s + (getRevenue(f) > 0 ? getDepreciation(f) / getRevenue(f) : 0), 0) /
     nonZeroRevCount;
+  // D&A rate on opening PP&E stock (PP&E roll-forward anchor — item 10). Pairs
+  // D&A_t against netPPE_{t-1}; needs ≥2 pairs, else revenue-based fallback.
+  const ppePairs: number[] = [];
+  for (let i = 1; i < annualFinancials.length; i++) {
+    const prevPpe = Number((annualFinancials[i - 1] as unknown as Record<string, unknown>).netFixedAssets) || 0;
+    if (prevPpe > 0 && getRevenue(annualFinancials[i]) > 0) {
+      ppePairs.push(getDepreciation(annualFinancials[i]) / prevPpe);
+    }
+  }
+  const rawAvgDepOnPpe = ppePairs.length >= 2
+    ? ppePairs.reduce((s, r) => s + r, 0) / ppePairs.length
+    : 0;
+  const ppeBase = Number((latest as unknown as Record<string, unknown>).netFixedAssets) || 0;
   // effectiveMargin mirrors computeWACC's mid-cycle anchor (first explicit margin minus 1pp ramp).
   const effectiveMarginSeed = (assumptions.ebitMargins?.[0] ?? 0.14) - 0.01;
   const sectorIdForDrivers = sectorProfile?.id ?? "general";
@@ -1121,6 +1144,9 @@ export function computeDCF(
       effectiveMargin: effectiveMarginSeed,
       rawAvgCapexPct,
       rawAvgDeptPct,
+      rawAvgDepOnPpe,
+      ppeBase,
+      continuityCapped,
     },
   });
   assumptions.revenueGrowthRates = driver.revenueGrowthRates;
@@ -1149,6 +1175,11 @@ export function computeDCF(
 
   const projections: DCFProjection[] = [];
   let baseRevenue = getRevenue(latest);
+  // PP&E roll-forward stock (item 10): when the driver carries a PPE-anchored
+  // D&A rate, depreciation charges against the opening stock and the stock
+  // recurses (PPE += capex − dep). Otherwise revenue-based fallback.
+  const usePpeDep = driver.depOnPpeRate !== null && ppeBase > 0;
+  let ppeStock = ppeBase;
 
   for (let i = 0; i < 5; i++) {
     const growthRate = assumptions.revenueGrowthRates[i];
@@ -1157,9 +1188,15 @@ export function computeDCF(
     const ebit = revenue * ebitMargin;
     const taxPayment = ebit * taxRate;
     const nopat = ebit - taxPayment;
-    const depreciation = revenue * avgDeptPct;
+    const depreciation = usePpeDep
+      ? ppeStock * (driver.depOnPpeRate as number)
+      : revenue * avgDeptPct;
     const capex = revenue * Math.max(avgCapexPct, avgDeptPct * 1.1);
     const changeInWorkingCapital = revenue * avgNwcChangePct;
+    // Forecast EBITDA is derived (EBIT + D&A) — exact by construction, same
+    // taxonomy as history (reported EBITDA = EBIT + D&A on compliant feeds).
+    const ebitda = ebit + depreciation;
+    if (usePpeDep) ppeStock = ppeStock + capex - depreciation;
     // Universal FCFF kernel (P0 #12 — identical arithmetic, formula-tagged).
     const fcff = computeFCFF({ nopat, depreciation, capex, changeInWorkingCapital });
     // Kernel mid-year discount (P0 #13 — bit-identical to legacy convention).
@@ -1176,11 +1213,13 @@ export function computeDCF(
       taxPayment,
       nopat,
       depreciation,
+      ebitda,
       capex,
       changeInWorkingCapital,
       fcff,
       discountFactor,
       pvFcff,
+      ...(usePpeDep ? { ppe: ppeStock } : {}),
     });
 
     baseRevenue = revenue;
@@ -1230,12 +1269,24 @@ export function computeDCF(
     ? Math.min(Math.max(0, receivables - tradeAllowance), latestDebt)
     : 0;
   const netDebt = latestDebt - latestCash - financeReceivablesOffset;
+  // Finance-lease liabilities live inside totalDebt (std+ltd+leases = total on
+  // compliant feeds) — surfaced for the debt-bridge disclosure, never double-counted.
+  const latestLeases = Number((latest as unknown as Record<string, unknown>).capitalLeaseObligations) || 0;
   const rawEquityValue = enterpriseValue - netDebt;
   // Priority 2: resolved share base (market-cap cross-checked; partial-class
   // quote feeds lose) so model and ledger divide by the SAME count.
   const sharesOutstanding = resolveShareCount({ stockData, annualFinancials }).shares;
 
   const diagnostics: string[] = [];
+  if (continuityCapped) {
+    diagnostics.push(`Continuity guard ACTIVE: live revenue growth ${(liveRevGrowth * 100).toFixed(1)}% exceeded hist CAGR by >10pp — live leg cut to ${(effWinsorizedLive * 100).toFixed(1)}% (hist+10pp); 5y base ${(baseGrowth * 100).toFixed(1)}%. A quarterly spike cannot rebase the trajectory.`);
+  }
+  if (usePpeDep) {
+    diagnostics.push(`PP&E roll-forward depreciation: D&A at ${((driver.depOnPpeRate as number) * 100).toFixed(2)}% of opening net PPE (base stock ${ppeBase.toFixed(0)}); forecast EBITDA = EBIT + D&A exact by construction.`);
+  }
+  if (latestLeases > 0) {
+    diagnostics.push(`Finance-lease liabilities ${latestLeases.toFixed(0)} sit inside total debt ${latestDebt.toFixed(0)} (short+long+leases reconcile); EV net debt charges leases in full.`);
+  }
   if (financeReceivablesOffset > 0) {
     diagnostics.push(`Captive-finance adjustment: ${financeReceivablesOffset.toFixed(0)} of receivables (above 20%-of-revenue trade allowance on revenue ${latestRevForTrade.toFixed(0)}) netted against debt; adjusted net debt ${netDebt.toFixed(0)}. See evidence trail.`);
   }
@@ -1287,7 +1338,7 @@ export function computeDCF(
     wacc,
     terminalGrowthRate: tg,
     marginalTaxRate: taxRate,
-    modelBaseGrowthRate: baseGrowth,
+    modelBaseGrowthRate: baseGrowth, // continuity-capped base (live-spike trimmed)
     avgCapexPct,
     avgDeptPct,
     avgNwcChangePct,
@@ -1306,13 +1357,13 @@ export function computeDCF(
           ? `live operating margin ${(stockData.operatingMargins * 100).toFixed(1)}%`
           : `14% default (no margin basis — treat with caution)`;
   const assumptionBasis: Record<string, string> = {
-    revenueGrowth: `${driver.driverEquation}; 55% hist CAGR (${(cagr * 100).toFixed(1)}% over ${Math.max(1, years - 1)}y, winsorized ${(winsorizedCagr * 100).toFixed(1)}%) + 45% live (${hasLive ? `${(liveRevGrowth * 100).toFixed(1)}%, winsorized ${(winsorizedLive * 100).toFixed(1)}%` : "n/a"}) → base ${(baseGrowth * 100).toFixed(1)}% driver-shaped fade`,
+    revenueGrowth: `${driver.driverEquation}; 55% hist CAGR (${(cagr * 100).toFixed(1)}% over ${Math.max(1, years - 1)}y, winsorized ${(winsorizedCagr * 100).toFixed(1)}%) + 45% live (${hasLive ? `${(liveRevGrowth * 100).toFixed(1)}%, winsorized ${(winsorizedLive * 100).toFixed(1)}%` : "n/a"}) → base ${(baseGrowth * 100).toFixed(1)}% driver-shaped fade${continuityCapped ? ` — CONTINUITY-CAPPED: live leg cut to hist+10pp (${(effWinsorizedLive * 100).toFixed(1)}%) so a quarterly spike cannot rebase the 5y trajectory` : ""}`,
     ebitMargin: `Driver-shaped (${sectorIdForDrivers}): base from ${marginSource}; explicit path ${driver.ebitMargins.map((m) => `${(m * 100).toFixed(1)}%`).join(" → ")}`,
-    capex: `Driver capex ${(avgCapexPct * 100).toFixed(1)}% of revenue (hist ${(rawAvgCapexPct * 100).toFixed(1)}% clamped 2.5–8.0%)${archetypeProfile?.archetype ? `; ${archetypeProfile.archetype} overlay` : ""}; D&A ${(rawAvgDeptPct * 100).toFixed(1)}% (clamped 2.0–6.0%)`,
+    capex: `Driver capex ${(avgCapexPct * 100).toFixed(1)}% of revenue (hist ${(rawAvgCapexPct * 100).toFixed(1)}% clamped 2.5–12.0%)${archetypeProfile?.archetype ? `; ${archetypeProfile.archetype} overlay` : ""}; ${driver.depOnPpeRate !== null ? `D&A PP&E-anchored at ${((driver.depOnPpeRate as number) * 100).toFixed(2)}% of opening net PPE (hist mean ${(rawAvgDeptPct * 100).toFixed(1)}% of revenue for reference)` : `D&A ${(avgDeptPct * 100).toFixed(1)}% of revenue (hist ${(rawAvgDeptPct * 100).toFixed(1)}% clamped 2.0–6.0%; no usable PPE stock)`}`,
     workingCapital: `Driver NWC change ${(avgNwcChangePct * 100).toFixed(1)}% of revenue (revenue-linked, sector-calibrated for ${sectorIdForDrivers})${archetypeProfile?.archetype === "EARLY_PLATFORM_GROWTH" ? " with platform buffer overlay" : ""}`,
     netDebt: financeReceivablesOffset > 0
       ? `Reported net debt ${(latestDebt - latestCash).toFixed(0)} less captive-finance receivables offset ${financeReceivablesOffset.toFixed(0)} (receivables ${receivables.toFixed(0)} vs 20% trade allowance ${(tradeAllowance).toFixed(0)}, capped at total debt) → adjusted ${netDebt.toFixed(0)}`
-      : `Reported net debt in full (total debt ${latestDebt.toFixed(0)} − cash ${(latestCash).toFixed(0)}); no captive-finance offset (receivables ${receivables.toFixed(0)} within trade allowance)`,
+      : `Reported net debt in full (total debt ${latestDebt.toFixed(0)} − cash ${(latestCash).toFixed(0)}); no captive-finance offset (receivables ${receivables.toFixed(0)} within trade allowance)${latestLeases > 0 ? `; total debt includes finance-lease liabilities ${latestLeases.toFixed(0)} (EV charges leases — see debt bridge)` : ""}`,
     wacc: assumptions.parameterSource || "CAPM blend (parameters undisclosed)",
     terminal: `${(assumptions.terminalGrowthRate * 100).toFixed(1)}% sector anchor (${sectorIdForDrivers}); TV capped at 25× terminal-year FCFF${isTvCapped ? " (CAP ACTIVE — see diagnostics)" : " (not binding)"}`,
     driverEquation: driver.driverEquation,
@@ -1323,8 +1374,9 @@ export function computeDCF(
     baseRevenueGrowth: { value: Number(baseGrowth.toFixed(6)), source: "driver-models:55% winsorized hist CAGR + 45% live" },
     revenueGrowthPath: { value: assumptions.revenueGrowthRates.map((g) => Number(g.toFixed(6))).join(","), source: "driver-models:sector fade shape" },
     baseEbitMargin: { value: Number(assumptions.ebitMargins[0].toFixed(6)), source: marginSource },
-    capexPct: { value: Number(avgCapexPct.toFixed(6)), source: "driver-models:hist intensity clamped [2.5%, 8.0%]" },
-    deptPct: { value: Number(avgDeptPct.toFixed(6)), source: "driver-models:hist intensity clamped [2.0%, 6.0%]" },
+    capexPct: { value: Number(avgCapexPct.toFixed(6)), source: "driver-models:hist intensity clamped [2.5%, 12.0%]" },
+    deptPct: { value: Number(avgDeptPct.toFixed(6)), source: driver.depOnPpeRate !== null ? `driver-models:PP&E-anchored ${(driver.depOnPpeRate as number).toFixed(6)} of opening net PPE` : "driver-models:hist intensity clamped [2.0%, 6.0%]" },
+    ...(continuityCapped ? { continuityCap: { value: `${(effWinsorizedLive * 100).toFixed(1)}%`, source: "calculations:live leg cut to hist+10pp (continuity guard)" } } : {}),
     nwcPct: { value: Number(avgNwcChangePct.toFixed(6)), source: "driver-models:sector overlay" },
     wacc: { value: wacc, source: assumptions.parameterSource || "CAPM blend" },
     terminalGrowth: { value: tg, source: "driver-models:sector terminal anchor" },

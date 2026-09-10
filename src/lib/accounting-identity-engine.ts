@@ -16,7 +16,7 @@
 //     10% FAIL calibration (validator: 8%).
 //  5) FCF = CFO − Capex (flow chain)
 //  6) Retained earnings: RE(t)=RE(t-1)+NI−Div−Buyback (bridge; OCI plugs WARN-only)
-//  7) Debt: STD+LTD ≈ TotalDebt ; Cash: CA−CL = NWC ; D&A rate / PP&E roll-forward
+//  7) Debt: STD+LTD+leases ≈ TotalDebt ; Cash: CA−CL = NWC ; D&A rate / PP&E roll-forward
 // ============================================================
 import { magnitudeTolerance, MONEY_BRIDGE_TOL, RATIO_TOL, wcDriverDays, rollforwardVariance } from "./financial-kernel";
 import type { CanonicalFactGraph } from "./canonical-facts";
@@ -156,20 +156,37 @@ export function enforceAccountingIdentities(graph: CanonicalFactGraph): Identity
           else ebtFail();
         }
       }
-      // 5) EBIT = revenue − costOfRevenue − (implied opex); we validate via operatingIncome ≈ grossProfit − implied opex gap not directly — instead check EBIT taxonomy: operatingIncome + depreciation ≈ ebitda
-      if (v(y.ebitda) !== null && v(y.operatingIncome) !== null && v(y.depreciation) !== null) {
-        const expected = (v(y.operatingIncome) as number) + (v(y.depreciation) as number);
+      // 5) EBITDA taxonomy: reported ≈ EBIT + depreciation (EBIT anchor — Yahoo
+      // EBITDA = EBIT+D&A exactly on compliant feeds; opInc+D&A false-fails).
+      // WARN on tolerance drift; FAIL past 15% of reported EBITDA.
+      if (v(y.ebitda) !== null && v(y.depreciation) !== null && (v((y as any).ebit) !== null || v(y.operatingIncome) !== null)) {
+        const ebitVal = v((y as any).ebit) !== null ? (v((y as any).ebit) as number) : (v(y.operatingIncome) as number);
+        const ebitLabel = v((y as any).ebit) !== null ? "EBIT" : "opInc(fallback)";
+        const expected = ebitVal + (v(y.depreciation) as number);
         const t = magnitudeTolerance(expected, v(y.ebitda) as number, { absTol: Math.max(1000, Math.abs(expected) * 0.02), relTol: 0.05, materiality: Math.max(1000, Math.abs(expected) * 0.05) });
-        if (!t.pass) out.push({ code: "EBITDA-TAXONOMY", severity: "WARN", year: y.year, expected: fmt0(expected), actual: fmt0(v(y.ebitda) as number), detail: `EBITDA≠opInc+D&A: ${t.detail}` });
+        if (!t.pass) {
+          const gapRel = Math.abs((v(y.ebitda) as number) - expected) / Math.max(1, Math.abs(v(y.ebitda) as number));
+          out.push(gapRel > 0.15
+            ? { code: "EBITDA-TAXONOMY", severity: "FAIL", year: y.year, expected: fmt0(expected), actual: fmt0(v(y.ebitda) as number), detail: `FATAL: EBITDA≠${ebitLabel}+D&A by ${(gapRel * 100).toFixed(1)}% > 15%: ${t.detail}` }
+            : { code: "EBITDA-TAXONOMY", severity: "WARN", year: y.year, expected: fmt0(expected), actual: fmt0(v(y.ebitda) as number), detail: `EBITDA≠${ebitLabel}+D&A: ${t.detail}` });
+        }
       }
     }
-    // 6) Debt split — both
+    // 6) Debt split — short + long + finance leases ≈ total (totalDebt already
+    // includes lease liabilities; the ~6% "drift" is leases, not missing debt).
+    // WARN on tolerance drift; FAIL past 10% unexplained.
     if (v(y.shortTermDebt) !== null && v(y.longTermDebt) !== null && v(y.totalDebt) !== null && (v(y.totalDebt) as number) > 0) {
       const sd = Number(v(y.shortTermDebt) ?? 0); const ld = Number(v(y.longTermDebt) ?? 0);
       if (!(sd === 0 && ld === 0)) {
-        const expected = sd + ld;
+        const leases = Number(v((y as any).capitalLeaseObligations) ?? 0);
+        const expected = sd + ld + leases;
         const t = magnitudeTolerance(expected, v(y.totalDebt) as number, { absTol: Math.max(1000, expected * 0.02), relTol: 0.05, materiality: Math.max(1000, expected * 0.1) });
-        if (!t.pass) out.push({ code: "DEBT-SPLIT", severity: "WARN", year: y.year, expected: fmt0(expected), actual: fmt0(v(y.totalDebt) as number), detail: `short+long≠totalDebt: ${t.detail}` });
+        if (!t.pass) {
+          const gapRel = Math.abs((v(y.totalDebt) as number) - expected) / Math.max(1, Math.abs(v(y.totalDebt) as number));
+          out.push(gapRel > 0.10
+            ? { code: "DEBT-SPLIT", severity: "FAIL", year: y.year, expected: fmt0(expected), actual: fmt0(v(y.totalDebt) as number), detail: `FATAL: short+long+leases≠totalDebt by ${(gapRel * 100).toFixed(1)}% > 10%: ${t.detail}` }
+            : { code: "DEBT-SPLIT", severity: "WARN", year: y.year, expected: fmt0(expected), actual: fmt0(v(y.totalDebt) as number), detail: `short+long+leases≠totalDebt: ${t.detail}` });
+        }
       }
     }
     // 7) Implied borrowing rate sanity — corporate only (banks handled above as NIM)
