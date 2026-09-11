@@ -6,7 +6,7 @@
 // QA CONTRACT (block-vs-warn policy — adversarially tested, see
 // scratch/test-publication-gate.ts two-phase fixtures; Priority 4 independent gate):
 //   FAIL (blocks export): primary-data gaps (DATA-01), ontology violations (ONT-01,
-//     HOSP-01, HW-01), arithmetic breaks (XREF-01/03/04/05, SCEN-01/02, PROB-01, FV-RECOMP-01,
+//     OM-01, HOSP-01, HW-01), arithmetic breaks (XREF-01/03/04/05, SCEN-01/02, PROB-01, FV-RECOMP-01,
 //     CHAIN-01, BS-01, MODEL-01, IND-01..IND-05 independent recomputation), share/market-cap integrity (SHARE-01),
 //     identity defects (IDENTITY-01),
 //     rating/moat/credit contradictions (RATING-01/02, MOAT-01/02, STEWARD-01,
@@ -32,11 +32,13 @@ import { getSectorProfile, classifySector } from "./sectors/index";
 import { identityIssues } from "./canonical";
 import { getAllowlistedConcepts } from "./sector-allowlist";
 import { buildCompanyOntology, validateOntologyCoverage } from "./company-ontology";
+import { buildResearchOperatingModel, validateReportAgainstModel, type ResearchOperatingModel } from "./research-model";
 import { assessProvenance, assessMarketIntegrity, resolveShareCount } from "./financial-provenance";
 import { gatePeerSet, SIMILARITY_THRESHOLD_AVG, SIMILARITY_MIN_QUALIFYING } from "./peer-similarity";
 import { buildCanonicalFacts } from "./canonical-facts";
 import { validateIndependently } from "./independent-validator";
 import type { IndependentIssue } from "./independent-validator";
+import { reconcileForecast } from "./forecast-reconciliation";
 
 const SECTOR_KEYWORD_BLOCKLIST: Record<string, { blocked: string[]; sectorNames: string[] }> = {
   telecom: {
@@ -230,6 +232,10 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
 
   // 2b. DCF Equity Value Arithmetic Bridge Check (EV - Net Debt = Equity Value)
   const sectorProfile = classifySector(data.profile.sector, data.profile.industry, data.profile.description);
+  // Single operating-model instance for ALL narrative QA below (ONT-01,
+  // MODEL-01): built once here, shared by every section scan. Nothing below
+  // re-classifies the company.
+  const operatingModel: ResearchOperatingModel = buildResearchOperatingModel({ profile: data.profile });
   const isBankOrNbfc = sectorProfile.isFinancialInstitution ||
     (data.dcf?.sumPvFcff === 0 && (data.dcf?.equityValue || 0) > 0);
 
@@ -1754,8 +1760,7 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
   // ecosystem, microservices, consulting spend, TCV, utilization pyramids) is
   // the canonical wrong-business-model failure — BLOCK regardless of other passes.
   {
-    const ontoHw = buildCompanyOntology(data.profile);
-    const isHw = ontoHw.sectorId === "technology-hardware";
+    const isHw = operatingModel.sector === "technology-hardware";
     if (isHw) {
       const narrativeHw = JSON.stringify({ ...(data.aiAnalysis || {}), ...(data as unknown as { peAnalysis?: unknown }).peAnalysis || {} }).toLowerCase();
       const saasLeak = [
@@ -1863,10 +1868,9 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
   // Financials must use residual-income (FCFF forbidden); hardware must never
   // use a SaaS/ARR multiple lens; SaaS must never use a units/ASP lens.
   {
-    const ontoVal = buildCompanyOntology(data.profile);
     const lens = ((data as unknown as { valuationLens?: string }).valuationLens || (data.masterReportFacts as unknown as { valuationLens?: string } | undefined)?.valuationLens || "") as string;
     const model = ((data.dcf as unknown as { selectedModel?: string }).selectedModel || "") as string;
-    const isFinVal = ontoVal.isFinancialInstitution;
+    const isFinVal = operatingModel.isFinancialInstitution;
     const dcfHasProjections = Array.isArray(data.dcf?.projections) && (data.dcf.projections?.length ?? 0) > 0;
     if (isFinVal && dcfHasProjections) {
       checks.push({
@@ -1874,7 +1878,7 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
         category: "CROSS_REFERENCE",
         name: "Valuation Model vs Operating Archetype",
         status: "FAIL",
-        details: `FATAL PUBLICATION BLOCK: financial institution (${ontoVal.sectorId}) valued with an FCFF projection model — deposits are operating liabilities; residual-income/PB is required.`,
+        details: `FATAL PUBLICATION BLOCK: financial institution (${operatingModel.sector}) valued with an FCFF projection model — deposits are operating liabilities; residual-income/PB is required.`,
         expected: "PB_RESIDUAL_INCOME",
         actual: "FCFF_DCF projections present",
       });
@@ -1884,11 +1888,11 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
         category: "CROSS_REFERENCE",
         name: "Valuation Model vs Operating Archetype",
         status: "FAIL",
-        details: `FATAL PUBLICATION BLOCK: operating company (${ontoVal.sectorId}) carries no FCFF projections on a "valid" DCF — valuation has no engine.`,
+        details: `FATAL PUBLICATION BLOCK: operating company (${operatingModel.sector}) carries no FCFF projections on a "valid" DCF — valuation has no engine.`,
         expected: "5Y FCFF projections",
         actual: "0 projections",
       });
-    } else if (ontoVal.sectorId === "technology-hardware" && /arr|nrr|rule.of.40/i.test(lens)) {
+    } else if (operatingModel.sector === "technology-hardware" && /arr|nrr|rule.of.40/i.test(lens)) {
       checks.push({
         id: "VAL-01",
         category: "CROSS_REFERENCE",
@@ -1898,7 +1902,7 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
         expected: "units×ASP lens",
         actual: lens.slice(0, 60),
       });
-    } else if (ontoVal.sectorId === "technology-software" && /units.*asp|shipments/i.test(lens)) {
+    } else if (operatingModel.sector === "technology-software" && /units.*asp|shipments/i.test(lens)) {
       checks.push({
         id: "VAL-01",
         category: "CROSS_REFERENCE",
@@ -1914,7 +1918,7 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
         category: "CROSS_REFERENCE",
         name: "Valuation Model vs Operating Archetype",
         status: "FAIL",
-        details: `FATAL PUBLICATION BLOCK: model tag ${model} contradicts ${ontoVal.sectorId} archetype.`,
+        details: `FATAL PUBLICATION BLOCK: model tag ${model} contradicts ${operatingModel.sector} archetype.`,
         expected: isFinVal ? "PB_RESIDUAL_INCOME" : "FCFF_DCF",
         actual: model,
       });
@@ -1924,7 +1928,7 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
         category: "BS_DETECTOR",
         name: "Valuation Model vs Operating Archetype",
         status: "PASS",
-        details: `Valuation engine matches operating archetype (${ontoVal.sectorId}${lens ? `; lens: ${lens.slice(0, 60)}` : ""}).`,
+        details: `Valuation engine matches operating archetype (${operatingModel.sector}${lens ? `; lens: ${lens.slice(0, 60)}` : ""}).`,
       });
     }
   }
@@ -2060,22 +2064,38 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
     }
   }
 
-  // ONT-01: hard ontology coverage (generalized required/forbidden — independent of sanitizer rewrites).
+  // ONT-01: hard ontology coverage, evaluated against the SHARED operating
+  // model (same instance MODEL-01 uses — never a second classification).
+  // Forbidden presence is a hard BLOCK; required absence blocks only when
+  // ZERO required concepts are evidenced for a known sector (generic or
+  // foreign template applied). `general` never blocks on required absence.
   {
-    const onto = buildCompanyOntology(data.profile);
     const narrativeAll = JSON.stringify({ ...(data.aiAnalysis || {}), ...(data as unknown as { peAnalysis?: unknown }).peAnalysis || {} });
-    const cov = validateOntologyCoverage(onto, narrativeAll);
+    const cov = validateOntologyCoverage(operatingModel, narrativeAll);
     if (cov.presentForbidden.length > 0) {
       checks.push({
         id: "ONT-01",
         category: "BS_DETECTOR",
         name: "Ontology Forbidden Concepts",
         status: "FAIL",
-        details: `FATAL PUBLICATION BLOCK: narrative contains ${cov.presentForbidden.length} ontology-forbidden concept(s) for ${onto.sectorId} [${cov.presentForbidden.slice(0, 6).join(", ")}]. Business-model violation — wrong template applied.`,
+        details: `FATAL PUBLICATION BLOCK: narrative contains ${cov.presentForbidden.length} ontology-forbidden concept(s) for ${operatingModel.sector} [${cov.presentForbidden.slice(0, 6).join(", ")}]. Business-model violation — wrong template applied.`,
         expected: "Zero forbidden concepts",
         actual: `${cov.presentForbidden.length} forbidden`,
       });
-    } else if (cov.missingRequired.length >= onto.requiredConcepts.length - 1 && onto.requiredConcepts.length > 2) {
+    } else if (operatingModel.isKnownSector && cov.missingRequired.length >= operatingModel.requiredConcepts.length && operatingModel.requiredConcepts.length > 0) {
+      // Zero of N required concepts evidenced = the dossier speaks no word of
+      // its own sector's language. BLOCK (never WARN): this is cross-sector
+      // failure, not thin phrasing.
+      checks.push({
+        id: "ONT-01",
+        category: "BS_DETECTOR",
+        name: "Ontology Required Concepts",
+        status: "FAIL",
+        details: `FATAL PUBLICATION BLOCK: narrative evidences ZERO of the required ${operatingModel.sector} concepts [${operatingModel.requiredConcepts.slice(0, 6).join(", ")}] — generic or foreign template applied. Rebuild every section around the sector drivers.`,
+        expected: `≥2 of: ${operatingModel.requiredConcepts.slice(0, 4).join(", ")}`,
+        actual: `missing all ${cov.missingRequired.length}`,
+      });
+    } else if (cov.missingRequired.length >= operatingModel.requiredConcepts.length - 1 && operatingModel.requiredConcepts.length > 2) {
       // All-but-one required concepts missing = likely generic template.
       // WARN (not FAIL): conglomerates and GENERAL-sector names legitimately lack
       // narrow required vocab; HOSP-01 already hard-blocks hospitality. Avoids
@@ -2085,8 +2105,8 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
         category: "BS_DETECTOR",
         name: "Ontology Required Concepts",
         status: "WARN",
-        details: `Narrative evidences few of the required ${onto.sectorId} concepts [${onto.requiredConcepts.slice(0, 6).join(", ")}] — missing ${cov.missingRequired.length}/${onto.requiredConcepts.length}. Rebuild around sector drivers if sector is high-confidence.`,
-        expected: `≥2 of: ${onto.requiredConcepts.slice(0, 4).join(", ")}`,
+        details: `Narrative evidences few of the required ${operatingModel.sector} concepts [${operatingModel.requiredConcepts.slice(0, 6).join(", ")}] — missing ${cov.missingRequired.length}/${operatingModel.requiredConcepts.length}. Rebuild around sector drivers if sector is high-confidence.`,
+        expected: `≥2 of: ${operatingModel.requiredConcepts.slice(0, 4).join(", ")}`,
         actual: `missing ${cov.missingRequired.length}`,
       });
     } else {
@@ -2095,7 +2115,63 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
         category: "BS_DETECTOR",
         name: "Ontology Coverage",
         status: "PASS",
-        details: `Ontology ${onto.sectorId} (${onto.ontologyVersion}): required concepts evidenced, zero forbidden concepts.`,
+        details: `Ontology ${operatingModel.sector} (${operatingModel.modelVersion}): required concepts evidenced, zero forbidden concepts.`,
+      });
+    }
+  }
+
+  // OM-01: operating-model section scan — hard forbidden-concept sweep of
+  // EVERY narrative section against the shared instance. Any leak in any
+  // section is a publication BLOCKER (never WARN): a single foreign-sector
+  // term proves template contamination.
+  {
+    const flat = (v: unknown): string => {
+      if (v === null || v === undefined) return "";
+      if (typeof v === "string") return v;
+      if (Array.isArray(v)) return v.map(flat).join(" ");
+      if (typeof v === "object") return Object.values(v as Record<string, unknown>).map(flat).join(" ");
+      return "";
+    };
+    const ai = (data.aiAnalysis || {}) as unknown as Record<string, unknown>;
+    const pe = ((data as unknown as { peAnalysis?: Record<string, unknown> }).peAnalysis || {}) as Record<string, unknown>;
+    const pick = (...keys: string[]): string => {
+      for (const k of keys) {
+        const t = flat(ai[k] || pe[k]);
+        if (t.trim()) return t;
+      }
+      return "";
+    };
+    const sections: Record<string, string> = {
+      thesis: [pick("investmentThesis"), pick("companyOverview"), pick("investmentConclusion")].join(" "),
+      moat: [pick("competitiveMoat"), pick("moatSources"), pick("moatPillars")].join(" "),
+      strategy: [pick("businessStrategyCommentary"), pick("industryDynamicsCommentary")].join(" "),
+      swot: [pick("swotStrengths"), pick("swotWeaknesses"), pick("swotOpportunities"), pick("swotThreats")].join(" "),
+      risks: [pick("keyRisks"), pick("enterpriseRiskCommentary")].join(" "),
+      catalysts: pick("catalysts"),
+      financials: [pick("revenueCommentary"), pick("ebitdaCommentary"), pick("ebitCommentary"), pick("patCommentary"), pick("balanceSheetCommentary"), pick("cashFlowCommentary"), pick("dupontCommentary"), pick("ratioCommentary"), pick("dcfCommentary")].join(" "),
+      credit: pick("creditAnalysisCommentary"),
+      governance: [pick("managementCommentary"), pick("governanceCommentary"), pick("capitalAllocationCommentary"), pick("capitalDeploymentHistory")].join(" "),
+      news: [pick("recentNewsAnalysis"), pick("newsSummary")].join(" "),
+    };
+    const res = validateReportAgainstModel(operatingModel, sections);
+    if (!res.pass) {
+      const first = res.blockers[0];
+      checks.push({
+        id: "OM-01",
+        category: "BS_DETECTOR",
+        name: "Operating-Model Section Scan",
+        status: "FAIL",
+        details: `FATAL PUBLICATION BLOCK: ${res.blockers.length} operating-model violation(s) under model ${operatingModel.modelId} — ${first.message}${res.blockers.length > 1 ? ` (+${res.blockers.length - 1} more: ${res.blockers.slice(1, 3).map((b) => `${b.section}: ${b.terms.slice(0, 3).join(", ")}`).join("; ")})` : ""} Required evidenced: [${res.requiredEvidenced.join(", ") || "none"}].`,
+        expected: "Zero forbidden concepts in every section",
+        actual: `${res.blockers.length} violation(s)`,
+      });
+    } else {
+      checks.push({
+        id: "OM-01",
+        category: "BS_DETECTOR",
+        name: "Operating-Model Section Scan",
+        status: "PASS",
+        details: `All 10 narrative sections scanned against ${operatingModel.modelId}: zero forbidden concepts; required evidenced [${res.requiredEvidenced.slice(0, 6).join(", ") || "none"}].`,
       });
     }
   }
@@ -2309,6 +2385,71 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
       } else {
         checks.push({ id: "FCST-01", category: "CROSS_REFERENCE", name: "Single Canonical Forecast", status: "PASS", details: `Single forecast sealed: ${fc.projections.length}Y ${fc.driverEquation.slice(0,60)} — sole source for DCF/credit/PDF.` });
       }
+    }
+  }
+  // FCST-02..05 — Forecast reconciliation identities over the single
+  // CanonicalForecast (TRACK 1): bridges, roll-forwards, DCF linkage,
+  // margin continuity + funding. Blocker findings FAIL (machine-verifiable
+  // falsehood or hidden shortfall); material findings WARN (disclosure-grade
+  // discontinuity/liquidity qualification). RI path (vectors-only) skips DCF
+  // linkage — residual income prices the equity, the FCFF stream is narrative
+  // consistency only.
+  {
+    const fc: any = (data as any).canonicalForecast;
+    if (fc && Array.isArray(fc.projections) && fc.projections.length > 0) {
+      const dcfAny: any = (data as any).dcf || {};
+      const ledgerScen: any = (data as any).assumptionsLedger?.scenarios;
+      const enforceLinkage = (fc.valuationUse ?? (Array.isArray(dcfAny.projections) && dcfAny.projections.length > 0 ? "fcff" : "vectors-only")) === "fcff";
+      let findings: Array<{ rule: string; year?: string; pass: boolean; severity: string; expected: string; actual: string; detail: string }> = [];
+      try {
+        findings = reconcileForecast({
+          forecast: fc,
+          dcfAssumptions: {
+            revenueGrowthRates: dcfAny.assumptions?.revenueGrowthRates,
+            ebitMargins: dcfAny.assumptions?.ebitMargins,
+            avgCapexPct: (dcfAny.avgCapexPct ?? (fc as any).avgCapexPct),
+            avgDeptPct: (dcfAny.avgDeptPct ?? (fc as any).avgDeptPct),
+            avgNwcChangePct: (dcfAny.avgNwcChangePct ?? (fc as any).avgNwcChangePct),
+            wacc: dcfAny.assumptions?.wacc,
+            terminalGrowthRate: dcfAny.assumptions?.terminalGrowthRate,
+          },
+          dcfOutputs: {
+            sumPvFcff: dcfAny.sumPvFcff,
+            enterpriseValue: dcfAny.enterpriseValue,
+            equityValue: dcfAny.equityValue,
+            fairValuePerShare: (data as any).assumptionsLedger?.fairValue ?? dcfAny.intrinsicValue ?? dcfAny.fairValuePerShare ?? null,
+            netDebt: dcfAny.netDebt,
+            sharesOutstanding: dcfAny.sharesOutstanding,
+          },
+          scenarioBaseVector: ledgerScen?.base?.inputVector ? { revenueGrowth: ledgerScen.base.inputVector.revenueGrowth, ebitMargin: ledgerScen.base.inputVector.ebitMargin } : null,
+          enforceDcfLinkage: enforceLinkage,
+        }) as unknown as typeof findings;
+      } catch (e) {
+        findings = [{ rule: "revenue-bridge", pass: false, severity: "blocker", expected: "reconciliation runnable", actual: String(e).slice(0, 80), detail: `Reconciliation harness threw — treat as blocker: ${String(e).slice(0, 160)}` }];
+      }
+      const group = (name: string, rules: string[]) => findings.filter((f) => !f.pass && rules.includes(f.rule));
+      const emit = (id: string, title: string, rules: string[], skipNote?: string) => {
+        if (skipNote) {
+          checks.push({ id, category: "CROSS_REFERENCE", name: title, status: "PASS", details: skipNote });
+          return;
+        }
+        const bad = group(id, rules);
+        const blockers = bad.filter((f) => f.severity === "blocker");
+        const materials = bad.filter((f) => f.severity === "material");
+        if (blockers.length > 0) {
+          const first = blockers[0];
+          checks.push({ id, category: "CROSS_REFERENCE", name: title, status: "FAIL", details: `FATAL: ${blockers.length} forecast-identity breach(es) — ${first.rule}${first.year ? ` @ ${first.year}` : ""}: ${first.detail.slice(0, 220)}${blockers.length > 1 ? ` (+${blockers.length - 1} more)` : ""}`, expected: "identities hold", actual: `${blockers.length} blocker(s)` });
+        } else if (materials.length > 0) {
+          const first = materials[0];
+          checks.push({ id, category: "CROSS_REFERENCE", name: title, status: "WARN", details: `${materials.length} material forecast qualification(s) — ${first.rule}${first.year ? ` @ ${first.year}` : ""}: ${first.detail.slice(0, 220)}${materials.length > 1 ? ` (+${materials.length - 1} more)` : ""}`, expected: "identities hold", actual: `${materials.length} material` });
+        } else {
+          checks.push({ id, category: "CROSS_REFERENCE", name: title, status: "PASS", details: `${title} — all ${rules.length} rule family(ies) hold across ${fc.projections.length}Y.` });
+        }
+      };
+      emit("FCST-02", "Forecast Bridges (Revenue/EBIT/Pretax/NI/CFO/FCF)", ["revenue-bridge", "ebit-bridge", "pretax-bridge", "net-income-bridge", "cfo-bridge", "fcf-bridge"]);
+      emit("FCST-03", "Forecast Roll-Forwards (Cash/Debt/PP&E/Shares)", ["cash-roll-forward", "debt-roll-forward", "ppe-roll-forward", "share-count-roll-forward"]);
+      emit("FCST-04", "Forecast→DCF Linkage + Scenario Vectors", ["dcf-linkage", "scenario-vector-identity"], enforceLinkage ? undefined : "RI vectors-only path — FCFF stream is narrative consistency only; linkage not enforced.");
+      emit("FCST-05", "Forecast Continuity + Funding Liquidity", ["margin-continuity", "funding-liquidity"]);
     }
   }
   // P0 #7 — Dependency propagation: blocked nodes must not be consumed as valid

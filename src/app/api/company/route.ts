@@ -8,18 +8,17 @@ import { buildEventPriceMovements } from "@/lib/event-price-engine";
 import { normalizeTicker } from "@/lib/request-validation";
 import { isInternetPlatformCompany, isTelecomCarrierCompany, isHospitalityCompany, isRealEstateCompany, isHardwareCompany, isSoftwareCompany, classifySector } from "@/lib/sectors/profiles";
 import { isSectorSupported, unsupportedSectorPayload, getArchitectureForSector } from "@/lib/sectors/architectures";
-import { stmtNum } from "@/types/report";
 import { buildCompanyOntology } from "@/lib/company-ontology";
 import { scorePeerSimilarity, gatePeerSet } from "@/lib/peer-similarity";
 import { ModelLifecycle, buildAuditGraph } from "@/lib/financial-kernel";
 import { assessMarketIntegrity } from "@/lib/financial-provenance";
 import { buildCanonicalFacts, sealCanonicalFacts, verifyCanonicalSeal } from "@/lib/canonical-facts";
 import { enforceAccountingIdentities } from "@/lib/accounting-identity-engine";
-import { buildCanonicalForecast } from "@/lib/canonical-forecast";
 import { propagateInvalid } from "@/lib/dependency-propagation";
 import { validateIndependently } from "@/lib/independent-validator";
 import { buildCanonicalReport } from "@/lib/canonical-report";
 import { reconcileAll } from "@/lib/source-reconciliation";
+import { buildEvidenceRegistryFromInputs } from "@/lib/evidence-registry";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -126,8 +125,9 @@ export async function GET(request: NextRequest) {
     );
 
     // Dynamic Sector & Archetype-Calibrated Valuation (Residual Income for Financials / FCFF for non-financials)
+    // The valuation computes the single canonical forecast internally (P0 #4);
+    // nothing here rebuilds forward numbers in parallel (defect by definition).
     const archetypeProfile = classifyArchetype(companyProfile, stockData, annualFinancials);
-    const sectorIdForDrivers = (buildCompanyOntology(companyProfile, archetypeProfile as never).sectorId as string) || companyProfile.sector || "general";
     const valuationResult = selectAndComputeValuation({
       profile: companyProfile,
       stockData,
@@ -137,42 +137,13 @@ export async function GET(request: NextRequest) {
     const dcf = valuationResult.dcf;
     const valuationCalibration = valuationResult.calibration;
 
-    // P0 #4 — Single Canonical Forecast Model (driver-native, sealed)
-    let canonicalForecast: ReturnType<typeof buildCanonicalForecast> | null = null;
-    try {
-      const latestRev = annualFinancials[annualFinancials.length-1]?.revenue || 0;
-      const baseGrowth = (dcf.assumptions?.revenueGrowthRates?.[0] as number) ?? 0.08;
-      const effMargin = (dcf.assumptions?.ebitMargins?.[0] as number) ?? 0.15;
-      const rawCapex = Math.abs(annualFinancials[annualFinancials.length-1]?.capitalExpenditures || 0) / Math.max(1, latestRev);
-      // stmtNum: depreciation exists on corporate rows and as RE depreciation on
-      // REIT rows; banks/insurers/fee firms carry none (0, never NaN).
-      const lastFin = annualFinancials[annualFinancials.length-1];
-      const rawDept = Math.abs(lastFin ? stmtNum(lastFin, "depreciation", stmtNum(lastFin, "depreciationAmortization")) : 0) / Math.max(1, latestRev);
-      // PP&E-anchored D&A for the sealed forecast (parity with the DCF path):
-      // mean(D&A_t / netPPE_{t-1}), needs ≥2 pairs.
-      const routePpePairs: number[] = [];
-      for (let pi = 1; pi < annualFinancials.length; pi++) {
-        const prevPpe = Number(stmtNum(annualFinancials[pi - 1] as never, "netFixedAssets")) || 0;
-        const rRev = Number((annualFinancials[pi] as { revenue?: number }).revenue) || 0;
-        if (prevPpe > 0 && rRev > 0) {
-          routePpePairs.push(Math.abs(stmtNum(annualFinancials[pi] as never, "depreciation", stmtNum(annualFinancials[pi] as never, "depreciationAmortization"))) / prevPpe);
-        }
-      }
-      const routePpeBase = Number(stmtNum(lastFin as never, "netFixedAssets")) || 0;
-      canonicalForecast = buildCanonicalForecast({
-        sectorId: sectorIdForDrivers,
-        operatingArchetype: archetypeProfile.sector || "general",
-        baseRevenue: latestRev,
-        marginalTaxRate: 0.25,
-        wacc: (dcf.assumptions as any)?.wacc ?? 0.095,
-        netDebt: (dcf as any).netDebt ?? 0,
-        sharesOutstanding: (dcf as any).sharesOutstanding ?? stockData.sharesOutstanding ?? 1,
-        cagr: baseGrowth, winsorizedCagr: baseGrowth, winsorizedLive: baseGrowth, baseGrowth, hasLive: false, liveRevGrowth: baseGrowth, years: annualFinancials.length,
-        effectiveMargin: effMargin, rawAvgCapexPct: rawCapex, rawAvgDeptPct: rawDept,
-        rawAvgDepOnPpe: routePpePairs.length >= 2 ? routePpePairs.reduce((s, r) => s + r, 0) / routePpePairs.length : 0,
-        ppeBase: routePpeBase,
-      });
-    } catch (e) { console.warn("Canonical forecast build failed:", e); }
+    // P0 #4 — Single Canonical Forecast: consumed from the DCF result, which
+    // built it as the ONLY forward pipeline (facts → drivers → assumptions →
+    // statements → FCFF → DCF). A parallel rebuild here with different seeds
+    // would fork the model — prohibited (FY26 46.8% → FY27E 14.8% vs DCF
+    // 62.5% class of bug). Absence is a QA BLOCKER downstream, never rebuilt.
+    const canonicalForecast = (dcf as any)?.canonicalForecast ?? null;
+    if (!canonicalForecast) console.warn("Canonical forecast missing from DCF result — QA must block (FCST-05).");
 
     // Fetch peer data — select listed comparable peers matching geography and industry
     let peers: unknown[] = [];
@@ -495,7 +466,7 @@ export async function GET(request: NextRequest) {
         asOf: canonicalFacts.asOf,
         modelVersion: "apex-financial-model-v1",
         facts: canonicalFacts,
-        forecast: canonicalForecast ?? { driverEquation:"not built", basis:{}, modelVersion:"apex-financial-model-v1", revenueGrowthRates:[], ebitMargins:[], terminalGrowthRate:0.04, avgCapexPct:0.04, avgDeptPct:0.035, avgNwcChangePct:0.02, projections:[], terminal:{fcffT:0,wacc:0.095,g:0.04,terminalValue:0,pvTerminalValue:0,capped:false,spreadOk:true}, wacc:0.095, netDebt:0, sharesOutstanding:1 },
+        forecast: canonicalForecast ?? null,
         valuation: { enterpriseValue: (dcf as any).enterpriseValue ?? 0, equityValue: (dcf as any).equityValue ?? 0, fairValuePerShare: (dcf as any).intrinsicValue ?? 0, netDebt: (dcf as any).netDebt ?? 0, wacc: (dcf.assumptions as any)?.wacc ?? 0.095, terminalGrowth: (dcf.assumptions as any)?.terminalGrowthRate ?? 0.04 },
         market: { price: stockData.currentPrice, sharesBasic: canonicalFacts.market.sharesBasic.value, sharesDiluted: canonicalFacts.market.sharesDiluted.value, marketCap: stockData.marketCap },
         ratios: Object.fromEntries(ratiosByYear.map(r=>[r.year, r.roe])),
@@ -505,6 +476,18 @@ export async function GET(request: NextRequest) {
     } catch (e) { console.warn("CanonicalReport build failed:", e); }
 
     lifecycle.advance("MODELED", `valuation ${valuationResult.selectedModel} + ledger + facts built`);
+
+    // TRACK 3 — Evidence IDs in data: every priced/evidenced number carries
+    // an EV:<TIER>:<SOURCE>:<FIELD> ID (additive payload field; legacy
+    // consumers ignore it, claim-validator consumes it).
+    let evidenceRegistry: ReturnType<typeof buildEvidenceRegistryFromInputs> | null = null;
+    try {
+      evidenceRegistry = buildEvidenceRegistryFromInputs({
+        annualFinancials: annualFinancials as never,
+        stockData: stockData as never,
+        dcf: dcf as never,
+      });
+    } catch (e) { console.warn("Evidence registry build failed (non-blocking):", e); }
 
     return NextResponse.json({
       pipeline: lifecycle.history_(),
@@ -524,6 +507,7 @@ export async function GET(request: NextRequest) {
       canonicalFacts,
       canonicalForecast,
       canonicalReport,
+      evidenceRegistry,
       reconciliation,
       identityIssues,
       dependencyState: depState,

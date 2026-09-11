@@ -20,15 +20,12 @@ import { calculateRecommendation } from "./recommendation";
 import { computeReverseDCF } from "./valuation/reverse-dcf";
 import type { ArchetypeProfile } from "./company-archetype";
 import type { SectorProfile } from "./sectors/types";
-import { computeDriverForecast } from "./driver-models";
+import { buildCanonicalForecast, type CanonicalForecast } from "./canonical-forecast";
 import { resolveShareCount } from "./financial-provenance";
 import {
   guardedDiv,
   canonicalCAGR,
   canonicalMargin,
-  computeFCFF,
-  discountFactor as kernelDiscountFactor,
-  gordonTerminalValue,
   WACCFormulaEngine,
   ProvenanceTrail,
   MODEL_VERSION,
@@ -1139,120 +1136,14 @@ export function computeDCF(
     : 0;
   const ppeBase = Number((latest as unknown as Record<string, unknown>).netFixedAssets) || 0;
   // effectiveMargin mirrors computeWACC's mid-cycle anchor (first explicit margin minus 1pp ramp).
+  // SINGLE-SEED RULE: this seed is computed ONCE here and handed to the
+  // canonical forecast builder below. Nothing downstream re-seeds, re-ramps,
+  // or re-derives margins — a second seed is a parallel model (defect).
   const effectiveMarginSeed = (assumptions.ebitMargins?.[0] ?? 0.14) - 0.01;
   const sectorIdForDrivers = sectorProfile?.id ?? "general";
-  const driver = computeDriverForecast({
-    sectorId: sectorIdForDrivers,
-    operatingArchetype: archetypeProfile?.sector ?? "general_industrial",
-    inputs: {
-      cagr,
-      winsorizedCagr,
-      winsorizedLive,
-      baseGrowth,
-      hasLive,
-      liveRevGrowth: hasLive ? liveRevGrowth : cagr,
-      years,
-      effectiveMargin: effectiveMarginSeed,
-      rawAvgCapexPct,
-      rawAvgDeptPct,
-      rawAvgDepOnPpe,
-      ppeBase,
-      continuityCapped,
-    },
-  });
-  assumptions.revenueGrowthRates = driver.revenueGrowthRates;
-  assumptions.ebitMargins = driver.ebitMargins;
-  assumptions.terminalGrowthRate = driver.terminalGrowthRate;
 
-  const isHospSector = sectorProfile?.id === "hospitality" || sectorProfile?.id === "real-estate"
-    || archetypeProfile?.sector === "hospitality" || archetypeProfile?.sector === "hospitality_owner_operator"
-    || archetypeProfile?.sector === "hospitality_asset_light" || archetypeProfile?.sector === "hospitality_reit"
-    || archetypeProfile?.sector === "real_estate";
-
-  let avgCapexPct = driver.avgCapexPct;
-  let avgDeptPct = driver.avgDeptPct;
-  let avgNwcChangePct = driver.avgNwcChangePct;
-
-  if (archetypeProfile?.archetype === "CYCLICAL_CAPITAL_INTENSIVE") {
-    avgCapexPct = Math.max(avgCapexPct, 0.065); // High capex cycle absorption
-  } else if (archetypeProfile?.archetype === "EARLY_PLATFORM_GROWTH") {
-    avgCapexPct = Math.min(avgCapexPct, 0.030); // Asset-light platform
-    avgNwcChangePct = Math.max(avgNwcChangePct, 0.035); // Customer acquisition / inventory buffer
-  }
-
-  const wacc = assumptions.wacc;
-  const tg = assumptions.terminalGrowthRate;
-  const taxRate = assumptions.marginalTaxRate;
-
-  const projections: DCFProjection[] = [];
-  let baseRevenue = getRevenue(latest);
-  // PP&E roll-forward stock (item 10): when the driver carries a PPE-anchored
-  // D&A rate, depreciation charges against the opening stock and the stock
-  // recurses (PPE += capex − dep). Otherwise revenue-based fallback.
-  const usePpeDep = driver.depOnPpeRate !== null && ppeBase > 0;
-  let ppeStock = ppeBase;
-
-  for (let i = 0; i < 5; i++) {
-    const growthRate = assumptions.revenueGrowthRates[i];
-    const revenue = baseRevenue * (1 + growthRate);
-    const ebitMargin = assumptions.ebitMargins[i];
-    const ebit = revenue * ebitMargin;
-    const taxPayment = ebit * taxRate;
-    const nopat = ebit - taxPayment;
-    const depreciation = usePpeDep
-      ? ppeStock * (driver.depOnPpeRate as number)
-      : revenue * avgDeptPct;
-    const capex = revenue * Math.max(avgCapexPct, avgDeptPct * 1.1);
-    const changeInWorkingCapital = revenue * avgNwcChangePct;
-    // Forecast EBITDA is derived (EBIT + D&A) — exact by construction, same
-    // taxonomy as history (reported EBITDA = EBIT + D&A on compliant feeds).
-    const ebitda = ebit + depreciation;
-    if (usePpeDep) ppeStock = ppeStock + capex - depreciation;
-    // Universal FCFF kernel (P0 #12 — identical arithmetic, formula-tagged).
-    const fcff = computeFCFF({ nopat, depreciation, capex, changeInWorkingCapital });
-    // Kernel mid-year discount (P0 #13 — bit-identical to legacy convention).
-    const discountFactor = kernelDiscountFactor(wacc, i);
-    const pvFcff = fcff * discountFactor;
-
-    const yearNum = new Date().getFullYear() + i + 1;
-    projections.push({
-      year: `FY${yearNum}E`,
-      revenue,
-      revenueGrowth: growthRate,
-      ebitMargin,
-      ebit,
-      taxPayment,
-      nopat,
-      depreciation,
-      ebitda,
-      capex,
-      changeInWorkingCapital,
-      fcff,
-      discountFactor,
-      pvFcff,
-      ...(usePpeDep ? { ppe: ppeStock } : {}),
-    });
-
-    baseRevenue = revenue;
-  }
-
-  const sumPvFcff = projections.reduce((s, p) => s + p.pvFcff, 0);
-  const terminalYearFcff = projections[4].fcff;
-  // Gordon terminal value via the kernel (P0 #13, #14 — identical math plus
-  // explicit spread enforcement, 25× cap, and implied-margin sanity).
-  const tvResult = gordonTerminalValue({
-    terminalYearFcff,
-    wacc,
-    terminalGrowth: tg,
-    terminalRevenue: projections[4].revenue,
-    marginalTaxRate: taxRate,
-  });
-  const rawTerminalValue = tvResult.unadjustedTerminalValue;
-  const isTvCapped = tvResult.capped;
-  const terminalValue = tvResult.terminalValue;
-  const pvTerminalValue = terminalValue * Math.pow(1 + wacc, -5);
-  const enterpriseValue = sumPvFcff + pvTerminalValue;
-
+  // ── Market bridge inputs (moved ahead of the forecast: the canonical
+  // pipeline needs opening net debt + resolved shares to close EV/equity) ──
   // stmtNum: debt/cash bridge reads across all five shapes (non-corporate shapes
   // carry no maturity split or short-term-investment fields — totalDebt/cash only).
   const latestDebt = Number(latest.totalDebt) || (stmtNum(latest, "shortTermDebt") + stmtNum(latest, "longTermDebt"));
@@ -1283,17 +1174,154 @@ export function computeDCF(
   // Finance-lease liabilities live inside totalDebt (std+ltd+leases = total on
   // compliant feeds) — surfaced for the debt-bridge disclosure, never double-counted.
   const latestLeases = Number((latest as unknown as Record<string, unknown>).capitalLeaseObligations) || 0;
-  const rawEquityValue = enterpriseValue - netDebt;
   // Priority 2: resolved share base (market-cap cross-checked; partial-class
   // quote feeds lose) so model and ledger divide by the SAME count.
   const sharesOutstanding = resolveShareCount({ stockData, annualFinancials }).shares;
+
+  // ── THE single canonical forecast ──
+  // History was normalized above; the builder runs the ONLY driver pass,
+  // projection loop, statement roll-forwards, and DCF computation. Every
+  // value below is READ from its rows — recomputing any of them here would
+  // fork the model (the FY26 46.8% → FY27E 14.8% vs DCF 62.5% class of bug).
+  const R = latest as unknown as Record<string, unknown>;
+  const rnum = (k: string) => Number(R[k]) || 0;
+  const trailRevenue = getRevenue(latest);
+  const trailMargin = getMarginAnchor(latest).value;
+  const trailNI = Number(latest.netIncome) || 0;
+  const trailAR = rnum("netReceivables");
+  const trailINV = rnum("inventory");
+  const trailAP = rnum("accountsPayable");
+  const trailPPE = rnum("netFixedAssets");
+  const trailAssets = Number(latest.totalAssets) || 0;
+  const trailLiab = Number(latest.totalLiabilities) || 0;
+  const trailIntExp = rnum("interestExpense");
+  const trailIntInc = rnum("interestIncome");
+  const trailDiv = Math.abs(Number(latest.dividendsPaid) || 0);
+  const yearDigits = String((latest as { year?: unknown }).year || "").replace(/\D/g, "");
+  const canonicalForecast: CanonicalForecast = buildCanonicalForecast({
+    sectorId: sectorIdForDrivers,
+    operatingArchetype: archetypeProfile?.sector ?? "general_industrial",
+    financialArchetype: archetypeProfile?.archetype,
+    baseRevenue: trailRevenue,
+    marginalTaxRate: assumptions.marginalTaxRate,
+    wacc: assumptions.wacc,
+    netDebt,
+    sharesOutstanding,
+    cagr,
+    winsorizedCagr,
+    winsorizedLive,
+    baseGrowth,
+    hasLive,
+    liveRevGrowth: hasLive ? liveRevGrowth : cagr,
+    years,
+    effectiveMargin: effectiveMarginSeed,
+    rawAvgCapexPct,
+    rawAvgDeptPct,
+    rawAvgDepOnPpe,
+    ppeBase,
+    continuityCapped,
+    trailing: {
+      revenue: trailRevenue,
+      ebit: trailRevenue * trailMargin,
+      ebitMargin: trailMargin,
+      netIncome: trailNI,
+      cash: latestCash,
+      totalDebt: latestDebt,
+      equity: Number(latest.totalEquity) || 0,
+      totalAssets: trailAssets,
+      totalLiabilities: trailLiab,
+      sharesOutstanding,
+      receivables: trailAR,
+      inventory: trailINV,
+      payables: trailAP,
+      ppe: trailPPE,
+      otherAssets: trailAssets - (latestCash + trailAR + trailINV + trailPPE),
+      otherLiabilities: trailLiab - (latestDebt + trailAP),
+      nwcLevel: (Number(latest.currentAssets) || 0) - (Number(latest.currentLiabilities) || 0),
+      debtRate: latestDebt > 0 ? trailIntExp / latestDebt : 0,
+      cashYield: latestCash > 0 ? trailIntInc / latestCash : 0,
+      dividendPayout: trailNI > 0 && trailDiv > 0 ? Math.min(1, trailDiv / trailNI) : 0,
+      yearLabelBase: yearDigits ? parseInt(yearDigits.slice(-4), 10) : new Date().getFullYear(),
+    },
+    statementShape: isCorporateStatement(latest) ? "corporate" : "financial",
+  });
+
+  // Read-out (verbatim — the assumption vectors below ARE the forecast's):
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const driver = {
+    revenueGrowthRates: canonicalForecast.revenueGrowthRates,
+    ebitMargins: canonicalForecast.ebitMargins,
+    terminalGrowthRate: canonicalForecast.terminalGrowthRate,
+    avgCapexPct: canonicalForecast.avgCapexPct,
+    avgDeptPct: canonicalForecast.avgDeptPct,
+    avgNwcChangePct: canonicalForecast.avgNwcChangePct,
+    depOnPpeRate: canonicalForecast.assumptions.depOnPpeRate,
+    driverEquation: canonicalForecast.driverEquation,
+    basis: canonicalForecast.basis,
+  };
+  assumptions.revenueGrowthRates = [...canonicalForecast.revenueGrowthRates];
+  assumptions.ebitMargins = [...canonicalForecast.ebitMargins];
+  assumptions.terminalGrowthRate = canonicalForecast.terminalGrowthRate;
+
+  const avgCapexPct = canonicalForecast.avgCapexPct;
+  const avgDeptPct = canonicalForecast.avgDeptPct;
+  const avgNwcChangePct = canonicalForecast.avgNwcChangePct;
+
+  const wacc = assumptions.wacc;
+  const tg = assumptions.terminalGrowthRate;
+  const taxRate = assumptions.marginalTaxRate;
+
+  // DCFProjection rows map the canonical rows verbatim (labels + values).
+  const projections: DCFProjection[] = canonicalForecast.projections.map((p) => ({
+    year: p.label,
+    revenue: p.revenue,
+    revenueGrowth: p.revenueGrowth,
+    ebitMargin: p.ebitMargin,
+    ebit: p.ebit,
+    taxPayment: p.taxPayment,
+    nopat: p.nopat,
+    depreciation: p.depreciation,
+    ebitda: p.ebitda,
+    capex: p.capex,
+    changeInWorkingCapital: p.changeInWorkingCapital,
+    fcff: p.fcff,
+    discountFactor: p.discountFactor,
+    pvFcff: p.pvFcff,
+    ...(p.ppeStock !== undefined ? { ppe: p.ppeStock } : {}),
+  }));
+
+  const sumPvFcff = canonicalForecast.dcf.sumPvFcff;
+  const terminalYearFcff = canonicalForecast.dcf.terminalYearFcff;
+  // Kernel terminal-guard diagnostics (spread enforcement, margin sanity).
+  const tvDiagHolder: { capped: boolean; unadjusted: number; value: number; diagnostics: string[] } = {
+    capped: canonicalForecast.terminal.capped,
+    unadjusted: canonicalForecast.terminal.unadjustedTerminalValue,
+    value: canonicalForecast.terminal.terminalValue,
+    diagnostics: canonicalForecast.terminal.diagnostics,
+  };
+  const rawTerminalValue = tvDiagHolder.unadjusted;
+  const isTvCapped = tvDiagHolder.capped;
+  const terminalValue = tvDiagHolder.value;
+  const pvTerminalValue = canonicalForecast.terminal.pvTerminalValue;
+  const enterpriseValue = canonicalForecast.dcf.enterpriseValue;
+
+  // Explicit-period loop, terminal value, and market bridge now live in the
+  // canonical forecast above — read verbatim via canonicalForecast (single
+  // pipeline; parallel recomputation here would fork the model).
+
+  // (Market bridge — latestDebt/latestCash/offset/netDebt/shares — computed
+  // once in the canonical-forecast block above; reused verbatim below.)
+  const rawEquityValue = enterpriseValue - netDebt;
 
   const diagnostics: string[] = [];
   if (continuityCapped) {
     diagnostics.push(`Continuity guard ACTIVE: live revenue growth ${(liveRevGrowth * 100).toFixed(1)}% exceeded hist CAGR by >10pp — live leg cut to ${(effWinsorizedLive * 100).toFixed(1)}% (hist+10pp); 5y base ${(baseGrowth * 100).toFixed(1)}%. A quarterly spike cannot rebase the trajectory.`);
   }
+  // PP&E anchor flag/rate read from the canonical forecast (single pipeline —
+  // the rate printed here is the rate the forecast depreciated against).
+  const usePpeDep = canonicalForecast.assumptions.depOnPpeRate !== null;
   if (usePpeDep) {
-    diagnostics.push(`PP&E roll-forward depreciation: D&A at ${((driver.depOnPpeRate as number) * 100).toFixed(2)}% of opening net PPE (base stock ${ppeBase.toFixed(0)}); forecast EBITDA = EBIT + D&A exact by construction.`);
+    diagnostics.push(`PP&E roll-forward depreciation: D&A at ${((canonicalForecast.assumptions.depOnPpeRate as number) * 100).toFixed(2)}% of opening net PPE (base stock ${ppeBase.toFixed(0)}); forecast EBITDA = EBIT + D&A exact by construction.`);
   }
   if (latestLeases > 0) {
     diagnostics.push(`Finance-lease liabilities ${latestLeases.toFixed(0)} sit inside total debt ${latestDebt.toFixed(0)} (short+long+leases reconcile); EV net debt charges leases in full.`);
@@ -1305,7 +1333,7 @@ export function computeDCF(
     diagnostics.push(`Terminal value capped at 25.0x terminal-year FCFF safeguard (reduced from ${Math.round(rawTerminalValue / (terminalYearFcff || 1))}x).`);
   }
   // Kernel terminal-guard diagnostics (spread enforcement, margin sanity).
-  for (const d of tvResult.diagnostics) {
+  for (const d of canonicalForecast.terminal.diagnostics) {
     if (!diagnostics.some((x) => x.includes("Terminal value capped") && d.includes("capped at"))) diagnostics.push(d);
   }
   // TV-concentration flag: a valuation that is almost entirely terminal value
@@ -1370,16 +1398,16 @@ export function computeDCF(
             ? `live operating margin ${(stockData.operatingMargins * 100).toFixed(1)}%`
             : `14% default (no margin basis — treat with caution)`;
   const assumptionBasis: Record<string, string> = {
-    revenueGrowth: `${driver.driverEquation}; 55% hist CAGR (${(cagr * 100).toFixed(1)}% over ${Math.max(1, years - 1)}y, winsorized ${(winsorizedCagr * 100).toFixed(1)}%) + 45% live (${hasLive ? `${(liveRevGrowth * 100).toFixed(1)}%, winsorized ${(winsorizedLive * 100).toFixed(1)}%` : "n/a"}) → base ${(baseGrowth * 100).toFixed(1)}% driver-shaped fade${continuityCapped ? ` — CONTINUITY-CAPPED: live leg cut to hist+10pp (${(effWinsorizedLive * 100).toFixed(1)}%) so a quarterly spike cannot rebase the 5y trajectory` : ""}`,
-    ebitMargin: `Driver-shaped (${sectorIdForDrivers}): base from ${marginSource}; explicit path ${driver.ebitMargins.map((m) => `${(m * 100).toFixed(1)}%`).join(" → ")}`,
-    capex: `Driver capex ${(avgCapexPct * 100).toFixed(1)}% of revenue (hist ${(rawAvgCapexPct * 100).toFixed(1)}% clamped 2.5–12.0%)${archetypeProfile?.archetype ? `; ${archetypeProfile.archetype} overlay` : ""}; ${driver.depOnPpeRate !== null ? `D&A PP&E-anchored at ${((driver.depOnPpeRate as number) * 100).toFixed(2)}% of opening net PPE (hist mean ${(rawAvgDeptPct * 100).toFixed(1)}% of revenue for reference)` : `D&A ${(avgDeptPct * 100).toFixed(1)}% of revenue (hist ${(rawAvgDeptPct * 100).toFixed(1)}% clamped 2.0–6.0%; no usable PPE stock)`}`,
+    revenueGrowth: `${canonicalForecast.driverEquation}; 55% hist CAGR (${(cagr * 100).toFixed(1)}% over ${Math.max(1, years - 1)}y, winsorized ${(winsorizedCagr * 100).toFixed(1)}%) + 45% live (${hasLive ? `${(liveRevGrowth * 100).toFixed(1)}%, winsorized ${(winsorizedLive * 100).toFixed(1)}%` : "n/a"}) → base ${(baseGrowth * 100).toFixed(1)}% driver-shaped fade${continuityCapped ? ` — CONTINUITY-CAPPED: live leg cut to hist+10pp (${(effWinsorizedLive * 100).toFixed(1)}%) so a quarterly spike cannot rebase the 5y trajectory` : ""}`,
+    ebitMargin: `Driver-shaped (${sectorIdForDrivers}): base from ${marginSource}; explicit path ${assumptions.ebitMargins.map((m) => `${(m * 100).toFixed(1)}%`).join(" → ")}`,
+    capex: `Driver capex ${(avgCapexPct * 100).toFixed(1)}% of revenue (hist ${(rawAvgCapexPct * 100).toFixed(1)}% clamped 2.5–12.0%)${archetypeProfile?.archetype ? `; ${archetypeProfile.archetype} overlay` : ""}; ${canonicalForecast.assumptions.depOnPpeRate !== null ? `D&A PP&E-anchored at ${((canonicalForecast.assumptions.depOnPpeRate as number) * 100).toFixed(2)}% of opening net PPE (hist mean ${(rawAvgDeptPct * 100).toFixed(1)}% of revenue for reference)` : `D&A ${(avgDeptPct * 100).toFixed(1)}% of revenue (hist ${(rawAvgDeptPct * 100).toFixed(1)}% clamped 2.0–6.0%; no usable PPE stock)`}`,
     workingCapital: `Driver NWC change ${(avgNwcChangePct * 100).toFixed(1)}% of revenue (revenue-linked, sector-calibrated for ${sectorIdForDrivers})${archetypeProfile?.archetype === "EARLY_PLATFORM_GROWTH" ? " with platform buffer overlay" : ""}`,
     netDebt: financeReceivablesOffset > 0
       ? `Reported net debt ${(latestDebt - latestCash).toFixed(0)} less captive-finance receivables offset ${financeReceivablesOffset.toFixed(0)} (receivables ${receivables.toFixed(0)} vs 20% trade allowance ${(tradeAllowance).toFixed(0)}, capped at total debt) → adjusted ${netDebt.toFixed(0)}`
       : `Reported net debt in full (total debt ${latestDebt.toFixed(0)} − cash ${(latestCash).toFixed(0)}); no captive-finance offset (receivables ${receivables.toFixed(0)} within trade allowance)${latestLeases > 0 ? `; total debt includes finance-lease liabilities ${latestLeases.toFixed(0)} (EV charges leases — see debt bridge)` : ""}`,
     wacc: assumptions.parameterSource || "CAPM blend (parameters undisclosed)",
     terminal: `${(assumptions.terminalGrowthRate * 100).toFixed(1)}% sector anchor (${sectorIdForDrivers}); TV capped at 25× terminal-year FCFF${isTvCapped ? " (CAP ACTIVE — see diagnostics)" : " (not binding)"}`,
-    driverEquation: driver.driverEquation,
+    driverEquation: canonicalForecast.driverEquation,
   };
   // Structured assumption provenance (P0 #17): machine-readable twin of the
   // prose trail above — every material assumption carries value + source.
@@ -1388,7 +1416,7 @@ export function computeDCF(
     revenueGrowthPath: { value: assumptions.revenueGrowthRates.map((g) => Number(g.toFixed(6))).join(","), source: "driver-models:sector fade shape" },
     baseEbitMargin: { value: Number(assumptions.ebitMargins[0].toFixed(6)), source: marginSource },
     capexPct: { value: Number(avgCapexPct.toFixed(6)), source: "driver-models:hist intensity clamped [2.5%, 12.0%]" },
-    deptPct: { value: Number(avgDeptPct.toFixed(6)), source: driver.depOnPpeRate !== null ? `driver-models:PP&E-anchored ${(driver.depOnPpeRate as number).toFixed(6)} of opening net PPE` : "driver-models:hist intensity clamped [2.0%, 6.0%]" },
+    deptPct: { value: Number(avgDeptPct.toFixed(6)), source: canonicalForecast.assumptions.depOnPpeRate !== null ? `driver-models:PP&E-anchored ${(canonicalForecast.assumptions.depOnPpeRate as number).toFixed(6)} of opening net PPE` : "driver-models:hist intensity clamped [2.0%, 6.0%]" },
     ...(continuityCapped ? { continuityCap: { value: `${(effWinsorizedLive * 100).toFixed(1)}%`, source: "calculations:live leg cut to hist+10pp (continuity guard)" } } : {}),
     nwcPct: { value: Number(avgNwcChangePct.toFixed(6)), source: "driver-models:sector overlay" },
     wacc: { value: wacc, source: assumptions.parameterSource || "CAPM blend" },
@@ -1405,7 +1433,7 @@ export function computeDCF(
     { name: "fcffT", value: Math.round(terminalYearFcff), sourceId: "dcf.projections[4].fcff" },
     { name: "wacc", value: wacc, sourceId: "dcf.assumptions.wacc" },
     { name: "terminalGrowth", value: tg, sourceId: "dcf.assumptions.terminalGrowthRate" },
-  ], tvResult.capped ? "Gordon value, 25× terminal-FCFF cap applied" : "Gordon value, uncapped");
+  ], isTvCapped ? "Gordon value, 25× terminal-FCFF cap applied" : "Gordon value, uncapped");
   trail.trace("enterpriseValue", "valuation.gordonTV", [
     { name: "sumPvFcff", value: Math.round(sumPvFcff), sourceId: "dcf.sumPvFcff" },
     { name: "pvTerminalValue", value: Math.round(pvTerminalValue), sourceId: "dcf.pvTerminalValue" },
@@ -1457,6 +1485,9 @@ export function computeDCF(
     upsideDownside,
     verdict,
     reverseDCF,
+    // Single canonical forecast: every downstream consumer (tables,
+    // scenarios, QA) reads these rows — never parallel assumptions.
+    canonicalForecast,
   };
 }
 

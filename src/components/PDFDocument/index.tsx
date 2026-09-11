@@ -867,8 +867,15 @@ const buildFiveYearStatementModel = (data: ReportData): StatementColumn[] => {
   const rawTaxRate = colH0.pretaxIncome > 0 && colH0.tax > 0 ? colH0.tax / colH0.pretaxIncome : 0.22;
   const histTaxRate = Math.min(0.35, Math.max(0.12, rawTaxRate));
 
-  // Dynamic growth rates derived from DCF explicit model assumptions or historical growth
-  const dcfGrowth = data.dcf?.assumptions?.revenueGrowthRates || [];
+  // Canonical spine: forecast columns index the single CanonicalForecast
+  // (revenueGrowthRates/ebitMargins/projections) verbatim — never a parallel
+  // growth/margin recomputation. DCF assumptions mirror the same vectors by
+  // construction (computeDCF reads them from the forecast), so the fallback
+  // below only serves legacy fixtures without a forecast attached. Display is
+  // in millions (toMil rounding); native-unit verbatim is enforced by
+  // assertForecastSpineConsumed + QA FCST-02..05.
+  const cfSpine = (data as unknown as { canonicalForecast?: { revenueGrowthRates?: number[]; ebitMargins?: number[]; projections?: Array<Record<string, number>> } }).canonicalForecast;
+  const dcfGrowth = (cfSpine?.revenueGrowthRates?.length ? cfSpine.revenueGrowthRates : data.dcf?.assumptions?.revenueGrowthRates) || [];
   const g1 = dcfGrowth[0] !== undefined
     ? dcfGrowth[0]
     : (data.stockData.revenueGrowth ? Math.min(0.25, Math.max(0.01, data.stockData.revenueGrowth)) : 0.08);
@@ -879,7 +886,8 @@ const buildFiveYearStatementModel = (data: ReportData): StatementColumn[] => {
   // DCF EBIT margin path — forecast statements MUST use exactly these margins
   // (MARGIN-01). A prior version held statements at trailing margin while the
   // DCF ramped elsewhere, printing two different "target margins" (5.1% vs 12.4%).
-  const dcfMargins = data.dcf?.assumptions?.ebitMargins || [];
+  // Canonical-first: the DCF margins already mirror canonicalForecast.ebitMargins.
+  const dcfMargins = (cfSpine?.ebitMargins?.length ? cfSpine.ebitMargins : data.dcf?.assumptions?.ebitMargins) || [];
 
   // Historical working-capital intensity — forecasts extend THESE ratios instead
   // of snapping to fixed 8%/4%/10% constants (which caused abrupt WC jumps).
@@ -894,18 +902,22 @@ const buildFiveYearStatementModel = (data: ReportData): StatementColumn[] => {
   const histApRatio = wcRatio(colH0.ap, colH0.revenue, 0.10);
   const histOclRatio = wcRatio(colH0.otherCurrentLiab, colH0.revenue, 0.06);
 
-  const makeForecast = (base: StatementColumn, g: number, label: string, dcfMargin?: number): StatementColumn => {
-    const rev = Math.round(base.revenue * (1 + g));
+  const makeForecast = (base: StatementColumn, g: number, label: string, dcfMargin?: number, canon?: Record<string, number>): StatementColumn => {
+    // Spine verbatim (native → millions): canonical revenue/EBIT govern the
+    // column; presentation splits (gross/SGA/R&D) scale to hit them exactly.
+    const rev = canon && Number.isFinite(canon.revenue) ? toMil(Number(canon.revenue)) : Math.round(base.revenue * (1 + g));
     const gp = Math.round(rev * histGrossMargin);
     const cogs = rev - gp;
     // SAME margin path as the DCF (explicit assumption), not trailing margin.
     const opMarginUse = dcfMargin !== undefined ? dcfMargin : histOpMargin;
     const sga = Math.round(rev * histSgaRatio);
     const rd = Math.round(rev * histRdRatio);
-    const depr = Math.round(base.depr > 0 ? base.depr * (1 + g * 0.8) : rev * 0.04);
+    const depr = canon && Number.isFinite(canon.depreciation) ? toMil(Number(canon.depreciation)) : Math.round(base.depr > 0 ? base.depr * (1 + g * 0.8) : rev * 0.04);
     // Target opInc from DCF margin path, but never via implausible negative otherOpExp.
     // If gross profit cannot cover target opInc + opex, cap otherOpExp at 0 and let opInc float to achievable max.
-    let opInc = Math.round(rev * opMarginUse);
+    // Canonical EBIT overrides the margin-path target so the printed column
+    // matches the priced forecast to the million (spine verbatim).
+    let opInc = canon && Number.isFinite(canon.ebit) ? toMil(Number(canon.ebit)) : Math.round(rev * opMarginUse);
     let otherOpExp = gp - sga - rd - depr - opInc;
     if (otherOpExp < 0) {
       otherOpExp = 0;
@@ -921,7 +933,7 @@ const buildFiveYearStatementModel = (data: ReportData): StatementColumn[] => {
     const eps = sh > 0 ? net / sh : 0;
     const divPerShare = hasDividends ? eps * 0.25 : 0;
 
-    const capex = Math.round(base.capex > 0 ? base.capex * (1 + g * 0.7) : rev * 0.05);
+    const capex = canon && Number.isFinite(canon.capex) ? toMil(Number(canon.capex)) : Math.round(base.capex > 0 ? base.capex * (1 + g * 0.7) : rev * 0.05);
     // CFO built from earnings + non-cash + working-capital movements (NOT net +
     // depr alone, which contradicted the cash-flow narrative).
     const sbc = Math.round(base.stockBasedComp * (1 + g * 0.5));
@@ -947,7 +959,11 @@ const buildFiveYearStatementModel = (data: ReportData): StatementColumn[] => {
 
     const netChg = cfo + cfi + cff;
     const begCash = base.endCash;
-    const endCash = Math.max(0, begCash + netChg);
+    // Canonical cash close overrides the rolled cash so the balance sheet
+    // prints the priced liquidity position (funding gaps already floored at
+    // zero with explicit disclosure in the forecast).
+    const rolledCash = Math.max(0, begCash + netChg);
+    const endCash = canon && Number.isFinite(canon.cash) ? toMil(Number(canon.cash)) : rolledCash;
     const cash = endCash;
 
     // Working capital extends historical intensity ratios (no abrupt jumps).
@@ -956,7 +972,7 @@ const buildFiveYearStatementModel = (data: ReportData): StatementColumn[] => {
     const oca = Math.round(rev * histOcaRatio);
     const curAssets = cash + ar + inv + oca;
 
-    const ppe = Math.round(base.ppe > 0 ? base.ppe * 1.03 : rev * 0.5);
+    const ppe = canon && Number.isFinite(canon.ppe) ? toMil(Number(canon.ppe)) : Math.round(base.ppe > 0 ? base.ppe * 1.03 : rev * 0.5);
     const gw = base.goodwill || 0;
     const intang = Math.round(base.otherIntangibles > 0 ? base.otherIntangibles * 0.95 : 0);
     const olt = Math.round(base.otherLtAssets > 0 ? base.otherLtAssets * 1.02 : rev * 0.1);
@@ -967,7 +983,10 @@ const buildFiveYearStatementModel = (data: ReportData): StatementColumn[] => {
     const ocl = Math.round(rev * histOclRatio);
     const curLiab = ap + sd + ocl;
 
-    const ld = Math.max(0, base.longDebt + netDebtIssued);
+    // Canonical debt close overrides the amortized debt so leverage prints
+    // the priced capital structure (short debt carried; long debt residual).
+    const canonDebt = canon && Number.isFinite(canon.totalDebt) ? toMil(Number(canon.totalDebt)) : null;
+    const ld = canonDebt !== null ? Math.max(0, canonDebt - sd) : Math.max(0, base.longDebt + netDebtIssued);
     const dtl = base.defTaxLiab || 0;
     const oll = base.otherLtLiab || 0;
     const totLiab = curLiab + ld + dtl + oll;
@@ -1060,8 +1079,9 @@ const buildFiveYearStatementModel = (data: ReportData): StatementColumn[] => {
   colH0.otherFinancing = colH0.cff - (-colH0.repurchases - colH0.dividendsPaid + colH0.netDebtIssued);
   colH0.endCash = colH0.cash;
 
-  const colF1 = makeForecast(colH0, g1, `FY${currentYearNum + 1}(E)`, dcfMargins[0]);
-  const colF2 = makeForecast(colF1, g2, `FY${currentYearNum + 2}(E)`, dcfMargins[1]);
+  const canonRows = (cfSpine?.projections ?? []) as Array<Record<string, number>>;
+  const colF1 = makeForecast(colH0, g1, `FY${currentYearNum + 1}(E)`, dcfMargins[0], canonRows[0]);
+  const colF2 = makeForecast(colF1, g2, `FY${currentYearNum + 2}(E)`, dcfMargins[1], canonRows[1]);
 
   return [colH2, colH1, colH0, colF1, colF2];
 };
@@ -1983,8 +2003,11 @@ const FundamentalAnalysisPage = ({ data }: { data: ReportData }) => {
             // explicit-period stream + Gordon terminal under (w, t) — never a
             // proportional scaling of base FV (which misstates value whenever
             // the explicit period carries weight).
-            const sensFcffs = (data.dcf.projections || []).map((p) => Number(p.fcff) || 0);
-            const sensTvFcff = Number(data.dcf.terminalYearFcff) || 0;
+            // Canonical-first: the stream is the priced forecast rows; DCF
+            // projections mirror them verbatim (computeDCF maps rows 1:1).
+            const canonDcf = (data as unknown as { canonicalForecast?: { projections?: Array<{ fcff?: number }>; dcf?: { terminalYearFcff?: number; sumPvFcff?: number } } }).canonicalForecast;
+            const sensFcffs = (canonDcf?.projections?.length ? canonDcf.projections : data.dcf.projections || []).map((p) => Number((p as { fcff?: number }).fcff) || 0);
+            const sensTvFcff = Number(canonDcf?.dcf?.terminalYearFcff ?? data.dcf.terminalYearFcff) || 0;
             const sensNetDebt = Number(data.dcf.netDebt ?? 0) || 0;
             const sensShares = Number(data.dcf.sharesOutstanding) || 0;
             const sens = (w: number, t: number): number | null => {
@@ -2656,9 +2679,9 @@ const BullsSayBearsSayPage = ({ data }: { data: ReportData }) => {
           </View>
 
           {[
-            ["1. Structural Market Leadership & Pricing Power", bulls[0] || `${data.profile.name} commands entrenched scale in ${data.profile.industry}, driving superior purchasing power.`],
-            ["2. High-Margin Recurring Annuity Cash Flows", bulls[3] || bulls[1] || "Expanding aftermarket services and captive customer contracts deliver predictable free cash flow."],
-            ["3. Balance Sheet Strength & Capital Efficiency", bulls[2] || "Transformed capital structure enables internal funding of high-IRR growth initiatives without leverage."],
+            ["1. Revenue Durability & Scale", bulls[0] || `${data.profile.name} retains entrenched scale in ${data.profile.industry}, supporting repeat business and operating leverage.`],
+            ["2. Margin Expansion & Cash Conversion", bulls[3] || bulls[1] || "Operating efficiency gains and mix improvement support progressive margin expansion and cash generation."],
+            ["3. Balance-Sheet Flexibility", bulls[2] || "A conservative capital structure preserves capacity to fund growth and withstand cyclical stress."],
           ].map(([title, desc], idx) => (
             <View key={idx} style={{ marginBottom: 5 }}>
               <Text style={{ fontSize: 7.5, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2 }}>
@@ -2675,9 +2698,9 @@ const BullsSayBearsSayPage = ({ data }: { data: ReportData }) => {
           </View>
 
           {[
-            ["1. Commodity & Feedstock Cost Exposure", bears[1] || bears[0] || "Volatility in key raw material and logistics inputs can compress near-term gross fabrication margins."],
-            ["2. Project Execution & Timeline Delays", bears[2] || "Grid interconnection queues or customer site clearances can defer milestone billing realizations."],
-            ["3. Competitive Tender Bidding Pressure", bears[3] || "Intensifying price competition in public procurement tenders could constrain operating margin expansion."],
+            ["1. Input-Cost & Margin Sensitivity", bears[1] || bears[0] || "Volatility in key operating inputs can compress near-term margins where pass-through is lagged or incomplete."],
+            ["2. Execution & Working-Capital Intensity", bears[2] || "Delivery slippages or elongated receivables can defer cash realization and absorb working capital."],
+            ["3. Competitive & Pricing Pressure", bears[3] || "Intensifying rivalry and price competition in core markets could constrain margin expansion."],
           ].map(([title, desc], idx) => (
             <View key={idx} style={{ marginBottom: 5 }}>
               <Text style={{ fontSize: 7.5, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2 }}>
@@ -2726,8 +2749,32 @@ const BullsSayBearsSayPage = ({ data }: { data: ReportData }) => {
         </View>
       </View>
 
-      {/* Dense 2-Column Catalyst Monitoring & Exit Triggers Box */}
-      <View style={{ padding: 5.5, backgroundColor: COLORS.offWhite, borderWidth: 0.5, borderColor: COLORS.hairlineLight, marginTop: 3, marginBottom: 4 }}>
+      {/* Dense 2-Column Catalyst Monitoring & Exit Triggers Box — thresholds
+          computed from THIS company's trailing financials, never hardcoded */}
+      {(() => {
+        const hist = data.annualFinancials || [];
+        const lf: any = hist[hist.length - 1] || {};
+        const tRev = Number(lf.revenue) || 0;
+        const tEbitda = Number(lf.ebitda) || 0;
+        const tMargin = Number.isFinite(Number(lf.ebitdaMargin)) && Number(lf.ebitdaMargin) !== 0
+          ? Number(lf.ebitdaMargin)
+          : tRev > 0 && tEbitda !== 0 ? tEbitda / tRev : NaN;
+        const tOcf = Number(lf.operatingCashFlow);
+        const tConv = tEbitda > 0 && Number.isFinite(tOcf) ? tOcf / tEbitda : NaN;
+        const tDebt = Number(lf.totalDebt) || 0;
+        const tCash = Number(lf.cash) || 0;
+        const tNd = Math.max(0, tDebt - tCash);
+        const tNdEbitda = tEbitda > 0 ? tNd / tEbitda : 0;
+        const tWc = lf.workingCapital === null || lf.workingCapital === undefined ? NaN : Number(lf.workingCapital);
+        const tWcDays = tRev > 0 && Number.isFinite(tWc) ? (tWc / tRev) * 365 : NaN;
+        const mPct = (m: number) => `${(m * 100).toFixed(1)}%`;
+        const marginNow = Number.isFinite(tMargin) ? mPct(tMargin) : "N/M";
+        const marginTarget = Number.isFinite(tMargin) ? mPct(tMargin + 0.03) : "N/M";
+        const levTrig = (Math.max(2.0, tNdEbitda + 1.0)).toFixed(1);
+        const wcTrig = Number.isFinite(tWcDays) ? Math.round(tWcDays + 30) : 90;
+        const wcNow = Number.isFinite(tWcDays) ? `${Math.round(tWcDays)} days` : "undisclosed";
+        return (
+        <View style={{ padding: 5.5, backgroundColor: COLORS.offWhite, borderWidth: 0.5, borderColor: COLORS.hairlineLight, marginTop: 3, marginBottom: 4 }}>
         <Text style={{ fontSize: 7.8, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2.5 }}>
           Strategic Catalyst Transmission &amp; Position Risk Triggers
         </Text>
@@ -2737,10 +2784,10 @@ const BullsSayBearsSayPage = ({ data }: { data: ReportData }) => {
               Primary Value Accretion Milestones
             </Text>
             <Text style={{ fontSize: 6.6, color: COLORS.textSecondary, lineHeight: 1.35, marginBottom: 1.5 }}>
-              We closely monitor commercial delivery velocity across core customer accounts. Sequential expansion in EBITDA conversion toward 22%+ serves as the primary quantitative confirmation of operational leverage, signaling thesis validation.
+              Trailing EBITDA margin of {marginNow} is the line in the sand — sequential expansion toward {marginTarget} on throughput growth and cost discipline is the primary quantitative confirmation of operating leverage.
             </Text>
             <Text style={{ fontSize: 6.6, color: COLORS.textSecondary, lineHeight: 1.35 }}>
-              Continued execution of the firm&apos;s high-margin order pipeline and positive free cash flow compounding provide fundamental milestones for upward fair value target revisions.
+              Operating cash conversion printed at {Number.isFinite(tConv) ? `${(tConv * 100).toFixed(0)}% of EBITDA` : "an undisclosed rate"}; defending conversion through the capex cycle is the milestone for upward fair-value revisions.
             </Text>
           </View>
           <View style={{ flex: 1 }}>
@@ -2748,14 +2795,16 @@ const BullsSayBearsSayPage = ({ data }: { data: ReportData }) => {
               Downside Risk Triggers &amp; Exit Discipline
             </Text>
             <Text style={{ fontSize: 6.6, color: COLORS.textSecondary, lineHeight: 1.35, marginBottom: 1.5 }}>
-              Our quantitative risk framework mandates a formal thesis reassessment if trailing 12-month gross margins compress by more than 250 basis points without external commodity pass-through compensation.
+              Our framework mandates a formal thesis reassessment if trailing EBITDA margin compresses by more than 250 basis points from {marginNow} without external cost pass-through compensation.
             </Text>
             <Text style={{ fontSize: 6.6, color: COLORS.textSecondary, lineHeight: 1.35 }}>
-              Additionally, any un-hedged leverage spikes exceeding 2.0x Net Debt/EBITDA or sudden working capital bloat beyond 120 days CCC will trigger immediate position de-risking regardless of market sentiment.
+              Additionally, leverage beyond {levTrig}x Net Debt/EBITDA (vs {tNdEbitda.toFixed(1)}x trailing) or working-capital stretch beyond {wcTrig} days (vs {wcNow} trailing) triggers position de-risking regardless of market sentiment.
             </Text>
           </View>
         </View>
-      </View>
+        </View>
+        );
+      })()}
 
       {/* Table 2: Scenario Probability-Weighted Fair Value Bridge */}
       <View style={{ borderTopWidth: 0.5, borderTopColor: COLORS.hairlineLight, paddingTop: 3, marginBottom: 4 }}>
@@ -4936,9 +4985,12 @@ const AnalystForecastsSummaryPage = ({ data }: { data: ReportData }) => {
               {(() => {
                 const lf = data.annualFinancials[data.annualFinancials.length - 1];
                 const trailConv = lf && lf.netIncome > 0 ? lf.operatingCashFlow / lf.netIncome : null;
-                const projs = data.dcf?.projections || [];
-                const termProj = projs[projs.length - 1];
-                const termConv = termProj && termProj.nopat > 0 ? termProj.fcff / termProj.nopat : null;
+                const canonProjs = (data as unknown as { canonicalForecast?: { projections?: Array<{ nopat?: number; fcff?: number }> } }).canonicalForecast?.projections;
+                const projs = (canonProjs?.length ? canonProjs : data.dcf?.projections) || [];
+                const termProj = projs[projs.length - 1] as unknown as { nopat?: number; fcff?: number } | undefined;
+                const termNopat = Number(termProj?.nopat) || 0;
+                const termFcff = Number(termProj?.fcff) || 0;
+                const termConv = termProj && termNopat > 0 ? termFcff / termNopat : null;
                 const fmtC = (c: number | null) => c === null || !isFinite(c) ? "undisclosed" : `${Math.round(c * 100)}%`;
                 return `Cash conversion, trailing: CFO at ${fmtC(trailConv)} of net income. Explicit-forecast terminal year: FCF at ${fmtC(termConv)} of NOPAT. Where the two differ, the forecast — not a normalized ideal — governs valuation, and the gap is working-capital plus capex intensity per the evidence trail above.`;
               })()}

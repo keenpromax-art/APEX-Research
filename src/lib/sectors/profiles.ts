@@ -214,7 +214,14 @@ export const SOFTWARE_PROFILE: SectorProfile = {
     "wafer fab", "foundry", "refinery throughput", "plant turnaround",
     "casa", "nim", "gnpa", "loan book",
     "spectrum auction", "subscriber churn", "tower tenancy",
-    "revpar", "adr", "occupancy", "clinical trial", "dark stores"
+    "revpar", "adr", "occupancy", "clinical trial", "dark stores",
+    // IT-services-only operating metrics: offshore pyramid, utilization and
+    // attrition vocabulary belongs to the it-services model, never here.
+    // (Compound terms only — bare utilization/attrition hit legitimate text.)
+    "offshore", "onsite effort", "effort mix",
+    "billable utilization", "blended utilization",
+    "delivery pyramid", "talent pyramid", "voluntary attrition",
+    "time and materials", "discretionary consulting", "deal signing"
   ],
   requiredConcepts: ["arr", "retention", "tcv", "subscription", "expansion"],
   isFinancialInstitution: false,
@@ -327,7 +334,11 @@ export const INTERNET_RETAIL_PROFILE: SectorProfile = {
     "casa", "nim", "gnpa", "credit cost", "aum", "spectrum auction", "clinical trials", "anda filings",
     "wafer fab", "refinery throughput", "crack spread", "plant turnaround", "agri commodity",
     "copra", "palm oil procurement", "packaged goods", "personal care", "brand recall",
-    "iconic consumer brand", "multi-tier retail distribution", "fmcg", "modern trade"
+    "iconic consumer brand", "multi-tier retail distribution", "fmcg", "modern trade",
+    // Logistics/order-economics model: commodity, feedstock, and manufacturing
+    // vocabulary belongs to other sectors — never here.
+    "feedstock", "commodity procurement", "upstream crude", "crude oil",
+    "manufacturing line", "assembly line", "offshore", "delivery pyramid"
   ],
   isFinancialInstitution: false,
   standardMarginMetric: "EBITDA Margin"
@@ -648,8 +659,11 @@ export const GENERAL_PROFILE: SectorProfile = {
   riskCategories: ["Demand Softening", "Competitive Pricing Pressure", "Input Cost Inflation", "Macro Volatility"],
   moatDrivers: ["Brand recognition", "Distribution channels", "Operating cost efficiencies"],
   forbiddenConcepts: [
-    // General is no longer empty — it blocks the most egregious cross-sector bleed so leakage cannot silently publish
-    "spectrum auction", "spectrum holdings", "4g/5g", "wafer fab", "refinery throughput", "crack spread", "clinical trial", "dark stores"
+    // General is no longer empty — it blocks the most egregious cross-sector bleed so leakage cannot silently publish.
+    // Lending (casa/loan-book) and carrier (arpu/subscriber-churn) vocabulary
+    // never belongs to an unclassified conglomerate/industrial (e.g. Reliance).
+    "spectrum auction", "spectrum holdings", "4g/5g", "wafer fab", "refinery throughput", "crack spread", "clinical trial", "dark stores",
+    "casa", "loan book", "arpu", "subscriber churn"
   ],
   isFinancialInstitution: false,
   standardMarginMetric: "EBITDA Margin"

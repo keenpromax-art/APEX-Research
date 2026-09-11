@@ -35,6 +35,17 @@ export interface WriterCheckerGroundTruth {
   canonicalMoat: MoatRating;
   /** ROIC - WACC in percentage points (for moat spread discipline). */
   roicSpreadPp?: number;
+  /**
+   * Shared operating-model vocabulary. When present, the checker uses THESE
+   * lists (same instance every section receives) instead of re-classifying
+   * the company — no section may independently classify.
+   */
+  operatingModel?: {
+    requiredConcepts: string[];
+    forbiddenConcepts: string[];
+    isKnownSector: boolean;
+    sector: string;
+  } | null;
 }
 
 export interface DraftCheck {
@@ -144,6 +155,27 @@ function valuationNumberIssues(text: string, truth: WriterCheckerGroundTruth): s
 }
 
 function sectorBleedIssues(text: string, truth: WriterCheckerGroundTruth): string[] {
+  // Prefer the shared model instance (same lists every section receives).
+  // Standalone classifySector fallback exists only for direct unit-test use.
+  const modelLists = truth.operatingModel
+    ? { forbidden: truth.operatingModel.forbiddenConcepts, required: truth.operatingModel.requiredConcepts, known: truth.operatingModel.isKnownSector }
+    : null;
+  if (modelLists) {
+    const lower = (text || "").toLowerCase();
+    const hit = (phrase: string): boolean => {
+      const esc = phrase.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      return new RegExp(`(^|[^a-z0-9])${esc}([^a-z0-9]|$)`, "i").test(lower);
+    };
+    const issues = modelLists.forbidden.filter(hit).slice(0, 6).map(
+      (c) => `Off-sector term "${c}" — rewrite with this company's own sector KPIs (see guardrail), never another sector's vocabulary.`
+    );
+    // Required nudge (coaching, bounded by max attempts): a draft evidencing
+    // zero required concepts for a known sector will hard-block in QA.
+    if (modelLists.known && modelLists.required.length > 0 && !modelLists.required.some(hit)) {
+      issues.push(`No required sector concept evidenced [${modelLists.required.slice(0, 6).join(", ")}] — rebuild the draft around the sector's own drivers and KPIs.`);
+    }
+    return issues;
+  }
   try {
     const profile = classifySector(truth.sector, truth.industry, truth.description);
     const res = validateSectorConcepts(profile, text);

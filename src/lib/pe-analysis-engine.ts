@@ -18,8 +18,8 @@ import type {
 import { stmtNum, isReitStatement, isAssetLightStatement } from "@/types/report";
 import { formatPct, formatLargeNum } from "./calculations";
 import { classifyArchetype, type GICSSector, type FinancialArchetype } from "./company-archetype";
-import { buildCompanyOntology } from "./company-ontology";
 import { resolveMoatRating, capPillarsToRating, harmonizeMoatSources } from "./moat";
+import { buildResearchOperatingModel, type ResearchOperatingModel } from "./research-model";
 
 export interface PEAnalysisInput {
   profile: CompanyProfile;
@@ -31,6 +31,12 @@ export interface PEAnalysisInput {
   news?: TickerNewsItem[];
   assumptionsLedger?: any;
   masterReportFacts?: any;
+  /**
+   * Shared operating-model instance (built once per report). When provided,
+   * the engine uses it instead of classifying the company itself — no
+   * section may independently classify.
+   */
+  operatingModel?: ResearchOperatingModel | null;
 }
 
 export function generatePEFirmAnalysis(input: PEAnalysisInput): AIAnalysis {
@@ -39,14 +45,27 @@ export function generatePEFirmAnalysis(input: PEAnalysisInput): AIAnalysis {
   const prev = annualFinancials[annualFinancials.length - 2] || latest;
   
   // Priority 1: hard CompanyOntology is the single authority (sector + archetype + drivers + KPIs).
+  // The shared ResearchOperatingModel (built once per report) wins when
+  // provided — this engine never re-classifies on its own.
   const archProfile = classifyArchetype(profile, stockData, annualFinancials);
   const sectorType = archProfile.sector;
   const archetype = archProfile.archetype;
-  const ontology = buildCompanyOntology(profile, archProfile);
+  const operatingModel = input.operatingModel ?? buildResearchOperatingModel({ profile, archetypeProfile: archProfile });
   // Also resolve canonical SectorProfile id (consumer / auto / etc.) for
   // cases where archetype sector is generic (general_industrial) but the
   // company is clearly FMCG/consumer by GICS (e.g. ITC). Ontology is authoritative.
-  const sectorProfileId: string = ontology.sectorId;
+  const sectorProfileId: string = operatingModel.sector;
+  // Logistics & freight (e.g. Delhivery) classify as general_industrial by
+  // archetype but need their own operating vocabulary (shipments, linehaul,
+  // sort/gateway infrastructure) — matched on sector+industry only.
+  const logisticsHay = `${profile.sector || ""} ${profile.industry || ""}`.toLowerCase();
+  const isLogisticsCompany =
+    logisticsHay.includes("logistic") ||
+    logisticsHay.includes("freight") ||
+    logisticsHay.includes("trucking") ||
+    logisticsHay.includes("courier") ||
+    logisticsHay.includes("parcel") ||
+    logisticsHay.includes("marine shipping");
 
   const cur = profile.currency || "INR";
   const sym = cur === "INR" ? "Rs. " : cur === "USD" ? "$" : cur === "EUR" ? "€" : "£";
@@ -148,9 +167,20 @@ export function generatePEFirmAnalysis(input: PEAnalysisInput): AIAnalysis {
     investmentThesis = `Our institutional thesis evaluates ${profile.name} through digital-advertising unit economics, not telecom or consumer-packaged-goods metrics. The thesis is anchored by three drivers: First, Family of Apps advertising revenue compounding via combined ad-impression growth and average price-per-ad recovery, reflected in digital-advertising ARPU expansion across DAU/MAU cohorts. Second, operating leverage from AI-driven ad ranking, measurement, and efficiency gains, partly offset by data-center and AI infrastructure capex intensity. Third, disciplined containment of Reality Labs operating losses while preserving optionality in wearables and mixed-reality hardware. All KPIs used are internet-platform metrics as defined above.`;
     investmentConclusion = `We formulate ${recAction} recommendation on ${profile.name} with an intrinsic fair value target of ${sym}${fv.toFixed(2)} per share (${formatPct(upsidePct)} implied upside), anchored on Family of Apps ad-revenue durability, digital ARPU trajectory, and free-cash-flow conversion net of AI infrastructure capex and Reality Labs investment.`;
   } else if (sectorType === "technology_software") {
-    companyOverview = `${profile.name} is a premier enterprise digital solutions and software engineering enterprise delivering cloud architecture, application modernizations, artificial intelligence integration, and managed IT services across global corporate clients.`;
-    investmentThesis = `Our institutional thesis highlights ${profile.name}'s deep client domain integration, high recurring contractual revenue visibility, and disciplined delivery pyramid optimization. The business generates robust free cash flow conversion exceeding 80% of EBITDA, deploying capital toward organic talent upskilling, proprietary AI platforms, and consistent capital returns.`;
-    investmentConclusion = `We formulate ${recAction} recommendation on ${profile.name} with an intrinsic fair value target of ${sym}${fv.toFixed(2)} per share (${formatPct(upsidePct)} implied upside), supported by enterprise digital spending resilience and strong return on invested capital (ROIC).`;
+    // IT-services companies (TCS/Infosys industry) and product-software
+    // companies (Microsoft industry) share an archetype but NOT an operating
+    // model: pyramid/utilization/attrition vocabulary is legitimate ONLY for
+    // IT services and contaminates product-software narratives (and vice
+    // versa for ARR/seat economics). Branch on the SectorProfile id.
+    if (sectorProfileId === "it-services") {
+      companyOverview = `${profile.name} is a global IT services and consulting enterprise delivering application development, systems integration, cloud migration, and managed outsourcing through an offshore-leveraged global delivery model.`;
+      investmentThesis = `Our institutional thesis evaluates ${profile.name} on IT-services operating metrics: First, constant-currency revenue growth from large-deal TCV conversion and steady deal-win momentum. Second, EBIT margin defense through offshore pyramid optimization, utilization discipline, and wage-inflation pass-through. Third, free-cash-flow conversion on low-capital-intensity delivery, funding dividends and buybacks while attrition normalizes.`;
+      investmentConclusion = `We formulate ${recAction} recommendation on ${profile.name} with an intrinsic fair value target of ${sym}${fv.toFixed(2)} per share (${formatPct(upsidePct)} implied upside), supported by TCV-led revenue growth and EBIT margin delivery against the DCF trajectory.`;
+    } else {
+      companyOverview = `${profile.name} is an enterprise product-software company monetizing subscription (ARR), license, and attached services. Unit economics are measured in ARR growth, net revenue retention, large-deal TCV conversion, and subscription gross margin — services-pyramid, utilization, and attrition metrics do not apply here.`;
+      investmentThesis = `Our institutional thesis highlights ${profile.name}'s deep client domain integration, high recurring subscription revenue (ARR) visibility with net retention expansion, and disciplined product R&D. The business generates robust free cash flow conversion on subscription gross margins, deploying capital toward organic product investment, proprietary AI platforms, and consistent capital returns. Services-pyramid and utilization metrics do not apply to this operating model.`;
+      investmentConclusion = `We formulate ${recAction} recommendation on ${profile.name} with an intrinsic fair value target of ${sym}${fv.toFixed(2)} per share (${formatPct(upsidePct)} implied upside), supported by ARR expansion, subscription retention, and enterprise digital spending resilience.`;
+    }
   } else if (sectorType === "technology_hardware") {
     companyOverview = `${profile.name} is a technology hardware enterprise designing and selling devices, endpoints, and components through retail, carrier, and enterprise channels. Unit economics are measured in segment unit shipments, average selling prices (ASP) and product mix, hardware gross margin net of component costs, channel inventory and sell-through, and services attach on the installed base — SaaS retention, consulting utilization, and contract-value metrics do not apply here.`;
     investmentThesis = `Our hardware thesis evaluates ${profile.name} on three drivers: First, unit volume resilience through replacement cycles and flagship launch execution across product lines. Second, ASP and product-mix discipline — pro-tier and high-memory configurations defending realization against mid-tier price pressure. Third, hardware gross-margin defense via vertical component integration and scale procurement net of memory/display cost swings, with channel inventory discipline protecting sell-through. Services attach on the installed base provides incremental lifetime revenue.`;
@@ -178,7 +208,7 @@ export function generatePEFirmAnalysis(input: PEAnalysisInput): AIAnalysis {
     investmentConclusion = `We formulate ${recAction} recommendation on ${profile.name} with an intrinsic fair value target of ${sym}${fv.toFixed(2)} per share (${formatPct(upsidePct)} implied upside). The conclusion is anchored to normalized fee-related earnings and cash conversion, while recognizing that market movements and client flows can materially change results.`;
   } else if (sectorType === "pharma_healthcare") {
     companyOverview = `${profile.name} is a leading global healthcare and pharmaceutical enterprise operating across complex generic formulations, active pharmaceutical ingredients (APIs), and domestic chronic therapy categories.`;
-    investmentThesis = `From a fundamental equity research perspective, ${profile.name} represents a defensive healthcare compounder driven by domestic prescription market dominance, complex generic filings in regulated export markets, and vertical API integration.`;
+    investmentThesis = `From a fundamental equity research perspective, ${profile.name} represents a defensive healthcare compounder driven by domestic prescription market dominance, complex generic filings (ANDA pipeline) in regulated export markets including US generics, and vertical API integration funded by disciplined R&D reinvestment.`;
     investmentConclusion = `We formulate ${recAction} recommendation on ${profile.name} with an intrinsic target of ${sym}${fv.toFixed(2)} per share, balancing defensive healthcare demand with asymmetric upside from differentiated pipeline launches.`;
   } else if (sectorType === "nbfc") {
     companyOverview = `${profile.name} is a leading Non-Banking Financial Company (NBFC) and specialized microfinance institution providing credit access, income-generation loans, and community-based lending solutions across under-penetrated rural and semi-urban markets.`;
@@ -221,6 +251,13 @@ export function generatePEFirmAnalysis(input: PEAnalysisInput): AIAnalysis {
   } else {
     companyOverview = `${profile.name} operates in the ${profile.sector} sector (${profile.industry}). The business description and segment disclosures in the company profile, together with the reported financials below, define its operating model — no sector-specific template applies.`;
     investmentThesis = `Our analysis of ${profile.name} is anchored on its reported revenue trajectory, margin structure, cash conversion, and balance-sheet capacity as detailed below. Without a sector-specific template match, no industry boilerplate (manufacturing throughput, credit-portfolio growth, user-based metrics, or platform dynamics) is assumed.`;
+    // Known-sector grounding (generic fallback elimination): when the shared
+    // operating model carries explicit drivers, the fallback thesis judges
+    // execution on them — so the section evidences required sector concepts
+    // instead of reading as template-free filler.
+    if (operatingModel.isKnownSector && operatingModel.revenueDrivers.length > 0) {
+      investmentThesis += ` Operating execution is judged on ${operatingModel.revenueDrivers.slice(0, 3).join(", ")}, with costs governed by ${operatingModel.costDrivers.slice(0, 2).join(" and ")}.`;
+    }
     investmentConclusion = `We formulate ${recAction} recommendation on ${profile.name} with an intrinsic fair value target of ${sym}${fv.toFixed(2)} per share (${formatPct(upsidePct)} implied upside), reflecting reported fundamentals and operational execution.`;
   }
 
@@ -280,18 +317,36 @@ export function generatePEFirmAnalysis(input: PEAnalysisInput): AIAnalysis {
       { pillar: "Brand & Distribution Ubiquity", durability: "Wide (15+ Yrs)", rationale: "Pre-installed distribution and habitual daily usage sustaining pricing power with advertisers." },
     ];
   } else if (sectorType === "technology_software") {
-    moatSources = {
-      switchingCosts: `Deep Enterprise Workflow Embedment: Multi-year software implementation cycles, proprietary data repositories, and mission-critical enterprise integrations generate exceptional customer retention rates (>95%).`,
-      intangibleAssets: `Proprietary Software Architecture & Developer Ecosystem: Broad enterprise intellectual property, automated cloud development frameworks, and trusted global security certifications.`,
-      costAdvantage: `Global Delivery Scale & Offshore Utilization: High offshore talent leverage and standardized delivery toolchains maximize gross margins against local boutique consultancies.`,
-      moatTrend: `Positive: Enterprise cloud and artificial intelligence migrations increase multi-year Total Contract Value (TCV) commitments.`,
-    };
-    moatPillars = [
-      { pillar: "Mission-Critical Workflow Integration", durability: "Wide (15+ Yrs)", rationale: "Enterprise operational workflows deeply entwined with customer core business operations." },
-      { pillar: "Global Delivery Scale & Offshore Footprint", durability: "Wide (12+ Yrs)", rationale: "Large-scale talent deployment models driving structural cost advantages and high delivery margins." },
-      { pillar: "Proprietary Software & AI Accelerators", durability: "Narrow (8-10 Yrs)", rationale: "Pre-built software automation accelerators reducing deployment lead times for complex clients." },
-      { pillar: "Institutional Client Account Tenures", durability: "Wide (15+ Yrs)", rationale: "Decades-long relationships with Fortune 500 organizations supporting multi-year renewal rates." },
-    ];
+    // Same split as the thesis branch above: IT-services pyramid language is
+    // legitimate only for it-services SectorProfile; product software uses
+    // subscription/retention moat vocabulary.
+    if (sectorProfileId === "it-services") {
+      moatSources = {
+        switchingCosts: `Deep Enterprise Workflow Embedment: Multi-year outsourcing engagements, proprietary delivery frameworks, and mission-critical application support generate exceptional client retention.`,
+        intangibleAssets: `Delivery Methodology & Domain IP: Reusable solution accelerators, automation platforms, and deep vertical domain expertise.`,
+        costAdvantage: `Global Delivery Scale & Offshore Utilization: High offshore talent leverage and standardized delivery toolchains maximize gross margins against local boutique consultancies.`,
+        moatTrend: `Positive: Enterprise cloud and artificial intelligence migrations increase multi-year Total Contract Value (TCV) commitments.`,
+      };
+      moatPillars = [
+        { pillar: "Mission-Critical Client Account Tenures", durability: "Wide (15+ Yrs)", rationale: "Decades-long outsourcing relationships with Fortune 500 organizations supporting multi-year renewal rates." },
+        { pillar: "Global Delivery Scale & Offshore Footprint", durability: "Wide (12+ Yrs)", rationale: "Large-scale talent deployment models driving structural cost advantages and high delivery margins." },
+        { pillar: "Proprietary Delivery Platforms & AI Accelerators", durability: "Narrow (8-10 Yrs)", rationale: "Pre-built automation accelerators reducing deployment lead times for complex clients." },
+        { pillar: "Institutional Client Account Tenures", durability: "Wide (15+ Yrs)", rationale: "Entrenched multi-tower vendor-consolidation positioning with high switching costs." },
+      ];
+    } else {
+      moatSources = {
+        switchingCosts: `Deep Enterprise Workflow Embedment: Multi-year software implementation cycles, proprietary data repositories, and mission-critical enterprise integrations generate exceptional customer retention rates (>95%).`,
+        intangibleAssets: `Proprietary Software Architecture & Product IP: Broad enterprise intellectual property, cloud-native product architecture, and trusted global security certifications.`,
+        costAdvantage: `Subscription Scale & R&D Leverage: A large ARR base amortizes product R&D across retained seats, funding innovation at a unit cost sub-scale rivals cannot match.`,
+        moatTrend: `Positive: Net revenue retention expansion and AI add-on monetization deepen per-seat economics.`,
+      };
+      moatPillars = [
+        { pillar: "Mission-Critical Workflow Integration", durability: "Wide (15+ Yrs)", rationale: "Enterprise operational workflows deeply entwined with customer core business operations." },
+        { pillar: "Subscription Retention & Net Expansion", durability: "Wide (12+ Yrs)", rationale: "High gross retention with net expansion compounding ARR on the installed seat base." },
+        { pillar: "Proprietary Software & AI Product IP", durability: "Narrow (8-10 Yrs)", rationale: "Differentiated product capabilities and data assets shortening sales cycles for complex clients." },
+        { pillar: "Institutional Client Account Tenures", durability: "Wide (15+ Yrs)", rationale: "Decades-long relationships with Fortune 500 organizations supporting multi-year renewal rates." },
+      ];
+    }
   } else if (sectorType === "technology_hardware") {
     moatSources = {
       switchingCosts: `Hardware-Software Ecosystem Lock-In: Integrated multi-device workflows and synchronized cloud services generate friction, yielding high customer retention.`,
@@ -510,13 +565,21 @@ export function generatePEFirmAnalysis(input: PEAnalysisInput): AIAnalysis {
       { force: "Competitive Rivalry", level: "High", commentary: "Rivalry with scaled peers (search, social video, commerce media) focuses on engagement time, creator ecosystems, and AI ad-performance rather than tariff or distribution competition." },
     ];
   } else if (sectorType === "technology_software") {
-    industryDynamicsCommentary = `The enterprise software and technology services industry is underpinned by global corporate digital transformation budgets, cloud migrations, and enterprise generative AI integration. Organizations that combine deep domain expertise with cost-effective global delivery models continue to expand market share.`;
-    fiveForces = [
+    industryDynamicsCommentary = sectorProfileId === "it-services"
+      ? `The enterprise software and technology services industry is underpinned by global corporate digital transformation budgets, cloud migrations, and enterprise generative AI integration. Organizations that combine deep domain expertise with cost-effective global delivery models continue to expand market share.`
+      : `The enterprise product-software industry is underpinned by subscription (ARR) economics: seat expansion, net revenue retention, and AI add-on monetization compound on the installed base, while cloud hosting and sales capacity scale sub-linearly with revenue.`;
+    fiveForces = sectorProfileId === "it-services" ? [
       { force: "Threat of New Entrants", level: "Moderate", commentary: "Boutique digital consultancies emerge, but Tier-1 client master service agreements (MSAs) require global delivery scale and multi-decade track records." },
       { force: "Bargaining Power of Buyers", level: "Moderate", commentary: "Enterprise CIOs seek vendor consolidation and pricing concessions, but mission-critical project reliance insulates billing realization." },
       { force: "Bargaining Power of Suppliers", level: "Low to Moderate", commentary: "Talent wage inflation fluctuates, but normalized attrition and offshore training pyramids contain unit delivery costs." },
       { force: "Threat of Substitutes", level: "Low", commentary: "Proprietary enterprise software and customized enterprise IT architectures have no commercial substitute in corporate workflows." },
       { force: "Competitive Rivalry", level: "Moderate", commentary: "Established global IT providers compete on technical capabilities, industry-specific AI solutions, and execution reliability." },
+    ] : [
+      { force: "Threat of New Entrants", level: "Moderate", commentary: "Point-solution startups emerge continuously, but enterprise-grade security certifications, compliance scope, and installed-base data gravity protect incumbents." },
+      { force: "Bargaining Power of Buyers", level: "Moderate", commentary: "Enterprise CIOs consolidate vendors and negotiate discounts, but mission-critical workflow embedment and high switching costs defend net retention." },
+      { force: "Bargaining Power of Suppliers", level: "Low to Moderate", commentary: "Cloud infrastructure (compute) and specialized AI talent are the critical inputs; scale procurement and pricing power offset supplier leverage." },
+      { force: "Threat of Substitutes", level: "Low", commentary: "Embedded enterprise platforms have no commercial substitute inside customer workflows; displacement requires full re-implementation." },
+      { force: "Competitive Rivalry", level: "Moderate", commentary: "Hyperscaler suites and best-of-breed vendors compete on product breadth, AI capability, and net expansion rather than headcount scale." },
     ];
   } else if (sectorType === "asset_management") {
     industryDynamicsCommentary = `Asset and wealth management economics are shaped by market levels, client asset allocation, organic net flows, fee rates, product mix, investment performance, and regulatory trust. Platform scale can create operating leverage, but passive products, private-market competition, and concentrated institutional mandates can pressure fee realization.`;
@@ -643,6 +706,14 @@ export function generatePEFirmAnalysis(input: PEAnalysisInput): AIAnalysis {
       { event: "Keys Pipeline Conversion and MICE/Banquet Mix Improvement", horizon: "12-18 Months", probability: "Evidence-Dependent", impact: "GOPPAR and EBITDAR expansion" },
       { event: "Direct-Booking / Loyalty Mix Improvement Reducing OTA Take-Rate", horizon: "12-24 Months", probability: "Evidence-Dependent", impact: "Net RevPAR and margin accretion" },
       { event: "Seasonal Demand Softness or New Supply Pressuring Occupancy/ADR", horizon: "Ongoing", probability: "Evidence-Dependent", impact: "RevPAR and target downside sensitivity" },
+    ];
+  } else if (isLogisticsCompany) {
+    businessStrategyCommentary = `${profile.name}'s strategic roadmap centers on three operating levers: First, shipment-volume throughput across express parcel and part-truckload networks, monetized through realization per shipment and gateway/sort-center automation. Second, integrated cross-sell across truckload, supply-chain services, and cross-border offerings, including integration of acquired networks to densify routes. Third, linehaul and last-mile cost-per-shipment discipline, with fuel-surcharge pass-through protecting unit margins while funding network capex from operating cash flow.`;
+    catalysts = [
+      { event: "Quarterly Shipment-Volume Beat with Stable Realization per Shipment", horizon: "6-12 Months", probability: "Medium-High", impact: "Validates throughput thesis; supports fair value" },
+      { event: "PTL Network Ramp and Acquired-Network Integration Synergies", horizon: "12-18 Months", probability: "Medium", impact: "Density-led margin expansion; utilization upside" },
+      { event: "Fuel-Cost Pass-Through Lag Compressing Unit Margins", horizon: "Ongoing", probability: "Medium", impact: "Near-term spread compression; watch surcharge recovery" },
+      { event: "E-commerce Demand Softness or Captive-Network Insourcing by Key Accounts", horizon: "Ongoing", probability: "Medium", impact: "Volume and realization downside sensitivity" },
     ];
   } else {
     businessStrategyCommentary = `${profile.name}'s strategy requires validation against its reported operating model, segment disclosures, and capital-allocation record. This baseline deliberately avoids assuming plants, credit-portfolio growth, inventory, user-based metrics, or platform infrastructure where those are not evidenced.`;
@@ -1281,6 +1352,32 @@ export function generatePEFirmAnalysis(input: PEAnalysisInput): AIAnalysis {
       { risk: "US Generics Price Erosion", description: "Buyer consolidation and competition compressing US generic realizations.", impact: "High", mitigation: "Complex-product mix shift and differentiated launch cadence" },
       { risk: "Regulatory Inspection Exposure", description: "Observations at manufacturing sites risking supply disruption and remediation cost.", impact: "Medium", mitigation: "Quality-system investment and site diversification" },
       { risk: "Input Cost & Channel Pressure", description: "Active-ingredient inflation plus distributor destocking weighing on margins.", impact: "Medium", mitigation: "Backward integration and disciplined channel inventory" },
+    ];
+  } else if (isLogisticsCompany) {
+    swotStrengths = [
+      "Pan-India express parcel network with automated sort and gateway infrastructure supporting volume throughput.",
+      "Integrated multi-service offering across parcel, part-truckload, truckload, and supply-chain services enabling client cross-sell.",
+      "Technology platform for route optimization, shipment tracking, and network utilization driving operating leverage.",
+    ];
+    swotWeaknesses = [
+      "Structurally thin 3PL operating margins with limited pricing power against large e-commerce accounts.",
+      "Fuel and linehaul cost sensitivity with contractual pass-through lags compressing unit spreads.",
+      "Client concentration in e-commerce verticals exposing volumes to captive-network insourcing.",
+    ];
+    swotOpportunities = [
+      "Part-truckload formalization and share gains from unorganized operators on network density.",
+      "Enterprise supply-chain outsourcing converting fixed client logistics cost into contracted volumes.",
+      "Acquisition integration synergies densifying routes and lifting gateway utilization.",
+    ];
+    swotThreats = [
+      "Captive logistics arms of large marketplaces insourcing volumes away from third-party networks.",
+      "Sustained fuel-price elevation outpacing surcharge recovery timelines.",
+      "Macro freight slowdown compressing load factors and realization per shipment.",
+    ];
+    keyRisks = [
+      { risk: "Captive-Network Insourcing", description: "Key e-commerce accounts shifting volumes to in-house logistics arms.", impact: "High", mitigation: "Multi-vertical client diversification and service-level differentiation on speed/reliability" },
+      { risk: "Fuel-Cost Pass-Through Lag", description: "Diesel/ATF spikes compressing unit margins before surcharge resets.", impact: "Medium", mitigation: "Indexed fuel surcharges and linehaul efficiency programs" },
+      { risk: "Acquisition Integration Execution", description: "Network-merger disruption risking service levels and synergy timelines.", impact: "Medium", mitigation: "Phased gateway integration with customer-retention tracking" },
     ];
   } else {
     // Sector-neutral fallback: this branch serves every sector WITHOUT a dedicated

@@ -24,7 +24,10 @@ import { stmtNum } from "@/types/report";
 import { formatPct, formatLargeNum } from "./calculations";
 import { resolveMoatRating, capPillarsToRating, type MoatRating } from "./moat";
 import { generatePEFirmAnalysis } from "./pe-analysis-engine";
-import { buildCompanyOntology } from "./company-ontology";
+import {
+  buildResearchOperatingModel,
+  type ResearchOperatingModel,
+} from "./research-model";
 import {
   SUPPORTED_PROVIDERS,
   CustomKeyConfig,
@@ -59,25 +62,23 @@ const safeFix = (v: unknown, d = 2, fallback = "—"): string => {
 // template so cross-sector boilerplate (telecom/FMCG/renewables) can never
 // leak into another sector's narrative and trip the publication gate.
 // ─────────────────────────────────────────────────────────────
-export function buildSectorGuardrail(profile: CompanyProfile): string {
-  // Priority 1: hard CompanyOntology is the single authority (not a forked keyword list).
-  // NOTE: the FULL forbidden list is emitted — a previous slice(0, 24) truncation
-  // hid tail terms (tower tenancy, subscriber churn, arpu, ...) from the model,
-  // which then emitted them innocently and tripped SANITIZE-01. Never truncate.
-  const onto = buildCompanyOntology(profile);
-  const kpis = onto.kpis.slice(0, 10).join("; ");
-  const forbidden = onto.forbiddenConcepts.join(", ") || "none";
-  const required = onto.requiredConcepts.slice(0, 8).join(", ");
-  const drivers = onto.revenueDrivers.join("; ");
-  return `Company Ontology Guardrail (authoritative ${onto.ontologyVersion} — violations BLOCK publication, the report is rejected):
+export function buildSectorGuardrail(profile: CompanyProfile, model?: ResearchOperatingModel | null): string {
+  // Single-instance rule: callers inside generateAIAnalysis MUST pass the
+  // shared model (no section may independently classify). The standalone
+  // build below exists only for backward-compatible direct callers.
+  const m = model ?? buildResearchOperatingModel({ profile });
+  const kpis = m.kpis.slice(0, 10).join("; ");
+  const forbidden = m.forbiddenConcepts.join(", ") || "none";
+  const required = m.requiredConcepts.slice(0, 8).join(", ");
+  const drivers = m.revenueDrivers.join("; ");
+  return `Company Ontology Guardrail (authoritative operating model ${m.modelId} ${m.modelVersion} — violations BLOCK publication, the report is rejected):
 - REJECTION RULE: if you write ANY of the STRICTLY FORBIDDEN terms below (in any form, including inside compound phrases), the entire report FAILS audit and is discarded. When tempted by a forbidden term, use the sector's own KPIs instead.
-- Ontology: ${onto.sectorName} (${onto.sectorId}) / ${onto.subSector}; operating archetype ${onto.operatingArchetype} / ${onto.financialArchetype}; segments: ${onto.segments.join(", ")}.
-- Revenue drivers (forecast ONLY via these): ${drivers}. Valuation lens: ${onto.valuationMethods.join(", ")}; margin metric: ${onto.standardMarginMetric}.
+- Ontology: ${m.sectorName} (${m.sector}) / ${m.subSector}; operating archetype ${m.operatingArchetype} / ${m.financialArchetype}; segments: ${m.segments.join(", ")}.
+- Unit economics (how THIS business makes money): ${m.unitEconomics}
+- Revenue drivers (forecast ONLY via these): ${drivers}. Cost drivers: ${m.costDrivers.join("; ")}. Capex: ${m.capexDrivers.join("; ")}. NWC: ${m.nwcDrivers.join("; ")}. Valuation lens: ${m.valuationMethods.join(", ")}; margin metric: ${m.standardMarginMetric}.
 - Use ONLY these KPIs: ${kpis}. REQUIRED concepts (must evidence ≥2): ${required}.
 - STRICTLY FORBIDDEN terms (never mention in any form — complete list): ${forbidden}.
-- Never apply another sector's template (telecom carrier, FMCG, pharma, banking, energy, renewables). Internet platforms must not mention spectrum auctions, tower tenancies, telecom subscriber churn, or packaged-goods distribution. Telecom tariff/subscriber ARPU must not be confused with digital-advertising ARPU per DAU/MAU. Every material number must carry source/period/currency/units provenance or be omitted.`;
-}
-
+- Never apply another sector's template (telecom carrier, FMCG, pharma, banking, energy, renewables). Internet platforms must not mention spectrum auctions, tower tenancies, telecom subscriber churn, or packaged-goods distribution. Telecom tariff/subscriber ARPU must not be confused with digital-advertising ARPU per DAU/MAU. Every material number must carry source/period/currency/units provenance or be omitted.`;}
 interface OpenRouterMessage {
   role: "system" | "user" | "assistant";
   content: string;
@@ -348,7 +349,8 @@ async function runLeadEquityStrategist(
   stockData: StockData,
   dcf: DCFResult,
   annualFinancials: AnnualFinancials[],
-  customConfig?: CustomKeyConfig | null
+  customConfig?: CustomKeyConfig | null,
+  operatingModel?: ResearchOperatingModel | null
 ): Promise<{
   investmentThesis: string;
   companyOverview: string;
@@ -389,7 +391,7 @@ Analytical Directives:
 2. Explain the causal mechanisms behind margin expansion, order backlog execution, and operating leverage.
 3. Contrast the Bull Case scenario against the Bear Case downside triggers with rigorous numerical backing.
 
-${buildSectorGuardrail(profile)}
+${buildSectorGuardrail(profile, operatingModel)}
 Derive ALL SWOT items from the sector guardrail KPIs above — never reuse wind-turbine, O&M-service, steel/copper, or grid-substation examples unless the company is genuinely a renewable-energy manufacturer.
 
 Return a valid JSON object matching this structure EXACTLY:
@@ -427,7 +429,7 @@ Return ONLY raw JSON, no markdown formatting.`;
   // Writer → checker → rewrite cycle: the strategist drafts, the
   // deterministic gate plus a second (checker) AI verify, and the writer
   // revises from feedback until both pass or attempts run out.
-  const truth = buildWriterCheckerTruth(profile, stockData, dcf, resolveMoatRating(annualFinancials, dcf.assumptions?.wacc ?? 0.095));
+  const truth = buildWriterCheckerTruth(profile, stockData, dcf, resolveMoatRating(annualFinancials, dcf.assumptions?.wacc ?? 0.095), undefined, operatingModel);
   const emptyStrategist = {
     investmentThesis: "",
     companyOverview: "",
@@ -482,7 +484,8 @@ async function runNewsIntelligenceAnalyst(
   stockData: StockData,
   annualFinancials: AnnualFinancials[],
   news: TickerNewsItem[] = [],
-  customConfig?: CustomKeyConfig | null
+  customConfig?: CustomKeyConfig | null,
+  operatingModel?: ResearchOperatingModel | null
 ): Promise<{
   recentNewsAnalysis: { headline: string; publisher?: string; date: string; strategicTakeaway: string }[];
   catalysts: { event: string; horizon: string; probability: string; impact: string }[];
@@ -510,7 +513,7 @@ Tasks:
 1. Synthesize 3-4 high-impact corporate developments. For each event, evaluate the exact strategic takeaway: how does it impact revenue velocity, gross margins, order book backlog execution, or competitive defense?
 2. Formulate 4 concrete forward catalysts across 3-12 month horizons with explicit probability estimates and projected fair value upside/downside impact.
 
-${buildSectorGuardrail(profile)}
+${buildSectorGuardrail(profile, operatingModel)}
 Describe every development and catalyst ONLY with the guardrail KPIs above — never import another sector's vocabulary.
 
 Return a valid JSON object matching this structure EXACTLY:
@@ -592,7 +595,8 @@ function buildWriterCheckerTruth(
   stockData: StockData,
   dcf: DCFResult,
   canonicalMoat: MoatRating,
-  roicSpreadPp?: number
+  roicSpreadPp?: number,
+  operatingModel?: ResearchOperatingModel | null
 ): WriterCheckerGroundTruth {
   const cmp = Number(dcf.currentMarketPrice ?? stockData.currentPrice ?? 0) || 0;
   const fv = Number(dcf.intrinsicValue ?? cmp) || cmp;
@@ -616,6 +620,16 @@ function buildWriterCheckerTruth(
     terminalGrowthRate: dcf.assumptions?.terminalGrowthRate ?? 0.03,
     canonicalMoat,
     roicSpreadPp,
+    ...(operatingModel
+      ? {
+          operatingModel: {
+            requiredConcepts: operatingModel.requiredConcepts,
+            forbiddenConcepts: operatingModel.forbiddenConcepts,
+            isKnownSector: operatingModel.isKnownSector,
+            sector: operatingModel.sector,
+          },
+        }
+      : {}),
   };
 }
 
@@ -689,7 +703,8 @@ async function runMoatAndStrategyAnalyst(
   annualFinancials: AnnualFinancials[],
   dcf: DCFResult,
   customConfig?: CustomKeyConfig | null,
-  canonicalMoat?: MoatRating
+  canonicalMoat?: MoatRating,
+  operatingModel?: ResearchOperatingModel | null
 ): Promise<{
   moatSources: {
     switchingCosts: string;
@@ -746,7 +761,7 @@ Directives:
 3. Score each of Porter's Five Forces with explicit strategic defense mechanisms.
 4. Derive every moat pillar, certification, and force commentary from the company's actual sector — never import wind-turbine, SCADA, O&M-fleet, spectrum, tower, CASA, or clinical-trial boilerplate from another sector.
 
-${buildSectorGuardrail(profile)}
+${buildSectorGuardrail(profile, operatingModel)}
 
 Return a valid JSON object matching this structure EXACTLY:
 {
@@ -777,7 +792,7 @@ Return ONLY raw JSON, no markdown formatting.`;
   // Writer → checker → rewrite cycle: same contract as the strategist —
   // draft, deterministic ceiling gate + second-AI check, revise to pass.
   const effectiveMoat: MoatRating = canonicalMoat ?? resolveMoatRating(annualFinancials, dcf.assumptions?.wacc ?? 0.095);
-  const truth = buildWriterCheckerTruth(profile, stockData, dcf, effectiveMoat, roicSpread);
+  const truth = buildWriterCheckerTruth(profile, stockData, dcf, effectiveMoat, roicSpread, operatingModel);
   const emptyMoat = {
     moatSources: { switchingCosts: "", intangibleAssets: "", costAdvantage: "", moatTrend: "Positive" },
     fiveForces: [],
@@ -826,7 +841,8 @@ Return ONLY raw JSON, no markdown formatting.`;
 async function runForensicFinancialAnalyst(
   profile: CompanyProfile,
   annualFinancials: AnnualFinancials[],
-  customConfig?: CustomKeyConfig | null
+  customConfig?: CustomKeyConfig | null,
+  operatingModel?: ResearchOperatingModel | null
 ): Promise<{
   revenueCommentary: string;
   ebitdaCommentary: string;
@@ -876,7 +892,7 @@ Directives:
 - Write with forensic precision, dissecting cash conversion quality, accrual divergence, working capital float, and operational leverage.
 - Avoid vague commentary; cite the exact multi-year numbers and percentage changes from the input data.
 
-${buildSectorGuardrail(profile)}
+${buildSectorGuardrail(profile, operatingModel)}
 Use ONLY the guardrail KPIs above — a financial-statement footnote never justifies importing another sector's template vocabulary.
 
 Return a valid JSON object matching this structure EXACTLY:
@@ -920,7 +936,8 @@ async function runCreditSolvencyAnalyst(
   profile: CompanyProfile,
   annualFinancials: AnnualFinancials[],
   stockData: StockData,
-  customConfig?: CustomKeyConfig | null
+  customConfig?: CustomKeyConfig | null,
+  operatingModel?: ResearchOperatingModel | null
 ): Promise<{
   creditAnalysisCommentary: {
     financialHealth: string;
@@ -953,7 +970,7 @@ Directives:
 2. Formulate 4 prioritized institutional investment risks with explicit causal descriptions and company-specific mitigations.
 3. Derive all risks from the company's actual sector per the guardrail — never use steel/copper/resin, ISTS substation, turbine ASP, or reverse-auction examples unless the company is genuinely a renewable manufacturer.
 
-${buildSectorGuardrail(profile)}
+${buildSectorGuardrail(profile, operatingModel)}
 
 Return a valid JSON object matching this structure EXACTLY:
 {
@@ -995,7 +1012,8 @@ async function runGovernanceCapitalAnalyst(
   stockData: StockData,
   annualFinancials: AnnualFinancials[],
   dcf: DCFResult,
-  customConfig?: CustomKeyConfig | null
+  customConfig?: CustomKeyConfig | null,
+  operatingModel?: ResearchOperatingModel | null
 ): Promise<{
   managementCommentary: string;
   governanceCommentary: string;
@@ -1025,7 +1043,7 @@ Directives:
 2. Evaluate board governance structure, accounting transparency, audit oversight, and alignment with minority shareholders.
 3. Review 5-year cumulative capital deployment across dividends, repurchases, and balance sheet deleveraging.
 
-${buildSectorGuardrail(profile)}
+${buildSectorGuardrail(profile, operatingModel)}
 Company: ${profile.name} (${profile.ticker} — Sector: ${profile.sector} | Industry: ${profile.industry}). Ground every judgment in this sector's guardrail KPIs — never borrow another sector's metrics or jargon.
 
 Return a valid JSON object matching this structure EXACTLY:
@@ -1237,7 +1255,8 @@ async function runNewsSummaryDesk(
   stockData: StockData,
   annualFinancials: AnnualFinancials[],
   news?: TickerNewsItem[],
-  customConfig?: CustomKeyConfig | null
+  customConfig?: CustomKeyConfig | null,
+  operatingModel?: ResearchOperatingModel | null
 ): Promise<{ newsSummary: NewsSummaryDeskAnalysis }> {
   const newsList = (news && news.length > 0)
     ? news.slice(0, 8).map(n => `- [${n.publisher || "Wire"}] ${n.title} (${n.publishedAt ? n.publishedAt.slice(0, 10) : "Recent"})`).join("\n")
@@ -1253,7 +1272,7 @@ COMPANY CONTEXT:
 - Sector: ${profile.sector || "General"} | Industry: ${profile.industry || "Diversified"}
 - CMP: ${stockData.currentPrice} ${profile.currency || "USD"}
 
-${buildSectorGuardrail(profile)}
+${buildSectorGuardrail(profile, operatingModel)}
 Brief ONLY with the guardrail KPIs above — headlines or sentiment must never introduce another sector's vocabulary.
 
 Provide a structured briefing:
@@ -1400,11 +1419,16 @@ export async function generateAIAnalysis(
   onProgress?: (event: AgentProgressEvent) => void,
   customConfig?: CustomKeyConfig | null,
   precomputedLedger?: AssumptionsLedger | null,
-  resumeFrom?: AgentCheckpointState | null
+  resumeFrom?: AgentCheckpointState | null,
+  operatingModel?: ResearchOperatingModel | null
 ): Promise<AIAnalysis> {
+  // Single operating-model instance for the ENTIRE synthesis: built once
+  // here, handed to every agent, the deterministic fallback, and the
+  // writer-checker. No section classifies the company on its own.
+  const model = operatingModel ?? buildResearchOperatingModel({ profile });
   // Always build the deep PE foundation first (100% deterministic & sector-tailored).
   // The canonical ledger (when precomputed) harmonizes moat pillars/narrative.
-  const peBase = generatePEFirmAnalysis({ profile, stockData, annualFinancials, dcf, news, assumptionsLedger: precomputedLedger ?? undefined });
+  const peBase = generatePEFirmAnalysis({ profile, stockData, annualFinancials, dcf, news, assumptionsLedger: precomputedLedger ?? undefined, operatingModel: model });
   // Canonical composite moat — single authority for the moat-agent prompt ceiling
   // AND the assembly cap below (peBase is self-harmonized since the pe-analysis
   // fix; the LLM path needs the same rating or it emits Wide pillars everywhere).
@@ -1426,13 +1450,13 @@ export async function generateAIAnalysis(
   }
 
   const agentDefs: AgentDef[] = [
-    { id: "strategist", meta: AI_AGENT_PERSONAS[0], run: () => runLeadEquityStrategist(profile, stockData, dcf, annualFinancials, customConfig), auditNote: () => `Agent complete — queued for council audit (target vs DCF ledger check pending).` },
-    { id: "news", meta: AI_AGENT_PERSONAS[1], run: () => runNewsIntelligenceAnalyst(profile, stockData, annualFinancials, news, customConfig), auditNote: () => "Agent complete — queued for council audit (catalyst authentication pending)." },
-    { id: "moat", meta: AI_AGENT_PERSONAS[2], run: () => runMoatAndStrategyAnalyst(profile, stockData, annualFinancials, dcf, customConfig, canonicalMoatRating), auditNote: () => `Agent complete — queued for council audit (moat-spread validation pending).` },
-    { id: "forensic", meta: AI_AGENT_PERSONAS[3], run: () => runForensicFinancialAnalyst(profile, annualFinancials, customConfig), auditNote: () => "Agent complete — queued for council audit (DuPont reconciliation pending)." },
-    { id: "credit", meta: AI_AGENT_PERSONAS[4], run: () => runCreditSolvencyAnalyst(profile, annualFinancials, stockData, customConfig), auditNote: () => "Agent complete — queued for council audit (solvency cross-check pending)." },
-    { id: "governance", meta: AI_AGENT_PERSONAS[5], run: () => runGovernanceCapitalAnalyst(profile, stockData, annualFinancials, dcf, customConfig), auditNote: () => "Agent complete — queued for council audit (stewardship review pending)." },
-    { id: "news_summary", meta: AI_AGENT_PERSONAS[6], run: () => runNewsSummaryDesk(profile, stockData, annualFinancials, news, customConfig), auditNote: () => "Agent complete — queued for council audit (news cross-check pending)." },
+    { id: "strategist", meta: AI_AGENT_PERSONAS[0], run: () => runLeadEquityStrategist(profile, stockData, dcf, annualFinancials, customConfig, model), auditNote: () => `Agent complete — queued for council audit (target vs DCF ledger check pending).` },
+    { id: "news", meta: AI_AGENT_PERSONAS[1], run: () => runNewsIntelligenceAnalyst(profile, stockData, annualFinancials, news, customConfig, model), auditNote: () => "Agent complete — queued for council audit (catalyst authentication pending)." },
+    { id: "moat", meta: AI_AGENT_PERSONAS[2], run: () => runMoatAndStrategyAnalyst(profile, stockData, annualFinancials, dcf, customConfig, canonicalMoatRating, model), auditNote: () => `Agent complete — queued for council audit (moat-spread validation pending).` },
+    { id: "forensic", meta: AI_AGENT_PERSONAS[3], run: () => runForensicFinancialAnalyst(profile, annualFinancials, customConfig, model), auditNote: () => "Agent complete — queued for council audit (DuPont reconciliation pending)." },
+    { id: "credit", meta: AI_AGENT_PERSONAS[4], run: () => runCreditSolvencyAnalyst(profile, annualFinancials, stockData, customConfig, model), auditNote: () => "Agent complete — queued for council audit (solvency cross-check pending)." },
+    { id: "governance", meta: AI_AGENT_PERSONAS[5], run: () => runGovernanceCapitalAnalyst(profile, stockData, annualFinancials, dcf, customConfig, model), auditNote: () => "Agent complete — queued for council audit (stewardship review pending)." },
+    { id: "news_summary", meta: AI_AGENT_PERSONAS[6], run: () => runNewsSummaryDesk(profile, stockData, annualFinancials, news, customConfig, model), auditNote: () => "Agent complete — queued for council audit (news cross-check pending)." },
   ];
 
   const runOneAgent = async <T>(def: {

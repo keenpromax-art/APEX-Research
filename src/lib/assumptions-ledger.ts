@@ -348,11 +348,22 @@ export function createAssumptionsLedger({
   // re-solvable through the kernel. Published targets remain the ±25%
   // arithmetic sensitivities by methodology; each vector is re-solved and any
   // directional disagreement is recorded (never silently divergent).
-  const _vecGrowth = dcf.assumptions?.revenueGrowthRates;
-  const scenarioVectors = deriveScenarioVectors({
+  // Canonical-first (TRACK 1): the forecast owns the base vectors
+  // (buildCanonicalForecast → deriveScenarioVectors once). The ledger consumes
+  // forecast.scenarioVectors VERBATIM — re-deriving here with different inputs
+  // would fork the model (parallel-forecast defect). Derivation below only
+  // serves legacy DCF results without an attached forecast.
+  const canonVectors = (dcf as unknown as { canonicalForecast?: { scenarioVectors?: Record<"bull" | "base" | "bear", import("./financial-kernel").ScenarioVector>; revenueGrowthRates?: number[]; ebitMargins?: number[] } }).canonicalForecast?.scenarioVectors;
+  const _vecGrowth = (dcf as unknown as { canonicalForecast?: { revenueGrowthRates?: number[] } }).canonicalForecast?.revenueGrowthRates?.length
+    ? (dcf as unknown as { canonicalForecast: { revenueGrowthRates: number[] } }).canonicalForecast.revenueGrowthRates
+    : dcf.assumptions?.revenueGrowthRates;
+  const _vecMargin = (dcf as unknown as { canonicalForecast?: { ebitMargins?: number[] } }).canonicalForecast?.ebitMargins?.length
+    ? (dcf as unknown as { canonicalForecast: { ebitMargins: number[] } }).canonicalForecast.ebitMargins
+    : dcf.assumptions?.ebitMargins;
+  const scenarioVectors = canonVectors ?? deriveScenarioVectors({
     revenueGrowth: Array.isArray(_vecGrowth) && _vecGrowth.length > 0 ? [..._vecGrowth] : [0.12, 0.10, 0.08, 0.07, 0.06],
     ebitMargin: (() => {
-      const m = dcf.assumptions?.ebitMargins;
+      const m = _vecMargin;
       return Array.isArray(m) && m.length > 0 ? [...m] : [baseOm];
     })(),
     capexPct: Number(dcf.avgCapexPct) > 0 ? Number(dcf.avgCapexPct) : 0.045,
@@ -361,7 +372,10 @@ export function createAssumptionsLedger({
     wacc,
     terminalGrowth: terminalGrowthRate,
   });
-  const vectorDiagnostics: string[] = [];
+  const scenarioVectorSource = canonVectors
+    ? "canonicalForecast.scenarioVectors (verbatim — single pipeline; DCF assumptions mirror the same rows)"
+    : "deriveScenarioVectors(dcf.assumptions) — legacy fallback (no forecast attached)";
+  const vectorDiagnostics: string[] = [`Scenario vectors sourced: ${scenarioVectorSource}.`];
   for (const key of ["bull", "base", "bear"] as const) {
     const solved = solveScenarioVector({
       vector: scenarioVectors[key],

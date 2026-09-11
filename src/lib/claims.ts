@@ -46,7 +46,20 @@ export function extractClaims(text: string): Claim[] {
     // Extract first numeric token
     const m = sent.match(/(\d+(?:,\d{3})*(?:\.\d+)?\s*%|\d+(?:,\d{3})*(?:\.\d+)?\s*x|\b(?:rs\.?|₹|\$)\s*\d[\d,]*(?:\.\d+)?)/i);
     const raw = m ? m[1] : sent.slice(0, 40);
-    const val = m ? parseFloat(raw.replace(/[,₹$€£rs\.%\sxcrbn]/gi, "").trim()) : undefined;
+    // Numeric parse must preserve the decimal point ("9.5%" → 9.5, never 95).
+    // Strip thousand-separators, currency glyphs, the Rs abbreviation (with
+    // its optional period), then the %/x/unit suffix — digits and "." survive.
+    const val = m
+      ? parseFloat(
+          raw
+            .replace(/,/g, "")
+            .replace(/(rs\.?|₹|\$|€|£)/gi, "")
+            .replace(/%/g, "")
+            .replace(/x$/i, "")
+            .replace(/(cr|l|m|bn|b)\.?$/i, "")
+            .trim()
+        )
+      : undefined;
     const kind: Claim["kind"] = raw.includes("%") ? "percentage" : raw.toLowerCase().includes("x") ? "multiple" : raw.match(/₹|\$|rs/i) ? "currency" : "count";
     const id = hashClaim(normalizeSentence(sent));
     claims.push({

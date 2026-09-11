@@ -17,7 +17,7 @@ export interface CanonicalReport {
   asOf: string;
   modelVersion: string;
   facts: CanonicalFactGraph;
-  forecast: CanonicalForecast;
+  forecast: CanonicalForecast | null;
   valuation: { enterpriseValue: number; equityValue: number; fairValuePerShare: number | null; netDebt: number; wacc: number; terminalGrowth: number };
   market: { price: number | null; sharesBasic: number | null; sharesDiluted: number | null; marketCap: number | null };
   ratios: Record<string, number | null>;
@@ -68,8 +68,8 @@ export function validatePdfAgainstCanonical(report: CanonicalReport, extract: Pd
     { key: "valuation.fairValuePerShare", expected: report.valuation.fairValuePerShare, actual: extract.values["valuation.fairValuePerShare"] ?? null, tol: PER_SHARE_TOL },
     { key: "valuation.wacc", expected: report.valuation.wacc, actual: extract.values["valuation.wacc"] ?? null, tol: { absTol: 0.0005, relTol: 0.02, materiality: 0.005 } },
   ];
-  // Forecast revenue per year
-  report.forecast.projections.forEach((p, i) => {
+  // Forecast revenue per year (null forecast = missing — flagged by FCST-05, never priced)
+  (report.forecast?.projections ?? []).forEach((p, i) => {
     checks.push({ key: `forecast.Y${i + 1}.revenue`, expected: p.revenue, actual: extract.values[`forecast.Y${i + 1}.revenue`] ?? null, tol: MONEY_BRIDGE_TOL });
   });
   for (const c of checks) {

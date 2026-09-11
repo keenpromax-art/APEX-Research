@@ -13,6 +13,9 @@ import type { CompanyProfile } from "@/types/report";
 import { classifySector, getSectorProfile } from "./sectors";
 import type { SectorId, SectorProfile } from "./sectors/types";
 import { classifyArchetype, type ArchetypeProfile, type GICSSector, type FinancialArchetype } from "./company-archetype";
+import { getSectorDriverPack, isKnownSectorPack } from "./research-model/sector-drivers";
+
+export const DRIVER_PACK_VERSION = "driver-pack-v1-2026-09";
 
 export interface CompanyOntology {
   sectorId: SectorId;
@@ -24,6 +27,13 @@ export interface CompanyOntology {
   revenueDrivers: string[];
   costDrivers: string[];
   capexDrivers: string[];
+  /** Working-capital drivers from the explicit sector pack (pack wins for known sectors). */
+  nwcDrivers: string[];
+  /** One-line unit-economics statement from the explicit sector pack. */
+  unitEconomics: string;
+  /** False only for `general` — generic drivers survive there and nowhere else. */
+  isKnownSector: boolean;
+  driverPackVersion: string;
   kpis: string[];
   risks: string[];
   catalysts: string[];
@@ -165,6 +175,37 @@ export function buildCompanyOntology(
             : ["input costs", "operating leverage"]);
   const capexDrivers = drivers?.capexDrivers ?? ["maintenance capex", "growth capex"];
 
+  // Explicit driver packs: pack wins for known sectors, eliminating the
+  // generic fallback drivers (volume / realization / mix) wherever a sector
+  // is available. The pack lists below REPLACE the legacy generic sets;
+  // sector-native driverSpec (where present) already took precedence above.
+  const pack = getSectorDriverPack(sectorId);
+  const knownSector = isKnownSectorPack(sectorId);
+  const GENERIC_SETS = [
+    ["volume", "realization / pricing", "mix"],
+    ["input costs", "operating leverage"],
+    ["maintenance capex", "growth capex"],
+  ];
+  const isGeneric = (list: string[]) =>
+    GENERIC_SETS.some((g) => g.length === list.length && g.every((x, i) => list[i].trim().toLowerCase() === x));
+  const finalRevenueDrivers = knownSector && isGeneric(revenueDrivers) ? [...pack.revenueDrivers] : revenueDrivers;
+  const finalCostDrivers = knownSector && isGeneric(costDrivers) ? [...pack.costDrivers] : costDrivers;
+  const finalCapexDrivers = knownSector && isGeneric(capexDrivers) ? [...pack.capexDrivers] : capexDrivers;
+
+  const mergeUnique = (...lists: string[][]): string[] => {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const list of lists) {
+      for (const raw of list ?? []) {
+        const item = (raw ?? "").trim();
+        if (!item || seen.has(item.toLowerCase())) continue;
+        seen.add(item.toLowerCase());
+        out.push(item);
+      }
+    }
+    return out;
+  };
+
   return {
     sectorId,
     sectorName: sectorProfile.name,
@@ -172,16 +213,20 @@ export function buildCompanyOntology(
     segments: deriveSegments(sectorId, profile.description || ""),
     operatingArchetype: arch.sector,
     financialArchetype: arch.archetype,
-    revenueDrivers,
-    costDrivers,
-    capexDrivers,
+    revenueDrivers: finalRevenueDrivers,
+    costDrivers: finalCostDrivers,
+    capexDrivers: finalCapexDrivers,
+    nwcDrivers: [...pack.nwcDrivers],
+    unitEconomics: pack.unitEconomics,
+    isKnownSector: knownSector,
+    driverPackVersion: DRIVER_PACK_VERSION,
     kpis: [...sectorProfile.allowedKPIs],
     risks: [...sectorProfile.riskCategories],
     catalysts: [...sectorProfile.riskCategories].slice(0, 4),
     valuationMethods: [...sectorProfile.preferredValuationModels],
     competitors: [...(COMPETITOR_UNIVERSE[sectorId] ?? [])],
-    requiredConcepts: [...(REQUIRED_CONCEPTS[sectorId] ?? REQUIRED_CONCEPTS.general)],
-    forbiddenConcepts: [...sectorProfile.forbiddenConcepts],
+    requiredConcepts: mergeUnique(REQUIRED_CONCEPTS[sectorId] ?? REQUIRED_CONCEPTS.general, pack.requiredConcepts),
+    forbiddenConcepts: mergeUnique(sectorProfile.forbiddenConcepts, pack.forbiddenConcepts),
     standardMarginMetric: sectorProfile.standardMarginMetric,
     isFinancialInstitution: sectorProfile.isFinancialInstitution,
     ontologyVersion: ONTOLOGY_VERSION,
@@ -190,7 +235,7 @@ export function buildCompanyOntology(
 
 /** Validate narrative against ontology: missing required + present forbidden. Boundary-safe. */
 export function validateOntologyCoverage(
-  ontology: CompanyOntology,
+  ontology: Pick<CompanyOntology, "requiredConcepts" | "forbiddenConcepts">,
   narrativeText: string
 ): { missingRequired: string[]; presentForbidden: string[] } {
   const lower = (narrativeText || "").toLowerCase();

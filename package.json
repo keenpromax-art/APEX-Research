@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "test": "npx tsx scratch/test-request-validation.mjs && npx tsx scratch/test-golden-regression.mjs && npx tsx scratch/test-ai-provider.mjs && npx tsx scratch/test-publication-gate.ts",
+    "test": "npx tsx scratch/test-request-validation.mjs && npx tsx scratch/test-golden-regression.mjs && npx tsx scratch/test-ai-provider.mjs && npx tsx scratch/test-operating-model.ts && npx tsx scratch/test-publication-gate.ts && npx tsx scratch/test-forecast-reconciliation.ts && npx tsx scratch/test-research-integrity.ts && npx tsx scratch/test-evidence-registry.ts",
     "test:golden": "npx tsx scratch/test-golden-regression.mjs",
     "preview": "npm run build && npx open-next build && npx wrangler pages dev",
     "deploy": "npm run build && npx open-next build && npx wrangler pages deploy"

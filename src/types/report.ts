@@ -693,6 +693,12 @@ export interface DCFResult {
   avgCapexPct?: number;
   avgDeptPct?: number;
   avgNwcChangePct?: number;
+  /**
+   * Single canonical forecast (P0 #4): the ONLY authoritative forward
+   * numbers. Tables, scenarios and QA consume its rows directly — parallel
+   * DCF assumptions that differ from it are a publication blocker.
+   */
+  canonicalForecast?: import("@/lib/canonical-forecast").CanonicalForecast;
 }
 
 export interface ValuationCalibration {
@@ -1116,6 +1122,12 @@ export interface ReportData {
   calibration?: ValuationCalibration;
   /** Terms the sector sanitizer rewrote (disclosed, QA-gated — never silent). */
   sanitizerReport?: { rewrittenTerms: string[] };
+  /**
+   * Evidence registry (TRACK 3): every priced/evidenced number carries an
+   * EV:<TIER>:<SOURCE>:<FIELD> ID. Attached by /api/company; absent on
+   * legacy fixtures (claim-validator treats absence as unevidenced).
+   */
+  evidenceRegistry?: import("@/lib/evidence-registry").EvidenceRegistry;
 }
 
 export interface SearchResult {
