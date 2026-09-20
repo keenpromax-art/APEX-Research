@@ -234,6 +234,7 @@ for (const company of testCompanies) {
       cmp: assumptionsLedger.currentPrice,
       analystName: "Apex Research Team",
       assumptionsLedger,
+      canonicalForecast: (dcf as any)?.canonicalForecast ?? null,
       masterReportFacts,
       sanitizerReport: { rewrittenTerms: rewriteLog },
     };

@@ -92,8 +92,8 @@ const groqConfig = resolveProviderRequestConfig({
 assert.strictEqual(groqConfig.provider, "groq");
 assert.strictEqual(groqConfig.apiKey, "gsk_custom_groq_key");
 assert.strictEqual(groqConfig.endpointUrl, "https://api.groq.com/openai/v1/chat/completions");
-assert.strictEqual(groqConfig.model, "llama-3.3-70b-versatile");
-console.log("  ✓ PASS: Custom Groq key routed to api.groq.com with default llama-3.3-70b-versatile");
+assert.strictEqual(groqConfig.model, "openai/gpt-oss-120b");
+console.log("  ✓ PASS: Custom Groq key routed to api.groq.com with default openai/gpt-oss-120b");
 
 // Case E: Custom OpenAI key
 const openaiConfig = resolveProviderRequestConfig({
