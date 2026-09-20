@@ -139,7 +139,7 @@ export interface MarketIntegrityIssue {
 
 export interface ResolvedShareCount {
   shares: number;
-  source: "quote" | "statement" | "none";
+  source: "quote" | "statement" | "statement-multiclass" | "none";
   warn: string | null;
 }
 
@@ -150,6 +150,12 @@ export interface ResolvedShareCount {
  * float) while market cap covers all classes — blindly preferring quote shares
  * then doubles per-share fair value. The count that reconciles wins; a split
  * decision WARNs explicitly instead of silently modeling on the wrong base.
+ *
+ * Multi-class detection (GOOG/GOOGL, BRK.A/BRK.B): when statement shares
+ * are roughly 1.6–2.5× quote shares AND statement shares reconcile with
+ * market cap, the quote feed is reporting a single share class while the
+ * income statement reports the all-class diluted weighted-average count.
+ * The statement (fully-diluted) count is canonical for per-share math.
  */
 export function resolveShareCount(params: {
   stockData: StockData;
@@ -162,9 +168,24 @@ export function resolveShareCount(params: {
   const f = Number(latest?.sharesOutstanding) || 0;
   const mktCap = Number(stockData.marketCap) || 0;
   const reconciles = (s: number) =>
-    price > 0 && s > 0 && mktCap > 0 && Math.abs(mktCap - price * s) / Math.max(1, price * s) <= 0.25;
+    price > 0 && s > 0 && mktCap > 0 && Math.abs(mktCap - price * s) / Math.max(1, price * s) <= 0.30;
   const qOk = reconciles(q);
   const fOk = reconciles(f);
+
+  // Multi-class detection: statement shares ÷ quote shares ≈ 2× (dual-class
+  // structures like GOOG Class A+C vs all-class diluted count).
+  if (q > 0 && f > 0 && !qOk && fOk) {
+    const ratio = f / q;
+    if (ratio >= 1.6 && ratio <= 2.5) {
+      return {
+        shares: f, source: "statement-multiclass",
+        warn: `Multi-class capital structure detected: statement shares (${f.toFixed(0)}) are ${ratio.toFixed(2)}× quote shares (${q.toFixed(0)}). ` +
+              `Quote feed likely reports a single share class; statement count reconciles with market cap (${mktCap.toFixed(0)}). ` +
+              `Model uses all-class diluted count for per-share math.`,
+      };
+    }
+  }
+
   if (q > 0 && f > 0) {
     if (qOk && !fOk) return { shares: q, source: "quote", warn: null };
     if (fOk && !qOk) return {
@@ -172,6 +193,17 @@ export function resolveShareCount(params: {
       warn: `Quote shares (${q.toFixed(0)}) do not reconcile with market cap while statement shares (${f.toFixed(0)}) do — probable partial-class quote feed. Model uses statement count; verify fully-diluted shares.`,
     };
     if (qOk && fOk) return { shares: q, source: "quote", warn: null };
+    // Neither reconciles — attempt multi-class inference from market cap directly
+    if (price > 0 && mktCap > 0) {
+      const impliedShares = mktCap / price;
+      // If implied shares from market cap are close to statement shares (within 30%), use statement
+      if (f > 0 && Math.abs(impliedShares - f) / Math.max(1, f) <= 0.30) {
+        return {
+          shares: f, source: "statement-multiclass",
+          warn: `Neither count reconciles directly, but market-cap-implied shares (${impliedShares.toFixed(0)}) align with statement count (${f.toFixed(0)}) — multi-class structure inferred. Verify fully-diluted count.`,
+        };
+      }
+    }
     return { shares: 0, source: "none", warn: null };
   }
   if (q > 0) return { shares: q, source: "quote", warn: null };

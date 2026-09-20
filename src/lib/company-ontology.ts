@@ -70,7 +70,7 @@ const REQUIRED_CONCEPTS: Record<string, string[]> = {
   agrochemical: ["volume growth", "registration", "working capital", "realization"],
   cement: ["volume", "realization per tonne", "ebitda per tonne", "utilization"],
   "internet-retail": ["gmv", "aov", "take rate", "order volume"],
-  "internet-platform": ["dau", "mau", "ad impressions", "price per ad", "arpu"],
+  "internet-platform": ["search", "ad impressions", "advertising", "cloud", "arpu", "dau", "mau", "price per ad", "tac"],
   general: ["revenue", "ebitda margin", "free cash flow"],
 };
 
@@ -96,7 +96,7 @@ const COMPETITOR_UNIVERSE: Record<string, string[]> = {
   agrochemical: ["PIIND.NS", "UPL.NS", "COROMANDEL.NS", "DHANUKA.NS"],
   cement: ["ULTRACEMCO.NS", "AMBUJACEM.NS", "SHREECEM.NS", "ACC.NS"],
   "internet-retail": ["ZOMATO.NS", "DELHIVERY.NS", "DASH", "UBER"],
-  "internet-platform": ["GOOGL", "META", "SNAP", "PINS"],
+  "internet-platform": ["META", "MSFT", "AMZN", "SNAP", "PINS"],
   general: [],
 };
 

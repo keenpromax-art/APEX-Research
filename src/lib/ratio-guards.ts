@@ -109,11 +109,13 @@ export function verifyBalanceSheetEquality(
 export function toReportingUnit(
   val: number | undefined | null,
   unitMultiplier = 10_000_000,
-  decimals = 1
+  decimals = 1,
+  locale?: string
 ): string {
   if (val == null || !isFinite(val) || isNaN(val)) return "—";
   const inUnits = val / unitMultiplier;
-  return inUnits.toLocaleString("en-IN", {
+  const resolvedLocale = locale ?? (unitMultiplier === 10_000_000 ? "en-IN" : "en-US");
+  return inUnits.toLocaleString(resolvedLocale, {
     minimumFractionDigits: decimals,
     maximumFractionDigits: decimals,
   });

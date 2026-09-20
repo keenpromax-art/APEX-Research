@@ -320,8 +320,20 @@ export function buildCanonicalForecast(params: {
     : params.sharesOutstanding;
 
   // Trailing intensity ratios for WC components (0 when base missing → flat).
+  const isInventoryFreeSector =
+    params.sectorId === "internet-platform" ||
+    params.sectorId === "technology-software" ||
+    params.sectorId === "it-services" ||
+    params.sectorId === "bank" ||
+    params.sectorId === "nbfc" ||
+    params.sectorId === "insurance" ||
+    params.sectorId === "ratings-agency" ||
+    params.sectorId === "asset-management";
+  if (isInventoryFreeSector) {
+    invOpen = 0;
+  }
   const arRatio = T && T.revenue > 0 && arOpen >= 0 ? arOpen / T.revenue : 0;
-  const invRatio = T && T.revenue > 0 && invOpen >= 0 ? invOpen / T.revenue : 0;
+  const invRatio = !isInventoryFreeSector && T && T.revenue > 0 && invOpen >= 0 ? invOpen / T.revenue : 0;
   const apRatio = T && T.revenue > 0 && apOpen >= 0 ? apOpen / T.revenue : 0;
 
   // Sub-decomposition: trailing cost structure for forecast bridge reconstruction.
@@ -346,18 +358,21 @@ export function buildCanonicalForecast(params: {
     // — Sub-decomposition: derive income-statement bridge FROM the driver margin —
     // The driver margin 'm' is the authoritative EBIT margin. We scale the
     // trailing cost structure so the bridge exactly reconstructs EBIT.
-    const impliedEbitMargin = gm - sgaPct - rdPct - otherOpexPct;
-    const costSum = sgaPct + rdPct + otherOpexPct;
+    // FCST-02 fix: clamp otherOpexPct ≥ 0 — trailing gains (negative other
+    // operating expense) must not project forward as cost reductions; otherOpex
+    // is the explicit plug so GP − SGA − R&D − OtherOpex = EBIT exactly.
+    const clampedOtherOpexPct = Math.max(0, otherOpexPct);
+    const costSum = sgaPct + rdPct + clampedOtherOpexPct;
     const k = costSum > 0 ? (gm - m) / costSum : 1;
     const adjSgaPct = sgaPct * k;
     const adjRdPct = rdPct * k;
-    const adjOtherOpexPct = otherOpexPct * k;
     const grossProfit = rev * gm;
     const cogs = rev - grossProfit;
     const sga = rev * adjSgaPct;
     const rd = rev * adjRdPct;
-    const otherOpex = rev * adjOtherOpexPct;
     const ebit = rev * m;
+    // OtherOpex is the EXPLICIT PLUG: GP − SGA − R&D − EBIT = OtherOpex
+    const otherOpex = Math.max(0, grossProfit - sga - rd - ebit);
     const nopat = ebit * (1 - tax);
     const dep = usePpeDep ? ppeStock * (driver.depOnPpeRate as number) : rev * avgDeptPct;
     const capex = rev * Math.max(avgCapexPct, avgDeptPct * 1.1);

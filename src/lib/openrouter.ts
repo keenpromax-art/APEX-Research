@@ -78,7 +78,7 @@ export function buildSectorGuardrail(profile: CompanyProfile, model?: ResearchOp
 - Revenue drivers (forecast ONLY via these): ${drivers}. Cost drivers: ${m.costDrivers.join("; ")}. Capex: ${m.capexDrivers.join("; ")}. NWC: ${m.nwcDrivers.join("; ")}. Valuation lens: ${m.valuationMethods.join(", ")}; margin metric: ${m.standardMarginMetric}.
 - Use ONLY these KPIs: ${kpis}. REQUIRED concepts (must evidence ≥2): ${required}.
 - STRICTLY FORBIDDEN terms (never mention in any form — complete list): ${forbidden}.
-- Never apply another sector's template (telecom carrier, FMCG, pharma, banking, energy, renewables). Internet platforms must not mention spectrum auctions, tower tenancies, telecom subscriber churn, or packaged-goods distribution. Telecom tariff/subscriber ARPU must not be confused with digital-advertising ARPU per DAU/MAU. Every material number must carry source/period/currency/units provenance or be omitted.`;}
+- Never apply another sector's template (telecom carrier, FMCG, pharma, banking, energy, renewables). Internet platforms must not mention spectrum auctions, tower tenancies, telecom subscriber churn, or packaged-goods distribution. Telecom tariff/subscriber ARPU must not be confused with digital-advertising ARPU per DAU/MAU. For internet platforms (e.g. Alphabet, Meta), narrative MUST explicitly discuss digital advertising, Search ad revenue, YouTube ads, cloud infrastructure / backlog, TAC, and ad impressions / CPC. Every material number must carry source/period/currency/units provenance or be omitted.`;}
 interface OpenRouterMessage {
   role: "system" | "user" | "assistant";
   content: string;
@@ -1233,7 +1233,7 @@ async function runCouncilVerificationOfficer(
     });
 
     return {
-      status: score >= 70 ? "CORRECTED" : "FLAGGED",
+      status: "FLAGGED",
       integrityScore: score,
       summary: `Data-driven council verification for ${profile.name} (${profile.ticker}). LLM verifier unavailable -- automated financial-math and completeness checks applied. Score: ${score}/100.`,
       checks,
@@ -1726,6 +1726,8 @@ export async function generateAIAnalysis(
     { id: "news_summary", meta: AI_AGENT_PERSONAS[6], run: () => runNewsSummaryDesk(profile, stockData, annualFinancials, news, customConfig, model), auditNote: () => "Agent complete — queued for council audit (news cross-check pending)." },
   ];
 
+  const resumedAgentIds = new Set<string>();
+
   const runOneAgent = async <T>(def: {
     id: (typeof CHECKPOINT_AGENT_IDS)[number];
     meta: (typeof AI_AGENT_PERSONAS)[number];
@@ -1735,6 +1737,7 @@ export async function generateAIAnalysis(
     const priorRaw: unknown = resumeState[def.id];
     if (isValidCheckpointSlice(def.id, priorRaw)) {
       const prior = priorRaw as T;
+      resumedAgentIds.add(def.id);
       completedCount++;
       onProgress?.({
         type: "agent_complete",
@@ -1851,63 +1854,64 @@ export async function generateAIAnalysis(
     const assembled: AIAnalysis = {
       // AI-ONLY WORDS: every narrative field below is council output or data-driven fallback.
       // AI content always wins; data-driven fallback fills any gaps so no section is empty.
+      // Resumed agents preserve their checkpoint slice without leaking template prose.
       // Agent 1: Lead Strategist
-      investmentThesis: a1?.investmentThesis || ddFallback.investmentThesis || "",
-      companyOverview: a1?.companyOverview || ddFallback.companyOverview || "",
-      investmentConclusion: a1?.investmentConclusion || ddFallback.investmentConclusion || "",
-      summary: a1?.summary || ddFallback.summary || "",
-      dcfCommentary: a1?.dcfCommentary || ddFallback.dcfCommentary || "",
-      economicContext: a1?.economicContext || ddFallback.economicContext || "",
-      swotStrengths: a1?.swotStrengths?.length ? a1.swotStrengths : ddFallback.swotStrengths || [],
-      swotWeaknesses: a1?.swotWeaknesses?.length ? a1.swotWeaknesses : ddFallback.swotWeaknesses || [],
-      swotOpportunities: a1?.swotOpportunities?.length ? a1.swotOpportunities : ddFallback.swotOpportunities || [],
-      swotThreats: a1?.swotThreats?.length ? a1.swotThreats : ddFallback.swotThreats || [],
+      investmentThesis: a1?.investmentThesis || (resumedAgentIds.has("strategist") ? "" : ddFallback.investmentThesis) || "",
+      companyOverview: a1?.companyOverview || (resumedAgentIds.has("strategist") ? "" : ddFallback.companyOverview) || "",
+      investmentConclusion: a1?.investmentConclusion || (resumedAgentIds.has("strategist") ? "" : ddFallback.investmentConclusion) || "",
+      summary: a1?.summary || (resumedAgentIds.has("strategist") ? "" : ddFallback.summary) || "",
+      dcfCommentary: a1?.dcfCommentary || (resumedAgentIds.has("strategist") ? "" : ddFallback.dcfCommentary) || "",
+      economicContext: a1?.economicContext || (resumedAgentIds.has("strategist") ? "" : ddFallback.economicContext) || "",
+      swotStrengths: a1?.swotStrengths?.length ? a1.swotStrengths : (resumedAgentIds.has("strategist") ? [] : ddFallback.swotStrengths || []),
+      swotWeaknesses: a1?.swotWeaknesses?.length ? a1.swotWeaknesses : (resumedAgentIds.has("strategist") ? [] : ddFallback.swotWeaknesses || []),
+      swotOpportunities: a1?.swotOpportunities?.length ? a1.swotOpportunities : (resumedAgentIds.has("strategist") ? [] : ddFallback.swotOpportunities || []),
+      swotThreats: a1?.swotThreats?.length ? a1.swotThreats : (resumedAgentIds.has("strategist") ? [] : ddFallback.swotThreats || []),
 
       // Agent 2: Real-Time News & Catalysts
       recentNewsAnalysis: a2?.recentNewsAnalysis?.length ? a2.recentNewsAnalysis : [],
-      catalysts: a2?.catalysts?.length ? a2.catalysts : ddFallback.catalysts || [],
+      catalysts: a2?.catalysts?.length ? a2.catalysts : (resumedAgentIds.has("news") ? [] : ddFallback.catalysts || []),
       analystNotes: a2?.analystNotes?.length ? a2.analystNotes : [],
 
       // Agent 3: Moat & Strategy
-      competitiveMoat: a3?.competitiveMoat || ddFallback.competitiveMoat || "",
-      moatSources: a3?.moatSources?.switchingCosts ? a3.moatSources : ddFallback.moatSources,
-      fiveForces: a3?.fiveForces?.length ? a3.fiveForces : ddFallback.fiveForces || [],
+      competitiveMoat: a3?.competitiveMoat || (resumedAgentIds.has("moat") ? "" : ddFallback.competitiveMoat) || "",
+      moatSources: a3?.moatSources?.switchingCosts ? a3.moatSources : (resumedAgentIds.has("moat") ? (a3?.moatSources || { switchingCosts: "", intangibleAssets: "", costAdvantage: "", moatTrend: "None" }) : ddFallback.moatSources),
+      fiveForces: a3?.fiveForces?.length ? a3.fiveForces : (resumedAgentIds.has("moat") ? [] : ddFallback.fiveForces || []),
       moatPillars: capPillarsToRating(
         a3?.moatPillars?.length ? a3.moatPillars : [],
         canonicalMoatRating
       ),
-      industryDynamicsCommentary: a3?.industryDynamicsCommentary || ddFallback.industryDynamicsCommentary || "",
-      globalIndustryAnalysis: a3?.globalIndustryAnalysis || ddFallback.globalIndustryAnalysis || "",
-      domesticIndustryAnalysis: a3?.domesticIndustryAnalysis || ddFallback.domesticIndustryAnalysis || "",
+      industryDynamicsCommentary: a3?.industryDynamicsCommentary || (resumedAgentIds.has("moat") ? "" : ddFallback.industryDynamicsCommentary) || "",
+      globalIndustryAnalysis: a3?.globalIndustryAnalysis || (resumedAgentIds.has("moat") ? "" : ddFallback.globalIndustryAnalysis) || "",
+      domesticIndustryAnalysis: a3?.domesticIndustryAnalysis || (resumedAgentIds.has("moat") ? "" : ddFallback.domesticIndustryAnalysis) || "",
 
       // Agent 4: Forensic Financial Analyst & DuPont
-      revenueCommentary: a4?.revenueCommentary || ddFallback.revenueCommentary || "",
-      ebitdaCommentary: a4?.ebitdaCommentary || ddFallback.ebitdaCommentary || "",
-      ebitCommentary: a4?.ebitCommentary || ddFallback.ebitCommentary || "",
-      patCommentary: a4?.patCommentary || ddFallback.patCommentary || "",
-      balanceSheetCommentary: a4?.balanceSheetCommentary || ddFallback.balanceSheetCommentary || "",
-      cashFlowCommentary: a4?.cashFlowCommentary || ddFallback.cashFlowCommentary || "",
-      dupontCommentary: a4?.dupontCommentary || ddFallback.dupontCommentary || "",
-      ratioCommentary: a4?.ratioCommentary || ddFallback.ratioCommentary || "",
-      segmentAnalysis: a4?.segmentAnalysis || ddFallback.segmentAnalysis || "",
-      quarterlyResultsCommentary: a4?.quarterlyResultsCommentary || ddFallback.quarterlyResultsCommentary || "",
+      revenueCommentary: a4?.revenueCommentary || (resumedAgentIds.has("forensic") ? "" : ddFallback.revenueCommentary) || "",
+      ebitdaCommentary: a4?.ebitdaCommentary || (resumedAgentIds.has("forensic") ? "" : ddFallback.ebitdaCommentary) || "",
+      ebitCommentary: a4?.ebitCommentary || (resumedAgentIds.has("forensic") ? "" : ddFallback.ebitCommentary) || "",
+      patCommentary: a4?.patCommentary || (resumedAgentIds.has("forensic") ? "" : ddFallback.patCommentary) || "",
+      balanceSheetCommentary: a4?.balanceSheetCommentary || (resumedAgentIds.has("forensic") ? "" : ddFallback.balanceSheetCommentary) || "",
+      cashFlowCommentary: a4?.cashFlowCommentary || (resumedAgentIds.has("forensic") ? "" : ddFallback.cashFlowCommentary) || "",
+      dupontCommentary: a4?.dupontCommentary || (resumedAgentIds.has("forensic") ? "" : ddFallback.dupontCommentary) || "",
+      ratioCommentary: a4?.ratioCommentary || (resumedAgentIds.has("forensic") ? "" : ddFallback.ratioCommentary) || "",
+      segmentAnalysis: a4?.segmentAnalysis || (resumedAgentIds.has("forensic") ? "" : ddFallback.segmentAnalysis) || "",
+      quarterlyResultsCommentary: a4?.quarterlyResultsCommentary || (resumedAgentIds.has("forensic") ? "" : ddFallback.quarterlyResultsCommentary) || "",
 
       // Agent 5: Credit & Solvency
       creditAnalysisCommentary: a5?.creditAnalysisCommentary?.financialHealth
         ? a5.creditAnalysisCommentary
-        : ddFallback.creditAnalysisCommentary,
-      keyRisks: a5?.keyRisks?.length ? a5.keyRisks : ddFallback.keyRisks || [],
+        : (resumedAgentIds.has("credit") ? (a5?.creditAnalysisCommentary || { financialHealth: "" }) : ddFallback.creditAnalysisCommentary),
+      keyRisks: a5?.keyRisks?.length ? a5.keyRisks : (resumedAgentIds.has("credit") ? [] : ddFallback.keyRisks || []),
       enterpriseRiskCommentary: a5?.enterpriseRiskCommentary?.length ? a5.enterpriseRiskCommentary : [],
 
       // Agent 6: Governance & Capital Allocation
-      managementCommentary: a6?.managementCommentary || ddFallback.managementCommentary || "",
-      governanceCommentary: a6?.governanceCommentary || ddFallback.governanceCommentary || "",
-      capitalAllocationCommentary: a6?.capitalAllocationCommentary || ddFallback.capitalAllocationCommentary || "",
-      businessStrategyCommentary: a6?.businessStrategyCommentary || ddFallback.businessStrategyCommentary || "",
-      operatingProfileCommentary: a6?.operatingProfileCommentary || ddFallback.operatingProfileCommentary || "",
+      managementCommentary: a6?.managementCommentary || (resumedAgentIds.has("governance") ? "" : ddFallback.managementCommentary) || "",
+      governanceCommentary: a6?.governanceCommentary || (resumedAgentIds.has("governance") ? "" : ddFallback.governanceCommentary) || "",
+      capitalAllocationCommentary: a6?.capitalAllocationCommentary || (resumedAgentIds.has("governance") ? "" : ddFallback.capitalAllocationCommentary) || "",
+      businessStrategyCommentary: a6?.businessStrategyCommentary || (resumedAgentIds.has("governance") ? "" : ddFallback.businessStrategyCommentary) || "",
+      operatingProfileCommentary: a6?.operatingProfileCommentary || (resumedAgentIds.has("governance") ? "" : ddFallback.operatingProfileCommentary) || "",
       capitalDeploymentHistory: a6?.capitalDeploymentHistory?.narrative
         ? a6.capitalDeploymentHistory
-        : ddFallback.capitalDeploymentHistory,
+        : (resumedAgentIds.has("governance") ? a6?.capitalDeploymentHistory : ddFallback.capitalDeploymentHistory),
 
       // Agent 7: News Sentiment & Executive Briefing Desk
       newsSummary: a7?.newsSummary,
@@ -1961,8 +1965,12 @@ export async function generateAIAnalysis(
         // Check if audit passed
         const failedChecks = vRes.checks.filter(c => c.status === "FLAG");
         const passThreshold = vRes.integrityScore >= COUNCIL_PASS_THRESHOLD && failedChecks.length === 0;
+        const hasApiKey = Boolean(
+          (customConfig?.apiKey && customConfig.apiKey.trim()) ||
+          process.env.OPENROUTER_API_KEY
+        );
 
-        if (passThreshold || retryRound === COUNCIL_MAX_RETRY_ROUNDS) {
+        if (!hasApiKey || passThreshold || retryRound === COUNCIL_MAX_RETRY_ROUNDS) {
           completedCount++;
           onProgress?.({
             type: "agent_complete",

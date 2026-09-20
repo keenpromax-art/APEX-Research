@@ -1292,7 +1292,7 @@ export function computeDCF(
       const deps = Number((latest as any).dilutedEps) || 0;
       return ni > 0 && deps > 0 ? ni / deps : undefined;
     })(),
-    statementShape: isCorporateStatement(latest) ? "corporate" : "financial",
+    statementShape: (sectorProfile?.isFinancialInstitution ? "financial" : (isCorporateStatement(latest) ? "corporate" : "financial")),
   });
 
   // Read-out (verbatim — the assumption vectors below ARE the forecast's):

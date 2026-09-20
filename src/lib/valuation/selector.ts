@@ -120,6 +120,14 @@ export function selectAndComputeValuation(params: {
       sectorId: sectorProfile.id
     });
 
+    // Non-FCFF canonical forecast for forward ratios, drivers, and statement integrity
+    const standardDcf = computeDCF(annualFinancials, stockData, sectorProfile, archetypeProfile, profile.country, aiDcfOverrides);
+    const canonicalForecast = standardDcf.canonicalForecast ? {
+      ...standardDcf.canonicalForecast,
+      valuationUse: "vectors-only" as const,
+      statementShape: "financial" as const,
+    } : undefined;
+
     // Adapt into DCFResult shape for unified presentation layer
     const adaptedDcf: DCFResult = {
       status: riResult.status,
@@ -136,10 +144,11 @@ export function selectAndComputeValuation(params: {
         equityWeight: 0.15,
         wacc: Number(costOfEquity.toFixed(4)), // Cost of equity used as hurdle for financial institutions
         terminalGrowthRate: terminalGrowth,
-        revenueGrowthRates: [0.15, 0.14, 0.13, 0.12, 0.10],
-        ebitMargins: [0.25, 0.25, 0.25, 0.25, 0.25]
+        revenueGrowthRates: [...(canonicalForecast?.revenueGrowthRates ?? [0.15, 0.14, 0.13, 0.12, 0.10])],
+        ebitMargins: [...(canonicalForecast?.ebitMargins ?? [0.25, 0.25, 0.25, 0.25, 0.25])]
       },
       projections: [],
+      canonicalForecast,
   assumptionBasis: {
     revenueGrowth: "Not applicable — residual-income model values financials on sustainable ROE, not revenue trajectory.",
     ebitMargin: "Not applicable — residual-income model; earnings power captured via sustainable ROE below.",

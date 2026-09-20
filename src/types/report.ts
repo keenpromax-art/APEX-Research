@@ -792,6 +792,7 @@ export interface PeerData {
   debtToEquity?: number | null;
   currentRatio?: number | null;
   revenueGrowth: number | null;
+  epsGrowth?: number | null;
   currency: string | null;
   /** Point-in-time equity beta for the peer-median beta engine (P0 #57). Null when undisclosed. */
   beta?: number | null;

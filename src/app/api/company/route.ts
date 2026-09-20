@@ -137,7 +137,7 @@ export async function GET(request: NextRequest) {
           else if (sec.includes("consumer") || ind.includes("food") || ind.includes("beverage")) peerTickers = ["HINDUNILVR.NS", "ITC.NS", "NESTLEIND.NS", "BRITANNIA.NS"];
           else peerTickers = [];
         } else {
-          if (isInternetPlatform) peerTickers = ["GOOGL", "RDDT", "SNAP", "PINS"];
+          if (isInternetPlatform) peerTickers = ["META", "MSFT", "AMZN", "SNAP", "PINS"];
           else if (sym.includes("DASH") || sym.includes("UBER") || sym.includes("LYFT") || sym.includes("GRAB") || ind.includes("delivery") || (companyProfile.description || "").toLowerCase().includes("food delivery") || (companyProfile.description || "").toLowerCase().includes("ride sharing")) peerTickers = ["DASH", "UBER", "LYFT", "GRAB"];
           else if (isCarrier) peerTickers = ["VZ", "T", "TMUS", "CMCSA"];
           else if (ind.includes("rating") || ind.includes("financial data") || ind.includes("exchange") || ind.includes("analytics")) peerTickers = ["SPGI", "MCO", "MSCI", "FDS"];
@@ -152,6 +152,13 @@ export async function GET(request: NextRequest) {
           else if (sec.includes("auto") || ind.includes("motor")) peerTickers = ["TSLA", "F", "GM", "STLA"];
           else peerTickers = [];
         }
+        const cleanSym = (sym || "").toUpperCase().replace(/\.(NS|BO)$/, "");
+        peerTickers = peerTickers.filter(t => {
+          const normT = t.toUpperCase().replace(/\.(NS|BO)$/, "");
+          if (normT === cleanSym) return false;
+          if ((cleanSym === "GOOG" || cleanSym === "GOOGL") && (normT === "GOOG" || normT === "GOOGL")) return false;
+          return true;
+        });
         if (peerTickers.length === 0) return [];
         const [rawQuotes, peerSession] = await Promise.all([
           fetchPeerQuotes(peerTickers),
@@ -184,6 +191,7 @@ export async function GET(request: NextRequest) {
               const pRoe = parseNum(p.returnOnEquity);
               const pNetMargin = parseNum(p.profitMargins);
               const pRevGrowth = parseNum(p.revenueGrowth);
+              const pEpsGrowth = parseNum((p as any).earningsGrowth) ?? parseNum((p as any).earningsQuarterlyGrowth);
               const pDivYield = parseNum(p.dividendYield);
               const pGrossMargin = parseNum(p.grossMargins);
               const pEbitdaMargin = parseNum(p.ebitdaMargins);
@@ -198,7 +206,7 @@ export async function GET(request: NextRequest) {
                 const breakdown = scorePeerSimilarity({ profile: companyProfile, stockData, annualFinancials, ontologySectorId: ontology.sectorId, ontologyArchetype: ontology.operatingArchetype, peer: { sector: qSec, industry: qInd, currency: (p.currency as string) || null, marketCap: pCap, roe: pRoe, netMargin: pNetMargin, revenueGrowth: pRevGrowth, debtToEquity: pDebtToEquity } });
                 relevanceScore = breakdown.total;
               }
-              return { ticker: peerSym, name: (p.longName as string) || (p.shortName as string) || peerSym, marketCap: pCap, cmp: pCmp, pe: pPe, evToEbitda: pEvEbitda, evToSales: pEvSales, dividendYield: pDivYield, pb: pPb, roe: pRoe, netMargin: pNetMargin, grossMargin: pGrossMargin, ebitdaMargin: pEbitdaMargin, operatingMargin: pOpMargin, debtToEquity: pDebtToEquity, currentRatio: pCurrentRatio, revenueGrowth: pRevGrowth, beta: pBeta, currency: (p.currency as string) || null, sector: qSec, industry: qInd, relevanceScore };
+              return { ticker: peerSym, name: (p.longName as string) || (p.shortName as string) || peerSym, marketCap: pCap, cmp: pCmp, pe: pPe, evToEbitda: pEvEbitda, evToSales: pEvSales, dividendYield: pDivYield, pb: pPb, roe: pRoe, netMargin: pNetMargin, grossMargin: pGrossMargin, ebitdaMargin: pEbitdaMargin, operatingMargin: pOpMargin, debtToEquity: pDebtToEquity, currentRatio: pCurrentRatio, revenueGrowth: pRevGrowth, epsGrowth: pEpsGrowth, beta: pBeta, currency: (p.currency as string) || null, sector: qSec, industry: qInd, relevanceScore };
             } catch { return null; }
           })
         );
