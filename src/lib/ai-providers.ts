@@ -25,6 +25,7 @@ export interface ProviderMeta {
   portalName: string;
   isFreeTierAvailable: boolean;
   freeTierNote: string;
+  preConfiguredKey?: string;
 }
 
 export const SUPPORTED_PROVIDERS: Record<SupportedProvider, ProviderMeta> = {
@@ -34,12 +35,11 @@ export const SUPPORTED_PROVIDERS: Record<SupportedProvider, ProviderMeta> = {
     badge: "⚡ 1,000 Free Credits",
     description: "Enterprise accelerated AI endpoints hosted by NVIDIA on DGX Cloud.",
     baseUrl: "https://integrate.api.nvidia.com/v1/chat/completions",
-    defaultModel: "meta/llama-3.3-70b-instruct",
+    defaultModel: "nvidia/llama-3.1-nemotron-70b-instruct",
     candidateModels: [
-      "meta/llama-3.3-70b-instruct",
-      "mistralai/mixtral-8x22b-instruct",
-      "deepseek-ai/deepseek-r1",
       "nvidia/llama-3.1-nemotron-70b-instruct",
+      "nvidia/nemotron-3.5-lightning-30b-a3b",
+      "meta/llama-3.3-70b-instruct",
     ],
     keyPlaceholder: "nvapi-...",
     keyPrefixHint: "nvapi-",
@@ -97,8 +97,10 @@ export const SUPPORTED_PROVIDERS: Record<SupportedProvider, ProviderMeta> = {
     badge: "🚀 Ultra-Low Latency",
     description: "LPU inference engine delivering 500+ tokens per second on open models.",
     baseUrl: "https://api.groq.com/openai/v1/chat/completions",
-    defaultModel: "llama-3.3-70b-versatile",
+    defaultModel: "openai/gpt-oss-120b",
     candidateModels: [
+      "openai/gpt-oss-120b",
+      "openai/gpt-oss-20b",
       "llama-3.3-70b-versatile",
       "llama-3.1-8b-instant",
       "mixtral-8x7b-32768",
@@ -109,6 +111,7 @@ export const SUPPORTED_PROVIDERS: Record<SupportedProvider, ProviderMeta> = {
     portalName: "console.groq.com",
     isFreeTierAvailable: true,
     freeTierNote: "High-speed free tier on standard Llama models.",
+    preConfiguredKey: undefined,
   },
   openai: {
     id: "openai",

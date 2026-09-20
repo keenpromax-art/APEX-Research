@@ -1,12 +1,11 @@
 "use client";
 import React, { useEffect, useState, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
-import dynamic from "next/dynamic";
 import ProgressTracker from "@/components/ProgressTracker";
 import type { ReportData, GenerationState, AgentCheckpoint } from "@/types/report";
 import { stmtNum, isInsuranceStatement, isReitStatement, isAssetLightStatement, getStatementArchitecture } from "@/types/report";
-import { generatePEFirmAnalysis } from "@/lib/pe-analysis-engine";
 import { createAssumptionsLedger } from "@/lib/assumptions-ledger";
+import { emptyAIAnalysis } from "@/lib/openrouter";
 import { canonicalValuation } from "@/lib/canonical";
 import { validateReportIntegrity } from "@/lib/report-qa";
 import { validateMasterReport } from "@/lib/report-validator";
@@ -16,7 +15,7 @@ import { sanitizeAIText, sanitizeSectorBleed } from "@/lib/ai/sanitizer";
 import { capPillarsToRating, harmonizeMoatSources } from "@/lib/moat";
 import { buildEventPriceMovements } from "@/lib/event-price-engine";
 import BacktestDashboard from "@/components/BacktestDashboard";
-import ApiKeyModal, { loadSavedAiConfig } from "@/components/ApiKeyModal";
+import ApiKeyModal, { loadSavedAiConfig, loadServerModelOverride } from "@/components/ApiKeyModal";
 import { SUPPORTED_PROVIDERS, type CustomKeyConfig } from "@/lib/ai-providers";
 import styles from "./report.module.css";
 
@@ -30,16 +29,7 @@ const INITIAL_AGENT_CHECKPOINTS: AgentCheckpoint[] = [
   { id: "verifier", name: "Council Quality & Audit Verifier", role: "Anti-Hallucination, Factual Integrity & Mistake Audit", status: "pending" },
 ];
 
-// Client-only dynamic import for PDF Download Button
-const PDFDownloadButton = dynamic(() => import("./PDFDownloadButton"), {
-  ssr: false,
-  loading: () => (
-    <button className={`btn-primary ${styles.downloadBtn}`} disabled>
-      <span className={styles.btnSpinner}>⟳</span>
-      Loading Engine...
-    </button>
-  ),
-});
+import PDFDownloadButton from "./PDFDownloadButton";
 
 interface Props {
   ticker: string;
@@ -67,10 +57,30 @@ export default function ReportClient({ ticker }: Props) {
   // run. Any interruption (pause, throttle, network drop) resumes from these
   // instead of restarting all 7 agents from zero.
   const resumeRef = useRef<{ ticker: string; partial: Record<string, unknown> } | null>(null);
+  // Cache company data so resume skips the /api/company fetch (which now includes AI DCF calls)
+  const companyDataRef = useRef<any>(null);
+  // Restore persisted checkpoint from localStorage on mount
+  useEffect(() => {
+    try {
+      const key = `apex_checkpoint_${ticker}`;
+      const stored = localStorage.getItem(key);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed && parsed.ticker === ticker && parsed.partial && typeof parsed.partial === "object") {
+          resumeRef.current = parsed;
+          console.log(`[resume] Restored ${Object.keys(parsed.partial).length} banked agent(s) from localStorage for ${ticker}`);
+        }
+      }
+    } catch {}
+  }, [ticker]);
   const stashCheckpoint = (agentId: string, result: unknown) => {
     if (result === null || result === undefined) return;
     const prev = resumeRef.current?.ticker === ticker ? resumeRef.current.partial : {};
     resumeRef.current = { ticker, partial: { ...prev, [agentId]: result } };
+    // Persist to localStorage so checkpoints survive page reload
+    try {
+      localStorage.setItem(`apex_checkpoint_${ticker}`, JSON.stringify(resumeRef.current));
+    } catch {}
   };
   // Pending resume-after-cooldown timer (cleared on unmount so a stray
   // re-run never fires another 8-request burst against the user's key).
@@ -93,19 +103,46 @@ export default function ReportClient({ ticker }: Props) {
 
   const generateReport = useCallback(async () => {
     try {
-      // Step 1: Fetch financial data
-      setState({
-        step: "fetching_data",
-        progress: 15,
-        message: "Connecting to Yahoo Finance API...",
-        agentCheckpoints: INITIAL_AGENT_CHECKPOINTS,
-      });
-      const companyRes = await fetch(`/api/company?symbol=${encodeURIComponent(ticker)}`);
-      if (!companyRes.ok) {
-        const err = await companyRes.json();
-        throw new Error(err.error || "Failed to fetch company data");
+      // Check if we're resuming from a checkpoint (banked agents exist)
+      const isResuming = resumeRef.current?.ticker === ticker
+        && Object.keys(resumeRef.current.partial || {}).length > 0;
+
+      let companyData: any;
+      if (isResuming && companyDataRef.current) {
+        // Resume: skip /api/company fetch — reuse cached data, go straight to AI analysis
+        companyData = companyDataRef.current;
+        const bankedCount = Object.keys(resumeRef.current!.partial).length;
+        // Pre-check banked agents as complete in the UI
+        const resumedCheckpoints = INITIAL_AGENT_CHECKPOINTS.map(cp => {
+          const agentNames = ["strategist", "news", "moat", "forensic", "credit", "governance", "news_summary"];
+          const idx = agentNames.indexOf(cp.id);
+          if (idx >= 0 && idx < bankedCount) {
+            return { ...cp, status: "complete" as const, progress: 100 };
+          }
+          return { ...cp };
+        });
+        setState({
+          step: "generating_ai",
+          progress: 50,
+          message: `Resuming with ${bankedCount} banked agent(s)...`,
+          agentCheckpoints: resumedCheckpoints,
+        });
+      } else {
+        // Fresh run: fetch company data
+        setState({
+          step: "fetching_data",
+          progress: 15,
+          message: "Connecting to Yahoo Finance API...",
+          agentCheckpoints: INITIAL_AGENT_CHECKPOINTS,
+        });
+        const companyRes = await fetch(`/api/company?symbol=${encodeURIComponent(ticker)}`);
+        if (!companyRes.ok) {
+          const err = await companyRes.json();
+          throw new Error(err.error || "Failed to fetch company data");
+        }
+        companyData = await companyRes.json();
+        companyDataRef.current = companyData;
       }
-      const companyData = await companyRes.json();
 
       // Canonical ledger FIRST (pure, cheap): AI personas and the deterministic PE
       // engine harmonize moat pillars/narrative to its moatRating. Reused below —
@@ -136,10 +173,12 @@ export default function ReportClient({ ticker }: Props) {
       });
 
       let aiAnalysis = null;
+      let aiAnalysisEmpty = false;
       let rateLimitEncountered = false;
       let pausedEncountered = false;
 
       const activeConfig = customKeyConfig || loadSavedAiConfig();
+      const serverModel = loadServerModelOverride();
       const reqHeaders: Record<string, string> = {
         "Content-Type": "application/json",
         "Accept": "text/event-stream, application/json",
@@ -150,6 +189,8 @@ export default function ReportClient({ ticker }: Props) {
         if (activeConfig.model) {
           reqHeaders["x-custom-api-model"] = activeConfig.model;
         }
+      } else if (serverModel) {
+        reqHeaders["x-custom-api-model"] = serverModel;
       }
 
       try {
@@ -240,6 +281,7 @@ export default function ReportClient({ ticker }: Props) {
                     pausedEncountered = true;
                     if (event.partial && typeof event.partial === "object") {
                       resumeRef.current = { ticker, partial: event.partial };
+                      try { localStorage.setItem(`apex_checkpoint_${ticker}`, JSON.stringify(resumeRef.current)); } catch {}
                     }
                     const done = event.completed ?? 0;
                     const tot = event.total ?? 7;
@@ -311,10 +353,47 @@ export default function ReportClient({ ticker }: Props) {
                         : `Agent complete: ${event.name} (${completed}/${total}), council audit pending`,
                       agentCheckpoints: currentCheckpoints,
                     }));
+                  } else if (event.type === "council_retry_start") {
+                    currentCheckpoints = currentCheckpoints.map(cp => {
+                      if (cp.id === event.agentId) {
+                        return {
+                          ...cp,
+                          status: "retrying" as const,
+                          retryRound: event.retryRound,
+                          councilAuditNote: event.councilAuditNote || `Council retry round ${event.retryRound}...`,
+                        };
+                      }
+                      return cp;
+                    });
+                    setState(s => ({
+                      ...s,
+                      message: event.councilAuditNote || `Council retry round ${event.retryRound}: re-analyzing flagged agents...`,
+                      agentCheckpoints: currentCheckpoints,
+                    }));
+                  } else if (event.type === "council_retry_complete") {
+                    currentCheckpoints = currentCheckpoints.map(cp => {
+                      if (cp.id === event.agentId) {
+                        return {
+                          ...cp,
+                          status: "complete" as const,
+                          completedAt: Date.now(),
+                          retryRound: event.retryRound,
+                          councilAuditNote: event.councilAuditNote || `Retry round ${event.retryRound} complete`,
+                        };
+                      }
+                      return cp;
+                    });
+                    setState(s => ({
+                      ...s,
+                      message: event.councilAuditNote || `Council retry round ${event.retryRound} complete`,
+                      agentCheckpoints: currentCheckpoints,
+                    }));
                   } else if (event.type === "done") {
                     aiAnalysis = event.aiAnalysis;
                     // Full success: checkpoint fulfilled, clear it.
                     resumeRef.current = null;
+                    companyDataRef.current = null;
+                    try { localStorage.removeItem(`apex_checkpoint_${ticker}`); } catch {}
                   }
                 } catch (e) {
                   console.warn("Error parsing stream chunk:", e);
@@ -326,6 +405,7 @@ export default function ReportClient({ ticker }: Props) {
           const aiData = await analyzeRes.json();
           aiAnalysis = aiData.aiAnalysis;
           resumeRef.current = null;
+          try { localStorage.removeItem(`apex_checkpoint_${ticker}`); } catch {}
         } else {
           // Non-streaming failure: RATE_PAUSED keeps banked agents for resume;
           // RATE_LIMIT_EXCEEDED opens the key modal instead of silent fallback.
@@ -335,6 +415,7 @@ export default function ReportClient({ ticker }: Props) {
               pausedEncountered = true;
               if (errData.partial && typeof errData.partial === "object") {
                 resumeRef.current = { ticker, partial: errData.partial };
+                try { localStorage.setItem(`apex_checkpoint_${ticker}`, JSON.stringify(resumeRef.current)); } catch {}
               }
               const done = errData.completed ?? 0;
               const tot = errData.total ?? 7;
@@ -380,19 +461,24 @@ export default function ReportClient({ ticker }: Props) {
         return;
       }
 
-      // If AI call failed or returned null, use institutional fallback
+      // If AI call failed or returned null, publish no words at all: every
+      // analytical word in the report is council-written, so an unavailable
+      // council means empty narrative sections (renderers omit them) rather
+      // than deterministic template prose. Numbers, ratings and tables still
+      // render from the engines; QA flags the missing AI coverage.
       if (!aiAnalysis) {
-        console.warn("AI analysis unconfigured or failed, utilizing institutional fallback template");
-        aiAnalysis = generatePlaceholderAnalysis(companyData);
+        console.warn("AI analysis unconfigured or failed — proceeding with empty AI narrative (no template prose substituted)");
+        aiAnalysis = emptyAIAnalysis();
+        aiAnalysisEmpty = true;
 
         const fallbackCouncilNotes: Record<string, string> = {
-          strategist: `Agent complete — queued for council audit (target vs DCF ledger check pending).`,
-          news: "Agent complete — queued for council audit (catalyst authentication pending).",
-          moat: `Agent complete — queued for council audit (moat-spread validation pending).`,
-          forensic: "Agent complete — queued for council audit (DuPont reconciliation pending).",
-          credit: "Agent complete — queued for council audit (solvency cross-check pending).",
-          governance: "Agent complete — queued for council audit (stewardship review pending).",
-          verifier: "Council audit checkpoint reached — see verification audit status.",
+          strategist: `AI unavailable — thesis section omitted, no prose substituted.`,
+          news: "AI unavailable — news section omitted, no prose substituted.",
+          moat: `AI unavailable — moat section omitted, no prose substituted.`,
+          forensic: "AI unavailable — forensics section omitted, no prose substituted.",
+          credit: "AI unavailable — credit section omitted, no prose substituted.",
+          governance: "AI unavailable — governance section omitted, no prose substituted.",
+          verifier: "Council audit did not run — AI narrative unavailable.",
         };
 
         // Transition checkpoints sequentially with direct Council verification step
@@ -451,7 +537,7 @@ export default function ReportClient({ ticker }: Props) {
       await new Promise(r => setTimeout(r, 200));
 
       // Step 3: Assemble report data
-      setState(s => ({ ...s, step: "building_pdf", progress: 95, message: "Finalizing research dossier..." }));
+      setState(s => ({ ...s, step: "building_pdf", progress: 95, message: aiAnalysisEmpty ? "AI narrative unavailable — finalizing modeled data..." : "Finalizing research dossier..." }));
 
       const dcf = companyData.dcf;
       // Reuse the canonical early ledger (created before AI synthesis) — Step 3
@@ -511,7 +597,7 @@ export default function ReportClient({ ticker }: Props) {
         companyOverview: bleedCleanedAiAnalysis.companyOverview
           ? sanitizeAIText(bleedCleanedAiAnalysis.companyOverview, masterReportFacts).sanitizedText
           : bleedCleanedAiAnalysis.companyOverview,
-        competitiveMoat: masterReportFacts.moat.rating,
+        competitiveMoat: bleedCleanedAiAnalysis.competitiveMoat || "",
       };
 
       const report: ReportData = {
@@ -523,6 +609,7 @@ export default function ReportClient({ ticker }: Props) {
         ratiosByYear: companyData.ratiosByYear,
         dupontByYear: companyData.dupontByYear,
         dcf,
+        canonicalForecast: companyData.canonicalForecast ?? (dcf as any)?.canonicalForecast ?? null,
         shareholding: companyData.shareholding,
         peers: companyData.peers || [],
         aiAnalysis: sanitizedAiAnalysis,
@@ -1309,10 +1396,13 @@ export default function ReportClient({ ticker }: Props) {
                           <div className={styles.subSection}>
                             <div className={styles.subSectionLabel}>
                               Competitive Moat Rating:{" "}
-                              <span className={`badge-solid ${reportData.aiAnalysis?.competitiveMoat === "Wide" ? "badge-buy" : reportData.aiAnalysis?.competitiveMoat === "Narrow" ? "badge-hold" : "badge-sell"}`}>
-                                {reportData.aiAnalysis?.competitiveMoat || "Wide"} Moat
+                              <span className={`badge-solid ${reportData.masterReportFacts.moat.rating === "Wide" ? "badge-buy" : reportData.masterReportFacts.moat.rating === "Narrow" ? "badge-hold" : "badge-sell"}`}>
+                                {reportData.masterReportFacts.moat.rating} Moat
                               </span>
                             </div>
+                            {reportData.aiAnalysis?.competitiveMoat && (
+                              <p className={styles.subSectionText}>{reportData.aiAnalysis.competitiveMoat}</p>
+                            )}
                             {reportData.aiAnalysis?.businessStrategyCommentary && (
                               <p className={styles.subSectionText}>{reportData.aiAnalysis.businessStrategyCommentary}</p>
                             )}
@@ -2405,11 +2495,4 @@ export default function ReportClient({ ticker }: Props) {
       />
     </div>
   );
-}
-
-// ─────────────────────────────────────────────
-// Institutional PE Analysis Engine Fallback
-// ─────────────────────────────────────────────
-function generatePlaceholderAnalysis(companyData: Record<string, unknown>): ReportData["aiAnalysis"] {
-  return generatePEFirmAnalysis(companyData as unknown as Parameters<typeof generatePEFirmAnalysis>[0]);
 }

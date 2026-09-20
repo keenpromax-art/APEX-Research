@@ -401,6 +401,36 @@
   border: 1px solid rgba(255, 255, 255, 0.06);
 }
 
+/* Retrying sub-step */
+.subStepRetrying {
+  background: rgba(245, 158, 11, 0.08);
+  border-color: rgba(245, 158, 11, 0.28);
+  animation: retryPulse 1.5s ease-in-out infinite;
+}
+
+.subStepRetrying .subStepIndex {
+  background: rgba(245, 158, 11, 0.2);
+  border-color: #f59e0b;
+  color: #fbbf24;
+}
+
+.subStepRetrying .subStepName {
+  color: #fbbf24;
+  font-weight: 600;
+}
+
+.subTagRetrying {
+  color: #fbbf24;
+  background: rgba(245, 158, 11, 0.18);
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  animation: retryPulse 1.2s ease-in-out infinite;
+}
+
+@keyframes retryPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
 .subStepAuditNote {
   font-size: 9.5px;
   color: #34d399;

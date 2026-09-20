@@ -78,11 +78,12 @@ export default function ProgressTracker({
                       const isAgentVerifying = agent.status === "verifying";
                       const isAgentRunning = agent.status === "running";
                       const isAgentPending = agent.status === "pending";
+                      const isAgentRetrying = agent.status === "retrying";
 
                       return (
                         <div
                           key={agent.id}
-                          className={`${styles.subStep} ${isAgentDone ? styles.subStepDone : ""} ${isAgentVerifying || isAgentRunning ? styles.subStepActive : ""} ${isAgentPending ? styles.subStepPending : ""}`}
+                          className={`${styles.subStep} ${isAgentDone ? styles.subStepDone : ""} ${isAgentVerifying || isAgentRunning ? styles.subStepActive : ""} ${isAgentPending ? styles.subStepPending : ""} ${isAgentRetrying ? styles.subStepRetrying : ""}`}
                         >
                           <div className={styles.subStepLeft}>
                             <div className={styles.subStepIndex}>
@@ -90,6 +91,8 @@ export default function ProgressTracker({
                                 <span className={styles.subCheck}>✓</span>
                               ) : isAgentVerifying || isAgentRunning ? (
                                 <span className={styles.subSpinner}>⟳</span>
+                              ) : isAgentRetrying ? (
+                                <span className={styles.subSpinner}>↻</span>
                               ) : (
                                 `0${agentIdx + 1}`
                               )}
@@ -106,7 +109,11 @@ export default function ProgressTracker({
                           <div className={styles.subStepStatus}>
                               {isAgentDone && (
                                 <span className={`${styles.subStepTag} ${styles.subTagDone}`}>
-                                  {agent.id === "verifier" ? "AUDIT DONE ✓" : "COMPLETE ✓"}
+                                  {agent.id === "verifier" ? (
+                                    agent.retryRound && agent.retryRound > 0
+                                      ? `AUDIT PASSED ✓ (R${agent.retryRound})`
+                                      : "AUDIT DONE ✓"
+                                  ) : "COMPLETE ✓"}
                                 </span>
                               )}
                             {isAgentVerifying && (
@@ -114,7 +121,12 @@ export default function ProgressTracker({
                                 COUNCIL AUDITING...
                               </span>
                             )}
-                            {isAgentRunning && !isAgentVerifying && (
+                            {isAgentRetrying && (
+                              <span className={`${styles.subStepTag} ${styles.subTagRetrying}`}>
+                                RETRYING ROUND {agent.retryRound || 1}...
+                              </span>
+                            )}
+                            {isAgentRunning && !isAgentVerifying && !isAgentRetrying && (
                               <span className={`${styles.subStepTag} ${styles.subTagRunning}`}>
                                 {agent.id === "verifier" ? "AUDITING LIVE" : "ANALYZING"}
                               </span>

@@ -9,7 +9,7 @@
  */
 
 import { classifySector, SectorProfile } from "../sectors";
-import { computeDCF } from "../calculations";
+import { computeDCF, type AIDCFOverrides } from "../calculations";
 import { computeResidualIncomeValuation, ResidualIncomeResult } from "./residual-income";
 import { calibrateValuation, ValuationCalibrationResult } from "./calibration";
 import type { CompanyProfile, StockData, AnnualFinancials, DCFResult } from "@/types/report";
@@ -54,8 +54,9 @@ export function selectAndComputeValuation(params: {
   stockData: StockData;
   annualFinancials: AnnualFinancials[];
   archetypeProfile?: ArchetypeProfile;
+  aiDcfOverrides?: AIDCFOverrides | null;
 }): ValuationSelectionResult {
-  const { profile, stockData, annualFinancials, archetypeProfile } = params;
+  const { profile, stockData, annualFinancials, archetypeProfile, aiDcfOverrides } = params;
 
   const sectorProfile = classifySector(profile.sector, profile.industry, profile.description);
   const latest = annualFinancials[annualFinancials.length - 1];
@@ -178,7 +179,7 @@ export function selectAndComputeValuation(params: {
   }
 
   // 2. Non-financial institutions: driver-native FCFF DCF with archetype lens (Priority 3+5)
-  const standardDcf = computeDCF(annualFinancials, stockData, sectorProfile, archetypeProfile, profile.country);
+  const standardDcf = computeDCF(annualFinancials, stockData, sectorProfile, archetypeProfile, profile.country, aiDcfOverrides);
   const fairValue = standardDcf.fairValuePerShare || (standardDcf.intrinsicValue > 0 ? standardDcf.intrinsicValue : null);
   const upside = standardDcf.upsideDownside;
   const rating = standardDcf.verdict;

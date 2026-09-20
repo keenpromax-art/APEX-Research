@@ -9,8 +9,8 @@ import type { SupportedProvider, CustomKeyConfig } from "@/lib/ai-providers";
 import type { CompanyProfile, StockData, AnnualFinancials, DCFResult, TickerNewsItem } from "@/types/report";
 
 export const runtime = "nodejs";
-// Slow-but-sure synthesis: 7 personas run fully serialized with 5s+ gaps and
-// deep 429 backoff, so a complete report can take several minutes by design.
+// Paced synthesis: 7 personas run serialized with 2s+ gaps and
+// deep 429 backoff, so a complete report can take a few minutes by design.
 export const maxDuration = 300;
 
 export async function POST(request: NextRequest) {
@@ -50,6 +50,13 @@ export async function POST(request: NextRequest) {
       provider: body.customKeyConfig.provider || "openrouter",
       apiKey: body.customKeyConfig.apiKey.trim(),
       model: body.customKeyConfig.model?.trim(),
+    };
+  } else if (headerModel && process.env.OPENROUTER_API_KEY) {
+    // No custom key, but user selected a model — use server key with that model
+    customConfig = {
+      provider: "openrouter",
+      apiKey: process.env.OPENROUTER_API_KEY,
+      model: headerModel,
     };
   }
 

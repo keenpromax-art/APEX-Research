@@ -13,7 +13,7 @@
 import { classifySector, validateSectorConcepts } from "./sectors/profiles";
 import type { MoatRating } from "./moat";
 
-export const WRITER_CHECKER_MAX_ATTEMPTS = 3;
+export const WRITER_CHECKER_MAX_ATTEMPTS = 2;
 
 export interface WriterCheckerGroundTruth {
   companyName: string;

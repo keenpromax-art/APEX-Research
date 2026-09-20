@@ -1068,12 +1068,20 @@ export function computeWACC(
 // ─────────────────────────────────────────────
 // DCF Valuation
 // ─────────────────────────────────────────────
+export interface AIDCFOverrides {
+  revenueGrowthRates?: number[];
+  ebitMargins?: number[];
+  terminalGrowthRate?: number;
+  waccOverride?: number | null;
+}
+
 export function computeDCF(
   annualFinancials: AnnualFinancials[],
   stockData: StockData,
   sectorProfile?: SectorProfile,
   archetypeProfile?: ArchetypeProfile,
-  country?: string
+  country?: string,
+  aiDcfOverrides?: AIDCFOverrides | null
 ): DCFResult {
   const latest = annualFinancials[annualFinancials.length - 1];
   // Banks AND insurers ride the residual-income path (selector); defensively both
@@ -1092,6 +1100,25 @@ export function computeDCF(
 
   const assumptions = computeWACC(stockData, latest, archetypeProfile, country, annualFinancials);
 
+  // AI-driven DCF assumption overrides: when the AI pre-synthesis agent generates
+  // company-specific growth/margin/WACC assumptions, use them instead of the
+  // mechanical defaults. This fixes absurd valuations for high-growth / low-margin
+  // names where sector-generic defaults break down (e.g., TSLA at $22.90).
+  if (aiDcfOverrides) {
+    if (aiDcfOverrides.revenueGrowthRates && aiDcfOverrides.revenueGrowthRates.length === 5) {
+      assumptions.revenueGrowthRates = aiDcfOverrides.revenueGrowthRates;
+    }
+    if (aiDcfOverrides.ebitMargins && aiDcfOverrides.ebitMargins.length === 5) {
+      assumptions.ebitMargins = aiDcfOverrides.ebitMargins;
+    }
+    if (typeof aiDcfOverrides.terminalGrowthRate === "number" && aiDcfOverrides.terminalGrowthRate > 0.01 && aiDcfOverrides.terminalGrowthRate < 0.08) {
+      assumptions.terminalGrowthRate = aiDcfOverrides.terminalGrowthRate;
+    }
+    if (typeof aiDcfOverrides.waccOverride === "number" && aiDcfOverrides.waccOverride > 0.06 && aiDcfOverrides.waccOverride < 0.20) {
+      assumptions.wacc = aiDcfOverrides.waccOverride;
+    }
+  }
+
   // Item 5: Winsorized blend of live revenue growth and historical CAGR
   const liveRevGrowth = stockData.revenueGrowth;
   const hasLive = Number.isFinite(liveRevGrowth) && liveRevGrowth !== 0;
@@ -1107,9 +1134,15 @@ export function computeDCF(
     effWinsorizedLive = winsorizedCagr + 0.10;
     continuityCapped = true;
   }
-  const baseGrowth = hasLive
-    ? 0.55 * winsorizedCagr + 0.45 * effWinsorizedLive
-    : winsorizedCagr;
+  // When AI overrides are present, use AI's first-year growth as baseGrowth
+  // so the canonical forecast builder produces the SAME growth vector the DCF prices.
+  // Without this, baseGrowth = 0.55*CAGR + 0.45*live diverges from AI growth[0],
+  // creating a parallel-forecast blocker on FCST-04.
+  const baseGrowth = aiDcfOverrides?.revenueGrowthRates?.[0] != null
+    ? aiDcfOverrides.revenueGrowthRates[0]
+    : hasLive
+      ? 0.55 * winsorizedCagr + 0.45 * effWinsorizedLive
+      : winsorizedCagr;
 
   // Priority 3: sector/segment driver forecast (replaces single generic CAGR).
   // Base growth stays winsorized history+live; shape, margins, capex, terminal
@@ -1139,7 +1172,12 @@ export function computeDCF(
   // SINGLE-SEED RULE: this seed is computed ONCE here and handed to the
   // canonical forecast builder below. Nothing downstream re-seeds, re-ramps,
   // or re-derives margins — a second seed is a parallel model (defect).
-  const effectiveMarginSeed = (assumptions.ebitMargins?.[0] ?? 0.14) - 0.01;
+  // When AI overrides are present, use AI's first-year margin directly (no -1pp ramp)
+  // so the canonical forecast margins match what the DCF priced. The ramp is sector-specific
+  // and the AI already accounts for it; double-ramping produces a margin-cliff BLOCKER.
+  const effectiveMarginSeed = aiDcfOverrides?.ebitMargins?.[0] != null
+    ? aiDcfOverrides.ebitMargins[0]
+    : (assumptions.ebitMargins?.[0] ?? 0.14) - 0.01;
   const sectorIdForDrivers = sectorProfile?.id ?? "general";
 
   // ── Market bridge inputs (moved ahead of the forecast: the canonical
@@ -1205,6 +1243,7 @@ export function computeDCF(
     baseRevenue: trailRevenue,
     marginalTaxRate: assumptions.marginalTaxRate,
     wacc: assumptions.wacc,
+    terminalGrowthRate: assumptions.terminalGrowthRate,
     netDebt,
     sharesOutstanding,
     cagr,
@@ -1241,8 +1280,18 @@ export function computeDCF(
       debtRate: latestDebt > 0 ? trailIntExp / latestDebt : 0,
       cashYield: latestCash > 0 ? trailIntInc / latestCash : 0,
       dividendPayout: trailNI > 0 && trailDiv > 0 ? Math.min(1, trailDiv / trailNI) : 0,
+      grossProfit: Number((latest as any).grossProfit) || 0,
+      cogs: Number((latest as any).costOfRevenue) || 0,
+      sga: Number((latest as any).sellingGeneralAdministrative) || 0,
+      rd: Number((latest as any).researchDevelopment) || 0,
+      otherOperatingExpense: Number((latest as any).totalOperatingExpense ?? 0) - Number((latest as any).costOfRevenue ?? 0) - Number((latest as any).sellingGeneralAdministrative ?? 0) - Number((latest as any).researchDevelopment ?? 0),
       yearLabelBase: yearDigits ? parseInt(yearDigits.slice(-4), 10) : new Date().getFullYear(),
     },
+    dilutedSharesOutstanding: (() => {
+      const ni = Number(latest.netIncome) || 0;
+      const deps = Number((latest as any).dilutedEps) || 0;
+      return ni > 0 && deps > 0 ? ni / deps : undefined;
+    })(),
     statementShape: isCorporateStatement(latest) ? "corporate" : "financial",
   });
 
@@ -1488,6 +1537,7 @@ export function computeDCF(
     // Single canonical forecast: every downstream consumer (tables,
     // scenarios, QA) reads these rows — never parallel assumptions.
     canonicalForecast,
+    aiDcfOverrides: aiDcfOverrides ?? null,
   };
 }
 

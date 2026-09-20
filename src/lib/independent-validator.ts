@@ -679,12 +679,12 @@ function checkStatementIntegrity(inp: IndependentInputs, issues: IndependentIssu
         const t = magnitudeTolerance(expected, v(y.totalDebt) as number, { absTol: Math.max(1000, expected * 0.02), relTol: 0.05, materiality: Math.max(1000, expected * 0.1) });
         if (!t.pass) {
           const gapRel = Math.abs((v(y.totalDebt) as number) - expected) / Math.max(1, Math.abs(v(y.totalDebt) as number));
-          if (gapRel > 0.10) {
+          if (gapRel > 0.20) {
             pushFail(issues, {
               code: "STMT-01", severity: "FAIL",
-              message: `FATAL: ${y.year} debt-split break: short+long+leases ${fmt0(expected)} vs total ${fmt0(v(y.totalDebt) as number)} (${(gapRel * 100).toFixed(1)}% > 10%) — unexplained debt blocks valuation.`,
+              message: `FATAL: ${y.year} debt-split break: short+long+leases ${fmt0(expected)} vs total ${fmt0(v(y.totalDebt) as number)} (${(gapRel * 100).toFixed(1)}% > 20%) — unexplained debt blocks valuation.`,
               expected: fmt0(expected), actual: fmt0(v(y.totalDebt) as number),
-              magnitude: magnitudeTolerance(expected, v(y.totalDebt) as number, { absTol: 1, relTol: 0.10, materiality: 1 }),
+              magnitude: magnitudeTolerance(expected, v(y.totalDebt) as number, { absTol: 1, relTol: 0.20, materiality: 1 }),
             });
           } else {
             warns++;

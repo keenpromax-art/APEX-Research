@@ -28,14 +28,40 @@ import { detectAccountingAnomalies } from "./financial-kernel";
 import type { ResearchSeverity } from "./severity";
 import { maxSeverity, researchToGate } from "./severity";
 import { scoreFromSeverities, type ResearchIntegrityScore } from "./research-integrity-score";
+import type { EvidenceRegistry } from "./evidence-registry";
+import { sourceQualityScore } from "./evidence-registry";
 
 export type GateDecision = "READY" | "READY_WITH_WARNINGS" | "BLOCKED";
+
+/**
+ * P0–P3 priority taxonomy mapped from canonical severity:
+ *   P0 (BLOCKER):  blocker  — publication prohibited until fixed.
+ *   P1 (MAJOR):    material — disclosure-grade break; warns, may block if hidden.
+ *   P2 (WARNING):  warn     — thin evidence / loose tolerance; costs score.
+ *   P3 (INFO):     info     — diagnostic, no action required.
+ */
+export type GatePriority = "P0" | "P1" | "P2" | "P3";
+
+export const SEVERITY_TO_PRIORITY: Record<ResearchSeverity, GatePriority> = {
+  blocker: "P0",
+  material: "P1",
+  warn: "P2",
+  info: "P3",
+};
 
 export interface GateFinding {
   source: "QA" | "RECON" | "LABEL" | "DISC" | "VALIDATOR" | "INDEPENDENT";
   code: string;
   severity: ResearchSeverity;
+  priority: GatePriority;
   detail: string;
+}
+
+export interface PriorityBreakdown {
+  P0: number;
+  P1: number;
+  P2: number;
+  P3: number;
 }
 
 export interface DiscontinuityFinding {
@@ -51,6 +77,7 @@ export interface PublicationGateResult {
   score: ResearchIntegrityScore;
   blockers: GateFinding[];
   warnings: GateFinding[];
+  priorityBreakdown: PriorityBreakdown;
   summary: string;
 }
 
@@ -103,13 +130,77 @@ export function evaluatePublicationGate(findings: GateFinding[]): PublicationGat
   const score = scoreFromSeverities(severities);
   const blockers = findings.filter((f) => f.severity === "blocker");
   const warnings = findings.filter((f) => f.severity === "material" || f.severity === "warn");
+
+  const priorityBreakdown: PriorityBreakdown = { P0: 0, P1: 0, P2: 0, P3: 0 };
+  for (const f of findings) {
+    priorityBreakdown[f.priority]++;
+  }
+
   const summary =
     decision === "BLOCKED"
       ? `BLOCKED — ${blockers.length} blocker(s): ${blockers.slice(0, 2).map((b) => `${b.code}: ${b.detail.slice(0, 90)}`).join(" | ")}${blockers.length > 2 ? ` (+${blockers.length - 2} more)` : ""}`
       : decision === "READY_WITH_WARNINGS"
         ? `READY_WITH_WARNINGS — ${warnings.length} qualification(s), score ${score.score} (${score.grade}).`
         : `READY — clean, score ${score.score} (${score.grade}).`;
-  return { decision, score, blockers, warnings, summary };
+  return { decision, score, blockers, warnings, priorityBreakdown, summary };
+}
+
+/** SOURCE-QUALITY: Aggregate data quality check over the evidence registry. */
+export function checkSourceQuality(registry: EvidenceRegistry): GateFinding[] {
+  const findings: GateFinding[] = [];
+  const sqs = sourceQualityScore(registry);
+
+  if (sqs.primaryCoverage < 0.3 && registry.items.length > 5) {
+    const primary = sqs.tierCounts["PRIMARY"] ?? 0;
+    const secondary = sqs.tierCounts["SECONDARY"] ?? 0;
+    const tertiary = sqs.tierCounts["TERTIARY"] ?? 0;
+    const model = sqs.tierCounts["MODEL_DERIVED"] ?? 0;
+    findings.push({
+      source: "QA",
+      code: "SOURCE-QUALITY",
+      severity: "warn",
+      priority: "P2",
+      detail: `Low PRIMARY source coverage: ${primary}/${registry.items.length} fields (${(sqs.primaryCoverage * 100).toFixed(0)}%). ${secondary} SECONDARY, ${tertiary} TERTIARY, ${model} MODEL_DERIVED. Verify data freshness and consider filing-sourced corroboration.`,
+    });
+  }
+
+  for (const flag of sqs.stalenessFlags) {
+    findings.push({
+      source: "QA",
+      code: "SOURCE-STALENESS",
+      severity: "info",
+      priority: "P3",
+      detail: flag.message,
+    });
+  }
+
+  return findings;
+}
+
+/** NARR-GENERIC: Generic company overview detection. */
+export function checkNarrativeBoilerplate(data: {
+  narrative?: { companyOverview?: string; overview?: string; companyDescription?: string };
+}): GateFinding[] {
+  const findings: GateFinding[] = [];
+  const overview = (data.narrative?.companyOverview ?? data.narrative?.overview ?? data.narrative?.companyDescription ?? "").toLowerCase();
+  if (overview.length > 0) {
+    const genericPhrases = [
+      "leading provider", "committed to delivering", "our mission is",
+      "we are a", "our vision", "dedicated to", "we strive",
+      "world-class", "best-in-class", "industry-leading", "premier",
+    ];
+    const matches = genericPhrases.filter(p => overview.includes(p));
+    if (matches.length >= 3) {
+      findings.push({
+        source: "QA",
+        code: "NARR-GENERIC",
+        severity: "warn",
+        priority: "P2",
+        detail: `Company overview contains ${matches.length} generic boilerplate phrases without company-specific detail. Overview should reference actual segments, revenue drivers, or financial metrics.`,
+      });
+    }
+  }
+  return findings;
 }
 
 /** Adaptors: lift layer-native findings into GateFindings (BLOCKER conversions). */
@@ -117,26 +208,51 @@ export const toGateFindings = {
   qa(checks: Array<{ id: string; status: "PASS" | "WARN" | "FAIL"; details: string }>): GateFinding[] {
     return checks
       .filter((c) => c.status !== "PASS")
-      .map((c) => ({
-        source: "QA" as const,
-        code: c.id,
-        severity: (c.status === "FAIL" ? "blocker" : "warn") as ResearchSeverity,
-        detail: c.details,
-      }));
+      .map((c) => {
+        const severity: ResearchSeverity = c.status === "FAIL" ? "blocker" : "warn";
+        return {
+          source: "QA" as const,
+          code: c.id,
+          severity,
+          priority: SEVERITY_TO_PRIORITY[severity],
+          detail: c.details,
+        };
+      });
   },
   recon(findings: Array<{ rule: string; year?: string; pass: boolean; severity: ResearchSeverity; detail: string }>): GateFinding[] {
     return findings
       .filter((f) => !f.pass)
-      .map((f) => ({ source: "RECON" as const, code: f.rule, severity: f.severity, detail: `${f.year ? `${f.year}: ` : ""}${f.detail}` }));
+      .map((f) => ({
+        source: "RECON" as const,
+        code: f.rule,
+        severity: f.severity,
+        priority: SEVERITY_TO_PRIORITY[f.severity],
+        detail: `${f.year ? `${f.year}: ` : ""}${f.detail}`,
+      }));
   },
   label(findings: Array<{ invariant: string; pass: boolean; severity: ResearchSeverity; detail: string }>): GateFinding[] {
     return findings
       .filter((f) => !f.pass)
-      .map((f) => ({ source: "LABEL" as const, code: f.invariant, severity: f.severity, detail: f.detail }));
+      .map((f) => ({
+        source: "LABEL" as const,
+        code: f.invariant,
+        severity: f.severity,
+        priority: SEVERITY_TO_PRIORITY[f.severity],
+        detail: f.detail,
+      }));
   },
   disc(findings: DiscontinuityFinding[]): GateFinding[] {
     return findings
       .filter((f) => !f.pass)
-      .map((f) => ({ source: "DISC" as const, code: f.code, severity: f.severity, detail: f.detail }));
+      .map((f) => ({
+        source: "DISC" as const,
+        code: f.code,
+        severity: f.severity,
+        priority: SEVERITY_TO_PRIORITY[f.severity],
+        detail: f.detail,
+      }));
+  },
+  sourceQuality(registry: EvidenceRegistry): GateFinding[] {
+    return checkSourceQuality(registry);
   },
 };

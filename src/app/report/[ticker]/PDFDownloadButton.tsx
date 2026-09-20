@@ -12,6 +12,12 @@ export default function PDFDownloadButton({ data }: Props) {
   const [statusText, setStatusText] = useState("");
   const [error, setError] = useState<string | null>(null);
 
+  const councilAudit = data.aiAnalysis?.councilVerification;
+  const councilPassed = councilAudit?.status === "VERIFIED" || councilAudit?.status === "CORRECTED";
+  const councilScore = councilAudit?.integrityScore ?? 0;
+  const failedChecks = councilAudit?.checks?.filter(c => c.status === "FLAG") ?? [];
+  const isBlocked = !councilPassed && councilAudit !== undefined;
+
   const handleDownload = async () => {
     try {
       setLoading(true);
@@ -46,18 +52,26 @@ export default function PDFDownloadButton({ data }: Props) {
     }
   };
 
-  // QA publication gate removed per owner request — export is always available.
   return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
       <button
         className={`btn-primary ${styles.downloadBtn}`}
         onClick={handleDownload}
-        disabled={loading}
+        disabled={loading || isBlocked}
+        title={isBlocked ? `Council audit not passed (${councilScore}/100, ${failedChecks.length} flags). Retry flagged agents until audit passes.` : "Export PDF report"}
       >
         {loading ? (
           <>
             <span className={styles.btnSpinner}>⟳</span>
             {statusText || "Rendering PDF..."}
+          </>
+        ) : isBlocked ? (
+          <>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" width="18" height="18">
+              <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+              <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+            </svg>
+            Council Audit Pending ({councilScore}/100 — {failedChecks.length} flag{failedChecks.length !== 1 ? "s" : ""})
           </>
         ) : (
           <>
@@ -71,6 +85,11 @@ export default function PDFDownloadButton({ data }: Props) {
         )}
       </button>
       {error && <span style={{ color: "#ef4444", fontSize: 12 }}>{error}</span>}
+      {isBlocked && failedChecks.length > 0 && (
+        <span style={{ color: "#f59e0b", fontSize: 11, textAlign: "right", maxWidth: 300 }}>
+          Failed: {failedChecks.map(c => c.category).join(", ")}
+        </span>
+      )}
     </div>
   );
 }

@@ -16,7 +16,7 @@
  * relative; multiples/counts ±5% relative.
  */
 import type { Claim } from "./claims";
-import { matchNumericEvidence, type EvidenceRegistry, type SourceTier } from "./evidence-registry";
+import { matchNumericEvidence, compareTier, type EvidenceRegistry, type SourceTier } from "./evidence-registry";
 import type { ResearchSeverity } from "./severity";
 
 export interface ClaimVerdict {
@@ -28,6 +28,10 @@ export interface ClaimVerdict {
   evidenceId: string | null;
   severity: ResearchSeverity;
   detail: string;
+  /** Period tag from the claim text (e.g., "FY26", "2026E"). */
+  period?: string;
+  /** Direction consistency: does the claim's direction match the model's forecast? */
+  directionConsistent?: boolean;
 }
 
 export interface ClaimSetResult {
@@ -79,6 +83,74 @@ export function validateClaim(
     ...base, supported: false, tier: null, evidenceId: null, severity: "warn",
     detail: `Thin ${claim.kind} claim "${claim.numericRaw ?? claim.numericValue}" has no registry evidence — corroborate or drop.`,
   };
+}
+
+/** Extended claim verdict with temporal and directional metadata. */
+export interface ClaimVerdictExtended extends ClaimVerdict {
+  period?: string;
+  directionConsistent?: boolean;
+}
+
+/**
+ * Validate a claim with temporal and directional matching.
+ * Extracts period tags, filters evidence to same-period items,
+ * and checks directional consistency against model forecasts.
+ */
+export function validateClaimExtended(
+  claim: Claim,
+  registry: EvidenceRegistry,
+  evidenceItems?: Array<{ id: string; tier: SourceTier; source: string; field: string; value: number; period?: string; numericValue?: number }>
+): ClaimVerdictExtended {
+  const verdict = validateClaim(claim, registry);
+  const result: ClaimVerdictExtended = { ...verdict };
+
+  // Temporal matching: extract year from claim text and only match evidence from same period
+  const yearMatch = claim.text.match(/\b(20\d{2}|FY\d{2})\b/i);
+  if (yearMatch) {
+    const claimYear = yearMatch[0].replace(/FY/i, '20');
+    result.period = claimYear;
+    // Filter evidence to only same-period items
+    const items = evidenceItems ?? [];
+    const samePeriodEvidence = items.filter(e => {
+      const ePeriod = e.period ?? "";
+      return !ePeriod || ePeriod.includes(claimYear) || claimYear.includes(ePeriod);
+    });
+    if (samePeriodEvidence.length > 0) {
+      // Re-match with period-filtered evidence
+      const periodHit = samePeriodEvidence.find(e => {
+        if (typeof e.value !== "number" || !Number.isFinite(e.value)) return false;
+        const gap = Math.abs(e.value - (claim.numericValue ?? 0));
+        const tol = toleranceFor(claim.kind);
+        if (claim.kind === "percentage") return gap <= (tol.toleranceAbs ?? 0.85);
+        const rel = Math.abs(e.value) > 0 ? gap / Math.abs(e.value) : (gap > 0 ? Infinity : 0);
+        return gap <= (tol.toleranceAbs ?? 0) || rel <= (tol.tolerancePct ?? 0.05);
+      });
+      if (periodHit && (!verdict.supported || compareTier(periodHit.tier, verdict.tier ?? "TERTIARY") < 0)) {
+        result.supported = true;
+        result.tier = periodHit.tier;
+        result.evidenceId = periodHit.id;
+        result.severity = "info";
+        result.detail = `Supported by ${periodHit.id} [${periodHit.tier}] (${periodHit.source}). [Period: ${claimYear}]`;
+      }
+    }
+  }
+
+  // Directional consistency: check if claim direction matches model forecast direction
+  if (claim.numericValue != null && evidenceItems && evidenceItems.length > 0) {
+    const modelEvidence = evidenceItems.find(e => e.source === "MODEL_DERIVED" || e.source === "canonical-forecast");
+    if (modelEvidence?.numericValue != null) {
+      const claimDirection = claim.numericValue > 0 ? "positive" : claim.numericValue < 0 ? "negative" : "neutral";
+      const modelDirection = modelEvidence.numericValue > 0 ? "positive" : modelEvidence.numericValue < 0 ? "negative" : "neutral";
+      result.directionConsistent = claimDirection === modelDirection || modelDirection === "neutral";
+      if (!result.directionConsistent) {
+        result.supported = false;
+        result.severity = "blocker";
+        result.detail = `Direction mismatch: claim says ${claimDirection} (${claim.numericValue.toFixed(2)}) but model forecasts ${modelDirection} (${modelEvidence.numericValue.toFixed(2)}).`;
+      }
+    }
+  }
+
+  return result;
 }
 
 /** Validate a SET of claims: per-claim verdicts + coverage scoring + set-level BLOCKER. */

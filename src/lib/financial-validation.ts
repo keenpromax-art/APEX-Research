@@ -134,17 +134,17 @@ export function validateFinancialIdentities(params: {
   if (shares > 0 && latest.netIncome !== 0 && latest.eps != null && latest.eps !== 0) {
     metricsAudited++;
     const calculatedEps = latest.netIncome / shares;
-    // Allow wider 20% tolerance due to weighted-average diluted shares difference
-    if (!withinTolerance(latest.eps, calculatedEps, 0.25)) {
+    // Tighter 10% tolerance — wider drift signals a share-count or unit error
+    if (!withinTolerance(latest.eps, calculatedEps, 0.10)) {
       issues.push({
         code: "EPS_CALCULATION_DRIFT",
-        severity: "INFO",
+        severity: "FLAG",
         identityName: "EPS ≈ Net Income / Diluted Shares",
         message: `Reported EPS (${latest.eps.toFixed(2)}) differs from Net Income / Shares (${calculatedEps.toFixed(2)}), likely reflecting weighted-average share variations.`,
         expected: calculatedEps,
         actual: latest.eps,
         period: latest.year,
-        tolerance: 0.25,
+        tolerance: 0.10,
       });
     }
   }

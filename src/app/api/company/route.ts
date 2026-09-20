@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { fetchQuoteSummary, parseQuoteSummary, fetchPeerQuotes, getTickerNews, fetchDailyPriceHistory } from "@/lib/yahoo-finance";
+import { fetchQuoteSummary, parseQuoteSummary, fetchPeerQuotes, getTickerNews, fetchDailyPriceHistory, getYahooSession } from "@/lib/yahoo-finance";
 import { computeRatios, computeDuPont } from "@/lib/calculations";
 import { selectAndComputeValuation } from "@/lib/valuation";
 import { classifyArchetype } from "@/lib/company-archetype";
@@ -19,9 +19,10 @@ import { validateIndependently } from "@/lib/independent-validator";
 import { buildCanonicalReport } from "@/lib/canonical-report";
 import { reconcileAll } from "@/lib/source-reconciliation";
 import { buildEvidenceRegistryFromInputs } from "@/lib/evidence-registry";
+import { generateAIDCFAssumptions } from "@/lib/openrouter";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+export const maxDuration = 90;
 
 export async function GET(request: NextRequest) {
   const symbol = normalizeTicker(request.nextUrl.searchParams.get("symbol"));
@@ -58,37 +59,158 @@ export async function GET(request: NextRequest) {
       return NextResponse.json(unsupportedSectorPayload(gateSector.id), { status: 501 });
     }
 
-    // Fetch verified real-time ticker news strictly validated for the subject company
-    const tickerNews = await getTickerNews(symbol, companyProfile.name, 15);
-
-    // Measured event-study sessions: one chart fetch spanning all news windows
-    // so event trajectories derive from real closes (null-tolerant fallback).
-    // A benchmark index series rides along for market-model abnormal returns.
-    let eventPriceLookup: { sessions: { date: string; close: number | null; volume: number | null }[]; marketSessions?: { date: string; close: number | null; volume: number | null }[] | null; marketSymbol?: string } | null = null;
-    try {
-      const dated = tickerNews
-        .filter((n) => n.publishedAt && !isNaN(new Date(n.publishedAt).getTime()))
-        .map((n) => new Date(n.publishedAt as string).getTime());
-      if (dated.length > 0) {
-        const fromSec = (Math.min(...dated) - 70 * 86400000) / 1000;
-        const toSec = (Math.max(Date.now(), Math.max(...dated)) + 20 * 86400000) / 1000;
-        const upSym = symbol.toUpperCase();
-        const marketSymbol = (upSym.endsWith(".NS") || upSym.endsWith(".BO")) ? "^NSEI" : "^GSPC";
-        const [sessions, marketSessions] = await Promise.all([
-          fetchDailyPriceHistory(symbol, fromSec, toSec),
-          fetchDailyPriceHistory(marketSymbol, fromSec, toSec),
-        ]);
-        if (sessions && sessions.length > 0) {
-          eventPriceLookup = {
-            sessions,
-            marketSessions: marketSessions && marketSessions.length > 0 ? marketSessions : null,
-            marketSymbol,
-          };
+    // ── PARALLEL I/O LAUNCH ──────────────────────────────────────────────
+    // News, AI DCF assumptions, and peer data are all independent of each
+    // other and only need companyProfile/stockData/annualFinancials (available
+    // now). Launch all three as background Promises so Yahoo fetches + LLM
+    // call overlap instead of blocking sequentially.
+    const newsPromise = (async () => {
+      try {
+        const tickerNews = await getTickerNews(symbol, companyProfile.name, 15);
+        let eventPriceLookup: { sessions: { date: string; close: number | null; volume: number | null }[]; marketSessions?: { date: string; close: number | null; volume: number | null }[] | null; marketSymbol?: string } | null = null;
+        const dated = tickerNews
+          .filter((n: any) => n.publishedAt && !isNaN(new Date(n.publishedAt).getTime()))
+          .map((n: any) => new Date(n.publishedAt as string).getTime());
+        if (dated.length > 0) {
+          const fromSec = (Math.min(...dated) - 70 * 86400000) / 1000;
+          const toSec = (Math.max(Date.now(), Math.max(...dated)) + 20 * 86400000) / 1000;
+          const upSym = symbol.toUpperCase();
+          const marketSymbol = (upSym.endsWith(".NS") || upSym.endsWith(".BO")) ? "^NSEI" : "^GSPC";
+          const [sessions, marketSessions] = await Promise.all([
+            fetchDailyPriceHistory(symbol, fromSec, toSec),
+            fetchDailyPriceHistory(marketSymbol, fromSec, toSec),
+          ]);
+          if (sessions && sessions.length > 0) {
+            eventPriceLookup = { sessions, marketSessions: marketSessions && marketSessions.length > 0 ? marketSessions : null, marketSymbol };
+          }
         }
+        return { tickerNews, eventPriceLookup };
+      } catch (e) {
+        console.warn("News/event fetch failed:", e);
+        return { tickerNews: [] as any[], eventPriceLookup: null };
       }
-    } catch (priceErr) {
-      console.warn("Event price history fetch failed (illustrative fallback):", priceErr);
-    }
+    })();
+
+    const aiDcfPromise = generateAIDCFAssumptions(companyProfile, stockData, annualFinancials).catch(e => {
+      console.warn("[company] AI DCF assumption generation failed, using mechanical defaults:", e);
+      return null;
+    });
+
+    const archetypeProfile = classifyArchetype(companyProfile, stockData, annualFinancials);
+    const ontology = buildCompanyOntology(companyProfile, archetypeProfile as never);
+
+    // Peer data: selection + fetchPeerQuotes + enrichment — runs in parallel with news + AI DCF
+    const peersPromise = (async () => {
+      try {
+        const isIndian = symbol.toUpperCase().endsWith(".NS") || symbol.toUpperCase().endsWith(".BO") || companyProfile.country === "India";
+        const ind = (companyProfile.industry || "").toLowerCase();
+        const sec = (companyProfile.sector || "").toLowerCase();
+        const sym = symbol.toUpperCase();
+        let peerTickers: string[] = [];
+        const isInternetPlatform = isInternetPlatformCompany(companyProfile.sector, companyProfile.industry, companyProfile.description, companyProfile.name);
+        const isCarrier = isTelecomCarrierCompany(companyProfile.sector, companyProfile.industry, companyProfile.description, companyProfile.name);
+        if (isIndian) {
+          if (isInternetPlatform) peerTickers = ["ZOMATO.NS", "DELHIVERY.NS", "PBFINTECH.NS", "NYKAA.NS"];
+          else if (sym.includes("SWIGGY") || sym.includes("ZOMATO") || ind.includes("food delivery") || ind.includes("quick commerce") || ind.includes("internet retail") || ind.includes("hyperlocal") || (companyProfile.description || "").toLowerCase().includes("food delivery") || (companyProfile.description || "").toLowerCase().includes("instamart") || (companyProfile.description || "").toLowerCase().includes("quick commerce")) peerTickers = ["ZOMATO.NS", "DELHIVERY.NS", "NAUKRI.NS", "JUSTDIAL.NS"];
+          else if (isCarrier || sym.includes("IDEA") || sym.includes("BHARTIARTL") || sym.includes("TATACOMM")) peerTickers = ["BHARTIARTL.NS", "INDUSTOWER.NS", "TATACOMM.NS", "ROUTE.NS"];
+          else if (sym.includes("RELIANCE")) peerTickers = ["ONGC.NS", "BPCL.NS", "IOC.NS", "NTPC.NS"];
+          else if (ind.includes("rating") || ind.includes("financial data") || ind.includes("exchange") || ind.includes("analytics")) peerTickers = ["ICRA.NS", "CAREERP.NS", "BSE.NS", "MCX.NS"];
+          else if (sym.includes("SPANDANA") || ind.includes("microfinance") || ind.includes("consumer finance") || (companyProfile.description || "").toLowerCase().includes("microfinance")) peerTickers = ["CREDITACC.NS", "FUSION.NS", "SATIN.NS", "ARMANFIN.NS"];
+          else if (isHospitalityCompany(companyProfile.sector, companyProfile.industry, companyProfile.description, companyProfile.name) || ind.includes("lodg") || ind.includes("hotel") || ind.includes("resort") || ind.includes("hospitality")) peerTickers = ["INDHOTEL.NS", "EIHOTEL.NS", "LEMONTREE.NS", "CHALET.NS"];
+          else if (isRealEstateCompany(companyProfile.sector, companyProfile.industry, companyProfile.description, companyProfile.name) || ind.includes("reit") || ind.includes("real estate") || ind.includes("property")) peerTickers = ["DLF.NS", "GODREJPROP.NS", "OBEROIRLTY.NS", "PRESTIGE.NS"];
+          else if (sec.includes("agri") || ind.includes("agro") || ind.includes("crop") || ind.includes("fertiliz") || ind.includes("pesticide") || (companyProfile.description || "").toLowerCase().includes("crop protection") || (companyProfile.description || "").toLowerCase().includes("agrochemical")) peerTickers = ["PIIND.NS", "UPL.NS", "COROMANDEL.NS", "SUMICHEM.NS", "DHANUKA.NS"];
+          else if (ind.includes("wind") || ind.includes("solar") || ind.includes("renewable") || sym.includes("SUZLON") || (companyProfile.name || "").toLowerCase().includes("suzlon")) peerTickers = ["INOXWIND.NS", "BHEL.NS", "THERMAX.NS", "TATAPOWER.NS"];
+          else if (sec.includes("utilit") || ind.includes("power") || ind.includes("electric") || ind.includes("transmission") || (companyProfile.description || "").toLowerCase().includes("power generation") || (companyProfile.description || "").toLowerCase().includes("electricity")) peerTickers = ["NTPC.NS", "POWERGRID.NS", "TATAPOWER.NS", "ADANIPOWER.NS", "JSWENERGY.NS"];
+          else if (sec.includes("cement") || ind.includes("cement") || ind.includes("building materials") || (companyProfile.description || "").toLowerCase().includes("clinker") || (companyProfile.description || "").toLowerCase().includes("cement")) peerTickers = ["ULTRACEMCO.NS", "AMBUJACEM.NS", "SHREECEM.NS", "ACC.NS", "DALBHARAT.NS"];
+          else if (sec.includes("metal") || ind.includes("steel") || ind.includes("mining") || ind.includes("iron") || ind.includes("aluminum")) peerTickers = ["TATASTEEL.NS", "JSWSTEEL.NS", "HINDALCO.NS", "VEDL.NS", "JINDALSTEL.NS"];
+          else if (sec.includes("chemical") || ind.includes("chemical")) peerTickers = ["SRF.NS", "DEEPAKNTR.NS", "NAVINFLUOR.NS", "AARTIIND.NS", "ATUL.NS"];
+          else if (sec.includes("capital goods") || ind.includes("infrastructure") || ind.includes("engineering") || ind.includes("machinery")) peerTickers = ["LT.NS", "SIEMENS.NS", "ABB.NS", "BHEL.NS", "THERMAX.NS"];
+          else if (isCarrier) peerTickers = ["BHARTIARTL.NS", "IDEA.NS", "TATACOMM.NS", "INDUSTOWER.NS"];
+          else if (ind.includes("asset management") || ind.includes("wealth management") || ind.includes("mutual fund") || sym.includes("HDFCAMC") || sym.includes("NAM-INDIA") || sym.includes("UTIAMC")) peerTickers = ["HDFCAMC.NS", "NAM-INDIA.NS", "UTIAMC.NS", "CAMS.NS"];
+          else if (sec.includes("financial") || ind.includes("bank")) peerTickers = ["HDFCBANK.NS", "ICICIBANK.NS", "KOTAKBANK.NS", "SBIN.NS"];
+          else if (sec.includes("nbfc") || ind.includes("nbfc") || ind.includes("lending")) peerTickers = ["BAJFINANCE.NS", "BAJAJFINSV.NS", "CHOLAFIN.NS", "SHRIRAMFIN.NS"];
+          else if (sec.includes("health") || ind.includes("pharma") || ind.includes("drug")) peerTickers = ["SUNPHARMA.NS", "CIPLA.NS", "DRREDDY.NS", "LUPIN.NS"];
+          else if (isHardwareCompany(companyProfile.sector, companyProfile.industry, companyProfile.description, companyProfile.name) || ind.includes("computer hardware") || ind.includes("electronic components")) peerTickers = ["DELL", "HPQ", "HPE", "LOGI"];
+          else if (sec.includes("tech") || ind.includes("software") || ind.includes("information")) peerTickers = ["TCS.NS", "INFY.NS", "HCLTECH.NS", "WIPRO.NS"];
+          else if (sec.includes("energy") || ind.includes("oil") || ind.includes("petro")) peerTickers = ["RELIANCE.NS", "ONGC.NS", "BPCL.NS", "IOC.NS"];
+          else if (sec.includes("auto") || ind.includes("motor") || ind.includes("vehicle")) peerTickers = ["TATAMOTORS.NS", "MARUTI.NS", "M&M.NS", "BAJAJ-AUTO.NS"];
+          else if (sec.includes("consumer") || ind.includes("food") || ind.includes("beverage")) peerTickers = ["HINDUNILVR.NS", "ITC.NS", "NESTLEIND.NS", "BRITANNIA.NS"];
+          else peerTickers = [];
+        } else {
+          if (isInternetPlatform) peerTickers = ["GOOGL", "RDDT", "SNAP", "PINS"];
+          else if (sym.includes("DASH") || sym.includes("UBER") || sym.includes("LYFT") || sym.includes("GRAB") || ind.includes("delivery") || (companyProfile.description || "").toLowerCase().includes("food delivery") || (companyProfile.description || "").toLowerCase().includes("ride sharing")) peerTickers = ["DASH", "UBER", "LYFT", "GRAB"];
+          else if (isCarrier) peerTickers = ["VZ", "T", "TMUS", "CMCSA"];
+          else if (ind.includes("rating") || ind.includes("financial data") || ind.includes("exchange") || ind.includes("analytics")) peerTickers = ["SPGI", "MCO", "MSCI", "FDS"];
+          else if (ind.includes("asset management") || ind.includes("wealth management") || ind.includes("investment management") || sym.includes("BLK") || sym.includes("STT")) peerTickers = ["BLK", "STT", "AB", "NTRS"];
+          else if (ind.includes("reit") || ind.includes("real estate") || ind.includes("property")) peerTickers = ["PLD", "AMT", "CCI", "EQIX"];
+          else if (isHardwareCompany(companyProfile.sector, companyProfile.industry, companyProfile.description, companyProfile.name) || ind.includes("computer hardware") || ind.includes("electronic components")) peerTickers = ["DELL", "HPQ", "HPE", "LOGI"];
+          else if (sec.includes("tech") || ind.includes("software") || ind.includes("information")) peerTickers = ["MSFT", "GOOGL", "CRM", "ADBE"];
+          else if (sec.includes("health") || ind.includes("pharma") || ind.includes("drug")) peerTickers = ["JNJ", "PFE", "MRK", "ABBV"];
+          else if (sec.includes("financ") || ind.includes("bank")) peerTickers = ["JPM", "BAC", "GS", "MS"];
+          else if (sec.includes("consumer") || ind.includes("retail")) peerTickers = ["AMZN", "WMT", "COST", "TGT"];
+          else if (sec.includes("energy") || ind.includes("oil")) peerTickers = ["XOM", "CVX", "COP", "SLB"];
+          else if (sec.includes("auto") || ind.includes("motor")) peerTickers = ["TSLA", "F", "GM", "STLA"];
+          else peerTickers = [];
+        }
+        if (peerTickers.length === 0) return [];
+        const [rawQuotes, peerSession] = await Promise.all([
+          fetchPeerQuotes(peerTickers),
+          getYahooSession(),
+        ]);
+        if (rawQuotes.length === 0) return [];
+        const peerModules = "defaultKeyStatistics,financialData,summaryDetail,assetProfile";
+        const peerCrumbParam = peerSession.crumb ? `&crumb=${encodeURIComponent(peerSession.crumb)}` : "";
+        const peerHeaders = { ...(peerSession.cookie ? { Cookie: peerSession.cookie } : {}) } as Record<string, string>;
+        const parseNum = (v: unknown): number | null => { const n = Number(v); return Number.isFinite(n) ? n : null; };
+        const enriched = await Promise.all(
+          peerTickers.map(async (peerSym) => {
+            const baseQuote = rawQuotes.find((q: any) => ((q.symbol as string) || "").toUpperCase() === peerSym.toUpperCase()) || {};
+            try {
+              let sumData: Record<string, unknown> = {};
+              for (const base of ["https://query2.finance.yahoo.com", "https://query1.finance.yahoo.com"]) {
+                try {
+                  const url = `${base}/v10/finance/quoteSummary/${encodeURIComponent(peerSym)}?modules=${peerModules}${peerCrumbParam}`;
+                  const sumRes = await fetch(url, { headers: peerHeaders });
+                  if (sumRes.ok) { const sj = await sumRes.json(); sumData = sj?.quoteSummary?.result?.[0] ?? {}; break; }
+                } catch { /* try next base */ }
+              }
+              const p = { ...baseQuote, ...sumData };
+              const pCap = parseNum(p.marketCap);
+              const pCmp = parseNum(p.regularMarketPrice);
+              const pPe = parseNum(p.trailingPE);
+              const pEvEbitda = parseNum(p.enterpriseToEbitda);
+              const pEvSales = parseNum(p.enterpriseToRevenue);
+              const pPb = parseNum(p.priceToBook);
+              const pRoe = parseNum(p.returnOnEquity);
+              const pNetMargin = parseNum(p.profitMargins);
+              const pRevGrowth = parseNum(p.revenueGrowth);
+              const pDivYield = parseNum(p.dividendYield);
+              const pGrossMargin = parseNum(p.grossMargins);
+              const pEbitdaMargin = parseNum(p.ebitdaMargins);
+              const pOpMargin = parseNum(p.operatingMargins);
+              const pDebtToEquity = parseNum(p.debtToEquity);
+              const pCurrentRatio = parseNum(p.currentRatio);
+              const pBeta = parseNum((p as Record<string, unknown>).beta);
+              const qSec = ((p.sector as string) || "").toLowerCase() || null;
+              const qInd = ((p.industry as string) || "").toLowerCase() || null;
+              let relevanceScore: number | null = null;
+              if (qSec || qInd) {
+                const breakdown = scorePeerSimilarity({ profile: companyProfile, stockData, annualFinancials, ontologySectorId: ontology.sectorId, ontologyArchetype: ontology.operatingArchetype, peer: { sector: qSec, industry: qInd, currency: (p.currency as string) || null, marketCap: pCap, roe: pRoe, netMargin: pNetMargin, revenueGrowth: pRevGrowth, debtToEquity: pDebtToEquity } });
+                relevanceScore = breakdown.total;
+              }
+              return { ticker: peerSym, name: (p.longName as string) || (p.shortName as string) || peerSym, marketCap: pCap, cmp: pCmp, pe: pPe, evToEbitda: pEvEbitda, evToSales: pEvSales, dividendYield: pDivYield, pb: pPb, roe: pRoe, netMargin: pNetMargin, grossMargin: pGrossMargin, ebitdaMargin: pEbitdaMargin, operatingMargin: pOpMargin, debtToEquity: pDebtToEquity, currentRatio: pCurrentRatio, revenueGrowth: pRevGrowth, beta: pBeta, currency: (p.currency as string) || null, sector: qSec, industry: qInd, relevanceScore };
+            } catch { return null; }
+          })
+        );
+        const peers = enriched.filter((p: any) => p && p.ticker && (p.marketCap != null || p.cmp != null || p.pe != null));
+        const gate = gatePeerSet(peers as never);
+        if (gate.suppress) { console.warn(`Peer similarity gate suppressed relative valuation for ${symbol}: ${gate.reason}`); return []; }
+        return peers;
+      } catch (peerError) {
+        console.warn("Peer fetch failed:", peerError);
+        return [];
+      }
+    })();
 
     // Compute ratios for each year
     const cmp = stockData.currentPrice;
@@ -127,12 +249,16 @@ export async function GET(request: NextRequest) {
     // Dynamic Sector & Archetype-Calibrated Valuation (Residual Income for Financials / FCFF for non-financials)
     // The valuation computes the single canonical forecast internally (P0 #4);
     // nothing here rebuilds forward numbers in parallel (defect by definition).
-    const archetypeProfile = classifyArchetype(companyProfile, stockData, annualFinancials);
+
+    // AI-driven DCF assumptions: await the promise launched above
+    const aiDcfOverrides = await aiDcfPromise;
+
     const valuationResult = selectAndComputeValuation({
       profile: companyProfile,
       stockData,
       annualFinancials,
       archetypeProfile,
+      aiDcfOverrides,
     });
     const dcf = valuationResult.dcf;
     const valuationCalibration = valuationResult.calibration;
@@ -145,280 +271,8 @@ export async function GET(request: NextRequest) {
     const canonicalForecast = (dcf as any)?.canonicalForecast ?? null;
     if (!canonicalForecast) console.warn("Canonical forecast missing from DCF result — QA must block (FCST-05).");
 
-    // Fetch peer data — select listed comparable peers matching geography and industry
-    let peers: unknown[] = [];
-    try {
-      const isIndian =
-        symbol.toUpperCase().endsWith(".NS") ||
-        symbol.toUpperCase().endsWith(".BO") ||
-        companyProfile.country === "India";
-
-      const ind = (companyProfile.industry || "").toLowerCase();
-      const sec = (companyProfile.sector || "").toLowerCase();
-      const sym = symbol.toUpperCase();
-
-      let peerTickers: string[] = [];
-
-      // Shared platform/carrier predicates (same as classifySector, archetype,
-      // ledger moat). "Communication Services" MUST NOT imply telecom carriers.
-      const isInternetPlatform = isInternetPlatformCompany(
-        companyProfile.sector,
-        companyProfile.industry,
-        companyProfile.description,
-        companyProfile.name
-      );
-      const isCarrier = isTelecomCarrierCompany(
-        companyProfile.sector,
-        companyProfile.industry,
-        companyProfile.description,
-        companyProfile.name
-      );
-
-      if (isIndian) {
-        if (isInternetPlatform) {
-          peerTickers = ["ZOMATO.NS", "DELHIVERY.NS", "PBFINTECH.NS", "NYKAA.NS"];
-        } else if (
-          sym.includes("SWIGGY") ||
-          sym.includes("ZOMATO") ||
-          ind.includes("food delivery") ||
-          ind.includes("quick commerce") ||
-          ind.includes("internet retail") ||
-          ind.includes("hyperlocal") ||
-          (companyProfile.description || "").toLowerCase().includes("food delivery") ||
-          (companyProfile.description || "").toLowerCase().includes("instamart") ||
-          (companyProfile.description || "").toLowerCase().includes("quick commerce")
-        ) {
-          peerTickers = ["ZOMATO.NS", "DELHIVERY.NS", "NAUKRI.NS", "JUSTDIAL.NS"];
-        } else if (isCarrier || sym.includes("IDEA") || sym.includes("BHARTIARTL") || sym.includes("TATACOMM")) {
-          peerTickers = ["BHARTIARTL.NS", "INDUSTOWER.NS", "TATACOMM.NS", "ROUTE.NS"];
-        } else if (sym.includes("RELIANCE")) {
-          // Energy/conglomerate comparables only — telecom carriers excluded
-          // (BHARTIARTL was a cross-sector contamination).
-          peerTickers = ["ONGC.NS", "BPCL.NS", "IOC.NS", "NTPC.NS"];
-        } else if (ind.includes("rating") || ind.includes("financial data") || ind.includes("exchange") || ind.includes("analytics")) {
-          peerTickers = ["ICRA.NS", "CAREERP.NS", "BSE.NS", "MCX.NS"];
-        } else if (sym.includes("SPANDANA") || ind.includes("microfinance") || ind.includes("consumer finance") || (companyProfile.description || "").toLowerCase().includes("microfinance")) {
-          peerTickers = ["CREDITACC.NS", "FUSION.NS", "SATIN.NS", "ARMANFIN.NS"];
-        } else if (isHospitalityCompany(companyProfile.sector, companyProfile.industry, companyProfile.description, companyProfile.name) || ind.includes("lodg") || ind.includes("hotel") || ind.includes("resort") || ind.includes("hospitality")) {
-          // Hospitality owner-operator / management peers (Indian)
-          peerTickers = ["INDHOTEL.NS", "EIHOTEL.NS", "LEMONTREE.NS", "CHALET.NS"];
-        } else if (isRealEstateCompany(companyProfile.sector, companyProfile.industry, companyProfile.description, companyProfile.name) || ind.includes("reit") || ind.includes("real estate") || ind.includes("property")) {
-          peerTickers = ["DLF.NS", "GODREJPROP.NS", "OBEROIRLTY.NS", "PRESTIGE.NS"];
-        } else if (sec.includes("agri") || ind.includes("agro") || ind.includes("crop") || ind.includes("fertiliz") || ind.includes("pesticide") || (companyProfile.description || "").toLowerCase().includes("crop protection") || (companyProfile.description || "").toLowerCase().includes("agrochemical")) {
-          peerTickers = ["PIIND.NS", "UPL.NS", "COROMANDEL.NS", "SUMICHEM.NS", "DHANUKA.NS"];
-        } else if (ind.includes("wind") || ind.includes("solar") || ind.includes("renewable") || sym.includes("SUZLON") || (companyProfile.name || "").toLowerCase().includes("suzlon")) {
-          peerTickers = ["INOXWIND.NS", "BHEL.NS", "THERMAX.NS", "TATAPOWER.NS"];
-        } else if (sec.includes("utilit") || ind.includes("power") || ind.includes("electric") || ind.includes("transmission") || (companyProfile.description || "").toLowerCase().includes("power generation") || (companyProfile.description || "").toLowerCase().includes("electricity")) {
-          peerTickers = ["NTPC.NS", "POWERGRID.NS", "TATAPOWER.NS", "ADANIPOWER.NS", "JSWENERGY.NS"];
-        } else if (sec.includes("cement") || ind.includes("cement") || ind.includes("building materials") || (companyProfile.description || "").toLowerCase().includes("clinker") || (companyProfile.description || "").toLowerCase().includes("cement")) {
-          peerTickers = ["ULTRACEMCO.NS", "AMBUJACEM.NS", "SHREECEM.NS", "ACC.NS", "DALBHARAT.NS"];
-        } else if (sec.includes("metal") || ind.includes("steel") || ind.includes("mining") || ind.includes("iron") || ind.includes("aluminum")) {
-          peerTickers = ["TATASTEEL.NS", "JSWSTEEL.NS", "HINDALCO.NS", "VEDL.NS", "JINDALSTEL.NS"];
-        } else if (sec.includes("chemical") || ind.includes("chemical")) {
-          peerTickers = ["SRF.NS", "DEEPAKNTR.NS", "NAVINFLUOR.NS", "AARTIIND.NS", "ATUL.NS"];
-        } else if (sec.includes("capital goods") || ind.includes("infrastructure") || ind.includes("engineering") || ind.includes("machinery")) {
-          peerTickers = ["LT.NS", "SIEMENS.NS", "ABB.NS", "BHEL.NS", "THERMAX.NS"];
-        } else if (isCarrier) {
-          peerTickers = ["BHARTIARTL.NS", "IDEA.NS", "TATACOMM.NS", "INDUSTOWER.NS"];
-        } else if (ind.includes("asset management") || ind.includes("wealth management") || ind.includes("mutual fund") || sym.includes("HDFCAMC") || sym.includes("NAM-INDIA") || sym.includes("UTIAMC")) {
-          peerTickers = ["HDFCAMC.NS", "NAM-INDIA.NS", "UTIAMC.NS", "CAMS.NS"];
-        } else if (sec.includes("financial") || ind.includes("bank")) {
-          peerTickers = ["HDFCBANK.NS", "ICICIBANK.NS", "KOTAKBANK.NS", "SBIN.NS"];
-        } else if (sec.includes("nbfc") || ind.includes("nbfc") || ind.includes("lending")) {
-          peerTickers = ["BAJFINANCE.NS", "BAJAJFINSV.NS", "CHOLAFIN.NS", "SHRIRAMFIN.NS"];
-        } else if (sec.includes("health") || ind.includes("pharma") || ind.includes("drug")) {
-          peerTickers = ["SUNPHARMA.NS", "CIPLA.NS", "DRREDDY.NS", "LUPIN.NS"];
-        } else if (isHardwareCompany(companyProfile.sector, companyProfile.industry, companyProfile.description, companyProfile.name) || ind.includes("computer hardware") || ind.includes("electronic components")) {
-          // Listed hardware peers are global — never IT-services names.
-          peerTickers = ["DELL", "HPQ", "HPE", "LOGI"];
-        } else if (sec.includes("tech") || ind.includes("software") || ind.includes("information")) {
-          peerTickers = ["TCS.NS", "INFY.NS", "HCLTECH.NS", "WIPRO.NS"];
-        } else if (sec.includes("energy") || ind.includes("oil") || ind.includes("petro")) {
-          peerTickers = ["RELIANCE.NS", "ONGC.NS", "BPCL.NS", "IOC.NS"];
-        } else if (sec.includes("auto") || ind.includes("motor") || ind.includes("vehicle")) {
-          peerTickers = ["TATAMOTORS.NS", "MARUTI.NS", "M&M.NS", "BAJAJ-AUTO.NS"];
-        } else if (sec.includes("consumer") || ind.includes("food") || ind.includes("beverage")) {
-          peerTickers = ["HINDUNILVR.NS", "ITC.NS", "NESTLEIND.NS", "BRITANNIA.NS"];
-        } else {
-          peerTickers = [];
-        }
-      } else {
-        if (isInternetPlatform) {
-          peerTickers = ["GOOGL", "RDDT", "SNAP", "PINS"];
-        } else if (
-          sym.includes("DASH") ||
-          sym.includes("UBER") ||
-          sym.includes("GRAB") ||
-          ind.includes("delivery") ||
-          (companyProfile.description || "").toLowerCase().includes("food delivery") ||
-          (companyProfile.description || "").toLowerCase().includes("ride sharing")
-        ) {
-          peerTickers = ["DASH", "UBER", "LYFT", "GRAB"];
-        } else if (isCarrier) {
-          peerTickers = ["VZ", "T", "TMUS", "CMCSA"];
-        } else if (ind.includes("rating") || ind.includes("financial data") || ind.includes("exchange") || ind.includes("analytics")) {
-          peerTickers = ["SPGI", "MCO", "MSCI", "FDS"];
-        } else if (
-          ind.includes("asset management") ||
-          ind.includes("wealth management") ||
-          ind.includes("investment management") ||
-          sym.includes("BLK") ||
-          sym.includes("STT") ||
-          sym.includes("TROW") ||
-          sym.includes("IVZ")
-        ) {
-          peerTickers = ["STT", "TROW", "IVZ", "BX", "BAM", "BEN"];
-        } else if (sec.includes("financial") || ind.includes("bank")) {
-          peerTickers = ["JPM", "BAC", "GS", "MS"];
-        } else if (sec.includes("health") || ind.includes("pharma")) {
-          peerTickers = ["JNJ", "PFE", "ABBV", "MRK"];
-        } else if (isHardwareCompany(companyProfile.sector, companyProfile.industry, companyProfile.description, companyProfile.name) || ind.includes("computer hardware") || ind.includes("electronic components") || ind.includes("computer peripherals") || ind.includes("data storage")) {
-          // Hardware peers only — never SaaS/platform names (no MSFT/GOOGL/META here).
-          peerTickers = ["DELL", "HPQ", "HPE", "LOGI", "NTAP", "STX"];
-        } else if (isSoftwareCompany(companyProfile.sector, companyProfile.industry, companyProfile.description, companyProfile.name) || ind.includes("application software") || ind.includes("systems software")) {
-          peerTickers = ["MSFT", "ORCL", "ADBE", "CRM", "INTU", "NOW"];
-        } else if (sec.includes("tech") || ind.includes("software")) {
-          peerTickers = ["AAPL", "MSFT", "GOOGL", "META"];
-        } else if (sec.includes("energy") || ind.includes("oil")) {
-          peerTickers = ["XOM", "CVX", "COP", "PSX"];
-        } else if (
-          ind.includes("auto") ||
-          ind.includes("motor") ||
-          ind.includes("vehicle") ||
-          ["TSLA", "F", "GM", "TM", "HMC", "RIVN", "LCID", "STLA", "NIO", "XPEV", "LI"].includes(sym) ||
-          (companyProfile.description || "").toLowerCase().includes("electric vehicle") ||
-          (companyProfile.description || "").toLowerCase().includes("automotive")
-        ) {
-          peerTickers = ["F", "GM", "TM", "RIVN", "STLA", "HMC"];
-        } else if (isHospitalityCompany(companyProfile.sector, companyProfile.industry, companyProfile.description, companyProfile.name) || ind.includes("lodg") || ind.includes("hotel") || ind.includes("resort") || ind.includes("hospitality")) {
-          peerTickers = ["MAR", "HLT", "H", "IHG", "WH", "CHH"];
-        } else if (isRealEstateCompany(companyProfile.sector, companyProfile.industry, companyProfile.description, companyProfile.name) || ind.includes("reit") || ind.includes("real estate") || ind.includes("property")) {
-          peerTickers = ["AMT", "PLD", "EQIX", "PSA", "O"];
-        } else if (
-          ind.includes("apparel") ||
-          ind.includes("footwear") ||
-          ind.includes("textile") ||
-          ind.includes("sportswear") ||
-          ind.includes("luxury") ||
-          ind.includes("accessories") ||
-          sym.includes("NKE") ||
-          sym.includes("LULU") ||
-          sym.includes("DECK") ||
-          sym.includes("CROX")
-        ) {
-          peerTickers = ["NKE", "LULU", "DECK", "CROX", "SKX", "HBI"];
-        } else {
-          // No generic catch-all bucket: unrelated industrials (HON/GE/CAT/UPS)
-          // contaminated every unclassified report. Empty list suppresses the
-          // relative-valuation conclusion instead of fabricating comparables.
-          peerTickers = [];
-        }
-      }
-
-      // Up to 6 peers (never fewer than the curated set when it qualifies) —
-      // the old slice(0, 4) silently dropped the 5th/6th comparable (NOW for
-      // MSFT) even when the similarity gate would have passed them.
-      const filteredPeers = peerTickers.filter(t => t.toUpperCase() !== symbol.toUpperCase()).slice(0, 6);
-
-      if (filteredPeers.length > 0) {
-        const peerRaw = await fetchPeerQuotes(filteredPeers);
-        // Priority 1+5: hard ontology is the candidate universe authority; similarity engine scores.
-        const ontology = buildCompanyOntology(companyProfile, archetypeProfile as never);
-        // Prefer ontology competitor universe when curated branch left gaps (general fallback).
-        if (peerTickers.length === 0 && ontology.competitors.length > 0) {
-          // (candidate pool already fixed above; ontology documents the intended universe for QA)
-        }
-        peers = peerRaw.map(p => {
-          const tickerStr = (p.symbol as string) || "";
-          const parseNum = (v: any): number | null => {
-            if (v === null || v === undefined || v === "") return null;
-            const n = Number(v);
-            return isFinite(n) && !isNaN(n) ? n : null;
-          };
-
-          const pCap = parseNum(p.marketCap);
-          const pCmp = parseNum(p.regularMarketPrice);
-          const pPe = parseNum(p.trailingPE);
-          const pEvEbitda = parseNum(p.enterpriseToEbitda);
-          const pEvSales = parseNum(p.enterpriseToRevenue);
-          const pPb = parseNum(p.priceToBook);
-          const pRoe = parseNum(p.returnOnEquity);
-          const pNetMargin = parseNum(p.profitMargins);
-          const pRevGrowth = parseNum(p.revenueGrowth);
-          const pDivYield = parseNum(p.dividendYield);
-          const pGrossMargin = parseNum(p.grossMargins);
-          const pEbitdaMargin = parseNum(p.ebitdaMargins);
-          const pOpMargin = parseNum(p.operatingMargins);
-          const pDebtToEquity = parseNum(p.debtToEquity);
-          const pCurrentRatio = parseNum(p.currentRatio);
-          const pBeta = parseNum((p as Record<string, unknown>).beta);
-
-          // Priority 5: business-model similarity engine (operating model + geography +
-          // growth + margins + capital intensity + size). Ontology is the authority.
-          const qSec = ((p.sector as string) || "").toLowerCase() || null;
-          const qInd = ((p.industry as string) || "").toLowerCase() || null;
-          let relevanceScore: number | null = null;
-          if (qSec || qInd) {
-            const breakdown = scorePeerSimilarity({
-              profile: companyProfile,
-              stockData,
-              annualFinancials,
-              ontologySectorId: ontology.sectorId,
-              ontologyArchetype: ontology.operatingArchetype,
-              peer: {
-                sector: qSec,
-                industry: qInd,
-                currency: (p.currency as string) || null,
-                marketCap: pCap,
-                roe: pRoe,
-                netMargin: pNetMargin,
-                revenueGrowth: pRevGrowth,
-                debtToEquity: pDebtToEquity,
-              },
-            });
-            relevanceScore = breakdown.total;
-          }
-
-          return {
-            ticker: tickerStr,
-            name: (p.longName as string) || (p.shortName as string) || tickerStr,
-            // Missing market data stays null (renders N/M) — never invented constants.
-            marketCap: pCap,
-            cmp: pCmp,
-            pe: pPe,
-            evToEbitda: pEvEbitda,
-            evToSales: pEvSales,
-            dividendYield: pDivYield,
-            pb: pPb,
-            roe: pRoe,
-            netMargin: pNetMargin,
-            grossMargin: pGrossMargin,
-            ebitdaMargin: pEbitdaMargin,
-            operatingMargin: pOpMargin,
-            debtToEquity: pDebtToEquity,
-            currentRatio: pCurrentRatio,
-            revenueGrowth: pRevGrowth,
-            // Point-in-time peer beta for the median beta engine (P0 #57) —
-            // null when undisclosed (single-beta path, limitation disclosed).
-            beta: pBeta,
-            // Missing peer currency stays null (renders N/M) — never inherit
-            // the subject's currency, which stamps wrong FX on foreign peers.
-            currency: (p.currency as string) || null,
-            sector: qSec,
-            industry: qInd,
-            relevanceScore,
-          };
-        }).filter(p => p.ticker && (p.marketCap != null || p.cmp != null || p.pe != null));
-        // Priority 5 gate: suppress relative valuation when similarity is insufficient.
-        const gate = gatePeerSet(peers as never);
-        if (gate.suppress) {
-          console.warn(`Peer similarity gate suppressed relative valuation for ${symbol}: ${gate.reason}`);
-          peers = [];
-        }
-      }
-    } catch (peerError) {
-      console.warn("Peer fetch failed:", peerError);
-    }
+    // Await peer data promise (launched in parallel above)
+    const peers = await peersPromise;
 
     const masterReportFacts = buildMasterReportFacts({
       stockData,
@@ -452,7 +306,7 @@ export async function GET(request: NextRequest) {
       beta: stockData.beta as number | undefined,
       country: companyProfile.country,
       dcf: { enterpriseValue: (dcf as any).enterpriseValue, sumPvFcff: (dcf as any).sumPvFcff, pvTerminalValue: (dcf as any).pvTerminalValue, equityValue: (dcf as any).equityValue, netDebt: (dcf as any).netDebt, financeReceivablesOffset: (dcf as any).financeReceivablesOffset, intrinsicValue: (dcf as any).intrinsicValue, fairValuePerShare: (dcf as any).intrinsicValue, sharesOutstanding: (dcf as any).sharesOutstanding ?? stockData.sharesOutstanding ?? 1, currentMarketPrice: stockData.currentPrice, assumptions: dcf.assumptions as any },
-      ledger: { fairValue: (masterReportFacts as any).valuation?.fairValue ?? dcf.intrinsicValue, targetPrice: (masterReportFacts as any).valuation?.fairValue ?? dcf.intrinsicValue, currentPrice: stockData.currentPrice, enterpriseValue: (dcf as any).enterpriseValue, equityValue: (dcf as any).equityValue, netDebt: (dcf as any).netDebt, sharesOutstanding: (dcf as any).sharesOutstanding, wacc: (dcf.assumptions as any)?.wacc, rating: (masterReportFacts as any).rating ?? "HOLD" },
+      ledger: { fairValue: (masterReportFacts as any).valuation?.fairValue ?? dcf.intrinsicValue, targetPrice: (masterReportFacts as any).valuation?.fairValue ?? dcf.intrinsicValue, currentPrice: stockData.currentPrice, enterpriseValue: (dcf as any).enterpriseValue, equityValue: (dcf as any).equityValue, netDebt: (dcf as any).netDebt, sharesOutstanding: (dcf as any).sharesOutstanding, wacc: (dcf.assumptions as any)?.wacc, rating: masterReportFacts.recommendation?.rating ?? "HOLD" },
     });
 
     // P0 #10 — CanonicalReport (single approved object, sealed)
@@ -488,6 +342,9 @@ export async function GET(request: NextRequest) {
         dcf: dcf as never,
       });
     } catch (e) { console.warn("Evidence registry build failed (non-blocking):", e); }
+
+    // Await news + event price history promise (launched in parallel above)
+    const { tickerNews, eventPriceLookup } = await newsPromise;
 
     return NextResponse.json({
       pipeline: lifecycle.history_(),

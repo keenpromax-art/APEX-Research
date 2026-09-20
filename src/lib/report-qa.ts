@@ -39,6 +39,10 @@ import { buildCanonicalFacts } from "./canonical-facts";
 import { validateIndependently } from "./independent-validator";
 import type { IndependentIssue } from "./independent-validator";
 import { reconcileForecast } from "./forecast-reconciliation";
+import { validateGrowthClaims } from "./claims";
+// TODO: claims.ts:validateClaims() is deprecated. Use claim-validator.ts:validateClaimSet() with EvidenceRegistry
+// for unified temporal/directional matching. The old flat-allowlist validator does not support period-aware
+// evidence filtering or directional consistency checks.
 
 const SECTOR_KEYWORD_BLOCKLIST: Record<string, { blocked: string[]; sectorNames: string[] }> = {
   telecom: {
@@ -667,6 +671,27 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
     }
   }
 
+  // MOAT-03: Moat State Consistency — MOAT=NONE and PILLARS=UNASSESSED cannot coexist.
+  // If evidence is insufficient, MOAT must be UNASSESSED.
+  // If evaluated and no durable advantage found, MOAT = NONE with evidence.
+  {
+    const aiMoat = (data.aiAnalysis as any)?.competitiveMoat || "";
+    const moatRating = (data.masterReportFacts as any)?.moat?.rating;
+    const moatPillars = (data as any).peAnalysis?.moatPillars || [];
+    const hasUnassessedPillar = moatPillars.some((p: any) => !p.pillar || p.pillar === "None" || p.durability === "Unassessed" || p.durability === "N/A");
+    const hasNoneRating = moatRating === "None" || moatRating === "NONE" || aiMoat.toLowerCase().includes("no economic moat") || aiMoat.toLowerCase().includes("moat = none");
+    const hasUnassessedRating = moatRating === "UNASSESSED" || moatRating === "Unassessed";
+
+    if (hasNoneRating && (!moatPillars.length || hasUnassessedPillar)) {
+      checks.push({
+        id: "MOAT-03", category: "BS_DETECTOR", name: "Moat State Consistency",
+        status: "WARN",
+        details: `Moat state contradiction: economic moat rated "None" but moat pillars are unassessed or empty. If evidence is insufficient, moat should be "UNASSESSED". If evaluated with no durable advantage, pillars must present supporting evidence for "None" verdict.`,
+        expected: "moat rating consistent with pillar assessment", actual: "NONE + UNASSESSED contradiction",
+      });
+    }
+  }
+
   // 3f. ROIC vs Capital Stewardship Alignment
   const roicSpreadValCheck = ledger?.roicSpread !== undefined ? ledger.roicSpread : (ledger?.roic ? ledger.roic - wacc : 0);
   const stewardshipLabel = (data as any).companyArchetype?.capitalAllocationLabel || (data as any).masterReportFacts?.capitalAllocationLabel || "";
@@ -1071,6 +1096,74 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
           name: `Sector-Native Identity Reconciliation (${archKind})`,
           status: "PASS",
           details: `${archKind} statements reconcile on their own identities across ${archEvaluated} year(s) — no generic corporate checks applied (no EBITDA/inventory/DSO for financials, no combined ratio outside insurance, no gross margin for REIT/fee).`,
+        });
+      }
+    }
+  }
+
+  // DISC-01: Material line-item discontinuity — a historically material operating
+  // line item that vanishes in forecast years without explanation.
+  {
+    const annuals = data.annualFinancials || [];
+    const fc = (data as any).canonicalForecast as { projections?: Array<Record<string, unknown>> } | null;
+    if (annuals.length >= 2 && fc?.projections?.length) {
+      const lineItems = [
+        { name: "Other Operating Expense", historical: (y: any) => Number(y.totalOperatingExpense ?? 0) - Number(y.costOfRevenue ?? 0) - Number(y.sellingGeneralAdmin ?? 0) - Number(y.researchDevelopment ?? 0), forecast: (p: Record<string, unknown>) => Number(p.otherOperatingExpense ?? 0), threshold: 0.005, label: "otherOperatingExpense" },
+      ];
+      const avgRevenue = annuals.reduce((s, y) => s + (Number((y as any).revenue) || 0), 0) / annuals.length;
+      for (const li of lineItems) {
+        const histValues = annuals.map(li.historical).filter(v => Number.isFinite(v) && v !== 0);
+        if (histValues.length < 2) continue;
+        const avgHist = Math.abs(histValues.reduce((s, v) => s + v, 0) / histValues.length);
+        const isMaterial = avgRevenue > 0 && (avgHist / avgRevenue) > li.threshold;
+        if (!isMaterial) continue;
+        const forecastValues = (fc.projections || []).map(li.forecast);
+        const allZero = forecastValues.every(v => v === 0 || !Number.isFinite(v));
+        if (allZero) {
+          checks.push({
+            id: "DISC-01", category: "BS_DETECTOR", name: "Material Line Discontinuity",
+            status: "WARN",
+            details: `Historically material line item "${li.name}" (avg ${avgRevenue > 0 ? ((avgHist / avgRevenue) * 100).toFixed(1) + '% of revenue' : 'abs ' + avgHist.toFixed(0)}) is present across ${histValues.length} historical years but absent/zero in all forecast periods. Requires explicit classification: RECURRING | NON_RECURRING | RECLASSIFIED | ONE_OFF_REMOVAL | DATA_ERROR.`,
+            expected: "explicit classification or continuation", actual: "all forecast values zero/missing",
+          });
+        }
+      }
+    }
+  }
+
+  // CF-ANOMALY: Cash flow anomaly detection — large non-cash adjustments,
+  // unusual working capital swings, or FCF vs CFO divergence.
+  {
+    const annuals = data.annualFinancials || [];
+    const latest = annuals[annuals.length - 1] as any;
+    if (latest) {
+      const revenue = Number(latest.revenue) || 0;
+      const cfo = Number(latest.operatingCashFlow) || 0;
+      const netIncome = Number(latest.netIncome) || 0;
+      const capex = Number(latest.capitalExpenditure) || 0;
+      const fcf = cfo + capex; // capex is typically negative
+      const changeInWorkingCapital = Number(latest.changeInWorkingCapital) || 0;
+
+      // Non-cash adjustment detection: |CFO - Net Income - D&A + ΔWC| should be small relative to revenue
+      const depreciation = Number(latest.depreciation) || 0;
+      const nonCashResidual = Math.abs(cfo - netIncome - depreciation + changeInWorkingCapital);
+      const nonCashThreshold = Math.max(revenue * 0.05, 50_000_000); // 5% of revenue or $50M absolute
+      if (nonCashResidual > nonCashThreshold && revenue > 0) {
+        checks.push({
+          id: "CF-ANOMALY", category: "BS_DETECTOR", name: "Cash Flow Anomaly Detection",
+          status: "WARN",
+          details: `Non-cash adjustment residual (${((nonCashResidual / revenue) * 100).toFixed(1)}% of revenue) exceeds threshold — CFO (${(cfo / 1e6).toFixed(1)}M) minus Net Income (${(netIncome / 1e6).toFixed(1)}M) minus D&A (${(depreciation / 1e6).toFixed(1)}M) plus ΔWC (${(changeInWorkingCapital / 1e6).toFixed(1)}M) = $${((cfo - netIncome - depreciation + changeInWorkingCapital) / 1e6).toFixed(1)}M unexplained. Investigate non-cash items, deferred taxes, SBC, or working capital anomalies.`,
+          expected: `|CFO - NI - D&A + ΔWC| < ${((nonCashThreshold / revenue) * 100).toFixed(1)}% of revenue`, actual: `${((nonCashResidual / revenue) * 100).toFixed(1)}%`,
+        });
+      }
+
+      // FCF quality: FCF/CFO ratio — if FCF << CFO, capex is consuming operating cash
+      if (cfo > 0 && fcf < cfo * 0.3) {
+        checks.push({
+          id: "CF-ANOMALY", category: "BS_DETECTOR", name: "FCF Quality Warning",
+          status: "WARN",
+          details: `FCF ($${(fcf / 1e6).toFixed(1)}M) is only ${((fcf / cfo) * 100).toFixed(0)}% of CFO ($${(cfo / 1e6).toFixed(1)}M) — heavy capex burden or investing intensity. Verify capex classification (growth vs maintenance).`,
+          expected: "FCF > 50% of CFO for mature companies", actual: `${((fcf / cfo) * 100).toFixed(0)}%`,
         });
       }
     }
@@ -1689,6 +1782,35 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
     }
   }
 
+  // REVERSE-DCF: Extreme Market-Implied Assumption Detection — flag when
+  // reverse DCF implies growth/margins far outside historical ranges.
+  {
+    const dcf = data.dcf;
+    const annuals = data.annualFinancials || [];
+    const ai = data.aiAnalysis as any;
+    // Check if reverse DCF data is available in the AI analysis or DCF
+    const reverseDcfText = JSON.stringify(ai?.valuationContext || ai?.reverseDcf || ai?.scenarioAnalysis || "").toLowerCase();
+    // Look for implied growth rates in narrative
+    const impliedGrowthMatch = reverseDcfText.match(/implied.*?(\d+\.?\d*)\s*%.*?(?:cagr|growth|revenue)/i);
+    if (impliedGrowthMatch && annuals.length >= 3) {
+      const implied = parseFloat(impliedGrowthMatch[1]) / 100;
+      // Compute historical revenue CAGR
+      const revs = annuals.map((y: any) => Number(y.revenue) || 0).filter(r => r > 0);
+      if (revs.length >= 3) {
+        const histCagr = (Math.pow(revs[revs.length - 1] / revs[0], 1 / (revs.length - 1)) - 1);
+        const divergence = Math.abs(implied - histCagr);
+        if (divergence > 0.30) {
+          checks.push({
+            id: "REVERSE-DCF", category: "BS_DETECTOR", name: "Reverse DCF Plausibility",
+            status: "WARN",
+            details: `Reverse DCF implies ${((implied) * 100).toFixed(1)}% revenue CAGR vs historical ${(histCagr * 100).toFixed(1)}% — ${(divergence * 100).toFixed(0)}pp divergence suggests extreme market-implied assumptions. Investigate whether market pricing reflects structural change or mispricing.`,
+            expected: `implied within ±30pp of historical`, actual: `${(divergence * 100).toFixed(0)}pp divergence`,
+          });
+        }
+      }
+    }
+  }
+
   // CLAIM-01: Fact-bound narrative — every material numeric claim must be traceable to a validated fact/claim ID (Priority 5)
   // Unsupported raw numbers (e.g., fabricated RevPAR Rs 8,400, occupancy 68%) cannot reach PDF without evidence linkage.
   // Enforce via placeholder discipline and allowlist of model facts: only numbers present in DCF/ledger/financials are permitted.
@@ -1707,13 +1829,31 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
         actual: leaked,
       });
     } else {
-      // Allowlist of model-grounded numbers: CMP, FV, upside, growth rates, margins, wacc, tgr, revenue, ebitda, shares
+      // Allowlist of model-grounded numbers: CMP, FV, upside, growth rates, margins, wacc, tgr,
+      // plus financials (revenue, EBITDA, net income), market multiples (P/E, P/B, P/S, EV/EBITDA),
+      // shares outstanding, beta — so AI narratives referencing actual data aren't falsely blocked.
       const modelFacts: number[] = [];
       if (Number.isFinite(cmp)) modelFacts.push(cmp, fv);
       if (Array.isArray((data.dcf as any)?.assumptions?.revenueGrowthRates)) modelFacts.push(...(data.dcf as any).assumptions.revenueGrowthRates);
       if (Array.isArray(data.dcf?.assumptions?.ebitMargins)) modelFacts.push(...data.dcf.assumptions.ebitMargins);
       if (Number.isFinite(wacc)) modelFacts.push(wacc);
       if (Number.isFinite(tgr)) modelFacts.push(tgr);
+      // Financial facts from Yahoo fundamentals
+      const sd = data.stockData || (data as any);
+      const financialFields = ["revenue", "ebitda", "netIncome", "totalDebt", "cash", "operatingCashFlow", "freeCashFlow", "totalEquity", "earningsPerShare", "bookValuePerShare", "dividendPerShare"];
+      for (const field of financialFields) {
+        const v = Number((sd as any)[field]);
+        if (Number.isFinite(v) && v !== 0) modelFacts.push(v);
+      }
+      // Market multiples
+      const multFields = ["trailingPE", "forwardPE", "priceToBook", "priceToSales", "evToEbitda", "pegRatio", "beta"];
+      for (const field of multFields) {
+        const v = Number((sd as any)[field]);
+        if (Number.isFinite(v) && v !== 0) modelFacts.push(v);
+      }
+      // Shares outstanding and market cap
+      if (Number.isFinite(Number(sd.sharesOutstanding))) modelFacts.push(Number(sd.sharesOutstanding));
+      if (Number.isFinite(Number(sd.marketCap))) modelFacts.push(Number(sd.marketCap));
       // Extract candidate unsupported percentages / currency figures from thesis-like fields only (narrow to avoid flagging dates/years)
       const thesisFields = [ (data.aiAnalysis as any)?.investmentThesis, (data as any)?.peAnalysis?.investmentThesis, (data.aiAnalysis as any)?.companyOverview].filter(Boolean).join(" ");
       const pctMatches = Array.from(thesisFields.matchAll(/(\d+(?:\.\d+)?)\s*%/g)).map(m => parseFloat(m[1]) / 100);
@@ -1970,6 +2110,159 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
     }
   }
 
+  // NARR-CONTRADICT: Narrative-Model Contradiction Detection — flags when the
+  // AI narrative makes qualitative claims that contradict the financial model.
+  {
+    const fullNarrative = JSON.stringify({ ...(data.aiAnalysis || {}), ...(data as any).peAnalysis || {} }).toLowerCase();
+    const dcf = data.dcf;
+    const annuals = data.annualFinancials || [];
+
+    // Helper to check if narrative contains a phrase
+    const hasPhrase = (phrases: string[]) => phrases.some(p => fullNarrative.includes(p));
+
+    // 1. "Strong cash generation" vs declining FCF
+    if (annuals.length >= 2) {
+      const recent = annuals.slice(-2) as any[];
+      const fcfTrend = (Number(recent[1]?.operatingCashFlow ?? 0) + Number(recent[1]?.capitalExpenditure ?? 0)) - (Number(recent[0]?.operatingCashFlow ?? 0) + Number(recent[0]?.capitalExpenditure ?? 0));
+      if (fcfTrend < 0 && hasPhrase(["strong cash generation", "robust cash", "solid cash flow", "healthy cash conversion"])) {
+        checks.push({
+          id: "NARR-CONTRADICT", category: "BS_DETECTOR", name: "Narrative-Model Contradiction",
+          status: "WARN",
+          details: `Narrative claims positive cash generation but FCF declined ${(Math.abs(fcfTrend) / 1e6).toFixed(1)}M year-over-year. Qualitative language should reflect actual trend.`,
+          expected: "narrative consistent with FCF trend", actual: "contradiction detected",
+        });
+      }
+    }
+
+    // 2. "Margin expansion" vs declining EBIT margins
+    if (annuals.length >= 2) {
+      const recent = annuals.slice(-2) as any[];
+      const marginTrend = (Number(recent[1]?.operatingIncome ?? 0) / Math.max(1, Number(recent[1]?.revenue ?? 1))) - (Number(recent[0]?.operatingIncome ?? 0) / Math.max(1, Number(recent[0]?.revenue ?? 1)));
+      if (marginTrend < -0.01 && hasPhrase(["margin expansion", "margin improvement", "expanding margins", "margin tailwind"])) {
+        checks.push({
+          id: "NARR-CONTRADICT", category: "BS_DETECTOR", name: "Narrative-Model Contradiction",
+          status: "WARN",
+          details: `Narrative claims margin expansion but EBIT margin declined ${(Math.abs(marginTrend) * 100).toFixed(1)}pp year-over-year.`,
+          expected: "narrative consistent with margin trend", actual: "contradiction detected",
+        });
+      }
+    }
+
+    // 3. "Revenue acceleration" vs decelerating growth
+    if (annuals.length >= 3) {
+      const revs = annuals.slice(-3).map((y: any) => Number(y.revenue) || 0);
+      if (revs[0] > 0 && revs[1] > 0 && revs[2] > 0) {
+        const g1 = (revs[1] - revs[0]) / revs[0];
+        const g2 = (revs[2] - revs[1]) / revs[1];
+        if (g2 < g1 - 0.02 && hasPhrase(["revenue acceleration", "accelerating growth", "growth acceleration", "revenue momentum"])) {
+          checks.push({
+            id: "NARR-CONTRADICT", category: "BS_DETECTOR", name: "Narrative-Model Contradiction",
+            status: "WARN",
+            details: `Narrative claims revenue acceleration but growth decelerated from ${(g1 * 100).toFixed(1)}% to ${(g2 * 100).toFixed(1)}%.`,
+            expected: "narrative consistent with growth trend", actual: "contradiction detected",
+          });
+        }
+      }
+    }
+
+    // 4. "Strong balance sheet" vs deteriorating leverage
+    if (annuals.length >= 2) {
+      const recent = annuals.slice(-2) as any[];
+      const lev0 = Number(recent[0]?.totalDebt ?? 0) / Math.max(1, Number(recent[0]?.totalEquity ?? 1));
+      const lev1 = Number(recent[1]?.totalDebt ?? 0) / Math.max(1, Number(recent[1]?.totalEquity ?? 1));
+      if (lev1 > lev0 * 1.15 && hasPhrase(["strong balance sheet", "fortress balance sheet", "conservative leverage", "low leverage"])) {
+        checks.push({
+          id: "NARR-CONTRADICT", category: "BS_DETECTOR", name: "Narrative-Model Contradiction",
+          status: "WARN",
+          details: `Narrative claims strong balance sheet but debt/equity ratio increased from ${lev0.toFixed(2)}x to ${lev1.toFixed(2)}x.`,
+          expected: "narrative consistent with leverage trend", actual: "contradiction detected",
+        });
+      }
+    }
+
+    // CAT-01: Catalyst Valuation Transmission — numerical sensitivity ranges
+    // (e.g., "+10% to +15%") must be model-derived, not invented.
+    {
+      const catalysts = (data.aiAnalysis as any)?.catalysts || [];
+      const catalystText = JSON.stringify(catalysts).toLowerCase();
+      const hasNumericalImpact = /\+?\d+\.?\d*\s*%?\s*(?:to|[-–])\s*\+?\d+\.?\d*\s*%/.test(catalystText);
+      const hasModelBridge = fullNarrative.includes("dcf") || fullNarrative.includes("fair value") || fullNarrative.includes("valuation model");
+
+      if (hasNumericalImpact && !hasModelBridge && catalysts.length > 0) {
+        const pctMatch = catalystText.match(/\+?\d+\.?\d*\s*%?\s*(?:to|[-–])\s*\+?\d+\.?\d*\s*%/);
+        checks.push({
+          id: "CAT-01", category: "BS_DETECTOR", name: "Catalyst Valuation Transmission",
+          status: "WARN",
+          details: `Catalyst claims numerical valuation impact (${pctMatch?.[0] ?? "detected"}) without visible DCF/fair-value model bridge. Numerical sensitivity ranges should be model-derived: CATALYST → OPERATING DRIVER → REVENUE/MARGIN → EBIT → FCF → DCF → FAIR VALUE → $/SHARE IMPACT. If not model-derived, label as QUALITATIVE.`,
+          expected: "model-derived valuation sensitivity", actual: "numerical range without model bridge",
+        });
+      }
+    }
+  }
+
+  // NARRATIVE-GROWTH-ACTUALS: Validate narrative growth claims against
+  // historical annualFinancials. Flags claims where narrative growth rate
+  // differs from actual revenue CAGR by more than 10pp.
+  {
+    const narrativeText = JSON.stringify({ ...(data.aiAnalysis || {}), ...(data as any).peAnalysis || {} });
+    const growthValidation = validateGrowthClaims(narrativeText, data.annualFinancials);
+    const flaggedGrowth = growthValidation.filter((g) => g.flagged);
+    if (flaggedGrowth.length > 0) {
+      const details = flaggedGrowth
+        .map((g) => `Claim "${g.claim.text.slice(0, 80)}" implies ${g.claim.numericValue?.toFixed(1)}% vs actual CAGR ${g.actualCAGR.toFixed(1)}% (${g.divergence.toFixed(1)}pp divergence)`)
+        .join("; ");
+      checks.push({
+        id: "NARR-GROWTH-01",
+        category: "CROSS_REFERENCE",
+        name: "Narrative Growth Claims vs Actuals",
+        status: "WARN",
+        details: `Narrative growth claims diverge from historical actual revenue CAGR (${growthValidation.length > 0 ? growthValidation[0].actualCAGR.toFixed(1) + "%" : "N/A"}): ${details}. Verify narrative growth assertions against reported financials.`,
+        expected: "Narrative growth within 10pp of actual CAGR",
+        actual: `${flaggedGrowth.length} claim(s) exceed 10pp divergence`,
+      });
+    } else {
+      checks.push({
+        id: "NARR-GROWTH-01",
+        category: "CROSS_REFERENCE",
+        name: "Narrative Growth Claims vs Actuals",
+        status: "PASS",
+        details: growthValidation.length > 0
+          ? `Narrative growth claims align with actual revenue CAGR (${growthValidation[0].actualCAGR.toFixed(1)}%).`
+          : "No growth-rate claims detected in narrative.",
+      });
+    }
+  }
+
+  // NARR-GENERIC: Generic Company Overview Detection — flag when overview
+  // uses boilerplate language without company-specific financial or segment detail.
+  {
+    const ai = data.aiAnalysis as any;
+    const overview = (ai?.companyOverview ?? ai?.overview ?? ai?.companyDescription ?? "").toLowerCase();
+    if (overview.length > 0) {
+      const genericPhrases = [
+        "leading provider", "committed to delivering", "our mission is",
+        "we are a", "our vision", "dedicated to", "we strive",
+        "world-class", "best-in-class", "industry-leading", "premier",
+        "cutting-edge", "innovative solutions", "value creation",
+        "stakeholder value", "sustainable growth", "operational excellence",
+        "synerg", "leverage our", "diversified portfolio",
+      ];
+      const matches = genericPhrases.filter(p => overview.includes(p));
+      const hasSegmentDetail = overview.includes("segment") || overview.includes("business unit")
+        || overview.includes("revenue by") || /\d+%/.test(overview);
+      const hasFinancialDetail = /\$[\d,.]+|revenue.*\$|margin|ebitda|net income/i.test(overview);
+
+      if (matches.length >= 3 && !hasSegmentDetail && !hasFinancialDetail) {
+        checks.push({
+          id: "NARR-GENERIC", category: "BS_DETECTOR", name: "Generic Company Overview",
+          status: "WARN",
+          details: `Company overview contains ${matches.length} generic boilerplate phrases (${matches.slice(0, 5).join("; ")}) with no segment-level or financial detail. Overview should reference actual business segments, revenue mix, or key metrics — not generic corporate language.`,
+          expected: "Company-specific segment/financial detail", actual: `${matches.length} generic phrases, no financial anchors`,
+        });
+      }
+    }
+  }
+
   // EVENT-01: illustrative trajectories must never pose as an empirical event study.
   // Measured sessions may carry abnormal-return verdicts; illustrative sketches may
   // only support directional tracking. An "event study confirms" style claim with
@@ -2020,6 +2313,24 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
         name: "Event-Study Evidence Standard",
         status: "PASS",
         details: evts.length === 0 ? `No event-study claims — nothing to evidence.` : `Event evidence standard met (${measuredCount} measured / ${illustCount} illustrative).`,
+      });
+    }
+  }
+
+  // EVENT-01: Event Study Evidence Standard — event descriptions must not be
+  // labeled as empirical event studies without actual price-window data.
+  {
+    const ai = data.aiAnalysis as any;
+    const events = ai?.catalysts || [];
+    const eventText = JSON.stringify(events).toLowerCase();
+    const hasEventStudy = eventText.includes("event study") || eventText.includes("abnormal return") || eventText.includes("cumulative abnormal");
+    const hasSessionData = eventText.includes("trading session") || eventText.includes("event window") || eventText.includes("price window");
+    if (hasEventStudy && !hasSessionData) {
+      checks.push({
+        id: "EVENT-01", category: "BS_DETECTOR", name: "Event Study Evidence Standard",
+        status: "WARN",
+        details: `Event descriptions reference "event study" or "abnormal return" language without empirical price-window/session data. These must be labeled "ILLUSTRATIVE EVENT FRAMEWORK" — do not make abnormal-return conclusions without actual event-date, benchmark, and expected-return methodology.`,
+        expected: "ILLUSTRATIVE label or empirical data", actual: "empirical language without empirical data",
       });
     }
   }
@@ -2367,12 +2678,11 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
   {
     const fc: any = (data as any).canonicalForecast;
     if (!fc || !Array.isArray(fc.projections) || fc.projections.length===0) {
-      // Backward compat: test fixtures / legacy cache without canonicalForecast use DCF assumptions as single source — WARN not BLOCK
       const hasDcfAssumps = !!(data.dcf as any)?.assumptions?.revenueGrowthRates;
       if (hasDcfAssumps) {
-        checks.push({ id: "FCST-01", category: "CROSS_REFERENCE", name: "Single Canonical Forecast", status: "WARN", details: `Canonical forecast not attached (legacy fixture) — DCF assumptions carry the single source for this run; attach canonicalForecast in live pipeline to PASS.`, expected: "5Y projections", actual: "legacy DCF assumptions" });
+        checks.push({ id: "FCST-01", category: "CROSS_REFERENCE", name: "Single Canonical Forecast", status: "FAIL", details: `FATAL PUBLICATION BLOCK: Canonical forecast not attached — DCF assumptions exist but canonical forecast object is missing. The canonical forecast is the ONLY authoritative forward pipeline; without it, forecast reconciliation (FCST-02..05) cannot verify integrity.`, expected: "5Y canonical forecast with projections", actual: "legacy DCF assumptions only" });
       } else {
-        checks.push({ id: "FCST-01", category: "CROSS_REFERENCE", name: "Single Canonical Forecast", status: "FAIL", details: `FATAL: no canonical forecast built — DCF/ratios/PDF have no single source; independent forecast prohibited.`, expected: "5Y projections", actual: "missing" });
+        checks.push({ id: "FCST-01", category: "CROSS_REFERENCE", name: "Single Canonical Forecast", status: "FAIL", details: `FATAL PUBLICATION BLOCK: no canonical forecast built — DCF/ratios/PDF have no single source; independent forecast prohibited.`, expected: "5Y projections", actual: "missing" });
       }
     } else {
       // cross-check DCF projections length if present. An EMPTY array is not a
@@ -2423,6 +2733,11 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
           },
           scenarioBaseVector: ledgerScen?.base?.inputVector ? { revenueGrowth: ledgerScen.base.inputVector.revenueGrowth, ebitMargin: ledgerScen.base.inputVector.ebitMargin } : null,
           enforceDcfLinkage: enforceLinkage,
+          dilutedSharesFromFacts: (() => {
+            const cf: any = (data as any).canonicalFacts;
+            const val = cf?.market?.sharesDiluted?.value;
+            return typeof val === "number" && val > 0 ? val : undefined;
+          })(),
         }) as unknown as typeof findings;
       } catch (e) {
         findings = [{ rule: "revenue-bridge", pass: false, severity: "blocker", expected: "reconciliation runnable", actual: String(e).slice(0, 80), detail: `Reconciliation harness threw — treat as blocker: ${String(e).slice(0, 160)}` }];
@@ -2447,7 +2762,7 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
         }
       };
       emit("FCST-02", "Forecast Bridges (Revenue/EBIT/Pretax/NI/CFO/FCF)", ["revenue-bridge", "ebit-bridge", "pretax-bridge", "net-income-bridge", "cfo-bridge", "fcf-bridge"]);
-      emit("FCST-03", "Forecast Roll-Forwards (Cash/Debt/PP&E/Shares)", ["cash-roll-forward", "debt-roll-forward", "ppe-roll-forward", "share-count-roll-forward"]);
+      emit("FCST-03", "Forecast Roll-Forwards (Cash/Debt/PP&E/Shares)", ["cash-roll-forward", "debt-roll-forward", "ppe-roll-forward", "share-count-roll-forward", "share-count-reconciliation"]);
       emit("FCST-04", "Forecast→DCF Linkage + Scenario Vectors", ["dcf-linkage", "scenario-vector-identity"], enforceLinkage ? undefined : "RI vectors-only path — FCFF stream is narrative consistency only; linkage not enforced.");
       emit("FCST-05", "Forecast Continuity + Funding Liquidity", ["margin-continuity", "funding-liquidity"]);
     }
@@ -2503,6 +2818,33 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
   const gateStatus: "READY" | "READY_WITH_WARNINGS" | "BLOCKED" =
     failCount > 0 ? "BLOCKED" : warnCount > 0 ? "READY_WITH_WARNINGS" : "READY";
 
+  // ── Model Credit Auto-Downgrade ──────────────────────────────────────────
+  // When P0 or P1 failures exist, the model-implied credit rating must be
+  // downgraded from the archetype-computed value. Rules:
+  //   P0 FAIL exists → Model Credit = D (lowest)
+  //   P1 FAIL/WARN exists → Model Credit = B or C
+  //   Only P2 WARNs → Model Credit = A
+  //   Clean → Model Credit = AAA (unchanged)
+  const p0FailCount = checks.filter(c => c.status === "FAIL").length;
+  const p1FailCount = checks.filter(c => c.status === "WARN").length;
+  let adjustedCreditRating: string | undefined;
+  const baseRating = creditRating || "NR";
+
+  if (p0FailCount > 0) {
+    adjustedCreditRating = "D";
+  } else if (p1FailCount > 0) {
+    // Degrade: AA/AAA → B; A-range → C; BBB or below stays unchanged
+    if (baseRating.startsWith("AAA") || baseRating.startsWith("AA") || baseRating.startsWith("A")) {
+      adjustedCreditRating = "B";
+    } else {
+      adjustedCreditRating = "C";
+    }
+  } else if (warnCount > 0) {
+    adjustedCreditRating = "A";
+  } else {
+    adjustedCreditRating = "AAA";
+  }
+
   return {
     passed,
     score,
@@ -2518,6 +2860,7 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
       balanceSheetVariance: maxBsVariancePct,
       ratingAlignedWithUpside: failCount === 0,
     },
+    adjustedCreditRating,
   };
 }
 

@@ -225,19 +225,33 @@ export function capPillarsToRating<
 >(pillars: P[], rating: MoatRating): P[] {
   if (rating === "Wide") return pillars;
   if (rating === "Narrow") {
-    return pillars.map((p) =>
-      p.durability.startsWith("Wide")
-        ? {
-            ...p,
-            durability: "Narrow (7-10 Yrs)",
-            rationale: `${p.rationale.replace(/multi-decade|unassailable|permanent|unassailable legal barriers/gi, "defensible")} (Durability capped to composite Narrow moat.)`,
-          }
-        : p
-    );
+    return pillars.map((p) => {
+      const cappedDurability = p.durability.startsWith("Wide")
+        ? "Narrow (7-10 Yrs)"
+        : p.durability;
+      const cappedRationale = p.rationale
+        .replace(/wide[\s-]moat/gi, "narrow moat")
+        .replace(/durable[\s-]advantage/gi, "limited advantage")
+        .replace(/competitive advantage/gi, "modest competitive edge")
+        .replace(/multi-decade|unassailable|permanent|unassailable legal barriers/gi, "defensible")
+        .replace(/20[\s-]+\d[\s-]*year|20[\s-]+\d[\s-]*-yr/gi, "7-10 year")
+        + (cappedDurability !== p.durability ? " (Durability capped to composite Narrow moat.)" : "");
+      return {
+        ...p,
+        durability: cappedDurability,
+        rationale: cappedRationale,
+      };
+    });
   }
   return pillars.map((p) => ({
     ...p,
     durability: "None (< 3 Yrs)",
-    rationale: "Vulnerable to competitive encroachment and margin erosion without structural barriers.",
+    rationale: p.rationale
+      .replace(/wide[\s-]moat/gi, "no material moat")
+      .replace(/durable[\s-]advantage/gi, "absence of structural barriers")
+      .replace(/competitive advantage/gi, "lack of competitive differentiation")
+      .replace(/multi-decade|unassailable|permanent|unassailable legal barriers/gi, "no durable barriers")
+      .replace(/20[\s-]+\d[\s-]*year|20[\s-]+\d[\s-]*-yr/gi, "under 3 year")
+      + ". No material moat evidenced; returns trail cost of capital without structural barriers.",
   }));
 }

@@ -83,10 +83,21 @@ export interface ForecastYearStatement {
   pvFcff: number;
   shares: number;
   eps: number;
+  /** Diluted share count (when basic ≠ diluted is resolvable). */
+  dilutedShares?: number;
+  /** Diluted EPS = netIncome / dilutedShares. */
+  dilutedEps?: number;
   /** External funding required this year (>0) — cash floored at zero, gap disclosed, never printed negative. */
   fundingGap: number;
   /** Closing net PPE stock (present only under PP&E roll-forward depreciation). */
   ppeStock?: number;
+  // Detailed income-statement components (historical actuals / drill-down)
+  grossProfit?: number;
+  cogs?: number;
+  sga?: number;
+  rd?: number;
+  dep?: number;
+  otherOperatingExpense?: number;
 }
 
 export interface CanonicalForecast {
@@ -120,6 +131,11 @@ export interface CanonicalForecast {
     dividendPayout: number;
     debtAmortizationRate: number;
     sharesOutstanding: number;
+    /** Sub-decomposition: trailing cost structure for forecast bridge reconstruction. */
+    trailingGrossMargin: number;
+    trailingSgaPctOfRevenue: number;
+    trailingRdPctOfRevenue: number;
+    trailingOtherOpexPctOfRevenue: number;
     /** Trailing actuals the forecast is anchored to (continuity reference). */
     trailingRevenue: number;
     trailingEbitMargin: number;
@@ -189,8 +205,15 @@ export interface ForecastTrailingSnapshot {
   dividendPayout: number;
   /** Calendar year of the last actual (labels derive from it). */
   yearLabelBase: number;
+  /** Finance-lease obligations inside totalDebt, tracked separately. */
+  capitalLeaseObligations?: number;
+  /** Income statement sub-components for bridge reconstruction. */
+  grossProfit?: number;
+  cogs?: number;
+  sga?: number;
+  rd?: number;
+   otherOperatingExpense?: number;
 }
-
 export function buildCanonicalForecast(params: {
   sectorId: SectorId | string;
   operatingArchetype: GICSSector | string;
@@ -219,6 +242,8 @@ export function buildCanonicalForecast(params: {
   trailing?: ForecastTrailingSnapshot;
   /** Corporate shapes get full statements; financial shapes get vectors (+labeled stream). */
   statementShape?: "corporate" | "financial";
+  /** Diluted share count from canonical facts (fully-diluted count when resolvable). */
+  dilutedSharesOutstanding?: number;
   /** Orderly debt amortization per year (default 5%; 0 = interest-only roll). */
   debtAmortizationRate?: number;
 }): CanonicalForecast {
@@ -275,17 +300,35 @@ export function buildCanonicalForecast(params: {
   let ppeOpen = T ? Math.max(0, T.ppe) : (params.ppeBase ?? 0);
   const otherAssets = T ? T.otherAssets : 0;
   const otherLiab = T ? T.otherLiabilities : 0;
+  const capitalLeaseObligations = T ? (T.capitalLeaseObligations ?? 0) : 0;
+  let leaseOpen = capitalLeaseObligations;
   // Other net working capital absorbs (dwc − ΔAR − ΔINV + ΔAP) so the
   // balance sheet balances EXACTLY while FCFF keeps the revenue-linked
   // NWC change both models share. Labeled, never silent.
-  let otherWc = 0;
+  // Anchor to the trailing snapshot's balance-sheet identity so the
+  // residual doesn't accumulate from zero (which causes asset drift).
+  const baseOtherWc = T
+    ? T.totalLiabilities + T.equity - T.cash - T.receivables - T.inventory - T.ppe - T.otherAssets
+    : 0;
+  let otherWc = baseOtherWc;
   let nwcLevel = T ? T.nwcLevel : 0;
   const shares = params.sharesOutstanding > 0 ? params.sharesOutstanding : 0;
+  // Diluted shares: if canonical facts resolved a diluted count, use it;
+  // otherwise fall back to basic (conservative — diluted ≥ basic by definition).
+  const dilutedShares = (params.dilutedSharesOutstanding ?? 0) > 0
+    ? Math.max(params.sharesOutstanding, params.dilutedSharesOutstanding!)
+    : params.sharesOutstanding;
 
   // Trailing intensity ratios for WC components (0 when base missing → flat).
   const arRatio = T && T.revenue > 0 && arOpen >= 0 ? arOpen / T.revenue : 0;
   const invRatio = T && T.revenue > 0 && invOpen >= 0 ? invOpen / T.revenue : 0;
   const apRatio = T && T.revenue > 0 && apOpen >= 0 ? apOpen / T.revenue : 0;
+
+  // Sub-decomposition: trailing cost structure for forecast bridge reconstruction.
+  const gm = T && T.grossProfit !== undefined && T.revenue > 0 ? T.grossProfit / T.revenue : 0.35;
+  const sgaPct = T && T.sga !== undefined && T.revenue > 0 ? T.sga / T.revenue : 0;
+  const rdPct = T && T.rd !== undefined && T.revenue > 0 ? T.rd / T.revenue : 0;
+  const otherOpexPct = T && T.otherOperatingExpense !== undefined && T.revenue > 0 ? T.otherOperatingExpense / T.revenue : 0;
 
   // Parity with the legacy DCF path: 1.1× D&A capex floor, PP&E
   // roll-forward depreciation when anchored, derived EBITDA.
@@ -300,6 +343,20 @@ export function buildCanonicalForecast(params: {
     const label = `FY${baseYear + i + 1}E`;
     rev = rev * (1 + gr);
     const m = driver.ebitMargins[Math.min(i, driver.ebitMargins.length - 1)] ?? 0.15;
+    // — Sub-decomposition: derive income-statement bridge FROM the driver margin —
+    // The driver margin 'm' is the authoritative EBIT margin. We scale the
+    // trailing cost structure so the bridge exactly reconstructs EBIT.
+    const impliedEbitMargin = gm - sgaPct - rdPct - otherOpexPct;
+    const costSum = sgaPct + rdPct + otherOpexPct;
+    const k = costSum > 0 ? (gm - m) / costSum : 1;
+    const adjSgaPct = sgaPct * k;
+    const adjRdPct = rdPct * k;
+    const adjOtherOpexPct = otherOpexPct * k;
+    const grossProfit = rev * gm;
+    const cogs = rev - grossProfit;
+    const sga = rev * adjSgaPct;
+    const rd = rev * adjRdPct;
+    const otherOpex = rev * adjOtherOpexPct;
     const ebit = rev * m;
     const nopat = ebit * (1 - tax);
     const dep = usePpeDep ? ppeStock * (driver.depOnPpeRate as number) : rev * avgDeptPct;
@@ -321,7 +378,9 @@ export function buildCanonicalForecast(params: {
     const div = payout > 0 && ni > 0 ? payout * ni : 0;
     const buyback = 0;
     const debtClose = Math.max(0, debtOpen * (1 - amort));
-    const netBorrowing = debtClose - debtOpen;
+    const leaseClose = Math.max(0, leaseOpen * (1 - amort));
+    const totalDebtClose = debtClose + leaseClose;
+    const netBorrowing = totalDebtClose - debtOpen - leaseOpen;
     let cashClose = cashOpen + cfo - capex - div - buyback + netBorrowing;
     let fundingGap = 0;
     if (cashClose < 0) {
@@ -345,7 +404,7 @@ export function buildCanonicalForecast(params: {
     const equityClose = equityOpen + ni - div - buyback;
 
     const assets = cashClose + ar + inv + ppeClose + otherAssets + otherWc;
-    const liab = debtClose + ap + otherLiab;
+    const liab = totalDebtClose + ap + otherLiab;
 
     projections.push({
       year: i + 1,
@@ -355,6 +414,11 @@ export function buildCanonicalForecast(params: {
       ebitMargin: m,
       ebit,
       ebitda: ebit + dep,
+      grossProfit,
+      cogs,
+      sga,
+      rd,
+      otherOperatingExpense: otherOpex,
       depreciation: dep,
       interestExpense: intExp,
       interestIncome: intInc,
@@ -379,7 +443,7 @@ export function buildCanonicalForecast(params: {
       otherAssets,
       totalAssets: assets,
       payables: ap,
-      totalDebt: debtClose,
+      totalDebt: totalDebtClose,
       otherLiabilities: otherLiab,
       totalLiabilities: liab,
       equity: equityClose,
@@ -387,6 +451,8 @@ export function buildCanonicalForecast(params: {
       discountFactor: kernelDiscountFactor(wacc, i),
       pvFcff: 0, // filled below from the single discount pass
       shares,
+      dilutedShares,
+      dilutedEps: dilutedShares > 0 ? ni / dilutedShares : 0,
       eps: shares > 0 ? ni / shares : 0,
       fundingGap,
       ...(usePpeDep ? { ppeStock: ppeClose } : {}),
@@ -394,6 +460,7 @@ export function buildCanonicalForecast(params: {
 
     // Advance opening stocks.
     debtOpen = debtClose;
+    leaseOpen = leaseClose;
     cashOpen = cashClose;
     equityOpen = equityClose;
     arOpen = ar;
@@ -459,6 +526,10 @@ export function buildCanonicalForecast(params: {
       dividendPayout: payout,
       debtAmortizationRate: amort,
       sharesOutstanding: shares,
+      trailingGrossMargin: gm,
+      trailingSgaPctOfRevenue: sgaPct,
+      trailingRdPctOfRevenue: rdPct,
+      trailingOtherOpexPctOfRevenue: otherOpexPct,
       trailingRevenue: params.baseRevenue,
       trailingEbitMargin: trailMargin,
       trailingNetIncome: T ? T.netIncome : 0,

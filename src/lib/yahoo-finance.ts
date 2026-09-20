@@ -1462,6 +1462,52 @@ export function parseQuoteSummary(raw: Record<string, unknown>, symbol: string) 
     targetHighPrice: safeNum((finData.targetHighPrice as Record<string,unknown>)?.raw),
     targetLowPrice: safeNum((finData.targetLowPrice as Record<string,unknown>)?.raw),
     targetMeanPrice: safeNum((finData.targetMeanPrice as Record<string,unknown>)?.raw),
+    // Extended Screener.in-style fields
+    pegRatio: safeNum((summary.pegRatio as Record<string,unknown>)?.raw),
+    evToEbitda: safeNum((keyStats.enterpriseToEbitda as Record<string,unknown>)?.raw),
+    priceToSales: safeNum((keyStats.priceToSalesTrailing12Months as Record<string,unknown>)?.raw),
+    earningsDate: (() => {
+      const ed = (summary.earnings as Record<string,unknown>)?.earningsDate;
+      if (Array.isArray(ed) && ed.length > 0) {
+        const d = Number((ed[0] as Record<string,unknown>)?.raw);
+        return d ? new Date(d * 1000).toISOString().slice(0, 10) : undefined;
+      }
+      return undefined;
+    })(),
+    exDividendDate: (() => {
+      const ed = Number((summary.exDividendDate as Record<string,unknown>)?.raw);
+      return ed ? new Date(ed * 1000).toISOString().slice(0, 10) : undefined;
+    })(),
+    dayRange: `${safeNum((priceData.regularMarketDayLow as Record<string,unknown>)?.raw)}-${safeNum((priceData.regularMarketDayHigh as Record<string,unknown>)?.raw)}`,
+    week52Range: `${safeNum((summary.fiftyTwoWeekLow as Record<string,unknown>)?.raw)}-${safeNum((summary.fiftyTwoWeekHigh as Record<string,unknown>)?.raw)}`,
+    avgVolume3m: safeNum((summary.averageDailyVolume3Month as Record<string,unknown>)?.raw),
+    avgVolume10d: safeNum((summary.averageDailyVolume10Day as Record<string,unknown>)?.raw),
+    // Computed risk/trend fields
+    volatility1y: (() => {
+      const px = safeNum((priceData.regularMarketPrice as Record<string,unknown>)?.raw) || 0;
+      const hi = safeNum((summary.fiftyTwoWeekHigh as Record<string,unknown>)?.raw) || 0;
+      const lo = safeNum((summary.fiftyTwoWeekLow as Record<string,unknown>)?.raw) || 0;
+      if (px > 0 && hi > 0 && lo > 0) return ((hi - lo) / px) * 100;
+      return 0;
+    })(),
+    trendVsMa50: (() => {
+      const px = safeNum((priceData.regularMarketPrice as Record<string,unknown>)?.raw) || 0;
+      const ma50 = safeNum((summary.fiftyDayAverage as Record<string,unknown>)?.raw) || 0;
+      if (px > 0 && ma50 > 0) return ((px - ma50) / ma50) * 100;
+      return 0;
+    })(),
+    trendVsMa200: (() => {
+      const px = safeNum((priceData.regularMarketPrice as Record<string,unknown>)?.raw) || 0;
+      const ma200 = safeNum((summary.twoHundredDayAverage as Record<string,unknown>)?.raw) || 0;
+      if (px > 0 && ma200 > 0) return ((px - ma200) / ma200) * 100;
+      return 0;
+    })(),
+    maxDrawdown: (() => {
+      const px = safeNum((priceData.regularMarketPrice as Record<string,unknown>)?.raw) || 0;
+      const hi = safeNum((summary.fiftyTwoWeekHigh as Record<string,unknown>)?.raw) || 0;
+      if (px > 0 && hi > 0) return ((px - hi) / hi) * 100;
+      return 0;
+    })(),
   };
 
   // ── Annual Financials ─────────────────────────────────────────────────────

@@ -8,6 +8,7 @@ import {
 import styles from "./ApiKeyModal.module.css";
 
 export const LOCAL_STORAGE_KEY = "apex_custom_ai_config";
+export const SERVER_MODEL_KEY = "apex_server_model_override";
 
 export function loadSavedAiConfig(): CustomKeyConfig | null {
   if (typeof window === "undefined") return null;
@@ -29,6 +30,25 @@ export function saveAiConfig(config: CustomKeyConfig | null): void {
       localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(config));
     } else {
       localStorage.removeItem(LOCAL_STORAGE_KEY);
+    }
+  } catch {}
+}
+
+export function loadServerModelOverride(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return localStorage.getItem(SERVER_MODEL_KEY) || null;
+  } catch {}
+  return null;
+}
+
+export function saveServerModelOverride(model: string | null): void {
+  if (typeof window === "undefined") return;
+  try {
+    if (model) {
+      localStorage.setItem(SERVER_MODEL_KEY, model);
+    } else {
+      localStorage.removeItem(SERVER_MODEL_KEY);
     }
   } catch {}
 }
@@ -57,6 +77,7 @@ export default function ApiKeyModal({
   const [customModel, setCustomModel] = useState<string>("");
   const [isPasswordVisible, setIsPasswordVisible] = useState<boolean>(false);
   const [isTesting, setIsTesting] = useState<boolean>(false);
+  const [serverModel, setServerModel] = useState<string>("");
   const [testResult, setTestResult] = useState<{
     success: boolean;
     message: string;
@@ -77,17 +98,19 @@ export default function ApiKeyModal({
       setIsCustomModel(isCustom);
       setCustomModel(isCustom ? activeModel : "");
     } else {
-      // Default to NVIDIA NIM or OpenRouter
+      // Default to NVIDIA NIM or OpenRouter, with pre-configured key fallback
       const defProvider: SupportedProvider = isRateLimitTriggered ? "nvidia" : "openrouter";
+      const defMeta = SUPPORTED_PROVIDERS[defProvider];
       setActiveProvider(defProvider);
-      setApiKey("");
-      const defModel = SUPPORTED_PROVIDERS[defProvider]?.defaultModel || "";
+      setApiKey(defMeta?.preConfiguredKey || "");
+      const defModel = defMeta?.defaultModel || "";
       setModel(defModel);
       setIsCustomModel(false);
       setCustomModel("");
     }
     setTestResult(null);
     setIsPasswordVisible(false);
+    setServerModel(loadServerModelOverride() || "");
   }, [isOpen, currentConfig, isRateLimitTriggered]);
 
   if (!isOpen) return null;
@@ -139,7 +162,14 @@ export default function ApiKeyModal({
       const isCustom = Boolean(m && !meta.candidateModels.includes(m));
       setIsCustomModel(isCustom);
       setCustomModel(isCustom ? m : "");
+    } else if (meta.preConfiguredKey) {
+      // Auto-fill pre-configured key (e.g., Groq key bundled with the app)
+      setApiKey(meta.preConfiguredKey);
+      setModel(meta.defaultModel);
+      setIsCustomModel(false);
+      setCustomModel("");
     } else {
+      setApiKey("");
       setModel(meta.defaultModel);
       setIsCustomModel(false);
       setCustomModel("");
@@ -275,6 +305,39 @@ export default function ApiKeyModal({
               </span>
             )}
           </div>
+
+          {/* Server Model Override (when using default server key) */}
+          {!hasSavedCustomKey && (
+            <div className={styles.providerConfigBox} style={{ marginBottom: 12 }}>
+              <div className={styles.formGroup} style={{ marginBottom: 0 }}>
+                <div className={styles.formLabel}>
+                  <span>Server AI Model</span>
+                  <span style={{ fontSize: "0.7rem", color: "#6B7280" }}>
+                    Change model without changing key
+                  </span>
+                </div>
+                <select
+                  className={styles.modelSelect}
+                  value={serverModel || ""}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setServerModel(val);
+                    saveServerModelOverride(val || null);
+                  }}
+                >
+                  <option value="">Default (auto-fallback)</option>
+                  {SUPPORTED_PROVIDERS.openrouter.candidateModels.map((m) => (
+                    <option key={m} value={m}>
+                      {m}
+                    </option>
+                  ))}
+                </select>
+                <div style={{ fontSize: "0.7rem", color: "#6B7280", marginTop: 4 }}>
+                  Uses the server&apos;s API key with your chosen model. No personal key needed.
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Provider Selection Tabs */}
           <div>

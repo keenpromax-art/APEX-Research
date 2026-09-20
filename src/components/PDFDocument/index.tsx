@@ -35,7 +35,6 @@ import type {
 } from "@/types/report";
 import { formatPct } from "@/lib/calculations";
 import { revalueSensitivity } from "@/lib/financial-kernel";
-import { generatePEFirmAnalysis } from "@/lib/pe-analysis-engine";
 import { buildEventPriceMovements } from "@/lib/event-price-engine";
 import {
   formatGuardedRatio,
@@ -202,38 +201,20 @@ const fmtSignedBig = (n: number, currency = "USD"): string => {
 
 
 // ─────────────────────────────────────────────────────────────────────────────
-// INSTITUTIONAL PRIVATE EQUITY ANALYSIS COMPOSER
-// Guarantees 100% deep, company-specific, sector-tailored buy-side analysis
+// AI-ONLY NARRATIVE COMPOSER
+// Every analytical word in the dossier is council-written. Sections the
+// council did not produce stay empty and renderers omit them — deterministic
+// template prose is never substituted. Numbers, ratings, tables and audit
+// metadata always come from the engines. Pillar caps (data rule) still apply.
 // ─────────────────────────────────────────────────────────────────────────────
 const getPEAnalysis = (data: ReportData) => {
-  if (data.aiAnalysis?.investmentThesis && data.aiAnalysis?.analystNotes?.length) {
-    return data.aiAnalysis;
-  }
-  const synthesized = generatePEFirmAnalysis({
-    profile: data.profile,
-    stockData: data.stockData,
-    annualFinancials: data.annualFinancials,
-    dcf: data.dcf,
-    ratiosByYear: data.ratiosByYear,
-    dupontByYear: data.dupontByYear,
-    assumptionsLedger: data.assumptionsLedger,
-    masterReportFacts: data.masterReportFacts,
-  });
-  // Read-time backstop (MOAT-02): pillars arriving via a stale aiAnalysis
-  // bypass generation-time caps, so re-cap to the canonical rating here —
-  // the printed matrix can never contradict the composite. Idempotent.
-  const mergedPillars = data.aiAnalysis?.moatPillars?.length ? data.aiAnalysis.moatPillars : (synthesized.moatPillars || []);
+  const ai = data.aiAnalysis || {};
   return {
-    ...synthesized,
-    ...(data.aiAnalysis || {}),
-    moatSources: data.aiAnalysis?.moatSources || synthesized.moatSources,
-    moatPillars: capPillarsToRating(mergedPillars, canonicalMoat(data).rating),
-    fiveForces: data.aiAnalysis?.fiveForces?.length ? data.aiAnalysis.fiveForces : synthesized.fiveForces,
-    catalysts: data.aiAnalysis?.catalysts?.length ? data.aiAnalysis.catalysts : synthesized.catalysts,
-    creditAnalysisCommentary: data.aiAnalysis?.creditAnalysisCommentary || synthesized.creditAnalysisCommentary,
-    enterpriseRiskCommentary: data.aiAnalysis?.enterpriseRiskCommentary?.length ? data.aiAnalysis.enterpriseRiskCommentary : synthesized.enterpriseRiskCommentary,
-    capitalDeploymentHistory: data.aiAnalysis?.capitalDeploymentHistory || synthesized.capitalDeploymentHistory,
-    analystNotes: data.aiAnalysis?.analystNotes?.length ? data.aiAnalysis.analystNotes : synthesized.analystNotes,
+    ...ai,
+    // Read-time backstop (MOAT-02): pillars arriving via a stale aiAnalysis
+    // bypass generation-time caps, so re-cap to the canonical rating here —
+    // the printed matrix can never contradict the composite. Idempotent.
+    moatPillars: capPillarsToRating(ai.moatPillars || [], canonicalMoat(data).rating),
   };
 };
 
@@ -243,7 +224,7 @@ const getPEAnalysis = (data: ReportData) => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 const InstitutionalDeskBadge = ({ ticker }: { ticker: string }) => (
-  <View style={{ flexDirection: "row", alignItems: "center", gap: 3 }}>
+  <View wrap={false} style={{ flexDirection: "row", alignItems: "center", gap: 3 }}>
     <View style={{ backgroundColor: "#1e3a8a", paddingHorizontal: 5, paddingVertical: 1.5, borderRadius: 2 }}>
       <Text style={{ fontSize: 7, fontFamily: "Helvetica-Bold", color: COLORS.white, letterSpacing: 0.6 }}>
         EQUITY RESEARCH
@@ -261,6 +242,7 @@ const getInstitutionalKPIs = (data: ReportData) => {
   const m = canonicalMoat(data);
   const ledger = data.assumptionsLedger;
   const { currency } = data.profile;
+  const sym = currency === "INR" ? "Rs. " : currency === "USD" ? "$" : currency === "GBP" ? "£" : currency === "EUR" ? "€" : "";
   const cmp = v.cmp;
   const fv = v.fv;
   const beta = ledger ? ledger.beta : (data.stockData.beta || 1.0);
@@ -303,19 +285,19 @@ const getInstitutionalKPIs = (data: ReportData) => {
 
   // Downside Support Floor: scenario bear price when sane, else N/M.
   const downsideFloor = (rawBear && rawBear > 0 && rawBear < cmp)
-    ? `${rawBear.toFixed(2)} ${currency}`
+    ? `${sym}${rawBear.toFixed(2)}`
     : "N/M";
 
   // Bull Target: scenario bull price when sane, else N/M.
   const bullTarget = (rawBull && rawBull > cmp)
-    ? `${rawBull.toFixed(2)} ${currency}`
+    ? `${sym}${rawBull.toFixed(2)}`
     : "N/M";
 
   return {
     stars,
     starCount,
-    lastPrice: `${cmp.toFixed(2)} ${currency}`,
-    fairValue: `${v.targetPrice.toFixed(2)} ${currency}`,
+    lastPrice: `${sym}${cmp.toFixed(2)}`,
+    fairValue: `${sym}${v.targetPrice.toFixed(2)}`,
     downsideFloor,
     bullTarget,
     considerBuy: downsideFloor,
@@ -330,7 +312,7 @@ const getInstitutionalKPIs = (data: ReportData) => {
 };
 
 const StarRating = ({ count }: { count: number }) => (
-  <View style={{ flexDirection: "row", alignItems: "center", gap: 2 }}>
+  <View wrap={false} style={{ flexDirection: "row", alignItems: "center", gap: 2 }}>
     {[1, 2, 3, 4, 5].map(idx => (
       <Svg key={idx} width={8} height={8} viewBox="0 0 24 24">
         <Polygon
@@ -359,7 +341,7 @@ const ProvenanceTag = ({
   const badgeLabel = type === "FILINGS" ? "AUDITED FILINGS" : type === "MODEL" ? "DCF MODEL" : type === "AI" ? "INSTITUTIONAL AI" : "MARKET DATA";
 
   return (
-    <View style={{ flexDirection: "row", alignItems: "center", gap: 3, marginTop: 1.5, marginBottom: 2 }}>
+    <View wrap={false} style={{ flexDirection: "row", alignItems: "center", gap: 3, marginTop: 1.5, marginBottom: 2 }}>
       <View style={{ backgroundColor: bg, paddingHorizontal: 3, paddingVertical: 1, borderRadius: 1.5, borderWidth: 0.5, borderColor: textColor }}>
         <Text style={{ fontSize: 4.8, fontFamily: "Helvetica-Bold", color: textColor }}>
           {badgeLabel}
@@ -406,6 +388,46 @@ const InstitutionalKPIStrip = ({ data }: { data: ReportData }) => {
   );
 };
 
+const MarketDataStrip = ({ data }: { data: ReportData }) => {
+  const { currency } = data.profile;
+  const sd = data.stockData;
+  const sym = currency === "INR" ? "Rs. " : currency === "USD" ? "$" : currency === "GBP" ? "£" : currency === "EUR" ? "€" : "";
+  const fmt = (v: number) => v ? `${sym}${v.toFixed(2)}` : "N/M";
+  const fmtPct = (v: number) => v ? `${v >= 0 ? "+" : ""}${v.toFixed(1)}%` : "N/M";
+  const fmtBig = (v: number) => {
+    if (!v) return "N/M";
+    if (v >= 1e12) return `${sym}${(v / 1e12).toFixed(2)}T`;
+    if (v >= 1e9) return `${sym}${(v / 1e9).toFixed(2)}B`;
+    if (v >= 1e7) return `${sym}${(v / 1e7).toFixed(2)}Cr`;
+    if (v >= 1e5) return `${sym}${(v / 1e5).toFixed(2)}L`;
+    return `${sym}${v.toFixed(0)}`;
+  };
+
+  const cols = [
+    { label: "MKT CAP", val: fmtBig(sd.marketCap) },
+    { label: "TRAIL P/E", val: sd.pe ? sd.pe.toFixed(1) + "x" : "N/M" },
+    { label: "FWD P/E", val: sd.forwardPE ? sd.forwardPE.toFixed(1) + "x" : "N/M" },
+    { label: "P/B", val: sd.priceToBook ? sd.priceToBook.toFixed(2) + "x" : sd.pb ? sd.pb.toFixed(2) + "x" : "N/M" },
+    { label: "P/S", val: sd.priceToSales ? sd.priceToSales.toFixed(2) + "x" : sd.ps ? sd.ps.toFixed(2) + "x" : "N/M" },
+    { label: "EV/EBITDA", val: sd.evToEbitda ? sd.evToEbitda.toFixed(2) + "x" : "N/M" },
+    { label: "BETA", val: sd.beta ? sd.beta.toFixed(2) : "N/M" },
+    { label: "52W HI/LO", val: sd.week52High ? `${fmt(sd.week52High)} / ${fmt(sd.week52Low)}` : "N/M" },
+    { label: "50D/200D MA", val: sd.fiftyDayAvg ? `${fmt(sd.fiftyDayAvg)} / ${fmt(sd.twoHundredDayAvg)}` : "N/M" },
+    { label: "VOL (AVG)", val: sd.avgVolume ? `${(sd.avgVolume / 1e6).toFixed(2)}M` : "N/M", last: true },
+  ];
+
+  return (
+    <View style={[S.kpiStrip, { marginTop: 2, backgroundColor: "rgba(30,58,138,0.04)", borderColor: COLORS.hairlineLight }]}>
+      {cols.map((c, i) => (
+        <View key={i} style={c.last ? S.kpiColLast : S.kpiCol}>
+          <Text style={[S.kpiLabel, { fontSize: 4.5 }]}>{c.label}</Text>
+          <Text style={[S.kpiValue, { fontSize: 7 }]}>{c.val}</Text>
+        </View>
+      ))}
+    </View>
+  );
+};
+
 const PageHeader = ({ ticker, sectionName }: { ticker: string; sectionName?: string }) => (
   <View style={S.header} fixed>
     <Text style={S.headerLeft}>
@@ -420,8 +442,7 @@ const InstitutionalMasthead = ({ data, sectionTitle }: { data: ReportData; secti
   return (
     <View style={{ marginBottom: 5 }}>
       <View
-        style={{
-          flexDirection: "row",
+        wrap={false} style={{ flexDirection: "row",
           justifyContent: "space-between",
           alignItems: "center",
           paddingBottom: 4,
@@ -433,20 +454,19 @@ const InstitutionalMasthead = ({ data, sectionTitle }: { data: ReportData; secti
         <Text style={{ fontSize: 7.5, color: COLORS.textSecondary, fontFamily: "Helvetica" }}>
           {data.profile.name} · Institutional Equity Research
         </Text>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+        <View wrap={false} style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
           <InstitutionalDeskBadge ticker={data.profile.ticker} />
         </View>
       </View>
 
       <View
-        style={{
-          flexDirection: "row",
+        wrap={false} style={{ flexDirection: "row",
           justifyContent: "space-between",
           alignItems: "center",
           marginBottom: 3,
         }}
       >
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+        <View wrap={false} style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
           <Text style={{ fontSize: 13, fontFamily: "Helvetica-Bold", color: COLORS.slateDark }}>
             {data.profile.name}
           </Text>
@@ -495,8 +515,7 @@ const PageFooter = ({ companyName }: { companyName?: string }) => (
 
 const CreditPageHeader = ({ ticker }: { ticker: string }) => (
   <View
-    style={{
-      flexDirection: "row",
+    wrap={false} style={{ flexDirection: "row",
       justifyContent: "space-between",
       alignItems: "center",
       paddingBottom: 4,
@@ -1121,8 +1140,7 @@ const CoverPage = ({ data, concise = true }: { data: ReportData; concise?: boole
     <Page size="A4" style={S.coverPage} wrap={false}>
       {/* ── Top Running Masthead ── */}
       <View
-        style={{
-          flexDirection: "row",
+        wrap={false} style={{ flexDirection: "row",
           justifyContent: "space-between",
           alignItems: "center",
           paddingBottom: 4,
@@ -1134,21 +1152,20 @@ const CoverPage = ({ data, concise = true }: { data: ReportData; concise?: boole
         <Text style={{ fontSize: 7.5, color: COLORS.textSecondary, fontFamily: "Helvetica" }}>
           {data.profile.name} · Institutional Equity Research
         </Text>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+        <View wrap={false} style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
           <InstitutionalDeskBadge ticker={data.profile.ticker} />
         </View>
       </View>
 
       {/* ── Company Header & Rating ── */}
       <View
-        style={{
-          flexDirection: "row",
+        wrap={false} style={{ flexDirection: "row",
           justifyContent: "space-between",
           alignItems: "baseline",
           marginBottom: 4,
         }}
       >
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+        <View wrap={false} style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
           <Text style={{ fontSize: 13, fontFamily: "Helvetica-Bold", color: COLORS.slateDark }}>
             {data.profile.name}
           </Text>
@@ -1165,28 +1182,26 @@ const CoverPage = ({ data, concise = true }: { data: ReportData; concise?: boole
       {/* ── 10-Column KPI Strip ── */}
       <InstitutionalKPIStrip data={data} />
 
-      {/* ── Core Editorial Headline ── */}
+      {/* ── Market Data Strip (Screener.in-style) ── */}
+      <MarketDataStrip data={data} />
+
+      {/* ── Core Editorial Headline (AI-generated) ── */}
       <Text style={S.headlineBanner}>
-        {data.profile.name} positioned to drive long-term cash flow compounding supported by durable competitive advantages and operational scale.
+        {data.aiAnalysis?.summary || data.aiAnalysis?.companyOverview || `${data.profile.name} — Institutional Equity Research Dossier`}
       </Text>
 
       {/* ── 3-Column Body Architecture ── */}
-      <View style={{ flexDirection: "row", gap: 7 }}>
+      <View wrap={false} style={{ flexDirection: "row", gap: 7 }}>
         {/* Column 1: Left Rail (19% width) */}
         <View style={{ width: "19%", borderRightWidth: 0.5, borderRightColor: COLORS.hairlineLight, paddingRight: 6 }}>
           <View style={{ marginBottom: 4 }}>
             <Text style={{ fontSize: 6.8, fontFamily: "Helvetica-Bold", color: COLORS.slateDark }}>
-              {data.analystName}
+              {data.analystName || "AI Research Council"}
             </Text>
-            <Text style={{ fontSize: 6.2, color: COLORS.textMuted }}>Senior Equity Analyst</Text>
-            <Text style={{ fontSize: 6.0, color: COLORS.textMuted }}>equity.research@desk.internal</Text>
             <Text style={{ fontSize: 6.0, color: COLORS.textMuted }}>Institutional Research Desk</Text>
           </View>
           <View style={{ height: 0.5, backgroundColor: COLORS.hairlineLight, marginBottom: 4 }} />
 
-          <Text style={{ fontSize: 5.8, color: COLORS.textMuted, lineHeight: 1.25, marginBottom: 4 }}>
-            The primary analyst covering this company does not hold personal beneficial ownership of its equity securities.
-          </Text>
           <View style={{ height: 0.5, backgroundColor: COLORS.hairlineLight, marginBottom: 4 }} />
 
           <View style={{ marginBottom: 4, gap: 1.2 }}>
@@ -1267,7 +1282,7 @@ const CoverPage = ({ data, concise = true }: { data: ReportData; concise?: boole
         {/* Column 2: Center Column (49% width) */}
         <View style={{ width: "49%", paddingRight: 6, borderRightWidth: 0.5, borderRightColor: COLORS.hairlineLight }}>
           {/* Eyebrow + title lockup — matches masthead / section-title system */}
-          <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 2 }}>
+          <View wrap={false} style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 2 }}>
             <Text style={{ fontSize: 6.0, fontFamily: "Helvetica-Bold", color: COLORS.primaryRed, letterSpacing: 0.8 }}>
               EXECUTIVE SUMMARY — INVESTMENT THESIS
             </Text>
@@ -1289,8 +1304,7 @@ const CoverPage = ({ data, concise = true }: { data: ReportData; concise?: boole
           </View>
 
           <View
-            style={{
-              flexDirection: "row",
+            wrap={false} style={{ flexDirection: "row",
               alignItems: "center",
               gap: 4,
               borderBottomWidth: 0.5,
@@ -1306,14 +1320,15 @@ const CoverPage = ({ data, concise = true }: { data: ReportData; concise?: boole
           </View>
           <Text style={{ fontSize: 7.0, color: COLORS.textPrimary, lineHeight: 1.45, textAlign: "justify", marginBottom: 4 }}>
             {(() => {
-              const t = ledger?.moatBridge || pe.competitiveMoat || pe.moatSources?.switchingCosts || `Entrenched competitive moat (${ledger?.moatRating || "Narrow"}) protecting operational margins and capital returns.`;
+              // AI-only: council moat narrative or the evidenced switching-cost
+              // source; never ledger boilerplate or template sentences.
+              const t = pe.competitiveMoat || pe.moatSources?.switchingCosts || "";
               return completeSentence(t, 260);
             })()}
           </Text>
 
           <View
-            style={{
-              flexDirection: "row",
+            wrap={false} style={{ flexDirection: "row",
               alignItems: "center",
               gap: 4,
               borderBottomWidth: 0.5,
@@ -1345,7 +1360,7 @@ const CoverPage = ({ data, concise = true }: { data: ReportData; concise?: boole
                   marginBottom: 3,
                 }}
               >
-                <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 2.5 }}>
+                <View wrap={false} style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 2.5 }}>
                   <Text style={{ fontSize: 6.0, fontFamily: "Helvetica-Bold", color: COLORS.textMuted, letterSpacing: 0.6 }}>
                     RESEARCH VERDICT
                   </Text>
@@ -1359,7 +1374,7 @@ const CoverPage = ({ data, concise = true }: { data: ReportData; concise?: boole
                   {completeSentence(pe.investmentConclusion, 260)}
                 </Text>
                 <View style={{ height: 0.5, backgroundColor: COLORS.hairlineFaint, marginBottom: 2.5 }} />
-                <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "baseline" }}>
+                <View wrap={false} style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "baseline" }}>
                   <Text style={{ fontSize: 6.2, fontFamily: "Helvetica-Bold", color: COLORS.slateDark }}>
                     Target {cmpSym}
                     {fmtNum(fv, 2)}
@@ -1535,7 +1550,7 @@ const CoverPage = ({ data, concise = true }: { data: ReportData; concise?: boole
                   <Text style={{ fontSize: 7.2, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 1.5 }}>
                     {bridgeTitle}
                   </Text>
-                  <View style={[S.compactTable, { marginBottom: 2 }]}>
+                  <View style={[S.compactTable, { marginBottom: 2  }]} wrap={false}>
                     <View style={[S.compactRowHeader, { minHeight: 13, paddingVertical: 1 }]}>
                       <Text style={[S.compactCellHeader, { width: "34%", fontSize: 5.8, paddingHorizontal: 2 }]}>Value Lever</Text>
                       <Text style={[S.compactCellHeader, { width: "36%", fontSize: 5.8, paddingHorizontal: 2 }]}>Operational Execution</Text>
@@ -1569,7 +1584,7 @@ const CoverPage = ({ data, concise = true }: { data: ReportData; concise?: boole
 
           {/* Recent Corporate Developments & News Pulse */}
           <View style={{ marginTop: 1.5, borderTopWidth: 0.5, borderTopColor: COLORS.hairlineLight, paddingTop: 1.2, marginBottom: 1.5 }}>
-            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 1 }}>
+            <View wrap={false} style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 1 }}>
               <Text style={{ fontSize: 6.5, fontFamily: "Helvetica-Bold", color: COLORS.slateDark }}>
                 Recent Corporate Developments &amp; News Pulse
               </Text>
@@ -1611,7 +1626,7 @@ const CoverPage = ({ data, concise = true }: { data: ReportData; concise?: boole
                     marginBottom: 1,
                   }}
                 >
-                  <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 0.5 }}>
+                  <View wrap={false} style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 0.5 }}>
                     <Text style={{ fontSize: 5.2, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, flex: 1, paddingRight: 4 }}>
                       [Reported] {item.headline}
                     </Text>
@@ -1633,7 +1648,7 @@ const CoverPage = ({ data, concise = true }: { data: ReportData; concise?: boole
             <Text style={{ fontSize: 6.8, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 1 }}>
               12-Month Target Price Scenario &amp; Return Matrix
             </Text>
-            <View style={[S.compactTable, { marginBottom: 1 }]}>
+            <View style={[S.compactTable, { marginBottom: 1  }]} wrap={false}>
               <View style={[S.compactRowHeader, { minHeight: 13, paddingVertical: 1 }]}>
                 <Text style={[S.compactCellHeader, { width: "28%", fontSize: 5.8 }]}>Scenario</Text>
                 <Text style={[S.compactCellHeaderRight, { width: "24%", fontSize: 5.8 }]}>Target Price</Text>
@@ -1698,7 +1713,7 @@ const CoverPage = ({ data, concise = true }: { data: ReportData; concise?: boole
             Valuation Summary &amp; Multiples
           </Text>
           <View style={{ borderWidth: 0.5, borderColor: COLORS.hairlineLight, marginBottom: 3 }}>
-            <View style={{ flexDirection: "row", backgroundColor: COLORS.lightGray, paddingVertical: 1.0, borderBottomWidth: 0.5, borderBottomColor: COLORS.hairlineLight }}>
+            <View wrap={false} style={{ flexDirection: "row", backgroundColor: COLORS.lightGray, paddingVertical: 1.0, borderBottomWidth: 0.5, borderBottomColor: COLORS.hairlineLight }}>
               <Text style={{ width: "34%", fontSize: 5.6, fontFamily: "Helvetica-Bold", paddingLeft: 2 }}>Fiscal Year</Text>
               {finYears.map((f, i) => (
                 <Text key={i} style={{ flex: 1, fontSize: 5.6, fontFamily: "Helvetica-Bold", textAlign: "right", paddingRight: 2 }}>
@@ -1746,7 +1761,7 @@ const CoverPage = ({ data, concise = true }: { data: ReportData; concise?: boole
             Financial Summary ({currency} {data.assumptionsLedger?.reportingUnit || (currency === "INR" ? "Cr" : "Mil")})
           </Text>
           <View style={{ borderWidth: 0.5, borderColor: COLORS.hairlineLight, marginBottom: 3 }}>
-            <View style={{ flexDirection: "row", backgroundColor: COLORS.lightGray, paddingVertical: 1.0, borderBottomWidth: 0.5, borderBottomColor: COLORS.hairlineLight }}>
+            <View wrap={false} style={{ flexDirection: "row", backgroundColor: COLORS.lightGray, paddingVertical: 1.0, borderBottomWidth: 0.5, borderBottomColor: COLORS.hairlineLight }}>
               <Text style={{ width: "34%", fontSize: 5.6, fontFamily: "Helvetica-Bold", paddingLeft: 2 }}>Fiscal Year</Text>
               {finYears.map((f, i) => (
                 <Text key={i} style={{ flex: 1, fontSize: 5.6, fontFamily: "Helvetica-Bold", textAlign: "right", paddingRight: 2 }}>
@@ -1781,7 +1796,7 @@ const CoverPage = ({ data, concise = true }: { data: ReportData; concise?: boole
           <Text style={{ fontSize: 6.8, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 1.5 }}>
             Capital Return &amp; Shareholder Yield
           </Text>
-          <View style={S.compactTable}>
+          <View style={S.compactTable} wrap={false}>
             <View style={S.compactRowHeader}>
               <Text style={[S.compactCellHeader, { width: "58%" }]}>Return Channel</Text>
               <Text style={[S.compactCellHeaderRight, { width: "42%" }]}>Current Rate</Text>
@@ -1821,7 +1836,7 @@ const CoverPage = ({ data, concise = true }: { data: ReportData; concise?: boole
 
           {/* Historical Capital Compounding Profile */}
           <View style={{ marginTop: 2, padding: 2.5, backgroundColor: COLORS.offWhite, borderWidth: 0.5, borderColor: COLORS.hairlineLight }}>
-            <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 1 }}>
+            <View wrap={false} style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 1 }}>
               <Text style={{ fontSize: 5.2, fontFamily: "Helvetica-Bold", color: COLORS.slateDark }}>
                 {ledger?.multiYearCAGR?.metric || "Multi-Year Compounding CAGR"}
               </Text>
@@ -1878,7 +1893,7 @@ const FundamentalAnalysisPage = ({ data }: { data: ReportData }) => {
     <Page size="A4" style={S.page}>
       <InstitutionalMasthead data={data} sectionTitle="Fundamental &amp; Valuation Analysis" />
 
-      <View style={{ flexDirection: "row", gap: 14, marginBottom: 8 }}>
+      <View wrap={false} style={{ flexDirection: "row", gap: 14, marginBottom: 8 }}>
         <View style={{ flex: 1, paddingRight: 4 }}>
           <Text style={{ fontSize: 8.2, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 3 }}>
             Valuation, Growth and Profitability <Text style={{ fontSize: 6.8, color: COLORS.textMuted, fontFamily: "Helvetica" }}>{genDate}</Text>
@@ -1890,7 +1905,7 @@ const FundamentalAnalysisPage = ({ data }: { data: ReportData }) => {
           />
 
           <Text style={S.bodyText}>
-            {pe.dcfCommentary || `We project revenue compounding across ${data.profile.name}'s core operational franchises, supported by secular expansion in ${data.profile.industry}. The business generates sustainable returns on capital, anchored by competitive scale advantages and high customer retention.`}
+            {pe.dcfCommentary}
           </Text>
         </View>
 
@@ -1930,7 +1945,7 @@ const FundamentalAnalysisPage = ({ data }: { data: ReportData }) => {
         <Text style={{ fontSize: 7.5, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2 }}>
           Scenario Valuation Sensitivity &amp; Margin of Safety Matrix
         </Text>
-        <View style={S.compactTable}>
+        <View style={S.compactTable} wrap={false}>
           <View style={S.compactRowHeader}>
             <Text style={[S.compactCellHeader, { width: "22%" }]}>Case Scenario</Text>
             <Text style={[S.compactCellHeaderRight, { width: "16%" }]}>Revenue CAGR</Text>
@@ -1975,14 +1990,14 @@ const FundamentalAnalysisPage = ({ data }: { data: ReportData }) => {
             ));
           })()}
         </View>
-        <View style={{ flexDirection: "row", justifyContent: "space-between", backgroundColor: COLORS.offWhite, padding: 3, borderWidth: 0.5, borderColor: COLORS.hairlineLight, marginTop: 2 }}>
+        <View style={{ flexDirection: "column", backgroundColor: COLORS.offWhite, padding: 3, borderWidth: 0.5, borderColor: COLORS.hairlineLight, marginTop: 2, gap: 1 }}>
           <Text style={{ fontSize: 5.6, fontFamily: "Helvetica-Bold", color: COLORS.slateDark }}>
             Published Target Price: {sym}{fmtNum(fv, 2)} (5-Year Explicit DCF Base Case)
           </Text>
           <Text style={{ fontSize: 5.6, color: COLORS.textSecondary }}>
             Scenario Probability-Weighted Value: {sym}{fmtNum(ledger?.probabilityWeightedValue || (ledger?.scenarios?.bull.targetPrice ? ledger.scenarios.bull.targetPrice * 0.25 + fv * 0.60 + ledger.scenarios.bear.targetPrice * 0.15 : fv * 1.025), 2)} (Weights: 60% Base / 25% Bull / 15% Bear)
           </Text>
-          <Text style={{ fontSize: 5.0, color: COLORS.textMuted, marginTop: 1 }}>
+          <Text style={{ fontSize: 5.0, color: COLORS.textMuted }}>
             Weights are judgmental priors emphasizing the base case, not fitted probabilities; each case carries distinct revenue/margin operating assumptions per the matrix above, and the weighted value is independently recomputed in QA (PROB-01).
           </Text>
         </View>
@@ -1993,7 +2008,7 @@ const FundamentalAnalysisPage = ({ data }: { data: ReportData }) => {
         <Text style={{ fontSize: 7.5, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2 }}>
           DCF Two-Dimensional Sensitivity Grid — Target Fair Value ({currency})
         </Text>
-        <View style={S.compactTable}>
+        <View style={S.compactTable} wrap={false}>
           {(()=>{
             const wb = data.dcf.assumptions?.wacc || 0.095;
             const tg = data.dcf.assumptions?.terminalGrowthRate || 0.04;
@@ -2041,7 +2056,7 @@ const FundamentalAnalysisPage = ({ data }: { data: ReportData }) => {
                       const cell = sens(w, t);
                       return (
                         <Text key={ci} style={[ri === 2 && ci === 2 ? S.compactCellBoldRight : S.compactCellRight, { width: "16%", color: ri === 2 && ci === 2 ? COLORS.primaryRed : undefined }]}>
-                          {cell === null || !Number.isFinite(cell) ? "N/A" : `${sym}${fmtNum(cell, 1)}`}
+                          {cell === null || !Number.isFinite(cell) ? "N/A" : `${sym}${fmtNum(cell, 2)}`}
                         </Text>
                       );
                     })}
@@ -2060,12 +2075,12 @@ const FundamentalAnalysisPage = ({ data }: { data: ReportData }) => {
         const modelG = rdcf?.modelGrowthPctDisplay || "—";
         const growthGap = rdcf?.growthGapPctDisplay || "—";
         const impliedM = rdcf?.impliedMarginPctDisplay || "—";
-        const rdcfVerdict = rdcf?.verdict || `Current market price implies baseline revenue growth broadly aligned with fundamental run-rate.`;
+        const rdcfVerdict = rdcf?.verdict || "";
         const rdcfConf = rdcf?.confidence || "Medium";
 
         return (
           <View style={{ padding: 5, backgroundColor: COLORS.offWhite, borderWidth: 0.5, borderColor: COLORS.hairlineLight }}>
-            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 3 }}>
+            <View wrap={false} style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 3 }}>
               <Text style={{ fontSize: 7.5, fontFamily: "Helvetica-Bold", color: COLORS.slateDark }}>
                 Reverse DCF Triangulation: What Growth &amp; Margin Does Today&apos;s Price ({sym}{fmtNum(cmp, 2)}) Imply?
               </Text>
@@ -2073,7 +2088,7 @@ const FundamentalAnalysisPage = ({ data }: { data: ReportData }) => {
                 Expectation Confidence: {rdcfConf}
               </Text>
             </View>
-            <View style={{ flexDirection: "row", gap: 5, marginBottom: 3 }}>
+            <View wrap={false} style={{ flexDirection: "row", gap: 5, marginBottom: 3 }}>
               <View style={{ flex: 1, backgroundColor: "#ffffff", borderWidth: 0.5, borderColor: COLORS.hairlineLight, padding: 3 }}>
                 <Text style={{ fontSize: 5.0, color: COLORS.textMuted }}>Market Implied 5Y Rev. CAGR</Text>
                 <Text style={{ fontSize: 8.2, fontFamily: "Helvetica-Bold", color: COLORS.slateDark }}>{impliedG}</Text>
@@ -2244,9 +2259,9 @@ const MoatAndPriceFairValuePage = ({ data }: { data: ReportData }) => {
     <Page size="A4" style={S.page}>
       <InstitutionalMasthead data={data} sectionTitle="Competitive Moat &amp; Price / Fair Value" />
 
-      <View style={{ flexDirection: "row", gap: 14, marginBottom: 8 }}>
+      <View wrap={false} style={{ flexDirection: "row", gap: 14, marginBottom: 8 }}>
         <View style={{ width: "48%" }}>
-          <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "baseline", marginBottom: 2 }}>
+          <View wrap={false} style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "baseline", marginBottom: 2 }}>
             <Text style={{ fontSize: 7.0, fontFamily: "Helvetica-Bold", color: COLORS.slateDark }}>
               Price / Fair Value (5-Yr Trajectory)
             </Text>
@@ -2312,8 +2327,7 @@ const MoatAndPriceFairValuePage = ({ data }: { data: ReportData }) => {
 
             {/* Explicit X-Axis Timeframe Bar */}
             <View
-              style={{
-                flexDirection: "row",
+              wrap={false} style={{ flexDirection: "row",
                 justifyContent: "space-between",
                 backgroundColor: "#f8fafc",
                 borderTopWidth: 0.5,
@@ -2339,13 +2353,13 @@ const MoatAndPriceFairValuePage = ({ data }: { data: ReportData }) => {
               ))}
             </View>
 
-            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 2 }}>
-              <View style={{ flexDirection: "row", gap: 10 }}>
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 3 }}>
+            <View wrap={false} style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 2 }}>
+              <View wrap={false} style={{ flexDirection: "row", gap: 10 }}>
+                <View wrap={false} style={{ flexDirection: "row", alignItems: "center", gap: 3 }}>
                   <View style={{ width: 10, height: 2, backgroundColor: "#d97706" }} />
                   <Text style={{ fontSize: 5.5, color: COLORS.textSecondary }}>Price ({currency})</Text>
                 </View>
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 3 }}>
+                <View wrap={false} style={{ flexDirection: "row", alignItems: "center", gap: 3 }}>
                   <View style={{ width: 10, height: 2, backgroundColor: "#111827" }} />
                   <Text style={{ fontSize: 5.5, color: COLORS.textSecondary }}>Fair Value ({currency})</Text>
                 </View>
@@ -2367,9 +2381,9 @@ const MoatAndPriceFairValuePage = ({ data }: { data: ReportData }) => {
         </View>
       </View>
 
-      <View style={{ flexDirection: "row", gap: 14, marginBottom: 8 }}>
+      <View wrap={false} style={{ flexDirection: "row", gap: 14, marginBottom: 8 }}>
         <View style={{ flex: 1, paddingRight: 4 }}>
-          <View style={{ borderBottomWidth: 0.5, borderBottomColor: COLORS.hairlineLight, paddingBottom: 2, marginBottom: 4 }}>
+          <View style={{ borderBottomWidth: 0.5, borderBottomColor: COLORS.hairlineLight, paddingBottom: 2, marginBottom: 4 }} wrap={false}>
             <Text style={{ fontSize: 8.5, fontFamily: "Helvetica-Bold", color: COLORS.slateDark }}>
               Economic Moat Sources
             </Text>
@@ -2389,7 +2403,7 @@ const MoatAndPriceFairValuePage = ({ data }: { data: ReportData }) => {
         </View>
 
         <View style={{ flex: 1, paddingLeft: 4 }}>
-          <View style={{ borderBottomWidth: 0.5, borderBottomColor: COLORS.hairlineLight, paddingBottom: 2, marginBottom: 4 }}>
+          <View style={{ borderBottomWidth: 0.5, borderBottomColor: COLORS.hairlineLight, paddingBottom: 2, marginBottom: 4 }} wrap={false}>
             <Text style={{ fontSize: 8.5, fontFamily: "Helvetica-Bold", color: COLORS.slateDark }}>
               Moat Trend &amp; Durability Trajectory
             </Text>
@@ -2400,17 +2414,12 @@ const MoatAndPriceFairValuePage = ({ data }: { data: ReportData }) => {
           <Text style={S.bodyText}>
             {pe.businessStrategyCommentary}
           </Text>
-          <PullQuote
-            attr="CANONICAL MOAT · ROIC-vs-WACC EVIDENCE"
-            quote={(() => {
-              const cm = canonicalMoat(data);
-              return cm.rating === "Wide"
-                ? `In summary, the ${cm.rating} composite moat (${cm.trend} trend) is supported by the evidenced pillars above; durability horizons are capped accordingly.`
-                : cm.rating === "Narrow"
-                ? `In summary, a ${cm.rating} composite moat (${cm.trend} trend) is evidenced — advantages exist but are contestable, as the capped pillar horizons reflect. No wide-moat claim is made.`
-                : `In summary, no durable economic moat is evidenced (${cm.trend} trend). Pillar language above must be read as transient strengths, not structural barriers.`;
-            })()}
-          />
+          {pe.competitiveMoat ? (
+            <PullQuote
+              attr="ECONOMIC MOAT · AI COUNCIL ASSESSMENT"
+              quote={completeSentence(pe.competitiveMoat, 320)}
+            />
+          ) : null}
         </View>
       </View>
 
@@ -2418,11 +2427,11 @@ const MoatAndPriceFairValuePage = ({ data }: { data: ReportData }) => {
           composite canonical moat upstream; each rationale states its evidence.
           No fallback pillars: an empty matrix renders as unassessed, never as
           manufacturing-flavored boilerplate. */}
-      <View style={{ borderTopWidth: 0.5, borderTopColor: COLORS.hairlineLight, paddingTop: 6, marginTop: 2 }}>
+      <View style={{ borderTopWidth: 0.5, borderTopColor: COLORS.hairlineLight, paddingTop: 6, marginTop: 2 }} wrap={false}>
         <Text style={{ fontSize: 8, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 3 }}>
           Competitive Moat Pillar Assessment &amp; Durability Matrix
         </Text>
-        <View style={S.compactTable}>
+        <View style={S.compactTable} wrap={false}>
           <View style={S.compactRowHeader}>
             <Text style={[S.compactCellHeader, { width: "28%" }]}>Moat Pillar</Text>
             <Text style={[S.compactCellHeader, { width: "20%" }]}>Durability</Text>
@@ -2463,9 +2472,9 @@ const MoatSourcesPage = ({ data }: { data: ReportData }) => {
     <Page size="A4" style={S.page}>
       <InstitutionalMasthead data={data} sectionTitle="Moat Sources &amp; Industry Structure" />
 
-      <View style={{ flexDirection: "row", gap: 14, marginBottom: 8 }}>
+      <View wrap={false} style={{ flexDirection: "row", gap: 14, marginBottom: 8 }}>
         <View style={{ flex: 1, paddingRight: 4 }}>
-          <View style={{ borderBottomWidth: 0.5, borderBottomColor: COLORS.hairlineLight, paddingBottom: 2, marginBottom: 4 }}>
+          <View style={{ borderBottomWidth: 0.5, borderBottomColor: COLORS.hairlineLight, paddingBottom: 2, marginBottom: 4 }} wrap={false}>
             <Text style={{ fontSize: 8.5, fontFamily: "Helvetica-Bold", color: COLORS.slateDark }}>
               Industry Competitive Landscape &amp; Macro Backdrop
             </Text>
@@ -2479,7 +2488,7 @@ const MoatSourcesPage = ({ data }: { data: ReportData }) => {
         </View>
 
         <View style={{ flex: 1, paddingLeft: 4 }}>
-          <View style={{ borderBottomWidth: 0.5, borderBottomColor: COLORS.hairlineLight, paddingBottom: 2, marginBottom: 4 }}>
+          <View style={{ borderBottomWidth: 0.5, borderBottomColor: COLORS.hairlineLight, paddingBottom: 2, marginBottom: 4 }} wrap={false}>
             <Text style={{ fontSize: 8.5, fontFamily: "Helvetica-Bold", color: COLORS.slateDark }}>
               Moat Trend &amp; Scale Compounding
             </Text>
@@ -2506,151 +2515,46 @@ const MoatSourcesPage = ({ data }: { data: ReportData }) => {
         <Text style={{ fontSize: 8, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2 }}>
           Industry Competitive Dynamics &amp; Porter&apos;s Five Forces Assessment
         </Text>
-        <View style={S.compactTable}>
+        <View style={S.compactTable} wrap={false}>
           <View style={S.compactRowHeader}>
             <Text style={[S.compactCellHeader, { width: "24%" }]}>Five Forces Pillar</Text>
             <Text style={[S.compactCellHeader, { width: "16%" }]}>Intensity</Text>
             <Text style={[S.compactCellHeader, { width: "60%" }]}>Sector Dynamics &amp; Strategic Defense</Text>
           </View>
-          {(pe.fiveForces || [
-            { force: "Threat of New Entrants", level: "Low", commentary: "Massive capex requirements, multi-year certification hurdles, and track record mandates prevent startup entry." },
-            { force: "Bargaining Power of Buyers", level: "Moderate", commentary: "Competitive auction tenders are balanced by proprietary product specifications and Tier-1 qualification." },
-            { force: "Bargaining Power of Suppliers", level: "Moderate", commentary: "Commodity feedstock exposure is actively mitigated through formulaic price-indexation pass-through clauses." },
-            { force: "Threat of Substitutes", level: "Low", commentary: "Core engineering products satisfy essential infrastructure functions with high barriers to functional substitution." },
-            { force: "Competitive Rivalry", level: "Moderate", commentary: "Disciplined competitive environment among an oligopoly of established Tier-1 manufacturers." },
-          ]).map((item, ri) => (
+          {(pe.fiveForces && pe.fiveForces.length > 0 ? pe.fiveForces : []).map((item, ri) => (
             <View key={ri} style={ri % 2 === 0 ? S.compactRow : S.compactRowAlt}>
               <Text style={[S.compactCellBold, { width: "24%" }]}>{item.force}</Text>
               <Text style={[S.compactCell, { width: "16%" }]}>{item.level}</Text>
               <Text style={[S.compactCell, { width: "60%" }]}>{item.commentary}</Text>
             </View>
           ))}
-        </View>
-      </View>
-
-      {/* Table 2: Industry Value Chain & Scale Reinvestment Runway Matrix */}
-      <View style={{ borderTopWidth: 0.5, borderTopColor: COLORS.hairlineLight, paddingTop: 4, marginBottom: 4 }}>
-        <Text style={{ fontSize: 8, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2 }}>
-          Industry Value Chain Integration &amp; Structural Scale Runway
-        </Text>
-        <View style={S.compactTable}>
-          <View style={S.compactRowHeader}>
-            <Text style={[S.compactCellHeader, { width: "26%" }]}>Value Chain Segment</Text>
-            <Text style={[S.compactCellHeader, { width: "22%" }]}>Scale Position</Text>
-            <Text style={[S.compactCellHeader, { width: "52%" }]}>Institutional Competitive Insulation</Text>
-          </View>
-          {(() => {
-            const sec = (data.profile.sector || "").toLowerCase();
-            const ind = (data.profile.industry || "").toLowerCase();
-            const arch = ledger?.archetype || "MATURE_COMPOUNDER";
-
-            if (arch === "EARLY_PLATFORM_GROWTH" || sec.includes("internet") || ind.includes("delivery") || ind.includes("platform")) {
-              return [
-                ["Merchant & Restaurant Partner Network", "Pan-National Category Aggregator", "Deep catalog exclusivity and point-of-sale integration establish high supply-side barriers against sub-scale entrants."],
-                ["Hyperlocal Dark Store Mesh Footprint", "Dense Urban Fulfillment Grid", "Strategically positioned micro-warehouses achieve sub-15 minute delivery times, capturing localized customer proximity."],
-                ["Algorithmic Fleet Routing & Batching", "Proprietary Dispatch Engine", "Machine-learning dispatch models maximize batching efficiency, reducing variable cost-per-drop across peak demand windows."],
-                ["Consumer Ecosystem & Loyalty Lock-in", "High-Frequency Transacting Base", "Subscription memberships (e.g. Swiggy One) and multi-category quick-commerce cross-sell compound customer lifetime value."],
-              ];
-            }
-            if (sec.includes("telecom") || ind.includes("communication") || ind.includes("wireless") || arch === "DISTRESSED") {
-              return [
-                ["Spectrum Rights & Bandwidth Portfolio", "Sub-GHz & C-Band Airwaves", "Regulated multi-decade spectrum holdings form absolute sovereign entry barriers; capital access dictates future auction participation."],
-                ["Tower Infrastructure & Fiber Backhaul", "Shared Passive Tenancy", "National macro-site tenancy and optical fiber interconnections govern baseline network uptime and backhaul throughput."],
-                ["4G/5G Radio Access Network (RAN)", "Core Urban Densification", "Coverage footprint and packet throughput directly control subscriber retention, blended ARPU, and incremental churn."],
-                ["Retail Subscriber & Enterprise Distribution", "Direct Franchisee & Corporate B2B", "Pan-India retailer points-of-presence and corporate fixed-line enterprise contracts underpin baseline monthly cash collections."],
-              ];
-            }
-            if (sec.includes("pharma") || sec.includes("health") || ind.includes("biotech")) {
-              return [
-                ["Active Pharmaceutical Ingredient (API) Sourcing", "Strategic Multi-Sourced Suppliers", "Regulatory-qualified supplier master files insulate formulations from single-source raw material disruption."],
-                ["cGMP Manufacturing & Sterile Footprint", "High-Throughput Cleanrooms", "Stringent international regulatory approvals (US FDA, EMA, WHO) impose multi-year validation hurdles for competitors."],
-                ["Formulation Pipeline & Dossier Filings", "Specialized ANDA / DMF Portfolio", "Continuous R&D investment into complex injectables, biologics, and modified-release therapies expands pricing power."],
-                ["Institutional Hospital & Pharmacy Distribution", "Direct Wholesaler & Tier-1 Accounts", "Entrenched tender procurement with hospital networks and pharmacy chains provides durable volume commitments."],
-              ];
-            }
-            if (sec.includes("technology") || sec.includes("software") || ind.includes("it services")) {
-              return [
-                ["Distributed Cloud Infrastructure & Compute", "Multi-Region Redundant Hosting", "Resilient microservices architecture guarantees enterprise-grade SLAs and scalable compute efficiency."],
-                ["Proprietary Codebase & Developer Ecosystem", "Modular Intellectual Property", "Extensive proprietary APIs and certified integrations embed high institutional switching costs into client workflows."],
-                ["Enterprise Go-To-Market & Account Expansion", "Tier-1 Global Direct Sales", "Long-term master service agreements and expanding Net Retention Rates (NRR) compound recurring revenue."],
-                ["Continuous Product Innovation & AI Integration", "High-Velocity Release Cycle", "Dedicated R&D reinvestment into automated tooling and machine intelligence maintains category technology leadership."],
-              ];
-            }
-            if (sec.includes("material") || ind.includes("agri") || ind.includes("crop") || ind.includes("chem") || (data.profile.name || "").toLowerCase().includes("pi ind")) {
-              return [
-                ["Proprietary Synthesis & Active Ingredients", "Global Custom Synthesis (CSM)", "Multi-step complex organic chemistry and patent registrations create sticky multi-year supply agreements with global innovator clients."],
-                ["Advanced EHS & Synthesis Footprint", "High-Containment Modern Complexes", "Strict regulatory clearances and environmental compliance create high capital hurdles against unorganized entrants."],
-                ["R&D Pipeline & Molecule Registrations", "Patented Commercial Portfolio", "Continuous development of proprietary co-formulations and active ingredient dossiers enhances pricing defensibility against generic erosion."],
-                ["Pan-Regional Agri-Retail Channel Reach", "Multi-Tier Rural Dealer Network", "Deep agronomist engagement and established farmer brand pull insulate domestic formulation volumes against spatial rainfall variations."],
-              ];
-            }
-            if (sec.includes("renewable") || ind.includes("wind") || ind.includes("solar") || ind.includes("clean") || ind.includes("power") || (data.profile.name || "").toLowerCase().includes("suzlon")) {
-              return [
-                ["Rotor Blade & Nacelle Sourcing", "Localized Multi-Cluster Footprint", "Strategically positioned manufacturing hubs in Gujarat and Tamil Nadu optimize logistics for 78m+ oversized blades, reducing freight costs and transit risks."],
-                ["Turnkey Turbine Assembly & BOP", "Proprietary S144 / Modular 3.x MW", "Integrated turbine generation with Balance of Plant (BOP) engineering provides EPC execution control across challenging Indian terrains."],
-                ["Utility & C&I Tender Execution", "SECI / State Grid Direct Wins", "Entrenched DevCo relationships and formulaic pass-through clauses in competitive auctions safeguard project realization margins."],
-                ["Sticky Life-Cycle O&M Annuity", "Pan-India 15+ GW Fleet Density", "20-year multi-stage Operations & Maintenance (O&M) service contracts create recurring high-margin annuities with 95%+ machine availability."],
-              ];
-            }
-            // General / Manufacturing / Consumer
-            return [
-              ["Upstream Sourcing & Pass-Through", "Tier-1 Preferred Buyer", "Strategic multi-sourcing and contract price-indexation protect gross margins against spot commodity inflation."],
-              ["Automated Production Footprint", "High-Throughput Modern Facilities", "Scaled manufacturing infrastructure with stringent ISO quality certifications establishes durable unit-cost advantages."],
-              ["Omnichannel Commercial Distribution", "Pan-Regional Wholesale & Direct", "Extensive distributor relationships and multi-tier retail penetration secure baseline volume velocity across economic cycles."],
-              ["Brand Equity & Product Innovation", "Continuous Category Reinvestment", "Consistent marketing and focused R&D targeted at premium high-margin variants expand structural pricing power."],
-            ];
-          })().map(([seg, pos, ins], ri) => (
-            <View key={ri} style={ri % 2 === 0 ? S.compactRow : S.compactRowAlt}>
-              <Text style={[S.compactCellBold, { width: "26%" }]}>{seg}</Text>
-              <Text style={[S.compactCell, { width: "22%" }]}>{pos}</Text>
-              <Text style={[S.compactCell, { width: "52%" }]}>{ins}</Text>
+          {(!pe.fiveForces || pe.fiveForces.length === 0) && (
+            <View style={S.compactRow}>
+              <Text style={[S.compactCell, { width: "100%", color: COLORS.textMuted }]}>No five-forces assessment evidenced — unassessed rather than assumed.</Text>
             </View>
-          ))}
+          )}
         </View>
       </View>
 
-      {/* Dense 2-Column Moat Durability & Value Chain Disruption Box */}
+      {/* Table 2 removed (AI-only doctrine): the sector-templated value-chain
+          matrix was pre-scripted prose with no council author. Moat economics
+          are carried by the AI pillar matrix and five-forces table above. */}
+
+      {/* Moat durability strip: engine numbers only (rating, trend, spread).
+          Analytical prose lives in the AI pillar matrix above — no boilerplate. */}
       <View style={{ padding: 5.5, backgroundColor: COLORS.offWhite, borderWidth: 0.5, borderColor: COLORS.hairlineLight }}>
         <Text style={{ fontSize: 7.8, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2.5 }}>
           Economic Moat Durability &amp; Value Chain Analysis
         </Text>
-        <View style={{ flexDirection: "row", gap: 10 }}>
+        <Text style={{ fontSize: 6.6, color: COLORS.textSecondary, lineHeight: 1.35 }}>
           {(() => {
             const moatR = ledger?.moatRating ?? "Narrow";
             const moatT = ledger?.moatTrend ?? "Stable";
-            const roicSpreadNum = ledger?.roicSpread !== undefined ? (ledger.roicSpread * 100).toFixed(1) : undefined;
-            const spreadDesc = roicSpreadNum !== undefined
-              ? (Number(roicSpreadNum) >= 0 ? `a positive ROIC-WACC spread (+${roicSpreadNum}%)` : `an ROIC-WACC spread of ${roicSpreadNum}%`)
-              : "disciplined hurdle rates";
-
-            return (
-              <>
-                <View style={{ flex: 1 }}>
-                  <Text style={{ fontSize: 7.2, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 1.5 }}>
-                    Economic Moat Reinvestment Runway
-                  </Text>
-                  <Text style={{ fontSize: 6.0, color: COLORS.textSecondary, lineHeight: 1.3, marginBottom: 1.5 }}>
-                    {data.profile.name}&apos;s competitive positioning in {data.profile.industry || data.profile.sector} supports operating resilience across sector cycles. Reinvestment of cash flows into core manufacturing, process synthesis, and channel distribution reinforces long-term economic value creation without balance sheet strain.
-                  </Text>
-                  <Text style={{ fontSize: 6.0, color: COLORS.textSecondary, lineHeight: 1.3 }}>
-                    Technical customer qualifications and regulatory compliance hurdles protect established relationships, underpinning predictable free cash flow conversion across the 5-year explicit forecast horizon.
-                  </Text>
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={{ fontSize: 7.2, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 1.5 }}>
-                    Competitive Defense &amp; Capital Intensity
-                  </Text>
-                  <Text style={{ fontSize: 6.0, color: COLORS.textSecondary, lineHeight: 1.3, marginBottom: 1.5 }}>
-                    Substantial upfront capital investment, stringent EHS/regulatory clearances, and multi-year customer auditing requirements establish formidable barriers against prospective entrants. Operational scale and integrated facilities reinforce competitive cost positioning.
-                  </Text>
-                  <Text style={{ fontSize: 6.0, color: COLORS.textSecondary, lineHeight: 1.3 }}>
-                    Our research confirms an economic moat rating of {moatR} with a {moatT} outlook, anchored by {spreadDesc} and disciplined capital stewardship.
-                  </Text>
-                </View>
-              </>
-            );
+            const s = ledger?.roicSpread;
+            const spread = s !== undefined && isFinite(s) ? ` · ROIC–WACC spread ${(s * 100).toFixed(1)}pp` : "";
+            return `Composite moat ${moatR} (${moatT} trend)${spread}. Pillar horizons above are capped to this composite.`;
           })()}
-        </View>
+        </Text>
       </View>
 
       <PageFooter companyName={data.profile.name} />
@@ -2672,17 +2576,18 @@ const BullsSayBearsSayPage = ({ data }: { data: ReportData }) => {
     <Page size="A4" style={S.page}>
       <InstitutionalMasthead data={data} sectionTitle="Bulls Say / Bears Say &amp; Strategic Catalysts" />
 
-      <View style={{ flexDirection: "row", gap: 14, marginBottom: 8 }}>
+      <View wrap={false} style={{ flexDirection: "row", gap: 14, marginBottom: 8 }}>
         <View style={{ flex: 1, paddingRight: 6, borderRightWidth: 0.5, borderRightColor: COLORS.hairlineLight }}>
           <View style={{ borderBottomWidth: 1, borderBottomColor: COLORS.hairline, paddingBottom: 2, marginBottom: 6 }}>
             <Text style={{ fontSize: 9, fontFamily: "Helvetica-Bold", color: COLORS.slateDark }}>Bulls Say</Text>
           </View>
 
+          {/* AI-only: strategist SWOT items or nothing — never template filler. */}
           {[
-            ["1. Revenue Durability & Scale", bulls[0] || `${data.profile.name} retains entrenched scale in ${data.profile.industry}, supporting repeat business and operating leverage.`],
-            ["2. Margin Expansion & Cash Conversion", bulls[3] || bulls[1] || "Operating efficiency gains and mix improvement support progressive margin expansion and cash generation."],
-            ["3. Balance-Sheet Flexibility", bulls[2] || "A conservative capital structure preserves capacity to fund growth and withstand cyclical stress."],
-          ].map(([title, desc], idx) => (
+            ["1. Revenue Durability & Scale", bulls[0]],
+            ["2. Margin Expansion & Cash Conversion", bulls[3] || bulls[1]],
+            ["3. Balance-Sheet Flexibility", bulls[2]],
+          ].filter(([, desc]) => typeof desc === "string" && (desc as string).trim().length > 0).map(([title, desc], idx) => (
             <View key={idx} style={{ marginBottom: 5 }}>
               <Text style={{ fontSize: 7.5, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2 }}>
                 {title}
@@ -2698,10 +2603,10 @@ const BullsSayBearsSayPage = ({ data }: { data: ReportData }) => {
           </View>
 
           {[
-            ["1. Input-Cost & Margin Sensitivity", bears[1] || bears[0] || "Volatility in key operating inputs can compress near-term margins where pass-through is lagged or incomplete."],
-            ["2. Execution & Working-Capital Intensity", bears[2] || "Delivery slippages or elongated receivables can defer cash realization and absorb working capital."],
-            ["3. Competitive & Pricing Pressure", bears[3] || "Intensifying rivalry and price competition in core markets could constrain margin expansion."],
-          ].map(([title, desc], idx) => (
+            ["1. Input-Cost & Margin Sensitivity", bears[1] || bears[0]],
+            ["2. Execution & Working-Capital Intensity", bears[2]],
+            ["3. Competitive & Pricing Pressure", bears[3]],
+          ].filter(([, desc]) => typeof desc === "string" && (desc as string).trim().length > 0).map(([title, desc], idx) => (
             <View key={idx} style={{ marginBottom: 5 }}>
               <Text style={{ fontSize: 7.5, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2 }}>
                 {title}
@@ -2716,9 +2621,9 @@ const BullsSayBearsSayPage = ({ data }: { data: ReportData }) => {
         <Text style={{ fontSize: 8.5, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2 }}>
           Strategic Roadmap &amp; Commercial Execution
         </Text>
-        <Text style={S.bodyText}>
-          {pe.businessStrategyCommentary || `We assess ${data.profile.name}'s forward strategy as highly disciplined. Management is prioritizing high-margin contract execution, localized supply chain integration, and working capital acceleration to compound returns on invested capital.`}
-        </Text>
+          <Text style={S.bodyText}>
+            {pe.businessStrategyCommentary}
+          </Text>
       </View>
 
       {/* Key Investment Catalysts & Downside Risk Milestones Table (Fills bottom gap) */}
@@ -2726,7 +2631,7 @@ const BullsSayBearsSayPage = ({ data }: { data: ReportData }) => {
         <Text style={{ fontSize: 8, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 3 }}>
           Key Investment Catalysts &amp; Downside Risk Milestones
         </Text>
-        <View style={S.compactTable}>
+        <View style={S.compactTable} wrap={false}>
           <View style={S.compactRowHeader}>
             <Text style={[S.compactCellHeader, { width: "36%" }]}>Event / Operational Milestone</Text>
             <Text style={[S.compactCellHeader, { width: "16%" }]}>Horizon</Text>
@@ -2778,7 +2683,7 @@ const BullsSayBearsSayPage = ({ data }: { data: ReportData }) => {
         <Text style={{ fontSize: 7.8, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2.5 }}>
           Strategic Catalyst Transmission &amp; Position Risk Triggers
         </Text>
-        <View style={{ flexDirection: "row", gap: 10 }}>
+        <View wrap={false} style={{ flexDirection: "row", gap: 10 }}>
           <View style={{ flex: 1 }}>
             <Text style={{ fontSize: 7.2, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 1.5 }}>
               Primary Value Accretion Milestones
@@ -2811,7 +2716,7 @@ const BullsSayBearsSayPage = ({ data }: { data: ReportData }) => {
         <Text style={{ fontSize: 7.5, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2 }}>
           Scenario Probability-Weighted Fair Value Bridge &amp; Milestone Calibration
         </Text>
-        <View style={S.compactTable}>
+        <View style={S.compactTable} wrap={false}>
           <View style={S.compactRowHeader}>
             <Text style={[S.compactCellHeader, { width: "24%" }]}>Scenario</Text>
             <Text style={[S.compactCellHeaderRight, { width: "12%" }]}>Weight</Text>
@@ -2900,14 +2805,14 @@ const CreditAnalysisPage1 = ({ data }: { data: ReportData }) => {
         </Text>
       </View>
 
-      <View style={{ flexDirection: "row", gap: 12, marginBottom: 4 }}>
+      <View wrap={false} style={{ flexDirection: "row", gap: 12, marginBottom: 4 }}>
         {/* Left Side: Tables & Chart */}
         <View style={{ flex: 1.15, paddingRight: 4 }}>
           {/* Table 1: Multi-Year Cash Flow Track & Horizon */}
           <Text style={{ fontSize: 7.2, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2 }}>
             Multi-Year Cash Flow Track &amp; Horizon ({currency} Millions)
           </Text>
-          <View style={S.compactTable}>
+          <View style={S.compactTable} wrap={false}>
             <View style={S.compactRowHeader}>
               <Text style={[S.compactCellHeader, { width: "35%" }]}>Line Item</Text>
               {models.map((m, i) => (
@@ -2950,7 +2855,7 @@ const CreditAnalysisPage1 = ({ data }: { data: ReportData }) => {
                 });
               })()}
             </Svg>
-            <View style={{ flexDirection: "row", paddingHorizontal: 10 }}>
+            <View wrap={false} style={{ flexDirection: "row", paddingHorizontal: 10 }}>
               {models.map((m, i) => (
                 <Text key={i} style={{ flex: 1, textAlign: "center", fontSize: 5.0, color: COLORS.textMuted }}>
                   {m.label.replace("FY20", "FY").replace("(E)", "E")}
@@ -2963,7 +2868,7 @@ const CreditAnalysisPage1 = ({ data }: { data: ReportData }) => {
           <Text style={{ fontSize: 7.2, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 1.5 }}>
             Adjusted Cash Flow Summary ({currency} Millions)
           </Text>
-          <View style={S.compactTable}>
+          <View style={S.compactTable} wrap={false}>
             <View style={S.compactRowHeader}>
               <Text style={[S.compactCellHeader, { width: "65%" }]}>Summary Metric</Text>
               <Text style={[S.compactCellHeaderRight, { width: "35%" }]}>Amount</Text>
@@ -2986,7 +2891,7 @@ const CreditAnalysisPage1 = ({ data }: { data: ReportData }) => {
           <Text style={{ fontSize: 7.2, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginTop: 3, marginBottom: 1.5 }}>
             Credit Rating Pillars — Subject Score vs Peer Median
           </Text>
-          <View style={S.compactTable}>
+          <View style={S.compactTable} wrap={false}>
             <View style={S.compactRowHeader}>
               <Text style={[S.compactCellHeader, { width: "40%" }]}>Pillar (1=Best, 10=Worst)</Text>
               <Text style={[S.compactCellHeaderRight, { width: "20%" }]}>{data.profile.ticker}</Text>
@@ -3057,13 +2962,13 @@ const CreditAnalysisPage1 = ({ data }: { data: ReportData }) => {
           </Text>
 
           {/* Table 4: Key Credit & Solvency Covenant Metrics */}
-          <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "baseline", marginTop: 3, marginBottom: 1.5 }}>
+          <View wrap={false} style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "baseline", marginTop: 3, marginBottom: 1.5 }}>
             <Text style={{ fontSize: 7.2, fontFamily: "Helvetica-Bold", color: COLORS.slateDark }}>
               Key Credit &amp; Solvency Covenant Metrics
             </Text>
             <Text style={{ fontSize: 4.8, color: COLORS.textMuted }}>[Reported / Derived · Covenants: Model Assumptions]</Text>
           </View>
-          <View style={S.compactTable}>
+          <View style={S.compactTable} wrap={false}>
             <View style={S.compactRowHeader}>
               <Text style={[S.compactCellHeader, { width: "42%" }]}>Metric</Text>
               <Text style={[S.compactCellHeaderRight, { width: "22%" }]}>Current</Text>
@@ -3160,7 +3065,7 @@ const CreditAnalysisPage1 = ({ data }: { data: ReportData }) => {
 
           {/* Institutional Credit Summary Box */}
           <View style={{ padding: 6, backgroundColor: "#f8fafc", borderWidth: 0.5, borderColor: COLORS.hairlineLight, borderRadius: 2 }}>
-            <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 2 }}>
+            <View wrap={false} style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 2 }}>
               <Text style={{ fontSize: 6.8, fontFamily: "Helvetica-Bold", color: COLORS.slateDark }}>Credit Assessment Summary</Text>
               <Text style={{ fontSize: 6.8, fontFamily: "Helvetica-Bold", color: COLORS.primaryRed }}>Grade: {kpis.credit} (Model)</Text>
             </View>
@@ -3176,7 +3081,7 @@ const CreditAnalysisPage1 = ({ data }: { data: ReportData }) => {
         <Text style={{ fontSize: 7.2, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2 }}>
           Credit Solvency &amp; Liquidity Headroom Under Multi-Tier Macro Stress Scenarios
         </Text>
-        <View style={S.compactTable}>
+        <View style={S.compactTable} wrap={false}>
           <View style={S.compactRowHeader}>
             <Text style={[S.compactCellHeader, { width: "24%" }]}>Stress Scenario</Text>
             <Text style={[S.compactCellHeaderRight, { width: "15%" }]}>Revenue Contraction</Text>
@@ -3280,7 +3185,7 @@ const CreditAnalysisPage2 = ({ data }: { data: ReportData }) => {
     <Page size="A4" style={S.page}>
       <InstitutionalMasthead data={data} sectionTitle="Capital Structure &amp; Enterprise Risk" />
 
-      <View style={{ flexDirection: "row", gap: 14, marginBottom: 5 }}>
+      <View wrap={false} style={{ flexDirection: "row", gap: 14, marginBottom: 5 }}>
         <View style={{ flex: 1, paddingRight: 4 }}>
           <Text style={{ fontSize: 6.6, color: COLORS.textSecondary, lineHeight: 1.35, textAlign: "justify", marginBottom: 3 }}>
             In evaluating {data.profile.name}&apos;s capital structure, we anchor on reported leverage, cash reserves, and interest coverage from the statements above. No characterization beyond those figures is made here — see the Credit Analysis page for the model-implied assessment.
@@ -3305,7 +3210,7 @@ const CreditAnalysisPage2 = ({ data }: { data: ReportData }) => {
         <Text style={{ fontSize: 7.5, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2 }}>
           Enterprise Risk Severity &amp; Management Mitigation Matrix
         </Text>
-        <View style={[S.compactTable, { marginBottom: 3 }]}>
+        <View style={[S.compactTable, { marginBottom: 3  }]} wrap={false}>
           <View style={S.compactRowHeader}>
             <Text style={[S.compactCellHeader, { width: "25%" }]}>Risk Category</Text>
             <Text style={[S.compactCellHeader, { width: "15%" }]}>Inherent Severity</Text>
@@ -3330,7 +3235,7 @@ const CreditAnalysisPage2 = ({ data }: { data: ReportData }) => {
         <Text style={{ fontSize: 7.5, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2 }}>
           Debt Maturity Amortization Schedule &amp; Refinancing Profile ({currency} Millions)
         </Text>
-        <View style={[S.compactTable, { marginBottom: 3 }]}>
+        <View style={[S.compactTable, { marginBottom: 3  }]} wrap={false}>
           <View style={S.compactRowHeader}>
             <Text style={[S.compactCellHeader, { width: "25%" }]}>Maturity Bucket</Text>
             <Text style={[S.compactCellHeaderRight, { width: "18%" }]}>Principal Due</Text>
@@ -3369,7 +3274,7 @@ const CreditAnalysisPage2 = ({ data }: { data: ReportData }) => {
         <Text style={{ fontSize: 7.8, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2.5 }}>
           Balance Sheet Stress-Testing &amp; Covenant Headroom Analysis
         </Text>
-        <View style={{ flexDirection: "row", gap: 10 }}>
+        <View wrap={false} style={{ flexDirection: "row", gap: 10 }}>
           <View style={{ flex: 1 }}>
             <Text style={{ fontSize: 7.2, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 1.5 }}>
               Downside Volume &amp; Pricing Stress Sensitivity
@@ -3415,13 +3320,13 @@ const ManagementAndOwnershipPage1 = ({ data }: { data: ReportData }) => {
     <Page size="A4" style={S.page}>
       <InstitutionalMasthead data={data} sectionTitle="Management &amp; Governance" />
 
-      <View style={{ flexDirection: "row", gap: 14, marginBottom: 8 }}>
+      <View wrap={false} style={{ flexDirection: "row", gap: 14, marginBottom: 8 }}>
         <View style={{ flex: 1.15, paddingRight: 4 }}>
           <Text style={{ fontSize: 7.2, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2 }}>
             Management & Key Officers
           </Text>
           <ProvenanceTag type="FILINGS" source="Statutory Annual Disclosures / Regulatory Registry" />
-          <View style={S.compactTable}>
+          <View style={S.compactTable} wrap={false}>
             <View style={S.compactRowHeader}>
               <Text style={[S.compactCellHeader, { width: "35%" }]}>Officer Name</Text>
               <Text style={[S.compactCellHeader, { width: "35%" }]}>Role / Designation</Text>
@@ -3462,7 +3367,7 @@ const ManagementAndOwnershipPage1 = ({ data }: { data: ReportData }) => {
             Major Institutional Holdings
           </Text>
           <ProvenanceTag type="FILINGS" source={data.shareholding?.provenanceNote || "Regulatory Registry / SEC 13-F / SEBI LODR"} />
-          <View style={S.compactTable}>
+          <View style={S.compactTable} wrap={false}>
             <View style={S.compactRowHeader}>
               <Text style={[S.compactCellHeader, { width: "42%" }]}>Institution / Asset Manager</Text>
               <Text style={[S.compactCellHeaderRight, { width: "18%" }]}>% Shares</Text>
@@ -3504,7 +3409,7 @@ const ManagementAndOwnershipPage1 = ({ data }: { data: ReportData }) => {
           <Text style={{ fontSize: 7.2, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginTop: 4, marginBottom: 2 }}>
             Top Mutual Funds &amp; Passive Vehicles
           </Text>
-          <View style={S.compactTable}>
+          <View style={S.compactTable} wrap={false}>
             <View style={S.compactRowHeader}>
               <Text style={[S.compactCellHeader, { width: "42%" }]}>Fund / Scheme Designation</Text>
               <Text style={[S.compactCellHeaderRight, { width: "18%" }]}>% Holding</Text>
@@ -3545,7 +3450,7 @@ const ManagementAndOwnershipPage1 = ({ data }: { data: ReportData }) => {
         </View>
 
         <View style={{ flex: 1, paddingLeft: 4 }}>
-          <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "baseline", marginBottom: 3 }}>
+          <View wrap={false} style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "baseline", marginBottom: 3 }}>
             <Text style={{ fontSize: 8.5, fontFamily: "Helvetica-Bold", color: COLORS.slateDark }}>
               Management &amp; Governance
             </Text>
@@ -3595,7 +3500,7 @@ const ManagementAndOwnershipPage1 = ({ data }: { data: ReportData }) => {
         <Text style={{ fontSize: 8, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2.5 }}>
           Board Governance &amp; Executive Compensation Scorecard
         </Text>
-        <View style={S.compactTable}>
+        <View style={S.compactTable} wrap={false}>
           <View style={S.compactRowHeader}>
             <Text style={[S.compactCellHeader, { width: "30%" }]}>Governance Pillar</Text>
             <Text style={[S.compactCellHeader, { width: "20%" }]}>Status</Text>
@@ -3639,7 +3544,7 @@ const ManagementAndOwnershipPage1 = ({ data }: { data: ReportData }) => {
         <Text style={{ fontSize: 7.8, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2 }}>
           Executive Stewardship, Succession Planning &amp; Long-Term Alignment
         </Text>
-        <View style={{ flexDirection: "row", gap: 10 }}>
+        <View wrap={false} style={{ flexDirection: "row", gap: 10 }}>
           <View style={{ flex: 1 }}>
             <Text style={{ fontSize: 7.2, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 1.5 }}>
               Board Oversight &amp; Key-Person Dependency Mitigation
@@ -3678,9 +3583,9 @@ const ManagementAndOwnershipPage2 = ({ data }: { data: ReportData }) => {
     <Page size="A4" style={S.page}>
       <InstitutionalMasthead data={data} sectionTitle="Capital Allocation &amp; Corporate Strategy" />
 
-      <View style={{ flexDirection: "row", gap: 14, marginBottom: 10 }}>
+      <View wrap={false} style={{ flexDirection: "row", gap: 14, marginBottom: 10 }}>
         <View style={{ flex: 1, paddingRight: 4 }}>
-          <View style={{ borderBottomWidth: 0.5, borderBottomColor: COLORS.hairlineLight, paddingBottom: 2, marginBottom: 4 }}>
+          <View style={{ borderBottomWidth: 0.5, borderBottomColor: COLORS.hairlineLight, paddingBottom: 2, marginBottom: 4 }} wrap={false}>
             <Text style={{ fontSize: 8.5, fontFamily: "Helvetica-Bold", color: COLORS.slateDark }}>
               Capital Allocation Framework &amp; Priorities
             </Text>
@@ -3700,7 +3605,7 @@ const ManagementAndOwnershipPage2 = ({ data }: { data: ReportData }) => {
         </View>
 
         <View style={{ flex: 1, paddingLeft: 4 }}>
-          <View style={{ borderBottomWidth: 0.5, borderBottomColor: COLORS.hairlineLight, paddingBottom: 2, marginBottom: 4 }}>
+          <View style={{ borderBottomWidth: 0.5, borderBottomColor: COLORS.hairlineLight, paddingBottom: 2, marginBottom: 4 }} wrap={false}>
             <Text style={{ fontSize: 8.5, fontFamily: "Helvetica-Bold", color: COLORS.slateDark }}>
               Balance Sheet Strategy &amp; Executive Alignment
             </Text>
@@ -3723,7 +3628,7 @@ const ManagementAndOwnershipPage2 = ({ data }: { data: ReportData }) => {
         <Text style={{ fontSize: 8, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 3 }}>
           Capital Deployment History &amp; 5-Year Forecast ({currency} Millions)
         </Text>
-        <View style={S.compactTable}>
+        <View style={S.compactTable} wrap={false}>
           <View style={S.compactRowHeader}>
             <Text style={[S.compactCellHeader, { width: "35%" }]}>Deployment Priority</Text>
             {models.map((m, i) => (
@@ -3754,7 +3659,7 @@ const ManagementAndOwnershipPage2 = ({ data }: { data: ReportData }) => {
         <Text style={{ fontSize: 7.5, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2 }}>
           ROIC vs. Cost of Capital (WACC) Multi-Year Economic Spread ({currency} Millions)
         </Text>
-        <View style={S.compactTable}>
+        <View style={S.compactTable} wrap={false}>
           <View style={S.compactRowHeader}>
             <Text style={[S.compactCellHeader, { width: "35%" }]}>Economic Value Metric</Text>
             {models.map((m, i) => (
@@ -3808,7 +3713,7 @@ const ManagementAndOwnershipPage2 = ({ data }: { data: ReportData }) => {
         <Text style={{ fontSize: 7.5, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2 }}>
           10-Year Cumulative Capital Stewardship &amp; Allocation Track Record
         </Text>
-        <View style={S.compactTable}>
+        <View style={S.compactTable} wrap={false}>
           <View style={S.compactRowHeader}>
             <Text style={[S.compactCellHeader, { width: "28%" }]}>Deployment Channel</Text>
             <Text style={[S.compactCellHeaderRight, { width: "18%" }]}>10-Yr Total</Text>
@@ -3882,7 +3787,7 @@ const ManagementAndOwnershipPage2 = ({ data }: { data: ReportData }) => {
         <Text style={{ fontSize: 7.8, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2 }}>
           Capital Allocation Framework &amp; Reinvestment Hurdle Discipline
         </Text>
-        <View style={{ flexDirection: "row", gap: 10 }}>
+        <View wrap={false} style={{ flexDirection: "row", gap: 10 }}>
           {(() => {
             const arch = ledger?.archetype || "MATURE_COMPOUNDER";
             if (arch === "DISTRESSED") {
@@ -4014,8 +3919,8 @@ const EventPriceChart = ({
   return (
     <View style={{ width, height: 104, backgroundColor: "#ffffff", borderWidth: 0.5, borderColor: COLORS.hairlineLight, borderRadius: 2, padding: 3, marginBottom: 3 }}>
       {/* Chart Top Header Strip */}
-      <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 3, paddingBottom: 2, borderBottomWidth: 0.5, borderBottomColor: COLORS.hairlineLight }}>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+      <View wrap={false} style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 3, paddingBottom: 2, borderBottomWidth: 0.5, borderBottomColor: COLORS.hairlineLight }}>
+        <View wrap={false} style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
           <View style={{ backgroundColor: "#1e293b", paddingHorizontal: 3, paddingVertical: 1, borderRadius: 1.5 }}>
             <Text style={{ fontSize: 5.0, fontFamily: "Helvetica-Bold", color: "#ffffff" }}>
               {event.category}
@@ -4025,7 +3930,7 @@ const EventPriceChart = ({
             {event.headline}
           </Text>
         </View>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
+        <View wrap={false} style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
           <Text style={{ fontSize: 5.2, color: COLORS.textMuted }}>Date: {event.eventDate}</Text>
           <View style={{ backgroundColor: isPositive ? "#d1fae5" : "#fee2e2", paddingHorizontal: 3, paddingVertical: 1, borderRadius: 1.5 }}>
             <Text style={{ fontSize: 5.4, fontFamily: "Helvetica-Bold", color: strokeColor }}>
@@ -4199,7 +4104,7 @@ const EventBasedPriceMovementPage = ({ data }: { data: ReportData }) => {
 
       {/* Methodology & Analytical Governance Box */}
       <View style={{ padding: 3.5, backgroundColor: COLORS.offWhite, borderWidth: 0.5, borderColor: COLORS.hairlineLight, marginBottom: 3 }}>
-        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 1 }}>
+        <View wrap={false} style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 1 }}>
           <Text style={{ fontSize: 6.2, fontFamily: "Helvetica-Bold", color: COLORS.slateDark }}>
             Empirical Event Study Methodology: T-5 to T+10 Normalized Price Discovery
           </Text>
@@ -4213,7 +4118,7 @@ const EventBasedPriceMovementPage = ({ data }: { data: ReportData }) => {
       {/* Primary Event Case with Vector Chart */}
       {ev1 && (
         <View style={{ marginBottom: 3 }}>
-          <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 1.2 }}>
+          <View wrap={false} style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 1.2 }}>
             <Text style={{ fontSize: 6.8, fontFamily: "Helvetica-Bold", color: COLORS.slateDark }}>
               Event Impact Analysis I: {ev1.categoryLabel}
             </Text>
@@ -4232,7 +4137,7 @@ const EventBasedPriceMovementPage = ({ data }: { data: ReportData }) => {
           )}
 
           {/* 3-Column Event Impact Decomposition */}
-          <View style={{ flexDirection: "row", gap: 6, marginTop: 1 }}>
+          <View wrap={false} style={{ flexDirection: "row", gap: 6, marginTop: 1 }}>
             <View style={{ flex: 1, padding: 2.5, backgroundColor: "#f8fafc", borderWidth: 0.5, borderColor: COLORS.hairlineLight, borderRadius: 1.5 }}>
               <Text style={{ fontSize: 5.4, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 0.8 }}>
                 Reported Disclosure Fact
@@ -4266,7 +4171,7 @@ const EventBasedPriceMovementPage = ({ data }: { data: ReportData }) => {
       {/* Secondary Event Case with Vector Chart */}
       {ev2 && ev2.id !== ev1?.id && (
         <View style={{ marginBottom: 3 }}>
-          <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 1.2 }}>
+          <View wrap={false} style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 1.2 }}>
             <Text style={{ fontSize: 6.8, fontFamily: "Helvetica-Bold", color: COLORS.slateDark }}>
               Event Impact Analysis II: {ev2.categoryLabel}
             </Text>
@@ -4285,7 +4190,7 @@ const EventBasedPriceMovementPage = ({ data }: { data: ReportData }) => {
           )}
 
           {/* 3-Column Event Impact Decomposition */}
-          <View style={{ flexDirection: "row", gap: 6, marginTop: 1 }}>
+          <View wrap={false} style={{ flexDirection: "row", gap: 6, marginTop: 1 }}>
             <View style={{ flex: 1, padding: 2.5, backgroundColor: "#f8fafc", borderWidth: 0.5, borderColor: COLORS.hairlineLight, borderRadius: 1.5 }}>
               <Text style={{ fontSize: 5.4, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 0.8 }}>
                 Reported Disclosure Fact
@@ -4321,7 +4226,7 @@ const EventBasedPriceMovementPage = ({ data }: { data: ReportData }) => {
         <Text style={{ fontSize: 6.8, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 1.2 }}>
           Corporate Event Surveillance &amp; Return Drift Ledger
         </Text>
-        <View style={S.compactTable}>
+        <View style={S.compactTable} wrap={false}>
           <View style={S.compactRowHeader}>
             <Text style={[S.compactCellHeader, { width: "12%", fontSize: 5.6 }]}>Event Date</Text>
             <Text style={[S.compactCellHeader, { width: "46%", fontSize: 5.6 }]}>Disclosure Headline &amp; Category</Text>
@@ -4334,7 +4239,7 @@ const EventBasedPriceMovementPage = ({ data }: { data: ReportData }) => {
             <View key={ri} style={ri % 2 === 0 ? S.compactRow : S.compactRowAlt}>
               <Text style={[S.compactCellBold, { width: "12%", fontSize: 5.6 }]}>{ev.eventDate}</Text>
               <View style={{ width: "46%", paddingHorizontal: 3.5, paddingVertical: 2.0 }}>
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 3, marginBottom: 1 }}>
+                <View wrap={false} style={{ flexDirection: "row", alignItems: "center", gap: 3, marginBottom: 1 }}>
                   <View style={{ backgroundColor: "#e2e8f0", paddingHorizontal: 2.5, paddingVertical: 0.5, borderRadius: 1.5 }}>
                     <Text style={{ fontSize: 4.0, fontFamily: "Helvetica-Bold", color: "#334155" }}>
                       {ev.categoryLabel || ev.category || "DISCLOSURE"}
@@ -4372,7 +4277,7 @@ const EventBasedPriceMovementPage = ({ data }: { data: ReportData }) => {
 
       {/* Institutional Corporate News Pulse & Material Disclosures Wire */}
       <View style={{ marginTop: 1 }}>
-        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 2 }}>
+        <View wrap={false} style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 2 }}>
           <Text style={{ fontSize: 6.8, fontFamily: "Helvetica-Bold", color: COLORS.slateDark }}>
             Institutional Corporate News Pulse &amp; Material Disclosures Wire
           </Text>
@@ -4380,7 +4285,7 @@ const EventBasedPriceMovementPage = ({ data }: { data: ReportData }) => {
         </View>
 
         {/* 4 Rich News Cards in 2x2 Grid */}
-        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 5 }}>
+        <View wrap={false} style={{ flexDirection: "row", flexWrap: "wrap", gap: 5 }}>
           {displayNews.map((item, idx) => (
             <View
               key={idx}
@@ -4395,8 +4300,8 @@ const EventBasedPriceMovementPage = ({ data }: { data: ReportData }) => {
               }}
             >
               {/* Card Header: Date, Publisher & Category Tag */}
-              <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 1.5 }}>
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 3 }}>
+              <View wrap={false} style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 1.5 }}>
+                <View wrap={false} style={{ flexDirection: "row", alignItems: "center", gap: 3 }}>
                   <Text style={{ fontSize: 4.8, fontFamily: "Helvetica-Bold", color: COLORS.primaryRed }}>
                     {item.date}
                   </Text>
@@ -4471,7 +4376,7 @@ const CorporateDisclosuresAndCatalystsPage = ({ data }: { data: ReportData }) =>
         </Text>
       </View>
 
-      <View style={{ flexDirection: "row", gap: 14, marginBottom: 5 }}>
+      <View wrap={false} style={{ flexDirection: "row", gap: 14, marginBottom: 5 }}>
         <View style={{ flex: 1, paddingRight: 4 }}>
           {renderNote(n4)}
           {renderNote(n5)}
@@ -4496,7 +4401,7 @@ const CorporateDisclosuresAndCatalystsPage = ({ data }: { data: ReportData }) =>
         <Text style={{ fontSize: 7.5, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2 }}>
           Model-Implied Valuation Sensitivity &amp; Distribution Analysis
         </Text>
-        <View style={[S.compactTable, { marginBottom: 3 }]}>
+        <View style={[S.compactTable, { marginBottom: 3  }]} wrap={false}>
           <View style={S.compactRowHeader}>
             <Text style={[S.compactCellHeader, { width: "26%" }]}>Sensitivity Band</Text>
             <Text style={[S.compactCellHeader, { width: "20%" }]}>Model Parameter Case</Text>
@@ -4534,7 +4439,7 @@ const CorporateDisclosuresAndCatalystsPage = ({ data }: { data: ReportData }) =>
         <Text style={{ fontSize: 7.8, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2 }}>
           Valuation Model Divergence &amp; Sensitivity Analysis
         </Text>
-        <View style={{ flexDirection: "row", gap: 10 }}>
+        <View wrap={false} style={{ flexDirection: "row", gap: 10 }}>
           <View style={{ flex: 1 }}>
             <Text style={{ fontSize: 7.2, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 1.5 }}>
               Where Our Valuation Differs from Street Consensus
@@ -4586,12 +4491,12 @@ const AnalystForecastsSummaryPage = ({ data }: { data: ReportData }) => {
         Financial Summary and Forecasts ({currency} Millions, except per-share data)
       </Text>
 
-      <View style={{ flexDirection: "row", gap: 10, marginBottom: 6 }}>
+      <View wrap={false} style={{ flexDirection: "row", gap: 10, marginBottom: 6 }}>
         <View style={{ flex: 1 }}>
           <Text style={{ fontSize: 7.2, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2 }}>
             Growth (% YoY)
           </Text>
-          <View style={S.compactTable}>
+          <View style={S.compactTable} wrap={false}>
             <View style={S.compactRowHeader}>
               <Text style={[S.compactCellHeader, { width: "38%" }]}>Metric</Text>
               {models.slice(1).map((m, i) => (
@@ -4633,7 +4538,7 @@ const AnalystForecastsSummaryPage = ({ data }: { data: ReportData }) => {
           <Text style={{ fontSize: 7.2, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2 }}>
             Profitability &amp; Returns (%)
           </Text>
-          <View style={S.compactTable}>
+          <View style={S.compactTable} wrap={false}>
             <View style={S.compactRowHeader}>
               <Text style={[S.compactCellHeader, { width: "40%" }]}>Metric</Text>
               {models.map((m, i) => (
@@ -4663,12 +4568,12 @@ const AnalystForecastsSummaryPage = ({ data }: { data: ReportData }) => {
         </View>
       </View>
 
-      <View style={{ flexDirection: "row", gap: 10, marginBottom: 6 }}>
+      <View wrap={false} style={{ flexDirection: "row", gap: 10, marginBottom: 6 }}>
         <View style={{ flex: 1 }}>
           <Text style={{ fontSize: 7.2, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2 }}>
             Leverage &amp; Liquidity
           </Text>
-          <View style={S.compactTable}>
+          <View style={S.compactTable} wrap={false}>
             <View style={S.compactRowHeader}>
               <Text style={[S.compactCellHeader, { width: "40%" }]}>Metric</Text>
               {models.map((m, i) => (
@@ -4706,7 +4611,7 @@ const AnalystForecastsSummaryPage = ({ data }: { data: ReportData }) => {
           <Text style={{ fontSize: 7.2, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2 }}>
             Valuation Multiples
           </Text>
-          <View style={S.compactTable}>
+          <View style={S.compactTable} wrap={false}>
             <View style={S.compactRowHeader}>
               <Text style={[S.compactCellHeader, { width: "40%" }]}>Multiple</Text>
               {models.map((m, i) => (
@@ -4753,12 +4658,12 @@ const AnalystForecastsSummaryPage = ({ data }: { data: ReportData }) => {
         </View>
       </View>
 
-      <View style={{ flexDirection: "row", gap: 10 }}>
+      <View wrap={false} style={{ flexDirection: "row", gap: 10 }}>
         <View style={{ flex: 1 }}>
           <Text style={{ fontSize: 7.2, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2 }}>
             Key Valuation Drivers
           </Text>
-          <View style={S.compactTable}>
+          <View style={S.compactTable} wrap={false}>
             <View style={S.compactRowHeader}>
               <Text style={[S.compactCellHeader, { width: "65%" }]}>Driver Parameter</Text>
               <Text style={[S.compactCellHeaderRight, { width: "35%" }]}>Model Assumption</Text>
@@ -4801,7 +4706,7 @@ const AnalystForecastsSummaryPage = ({ data }: { data: ReportData }) => {
           <Text style={{ fontSize: 7.2, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2 }}>
             DCF Valuation Bridge
           </Text>
-          <View style={S.compactTable}>
+          <View style={S.compactTable} wrap={false}>
             <View style={S.compactRowHeader}>
               <Text style={[S.compactCellHeader, { width: "65%" }]}>Component</Text>
               <Text style={[S.compactCellHeaderRight, { width: "35%" }]}>Value ({currency})</Text>
@@ -4855,7 +4760,7 @@ const AnalystForecastsSummaryPage = ({ data }: { data: ReportData }) => {
         <Text style={{ fontSize: 7.2, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2 }}>
           Forecast Assumption Evidence Trail
         </Text>
-        <View style={S.compactTable}>
+        <View style={S.compactTable} wrap={false}>
           <View style={S.compactRowHeader}>
             <Text style={[S.compactCellHeader, { width: "24%" }]}>Assumption</Text>
             <Text style={[S.compactCellHeader, { width: "76%" }]}>Empirical Basis (auditable — challenge any line lacking one)</Text>
@@ -4887,7 +4792,7 @@ const AnalystForecastsSummaryPage = ({ data }: { data: ReportData }) => {
         <Text style={{ fontSize: 7.2, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2 }}>
           Cost of Capital (WACC) Build — Inputs &amp; Sources
         </Text>
-        <View style={S.compactTable}>
+        <View style={S.compactTable} wrap={false}>
           <View style={S.compactRowHeader}>
             <Text style={[S.compactCellHeader, { width: "34%" }]}>Input</Text>
             <Text style={[S.compactCellHeaderRight, { width: "22%" }]}>Value</Text>
@@ -4943,7 +4848,7 @@ const AnalystForecastsSummaryPage = ({ data }: { data: ReportData }) => {
           // Cell factors scale with distance from base (calibrated so base = fv).
           const cellF = (dr: number, dm: number) => 1 + dr * 4.5 + dm * 1.6;
           return (
-        <View style={[S.compactTable, { marginBottom: 3 }]}>
+        <View style={[S.compactTable, { marginBottom: 3  }]} wrap={false}>
           <View style={S.compactRowHeader}>
             <Text style={[S.compactCellHeader, { width: "22%" }]}>Revenue CAGR \ Margin</Text>
             <Text style={[S.compactCellHeaderRight, { width: "15%" }]}>{pct1(mCols[0])} (Bear)</Text>
@@ -4976,7 +4881,7 @@ const AnalystForecastsSummaryPage = ({ data }: { data: ReportData }) => {
         <Text style={{ fontSize: 7.8, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2.5 }}>
           Forecast Methodology &amp; Long-Term Compounding Dynamics
         </Text>
-        <View style={{ flexDirection: "row", gap: 10 }}>
+        <View wrap={false} style={{ flexDirection: "row", gap: 10 }}>
           <View style={{ flex: 1 }}>
             <Text style={{ fontSize: 7.2, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 1.5 }}>
               Forecast Reliability &amp; Normalized Cash Conversion
@@ -5077,7 +4982,7 @@ const IncomeStatementDetailedPage = ({ data, concise = true }: { data: ReportDat
       </Text>
 
       {/* Main Income Statement Table */}
-      <View style={[S.compactTable, { marginBottom: 3 }]}>
+      <View style={[S.compactTable, { marginBottom: 3  }]} wrap={false}>
         <View style={S.compactRowHeader}>
           <Text style={[S.compactCellHeader, { width: "33%" }]}>Line Item</Text>
           {models.map((m, i) => (
@@ -5132,7 +5037,7 @@ const IncomeStatementDetailedPage = ({ data, concise = true }: { data: ReportDat
         <Text style={{ fontSize: 7.2, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2 }}>
           Historical Year-on-Year Walk (reported basis)
         </Text>
-        <View style={S.compactTable}>
+        <View style={S.compactTable} wrap={false}>
           <View style={S.compactRowHeader}>
             <Text style={[S.compactCellHeader, { width: "34%" }]}>Walk Item</Text>
             {models.filter((m) => !m.isForecast).map((m, i) => (
@@ -5182,7 +5087,7 @@ const IncomeStatementDetailedPage = ({ data, concise = true }: { data: ReportDat
       <Text style={{ fontSize: 7.8, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2 }}>
         Common-Size Margin Structure &amp; Operating Leverage Progression (% of Net Revenue)
       </Text>
-      <View style={[S.compactTable, { marginBottom: concise ? 0 : 3 }]}>
+      <View style={[S.compactTable, { marginBottom: concise ? 0 : 3  }]} wrap={false}>
         <View style={S.compactRowHeader}>
           <Text style={[S.compactCellHeader, { width: "33%" }]}>Margin / Cost Ratio</Text>
           {models.map((m, i) => (
@@ -5228,7 +5133,7 @@ const IncomeStatementDetailedPage = ({ data, concise = true }: { data: ReportDat
         <Text style={{ fontSize: 7.8, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2 }}>
           Operating Leverage &amp; Margin Trajectory Analysis
         </Text>
-        <View style={{ flexDirection: "row", gap: 10 }}>
+        <View wrap={false} style={{ flexDirection: "row", gap: 10 }}>
           {(() => {
             const sectorProfile = classifySector(data.profile.sector, data.profile.industry, data.profile.description);
             const isAssetMgmt = sectorProfile.id === "asset-management";
@@ -5303,7 +5208,7 @@ const BalanceSheetDetailedPage = ({ data }: { data: ReportData }) => {
       </Text>
 
       {/* Main Balance Sheet Table */}
-      <View style={[S.compactTable, { marginBottom: 3 }]}>
+      <View style={[S.compactTable, { marginBottom: 3  }]} wrap={false}>
         <View style={S.compactRowHeader}>
           <Text style={[S.compactCellHeader, { width: "33%" }]}>Line Item</Text>
           {models.map((m, i) => (
@@ -5356,7 +5261,7 @@ const BalanceSheetDetailedPage = ({ data }: { data: ReportData }) => {
       <Text style={{ fontSize: 7.8, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2 }}>
         Working Capital Cycle &amp; Capital Structure Solvency Metrics
       </Text>
-      <View style={[S.compactTable, { marginBottom: 3 }]}>
+      <View style={[S.compactTable, { marginBottom: 3  }]} wrap={false}>
         <View style={S.compactRowHeader}>
           <Text style={[S.compactCellHeader, { width: "33%" }]}>Balance Sheet Metric</Text>
           {models.map((m, i) => (
@@ -5394,7 +5299,7 @@ const BalanceSheetDetailedPage = ({ data }: { data: ReportData }) => {
         <Text style={{ fontSize: 7.8, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2 }}>
           Balance Sheet Flexibility &amp; Working Capital Dynamics
         </Text>
-        <View style={{ flexDirection: "row", gap: 10 }}>
+        <View wrap={false} style={{ flexDirection: "row", gap: 10 }}>
           <View style={{ flex: 1 }}>
             <Text style={{ fontSize: 7.2, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 1.5 }}>
               Working Capital Efficiency &amp; Trade Float
@@ -5449,7 +5354,7 @@ const CashFlowDetailedPage = ({ data }: { data: ReportData }) => {
       </Text>
 
       {/* Main Cash Flow Statement Table */}
-      <View style={[S.compactTable, { marginBottom: 3 }]}>
+      <View style={[S.compactTable, { marginBottom: 3  }]} wrap={false}>
         <View style={S.compactRowHeader}>
           <Text style={[S.compactCellHeader, { width: "33%" }]}>Line Item</Text>
           {models.map((m, i) => (
@@ -5500,7 +5405,7 @@ const CashFlowDetailedPage = ({ data }: { data: ReportData }) => {
       <Text style={{ fontSize: 7.8, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2 }}>
         Free Cash Flow Conversion &amp; Capital Reinvestment Quality
       </Text>
-      <View style={[S.compactTable, { marginBottom: 3 }]}>
+      <View style={[S.compactTable, { marginBottom: 3  }]} wrap={false}>
         <View style={S.compactRowHeader}>
           <Text style={[S.compactCellHeader, { width: "33%" }]}>Cash Flow Metric</Text>
           {models.map((m, i) => (
@@ -5537,7 +5442,7 @@ const CashFlowDetailedPage = ({ data }: { data: ReportData }) => {
         <Text style={{ fontSize: 7.8, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2 }}>
           Cash Flow Conversion &amp; Capital Discipline
         </Text>
-        <View style={{ flexDirection: "row", gap: 10 }}>
+        <View wrap={false} style={{ flexDirection: "row", gap: 10 }}>
           <View style={{ flex: 1 }}>
             <Text style={{ fontSize: 7.2, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 1.5 }}>
               Operating Cash Generation &amp; Quality of Earnings
@@ -5667,7 +5572,7 @@ const ComparableCompanyAnalysisPage1 = ({ data, concise = true }: { data: Report
       <Text style={{ fontSize: 7.2, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2 }}>
         Valuation Analysis
       </Text>
-      <View style={[S.compactTable, { marginBottom: 5 }]}>
+      <View style={[S.compactTable, { marginBottom: 5  }]} wrap={false}>
         <View style={S.compactRowHeader}>
           <Text style={[S.compactCellHeader, { width: "26%" }]}>Company / Ticker</Text>
           <Text style={[S.compactCellHeaderRight, { width: "10%" }]}>P/FV</Text>
@@ -5718,7 +5623,7 @@ const ComparableCompanyAnalysisPage1 = ({ data, concise = true }: { data: Report
       <Text style={{ fontSize: 7.2, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2 }}>
         Returns Analysis
       </Text>
-      <View style={[S.compactTable, { marginBottom: 5 }]}>
+      <View style={[S.compactTable, { marginBottom: 5  }]} wrap={false}>
         <View style={S.compactRowHeader}>
           <Text style={[S.compactCellHeader, { width: "26%" }]}>Company / Ticker</Text>
           <Text style={[S.compactCellHeaderRight, { width: "18%" }]}>ROIC %</Text>
@@ -5764,7 +5669,7 @@ const ComparableCompanyAnalysisPage1 = ({ data, concise = true }: { data: Report
       <Text style={{ fontSize: 7.2, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2 }}>
         Growth Analysis
       </Text>
-      <View style={[S.compactTable, { marginBottom: 6 }]}>
+      <View style={[S.compactTable, { marginBottom: 6  }]} wrap={false}>
         <View style={S.compactRowHeader}>
           <Text style={[S.compactCellHeader, { width: "26%" }]}>Company / Ticker</Text>
           <Text style={[S.compactCellHeaderRight, { width: "18%" }]}>Revenue Growth %</Text>
@@ -5806,7 +5711,7 @@ const ComparableCompanyAnalysisPage1 = ({ data, concise = true }: { data: Report
       <Text style={{ fontSize: 7.2, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2 }}>
         Enterprise Value &amp; Market Multiples Dislocation Analysis
       </Text>
-      <View style={[S.compactTable, { marginBottom: 4 }]}>
+      <View style={[S.compactTable, { marginBottom: 4  }]} wrap={false}>
         <View style={S.compactRowHeader}>
           <Text style={[S.compactCellHeader, { width: "26%" }]}>Company / Ticker</Text>
           <Text style={[S.compactCellHeaderRight, { width: "18%" }]}>EV / Sales</Text>
@@ -5859,19 +5764,17 @@ const ComparableCompanyAnalysisPage1 = ({ data, concise = true }: { data: Report
       </Text>
 
       {/* Dense 2-Column Buy-Side Relative Valuation Synthesis Box (full mode
-          only: in concise mode the four multiple tables plus the N/A footnote
-          carry the verdict, and this boilerplate both spills the page and can
-          contradict the rating — e.g. "attractive multiple" under a SELL) */}
+          only: AI writes all analytical prose — no archetype boilerplate. The
+          multiple tables plus the N/A footnote carry the verdict; this box
+          renders solely as a data-integrity advisory when peer coverage is
+          insufficient, otherwise nothing.) */}
       {!concise && (
       <View style={{ padding: 5, backgroundColor: COLORS.offWhite, borderWidth: 0.5, borderColor: COLORS.hairlineLight }}>
         <Text style={{ fontSize: 6.8, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 3 }}>
           Relative Valuation &amp; Peer Multiple Synthesis
         </Text>
-        <View style={{ flexDirection: "row", gap: 10 }}>
+        <View wrap={false} style={{ flexDirection: "row", gap: 10 }}>
           {(() => {
-            const arch = ledger?.archetype || "MATURE_COMPOUNDER";
-            const verdict = canonicalRating(data);
-
             // Calculate peer coverage score
             let totalFields = 0;
             let populatedFields = 0;
@@ -5885,114 +5788,30 @@ const ComparableCompanyAnalysisPage1 = ({ data, concise = true }: { data: Report
             const peerCoverageScore = totalFields > 0 ? populatedFields / totalFields : 0;
             const isPeerCoverageInsufficient = peers.length < 3 || peerCoverageScore < 0.50;
 
-            if (isPeerCoverageInsufficient) {
-              return (
-                <>
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ fontSize: 7.2, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 1.5 }}>
-                      Data Integrity Advisory: Peer Coverage Insufficiency
-                    </Text>
-                    <Text style={{ fontSize: 6.6, color: COLORS.textSecondary, lineHeight: 1.35, marginBottom: 2 }}>
-                      Relative valuation conclusion is formally suppressed. Direct peer coverage density is {Math.round(peerCoverageScore * 100)}% ({peers.length} active peers retrieved), falling below our institutional reliability threshold of 50%.
-                    </Text>
-                    <Text style={{ fontSize: 6.6, color: COLORS.textSecondary, lineHeight: 1.35 }}>
-                      Multiples comparisons exhibit data fragmentation across secondary metrics (EV/EBITDA, P/FCF). Multiples ranking should not be utilized as an independent valuation anchor.
-                    </Text>
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ fontSize: 7.2, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 1.5 }}>
-                      Valuation Anchor Governance
-                    </Text>
-                    <Text style={{ fontSize: 6.6, color: COLORS.textSecondary, lineHeight: 1.35, marginBottom: 2 }}>
-                      Our published target price of {data.profile.currency === "INR" ? "Rs. " : "$"}{fmtNum(canonicalValuation(data).targetPrice, 2)} remains strictly anchored on our 5-year explicit Discounted Cash Flow (DCF) model and company-specific fundamental drivers.
-                    </Text>
-                    <Text style={{ fontSize: 6.6, color: COLORS.textSecondary, lineHeight: 1.35 }}>
-                      No subjective multiple expansion or relative valuation premium has been imputed into our published rating.
-                    </Text>
-                  </View>
-                </>
-              );
-            }
+            if (!isPeerCoverageInsufficient) return null;
 
-            if (arch === "DISTRESSED") {
-              return (
-                <>
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ fontSize: 7.2, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 1.5 }}>
-                      Multiple Dislocation vs. Balance Sheet Distress
-                    </Text>
-                    <Text style={{ fontSize: 6.6, color: COLORS.textSecondary, lineHeight: 1.35, marginBottom: 2 }}>
-                      {data.profile.name} trades at a steep discount to telecom peers on headline EV/EBITDA. However, our institutional analysis confirms this multiple discount is fully justified by heavy financial leverage, sovereign AGR payment schedules, and elevated cash burn.
-                    </Text>
-                    <Text style={{ fontSize: 6.6, color: COLORS.textSecondary, lineHeight: 1.35 }}>
-                      Peer group comparison against better-capitalized incumbents demonstrates that equity value remains highly speculative pending meaningful debt restructuring.
-                    </Text>
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ fontSize: 7.2, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 1.5 }}>
-                      Capital Structure &amp; Downside Guardrails
-                    </Text>
-                    <Text style={{ fontSize: 6.6, color: COLORS.textSecondary, lineHeight: 1.35, marginBottom: 2 }}>
-                      With negative free cash flow yield and near-zero operating interest coverage, shareholder yield and dividend safety are nonexistent. Discretionary buybacks remain legally restricted.
-                    </Text>
-                    <Text style={{ fontSize: 6.6, color: COLORS.textSecondary, lineHeight: 1.35 }}>
-                      Our desk maintains an institutional {verdict} recommendation, advising capital preservation until clear statutory debt moratoriums or equity infusions de-risk the balance sheet.
-                    </Text>
-                  </View>
-                </>
-              );
-            }
-            if (arch === "EARLY_PLATFORM_GROWTH") {
-              return (
-                <>
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ fontSize: 7.2, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 1.5 }}>
-                      Platform Unit Economics vs. Traditional Multiples
-                    </Text>
-                    <Text style={{ fontSize: 6.6, color: COLORS.textSecondary, lineHeight: 1.35, marginBottom: 2 }}>
-                      Traditional P/E and EV/EBITDA multiples fail to capture {data.profile.name}&apos;s underlying value, as reported margins are depressed by rapid quick-commerce dark store rollouts. Enterprise value correlates to Gross Order Value (GOV) compounding and long-term take-rate durability.
-                    </Text>
-                    <Text style={{ fontSize: 6.6, color: COLORS.textSecondary, lineHeight: 1.35 }}>
-                      Benchmarking against platform peers confirms that operating leverage will unlock substantial free cash flow once store network density matures.
-                    </Text>
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ fontSize: 7.2, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 1.5 }}>
-                      Re-Rating Runway &amp; Long-Term Upside
-                    </Text>
-                    <Text style={{ fontSize: 6.6, color: COLORS.textSecondary, lineHeight: 1.35, marginBottom: 2 }}>
-                      Our comparative analysis indicates significant valuation re-rating potential as mature dark store cohorts expand positive contribution margins beyond 4.5%.
-                    </Text>
-                    <Text style={{ fontSize: 6.6, color: COLORS.textSecondary, lineHeight: 1.35 }}>
-                      Zero current dividend yield aligns with the platform growth charter, where 100% reinvestment into urban logistics scale provides maximum long-term shareholder accretion, supporting our institutional {verdict} thesis.
-                    </Text>
-                  </View>
-                </>
-              );
-            }
-            // Mature Compounder / General
             return (
               <>
                 <View style={{ flex: 1 }}>
                   <Text style={{ fontSize: 7.2, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 1.5 }}>
-                    Multiple Dislocation vs. Fundamental Quality
+                    Data Integrity Advisory: Peer Coverage Insufficiency
                   </Text>
                   <Text style={{ fontSize: 6.6, color: COLORS.textSecondary, lineHeight: 1.35, marginBottom: 2 }}>
-                    {data.profile.name} trades at an attractive multiple relative to peers given its return on invested capital profile and balance sheet strength. Peer group multiples reflect cyclical sector beta rather than company-specific competitive moats.
+                    Relative valuation conclusion is formally suppressed. Direct peer coverage density is {Math.round(peerCoverageScore * 100)}% ({peers.length} active peers retrieved), falling below our institutional reliability threshold of 50%.
                   </Text>
                   <Text style={{ fontSize: 6.6, color: COLORS.textSecondary, lineHeight: 1.35 }}>
-                    Normalized balance sheet strength and sustainable cash conversion provide strong downside support across economic cycles.
+                    Multiples comparisons exhibit data fragmentation across secondary metrics (EV/EBITDA, P/FCF). Multiples ranking should not be utilized as an independent valuation anchor.
                   </Text>
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={{ fontSize: 7.2, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 1.5 }}>
-                    Re-Rating Runway &amp; Valuation Stance
+                    Valuation Anchor Governance
                   </Text>
                   <Text style={{ fontSize: 6.6, color: COLORS.textSecondary, lineHeight: 1.35, marginBottom: 2 }}>
-                    Our comparative analysis evaluates operating margin progression against sector peers. Consistent operational execution should drive multiple stability or expansion.
+                    Our published target price of {data.profile.currency === "INR" ? "Rs. " : "$"}{fmtNum(canonicalValuation(data).targetPrice, 2)} remains strictly anchored on our 5-year explicit Discounted Cash Flow (DCF) model and company-specific fundamental drivers.
                   </Text>
                   <Text style={{ fontSize: 6.6, color: COLORS.textSecondary, lineHeight: 1.35 }}>
-                    Disciplined capital allocation and cash flow generation support institutional allocation, aligning with our {verdict} rating.
+                    No subjective multiple expansion or relative valuation premium has been imputed into our published rating.
                   </Text>
                 </View>
               </>
@@ -6026,7 +5845,7 @@ const ComparableCompanyAnalysisPage2 = ({ data }: { data: ReportData }) => {
       <Text style={{ fontSize: 7.2, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2 }}>
         Profitability Analysis
       </Text>
-      <View style={[S.compactTable, { marginBottom: 5 }]}>
+      <View style={[S.compactTable, { marginBottom: 5  }]} wrap={false}>
         <View style={S.compactRowHeader}>
           <Text style={[S.compactCellHeader, { width: "26%" }]}>Company / Ticker</Text>
           <Text style={[S.compactCellHeaderRight, { width: "18%" }]}>Gross Margin %</Text>
@@ -6062,7 +5881,7 @@ const ComparableCompanyAnalysisPage2 = ({ data }: { data: ReportData }) => {
       <Text style={{ fontSize: 7.2, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2 }}>
         Leverage Analysis
       </Text>
-      <View style={[S.compactTable, { marginBottom: 4 }]}>
+      <View style={[S.compactTable, { marginBottom: 4  }]} wrap={false}>
         <View style={S.compactRowHeader}>
           <Text style={[S.compactCellHeader, { width: "26%" }]}>Company / Ticker</Text>
           <Text style={[S.compactCellHeaderRight, { width: "18%" }]}>Debt / Equity %</Text>
@@ -6124,7 +5943,7 @@ const ComparableCompanyAnalysisPage2 = ({ data }: { data: ReportData }) => {
       <Text style={{ fontSize: 7.2, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2 }}>
         Liquidity Analysis
       </Text>
-      <View style={[S.compactTable, { marginBottom: 4 }]}>
+      <View style={[S.compactTable, { marginBottom: 4  }]} wrap={false}>
         <View style={S.compactRowHeader}>
           <Text style={[S.compactCellHeader, { width: "26%" }]}>Company / Ticker</Text>
           <Text style={[S.compactCellHeaderRight, { width: "18%" }]}>Current Ratio</Text>
@@ -6164,7 +5983,7 @@ const ComparableCompanyAnalysisPage2 = ({ data }: { data: ReportData }) => {
       <Text style={{ fontSize: 7.2, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2 }}>
         DuPont ROE Decomposition &amp; Capital Efficiency Comparison
       </Text>
-      <View style={[S.compactTable, { marginBottom: 4 }]}>
+      <View style={[S.compactTable, { marginBottom: 4  }]} wrap={false}>
         <View style={S.compactRowHeader}>
           <Text style={[S.compactCellHeader, { width: "26%" }]}>Company / Ticker</Text>
           <Text style={[S.compactCellHeaderRight, { width: "18%" }]}>Net Margin %</Text>
@@ -6255,7 +6074,7 @@ const ComparableCompanyAnalysisPage2 = ({ data }: { data: ReportData }) => {
             <Text style={{ fontSize: 6.8, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 3 }}>
               Operational Benchmarking &amp; Solvency Assessment
             </Text>
-            <View style={{ flexDirection: "row", gap: 10 }}>
+            <View wrap={false} style={{ flexDirection: "row", gap: 10 }}>
               <View style={{ flex: 1 }}>
                 <Text style={{ fontSize: 7.2, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 1.5 }}>
                   Operating Margin Expansion &amp; Scale Float
@@ -6310,7 +6129,7 @@ const ResearchMethodologyValuationPage1 = ({ data }: { data: ReportData }) => {
         </Text>
       </View>
 
-      <View style={{ flexDirection: "row", gap: 12, marginBottom: 12 }}>
+      <View wrap={false} style={{ flexDirection: "row", gap: 12, marginBottom: 12 }}>
         <View style={{ width: "22%", borderRightWidth: 0.5, borderRightColor: COLORS.hairlineLight, paddingRight: 6 }}>
           <Text style={{ fontSize: 7, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 4 }}>
             Methodology Framework
@@ -6359,7 +6178,7 @@ const ResearchMethodologyValuationPage1 = ({ data }: { data: ReportData }) => {
           Five-Stage Quantitative Equity Valuation Pipeline
         </Text>
 
-        <View style={{ flexDirection: "row", gap: 6 }}>
+        <View wrap={false} style={{ flexDirection: "row", gap: 6 }}>
           {[
             {
               stage: "1. Fundamental Analysis",
@@ -6401,7 +6220,7 @@ const ResearchMethodologyValuationPage1 = ({ data }: { data: ReportData }) => {
         <Text style={{ fontSize: 7.5, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2 }}>
           Three-Stage DCF Valuation Specification &amp; Competitive Advantage Period (CAP)
         </Text>
-        <View style={[S.compactTable, { marginBottom: 3 }]}>
+        <View style={[S.compactTable, { marginBottom: 3  }]} wrap={false}>
           <View style={S.compactRowHeader}>
             <Text style={[S.compactCellHeader, { width: "24%" }]}>Moat Classification</Text>
             <Text style={[S.compactCellHeader, { width: "20%" }]}>Stage I Explicit</Text>
@@ -6430,7 +6249,7 @@ const ResearchMethodologyValuationPage1 = ({ data }: { data: ReportData }) => {
         <Text style={{ fontSize: 7.8, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2 }}>
           Valuation Methodology &amp; Analytical Parameters
         </Text>
-        <View style={{ flexDirection: "row", gap: 10 }}>
+        <View wrap={false} style={{ flexDirection: "row", gap: 10 }}>
           <View style={{ flex: 1 }}>
             <Text style={{ fontSize: 7.2, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 1.5 }}>
               Cost of Capital &amp; Unlevered Beta Calibration
@@ -6475,7 +6294,7 @@ const ResearchMethodologyValuationPage2 = ({ data }: { data: ReportData }) => {
         </Text>
       </View>
 
-      <View style={{ flexDirection: "row", gap: 12, marginBottom: 12 }}>
+      <View wrap={false} style={{ flexDirection: "row", gap: 12, marginBottom: 12 }}>
         <View style={{ width: "22%", borderRightWidth: 0.5, borderRightColor: COLORS.hairlineLight, paddingRight: 6 }}>
           <Text style={{ fontSize: 7, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 4 }}>
             Valuation Principles
@@ -6552,7 +6371,7 @@ const ResearchMethodologyValuationPage2 = ({ data }: { data: ReportData }) => {
             <Rect x="335" y="103" width="55" height="14" fill="#1d4ed8" />
           </Svg>
 
-          <View style={{ flexDirection: "row", justifyContent: "space-around", width: "80%", marginTop: 2 }}>
+          <View wrap={false} style={{ flexDirection: "row", justifyContent: "space-around", width: "80%", marginTop: 2 }}>
             <Text style={{ fontSize: 6, color: COLORS.slateDark, fontFamily: "Helvetica-Bold" }}>Low</Text>
             <Text style={{ fontSize: 6, color: COLORS.slateDark, fontFamily: "Helvetica-Bold" }}>Medium</Text>
             <Text style={{ fontSize: 6, color: COLORS.slateDark, fontFamily: "Helvetica-Bold" }}>High</Text>
@@ -6560,24 +6379,24 @@ const ResearchMethodologyValuationPage2 = ({ data }: { data: ReportData }) => {
           </View>
         </View>
 
-        <View style={{ flexDirection: "row", justifyContent: "center", gap: 14 }}>
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 3 }}>
+        <View wrap={false} style={{ flexDirection: "row", justifyContent: "center", gap: 14 }}>
+          <View wrap={false} style={{ flexDirection: "row", alignItems: "center", gap: 3 }}>
             <View style={{ width: 8, height: 8, backgroundColor: "#1d4ed8" }} />
             <Text style={{ fontSize: 5.5, color: COLORS.textSecondary }}>5 Star (Deep Discount)</Text>
           </View>
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 3 }}>
+          <View wrap={false} style={{ flexDirection: "row", alignItems: "center", gap: 3 }}>
             <View style={{ width: 8, height: 8, backgroundColor: "#3b82f6" }} />
             <Text style={{ fontSize: 5.5, color: COLORS.textSecondary }}>4 Star (Moderate Discount)</Text>
           </View>
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 3 }}>
+          <View wrap={false} style={{ flexDirection: "row", alignItems: "center", gap: 3 }}>
             <View style={{ width: 8, height: 8, backgroundColor: "#6b7280" }} />
             <Text style={{ fontSize: 5.5, color: COLORS.textSecondary }}>3 Star (Fairly Valued)</Text>
           </View>
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 3 }}>
+          <View wrap={false} style={{ flexDirection: "row", alignItems: "center", gap: 3 }}>
             <View style={{ width: 8, height: 8, backgroundColor: "#be185d" }} />
             <Text style={{ fontSize: 5.5, color: COLORS.textSecondary }}>2 Star (Moderate Premium)</Text>
           </View>
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 3 }}>
+          <View wrap={false} style={{ flexDirection: "row", alignItems: "center", gap: 3 }}>
             <View style={{ width: 8, height: 8, backgroundColor: "#9d174d" }} />
             <Text style={{ fontSize: 5.5, color: COLORS.textSecondary }}>1 Star (Significant Premium)</Text>
           </View>
@@ -6589,7 +6408,7 @@ const ResearchMethodologyValuationPage2 = ({ data }: { data: ReportData }) => {
         <Text style={{ fontSize: 7.5, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2 }}>
           Valuation Uncertainty Calibration &amp; Margin of Safety Bands
         </Text>
-        <View style={[S.compactTable, { marginBottom: 4 }]}>
+        <View style={[S.compactTable, { marginBottom: 4  }]} wrap={false}>
           <View style={S.compactRowHeader}>
             <Text style={[S.compactCellHeader, { width: "22%" }]}>Uncertainty Rating</Text>
             <Text style={[S.compactCellHeaderRight, { width: "20%" }]}>5-Star Price (Buy)</Text>
@@ -6623,7 +6442,7 @@ const ResearchMethodologyValuationPage2 = ({ data }: { data: ReportData }) => {
         <Text style={{ fontSize: 7.8, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2.5 }}>
           Scenario Risk Calibration &amp; Downside Protection
         </Text>
-        <View style={{ flexDirection: "row", gap: 10 }}>
+        <View wrap={false} style={{ flexDirection: "row", gap: 10 }}>
           <View style={{ flex: 1 }}>
             <Text style={{ fontSize: 7.2, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 1.5 }}>
               Cash Flow Dispersion &amp; Fundamental Volatility
@@ -6669,7 +6488,7 @@ const CreditRatingApproachPage1 = ({ data }: { data: ReportData }) => {
 
       {/* Main Page Title */}
       <View style={{ marginTop: 2, marginBottom: 6, borderBottomWidth: 0.75, borderBottomColor: COLORS.hairline, paddingBottom: 4 }}>
-        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "baseline" }}>
+        <View wrap={false} style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "baseline" }}>
           <Text style={{ fontSize: 13, fontFamily: "Helvetica-Bold", color: COLORS.slateDark }}>
             Our Approach to Rating Corporate Credit
           </Text>
@@ -6680,7 +6499,7 @@ const CreditRatingApproachPage1 = ({ data }: { data: ReportData }) => {
       </View>
 
       {/* Top 3-Column Section */}
-      <View style={{ flexDirection: "row", gap: 10, marginBottom: 8 }}>
+      <View wrap={false} style={{ flexDirection: "row", gap: 10, marginBottom: 8 }}>
         {/* Column 1: Mandate */}
         <View style={{ width: "26%", borderRightWidth: 0.5, borderRightColor: COLORS.hairlineLight, paddingRight: 6 }}>
           <Text style={{ fontSize: 7.8, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 3 }}>
@@ -6748,13 +6567,13 @@ const CreditRatingApproachPage1 = ({ data }: { data: ReportData }) => {
 
       {/* 5-Stage Sequential Credit Evaluation Process */}
       <View style={{ marginBottom: 8 }}>
-        <View style={{ borderBottomWidth: 0.5, borderBottomColor: COLORS.hairlineLight, paddingBottom: 2, marginBottom: 4 }}>
+        <View style={{ borderBottomWidth: 0.5, borderBottomColor: COLORS.hairlineLight, paddingBottom: 2, marginBottom: 4 }} wrap={false}>
           <Text style={{ fontSize: 8.5, fontFamily: "Helvetica-Bold", color: COLORS.slateDark }}>
             5-Stage Sequential Credit Determination Workflow
           </Text>
         </View>
 
-        <View style={{ flexDirection: "row", gap: 3, alignItems: "stretch" }}>
+        <View wrap={false} style={{ flexDirection: "row", gap: 3, alignItems: "stretch" }}>
           {[
             {
               step: "01",
@@ -6797,7 +6616,7 @@ const CreditRatingApproachPage1 = ({ data }: { data: ReportData }) => {
                   padding: 4,
                 }}
               >
-                <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "baseline", marginBottom: 2 }}>
+                <View wrap={false} style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "baseline", marginBottom: 2 }}>
                   <Text style={{ fontSize: 7.2, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, lineHeight: 1.15 }}>
                     {col.title}
                   </Text>
@@ -6828,17 +6647,17 @@ const CreditRatingApproachPage1 = ({ data }: { data: ReportData }) => {
       </View>
 
       {/* Bottom Area: Weighting Matrix (Left 65%) + Hierarchical Rating Scale (Right 35%) */}
-      <View style={{ flexDirection: "row", gap: 10, flex: 1 }}>
+      <View wrap={false} style={{ flexDirection: "row", gap: 10, flex: 1 }}>
         {/* Left 65%: Four-Pillar Weighting & Calibration Table */}
         <View style={{ width: "65%" }}>
-          <View style={{ borderBottomWidth: 0.5, borderBottomColor: COLORS.hairlineLight, paddingBottom: 2, marginBottom: 4 }}>
+          <View style={{ borderBottomWidth: 0.5, borderBottomColor: COLORS.hairlineLight, paddingBottom: 2, marginBottom: 4 }} wrap={false}>
             <Text style={{ fontSize: 8.5, fontFamily: "Helvetica-Bold", color: COLORS.slateDark }}>
               Credit Rating Component Weighting &amp; Assessment Model
             </Text>
           </View>
           <ProvenanceTag type="MODEL" source="Institutional Credit Rating Methodology Guidelines" />
 
-          <View style={S.compactTable}>
+          <View style={S.compactTable} wrap={false}>
             <View style={S.compactRowHeader}>
               <Text style={[S.compactCellHeader, { width: "26%" }]}>Pillar Component</Text>
               <Text style={[S.compactCellHeader, { width: "14%" }]}>Weight</Text>
@@ -6873,7 +6692,7 @@ const CreditRatingApproachPage1 = ({ data }: { data: ReportData }) => {
 
         {/* Right 35%: Clean Hierarchical Rating Scale Table */}
         <View style={{ width: "35%", borderLeftWidth: 0.5, borderLeftColor: COLORS.hairlineLight, paddingLeft: 8 }}>
-          <View style={{ borderBottomWidth: 0.5, borderBottomColor: COLORS.hairlineLight, paddingBottom: 2, marginBottom: 3 }}>
+          <View style={{ borderBottomWidth: 0.5, borderBottomColor: COLORS.hairlineLight, paddingBottom: 2, marginBottom: 3 }} wrap={false}>
             <Text style={{ fontSize: 8.0, fontFamily: "Helvetica-Bold", color: COLORS.slateDark }}>
               Credit Rating Scale
             </Text>
@@ -6972,7 +6791,7 @@ const CreditRatingApproachPage2 = ({ data }: { data: ReportData }) => {
         </Text>
       </View>
 
-      <View style={{ flexDirection: "row", gap: 14, marginBottom: 6 }}>
+      <View wrap={false} style={{ flexDirection: "row", gap: 14, marginBottom: 6 }}>
         <View style={{ flex: 1, paddingRight: 4 }}>
           <Text style={{ fontSize: 7.2, color: COLORS.textSecondary, lineHeight: 1.4, textAlign: "justify", marginBottom: 6 }}>
             The advantage of the Cash Flow Cushion ratio relative to other fundamental indicators of credit health is that the measure focuses on the future cash-generating performance of the firm derived from our proprietary discounted cash flow model. By making standardized adjustments for certain expenses to reflect their debt-like characteristics, we can compare future projected free cash flows with debt-like cash commitments coming due in any particular year. The forward-looking nature of this metric allows us to anticipate changes in a firm&apos;s financial health and pinpoint periods where cash shortfalls are likely to occur.
@@ -7059,7 +6878,7 @@ const CreditRatingApproachPage2 = ({ data }: { data: ReportData }) => {
         <Text style={{ fontSize: 7.5, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2 }}>
           Corporate Credit Default Spread &amp; Solvency Benchmark Matrix
         </Text>
-        <View style={[S.compactTable, { marginBottom: 3 }]}>
+        <View style={[S.compactTable, { marginBottom: 3  }]} wrap={false}>
           <View style={S.compactRowHeader}>
             <Text style={[S.compactCellHeader, { width: "16%" }]}>Credit Grade</Text>
             <Text style={[S.compactCellHeaderRight, { width: "22%" }]}>Indicative 5Y CDS (bps)</Text>
@@ -7093,7 +6912,7 @@ const CreditRatingApproachPage2 = ({ data }: { data: ReportData }) => {
         <Text style={{ fontSize: 7.8, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2 }}>
           APEX Quantitative Credit Assessment &amp; Solvency Determination
         </Text>
-        <View style={{ flexDirection: "row", gap: 10 }}>
+        <View wrap={false} style={{ flexDirection: "row", gap: 10 }}>
           <View style={{ flex: 1 }}>
             <Text style={{ fontSize: 7.2, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 1.5 }}>
               Quantitative Solvency Tier Assessment
@@ -7240,7 +7059,7 @@ const AnalystAIDisclosurePage = ({ data }: { data: ReportData }) => (
           marginBottom: 5,
         }}
       >
-        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 3, borderBottomWidth: 0.5, borderBottomColor: COLORS.hairlineLight, paddingBottom: 2.5 }}>
+        <View wrap={false} style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 3, borderBottomWidth: 0.5, borderBottomColor: COLORS.hairlineLight, paddingBottom: 2.5 }}>
           <Text style={{ fontSize: 7.2, fontFamily: "Helvetica-Bold", color: COLORS.slateDark }}>
             A Note from the Research Desk: Fiduciary Rigor &amp; AI-Augmented Synthesis
           </Text>
@@ -7264,7 +7083,7 @@ const AnalystAIDisclosurePage = ({ data }: { data: ReportData }) => (
         <Text style={{ fontSize: 7.2, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2 }}>
           AI Model Architecture &amp; Computational Determinism Audit Framework
         </Text>
-        <View style={[S.compactTable, { marginBottom: 3 }]}>
+        <View style={[S.compactTable, { marginBottom: 3  }]} wrap={false}>
           <View style={S.compactRowHeader}>
             <Text style={[S.compactCellHeader, { width: "25%" }]}>Analytical Module</Text>
             <Text style={[S.compactCellHeader, { width: "20%" }]}>Model Architecture</Text>
@@ -7294,7 +7113,7 @@ const AnalystAIDisclosurePage = ({ data }: { data: ReportData }) => (
         <Text style={{ fontSize: 7.2, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2 }}>
           Algorithmic Risk Taxonomy &amp; Model Limitation Guardrails
         </Text>
-        <View style={[S.compactTable, { marginBottom: 3 }]}>
+        <View style={[S.compactTable, { marginBottom: 3  }]} wrap={false}>
           <View style={S.compactRowHeader}>
             <Text style={[S.compactCellHeader, { width: "25%" }]}>Limitation Category</Text>
             <Text style={[S.compactCellHeader, { width: "25%" }]}>Inherent Risk Vector</Text>
@@ -7324,7 +7143,7 @@ const AnalystAIDisclosurePage = ({ data }: { data: ReportData }) => (
             Final Institutional Algorithmic Sign-Off &amp; Fiduciary Safe Harbor Protocol
           </Text>
         </View>
-        <View style={{ flexDirection: "row", gap: 14 }}>
+        <View wrap={false} style={{ flexDirection: "row", gap: 14 }}>
           <View style={{ flex: 1 }}>
             <Text style={{ fontSize: 6.8, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2.5 }}>
               Algorithmic Determinism &amp; Mathematical Verification
@@ -7405,7 +7224,7 @@ const QualityAssuranceChecksumPage = ({ data }: { data: ReportData }) => {
         return (
           <View style={{ marginBottom: 4 }}>
             <View style={{ backgroundColor: bgColor, borderWidth: 1, borderColor: borderColor, padding: 3.5, marginBottom: 2.5 }}>
-              <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+              <View wrap={false} style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
                 <View style={{ flex: 1, paddingRight: 6 }}>
                   <Text style={{ fontSize: 7.8, fontFamily: "Helvetica-Bold", color: titleColor }}>
                     {bannerTitle}
@@ -7423,7 +7242,7 @@ const QualityAssuranceChecksumPage = ({ data }: { data: ReportData }) => {
             </View>
 
             {/* 3-Tier Architecture Status Strip */}
-            <View style={{ flexDirection: "row", gap: 4 }}>
+            <View wrap={false} style={{ flexDirection: "row", gap: 4 }}>
               <View style={{ flex: 1, backgroundColor: tiers.consistency === "PASS" ? "#f0fdf4" : "#fef2f2", borderWidth: 0.5, borderColor: tiers.consistency === "PASS" ? "#86efac" : "#fca5a5", padding: 2.5 }}>
                 <Text style={{ fontSize: 5.0, fontFamily: "Helvetica-Bold", color: COLORS.slateDark }}>TIER 1: CONSISTENCY</Text>
                 <Text style={{ fontSize: 6.5, fontFamily: "Helvetica-Bold", color: tiers.consistency === "PASS" ? "#15803d" : "#dc2626", marginTop: 0.5 }}>{tiers.consistency}</Text>
@@ -7446,14 +7265,14 @@ const QualityAssuranceChecksumPage = ({ data }: { data: ReportData }) => {
 
       {/* Assumptions Ledger Cross-Reference Verification */}
       <View style={{ marginBottom: 4 }}>
-        <View style={{ borderBottomWidth: 0.5, borderBottomColor: COLORS.hairlineLight, paddingBottom: 1.5, marginBottom: 2.5 }}>
+        <View style={{ borderBottomWidth: 0.5, borderBottomColor: COLORS.hairlineLight, paddingBottom: 1.5, marginBottom: 2.5 }} wrap={false}>
           <Text style={{ fontSize: 7.8, fontFamily: "Helvetica-Bold", color: COLORS.slateDark }}>
             1. Master Assumptions Ledger Cross-Reference Verification
           </Text>
         </View>
         <ProvenanceTag type="MODEL" source="Single Assumptions Ledger (src/lib/assumptions-ledger.ts)" />
 
-        <View style={S.compactTable}>
+        <View style={S.compactTable} wrap={false}>
           <View style={S.compactRowHeader}>
             <Text style={[S.compactCellHeader, { width: "26%" }]}>Metric Name</Text>
             <Text style={[S.compactCellHeader, { width: "20%" }]}>Ledger Value</Text>
@@ -7488,14 +7307,14 @@ const QualityAssuranceChecksumPage = ({ data }: { data: ReportData }) => {
 
       {/* Itemized Audit Checks */}
       <View style={{ marginBottom: 4 }}>
-        <View style={{ borderBottomWidth: 0.5, borderBottomColor: COLORS.hairlineLight, paddingBottom: 1.5, marginBottom: 2.5 }}>
+        <View style={{ borderBottomWidth: 0.5, borderBottomColor: COLORS.hairlineLight, paddingBottom: 1.5, marginBottom: 2.5 }} wrap={false}>
           <Text style={{ fontSize: 7.8, fontFamily: "Helvetica-Bold", color: COLORS.slateDark }}>
             2. Pre-Publish QA Itemized Rule Check Results
           </Text>
         </View>
         <ProvenanceTag type="AI" source="Automated Pre-Publish Inspection Suite (src/lib/report-qa.ts)" />
 
-        <View style={S.compactTable}>
+        <View style={S.compactTable} wrap={false}>
           <View style={S.compactRowHeader}>
             <Text style={[S.compactCellHeader, { width: "16%" }]}>Rule ID</Text>
             <Text style={[S.compactCellHeader, { width: "32%" }]}>Audit Test Name</Text>
@@ -7534,7 +7353,7 @@ const QualityAssuranceChecksumPage = ({ data }: { data: ReportData }) => {
                   </View>
                 ))}
                 {(hiddenPasses > 0 || fails.length > 0) && (
-                  <View style={{ flexDirection: "row", justifyContent: "space-between", backgroundColor: "#f8fafc", paddingVertical: 1.5, paddingHorizontal: 4, borderTopWidth: 0.5, borderTopColor: COLORS.hairlineLight }}>
+                  <View wrap={false} style={{ flexDirection: "row", justifyContent: "space-between", backgroundColor: "#f8fafc", paddingVertical: 1.5, paddingHorizontal: 4, borderTopWidth: 0.5, borderTopColor: COLORS.hairlineLight }}>
                     <Text style={{ fontSize: 5.0, color: COLORS.textMuted }}>
                       {hiddenPasses > 0 ? `+ ${hiddenPasses} additional passing checks audited` : `${fails.length} finding(s) shown above — all failures displayed`}
                     </Text>

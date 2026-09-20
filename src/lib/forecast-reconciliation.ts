@@ -30,10 +30,14 @@ export type ReconRuleId =
   | "debt-roll-forward"
   | "ppe-roll-forward"
   | "share-count-roll-forward"
+  | "retained-earnings-roll-forward"
+  | "forecast-bs-identity"
   | "dcf-linkage"
   | "margin-continuity"
   | "funding-liquidity"
-  | "scenario-vector-identity";
+  | "scenario-vector-identity"
+  | "share-count-reconciliation"
+  | "dep-rate-consistency";
 
 export interface ReconFinding {
   rule: ReconRuleId;
@@ -96,6 +100,12 @@ export interface ReconcileInputs {
   scenarioBaseVector?: { revenueGrowth?: number[]; ebitMargin?: number[] } | null;
   /** True when an FCFF DCF prices off this forecast (RI path skips linkage). */
   enforceDcfLinkage?: boolean;
+  /** Enable retained earnings roll-forward rule (default true). */
+  enforceRetainedEarnings?: boolean;
+  /** Enable forecast balance sheet identity rule (default true). */
+  enforceBalanceSheetIdentity?: boolean;
+  /** Diluted shares from canonical facts — used for diluted share count reconciliation. */
+  dilutedSharesFromFacts?: number;
 }
 
 /**
@@ -199,6 +209,27 @@ export function reconcileForecast(inputs: ReconcileInputs): ReconFinding[] {
       open = r.ppe;
     });
   }
+  // ── Depreciation rate consistency (P1) ──
+  // Verify depreciation rate consistency against the actual computation method
+  // Only meaningful when depreciation is PP&E-anchored (depOnPpeRate != null).
+  // When revenue-based, depreciation = rev * avgDeptPct and there's no PP&E rate to verify.
+  {
+    const rows = inputs.forecast.projections;
+    const depOnPpeRate = inputs.forecast.assumptions.depOnPpeRate;
+    if (depOnPpeRate != null && depOnPpeRate > 0) {
+      for (let i = 0; i < rows.length; i++) {
+        const r = rows[i];
+        // Opening PP&E: reverse the roll-forward close = open + capex - dep
+        const openingPpe = i === 0 ? Math.max(0, (r.ppe + (r.depreciation || 0) - r.capex)) : rows[i - 1].ppe;
+        const actualRate = openingPpe > 0 ? (r.depreciation || 0) / openingPpe : 0;
+        const t = magnitudeTolerance(actualRate, depOnPpeRate, { absTol: 0.01, relTol: 0.15, materiality: 0.05 });
+        if (!t.pass && t.material) {
+          out.push(fail("dep-rate-consistency", "material", `${(depOnPpeRate * 100).toFixed(2)}%`, `${(actualRate * 100).toFixed(2)}%`, `Depreciation rate ${(actualRate * 100).toFixed(2)}% of opening PP&E differs from depOnPpeRate ${(depOnPpeRate * 100).toFixed(2)}% in ${r.label}.`, r.label));
+        }
+      }
+    }
+  }
+
   // Share count: constant at the resolved base (buybacks modeled 0 — disclosed)
   {
     const base = a.sharesOutstanding;
@@ -210,6 +241,89 @@ export function reconcileForecast(inputs: ReconcileInputs): ReconFinding[] {
         if (!t.pass) out.push(fail("share-count-roll-forward", "blocker", fmt0(base), fmt0(r.shares), `Share count drifted from resolved base (buybacks modeled 0): ${t.detail}`, r.label));
       }
     });
+  }
+
+  // ── Diluted share count reconciliation (P0 #68) ──
+  if (inputs.dilutedSharesFromFacts != null && inputs.dilutedSharesFromFacts > 0) {
+    const rows = inputs.forecast.projections;
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      const basic = r.shares;
+      const diluted = r.dilutedShares ?? basic;
+      if (diluted < basic * 0.95) {
+        out.push(fail("share-count-reconciliation", "blocker", fmt0(inputs.dilutedSharesFromFacts), fmt0(diluted), `Diluted shares (${fmt0(diluted)}) < 95% of basic (${fmt0(basic)}) in ${r.label} — diluted must be ≥ basic by definition.`, r.label));
+      } else if (inputs.dilutedSharesFromFacts > 0) {
+        const diff = Math.abs(diluted - inputs.dilutedSharesFromFacts);
+        const relDiff = inputs.dilutedSharesFromFacts > 0 ? diff / inputs.dilutedSharesFromFacts : 0;
+        if (relDiff > 0.05) {
+          out.push(fail("share-count-reconciliation", "material", fmt0(inputs.dilutedSharesFromFacts), fmt0(diluted), `Forecast diluted shares (${fmt0(diluted)}) differ >5% from canonical facts diluted (${fmt0(inputs.dilutedSharesFromFacts)}) in ${r.label}.`, r.label));
+        }
+      }
+    }
+  }
+
+  // ── Retained Earnings roll-forward (P0 #66) ──
+  if (inputs.enforceRetainedEarnings !== false) {
+    const rows = inputs.forecast.projections;
+    for (let i = 1; i < rows.length; i++) {
+      const prev = rows[i - 1];
+      const cur = rows[i];
+      const openRE = prev.equity != null ? prev.equity - (prev.totalAssets != null && prev.totalLiabilities != null ? prev.totalAssets - prev.totalLiabilities - prev.equity : 0) : null;
+      // Use equity as proxy: equity_close = equity_open + NI - div - buyback
+      if (prev.equity != null && cur.equity != null && cur.netIncome != null) {
+        const expectedEquity = prev.equity + cur.netIncome - (cur.dividends ?? 0) - (cur.buybacks ?? 0);
+        const t = magnitudeTolerance(expectedEquity, cur.equity, MONEY_BRIDGE_TOL);
+        if (!t.pass && t.material) {
+          out.push(fail("retained-earnings-roll-forward", "blocker", fmt0(expectedEquity), fmt0(cur.equity), `Equity roll-forward broken Y${i}→Y${i+1}: open ${fmt0(prev.equity)} + NI ${fmt0(cur.netIncome)} − div ${fmt0(cur.dividends ?? 0)} − buyback ${fmt0(cur.buybacks ?? 0)} = ${fmt0(expectedEquity)} ≠ close ${fmt0(cur.equity)} (${t.detail}).`, rows[i].label));
+        } else if (!t.pass) {
+          out.push(fail("retained-earnings-roll-forward", "material", fmt0(expectedEquity), fmt0(cur.equity), `Equity roll-forward drift Y${i}→Y${i+1}: ${t.detail} — within tolerance but flagged for review.`, rows[i].label));
+        } else {
+          out.push(ok("retained-earnings-roll-forward", `Equity rolls correctly: ${fmt0(prev.equity)} + ${fmt0(cur.netIncome)} − ${fmt0(cur.dividends ?? 0)} − ${fmt0(cur.buybacks ?? 0)} = ${fmt0(cur.equity)}.`, rows[i].label));
+        }
+      }
+    }
+  }
+
+  // ── EBIT bridge reconciliation (P0 #67) — verify income statement
+  // consistency for historical rows where all components are available.
+  // EBIT ≈ Revenue − COGS − SGA − R&D − D&A − OtherOperatingExpense
+  {
+    const rows = inputs.forecast.projections;
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+       // Only check rows where we have the component data AND cost components are non-trivial
+       if (r.revenue != null && r.ebit != null && r.grossProfit != null && ((r.sga ?? 0) > 0 || (r.rd ?? 0) > 0 || (r.otherOperatingExpense ?? 0) > 0)) {
+        // Bridge from gross profit: EBIT = GP - SGA - R&D - D&A - OtherOpEx
+        // Or from revenue: EBIT = Rev - COGS - SGA - R&D - D&A - OtherOpEx
+        const cogs = r.cogs ?? (r.revenue - r.grossProfit);
+        const bridgeEbit = r.grossProfit - (r.sga ?? 0) - (r.rd ?? 0) - (r.otherOperatingExpense ?? 0);
+        const t = magnitudeTolerance(bridgeEbit, r.ebit, { absTol: Math.max(100, Math.abs(r.ebit) * 0.001), relTol: 0.001, materiality: Math.max(100, Math.abs(r.ebit) * 0.01) });
+        if (!t.pass && t.material) {
+          out.push(fail("ebit-bridge", "blocker", fmt0(bridgeEbit), fmt0(r.ebit), `EBIT bridge mismatch ${r.label}: GP ${fmt0(r.grossProfit)} − SGA ${fmt0(r.sga ?? 0)} − R&D ${fmt0(r.rd ?? 0)} − Other ${fmt0(r.otherOperatingExpense ?? 0)} = ${fmt0(bridgeEbit)} ≠ EBIT ${fmt0(r.ebit)} (${t.detail}).`, r.label));
+        } else if (!t.pass) {
+          out.push(fail("ebit-bridge", "material", fmt0(bridgeEbit), fmt0(r.ebit), `EBIT bridge drift ${r.label}: ${t.detail}.`, r.label));
+        }
+      }
+    }
+  }
+
+  // ── Balance Sheet identity on forecast projections (P0 #66) ──
+  if (inputs.enforceBalanceSheetIdentity !== false) {
+    const rows = inputs.forecast.projections;
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      if (r.totalAssets != null && r.totalLiabilities != null && r.equity != null) {
+        const expectedAssets = r.totalLiabilities + r.equity;
+        const t = magnitudeTolerance(expectedAssets, r.totalAssets, MONEY_BRIDGE_TOL);
+        if (!t.pass && t.material) {
+          out.push(fail("forecast-bs-identity", "blocker", fmt0(expectedAssets), fmt0(r.totalAssets), `Forecast BS identity breached Y${i + 1}: Liabilities ${fmt0(r.totalLiabilities)} + Equity ${fmt0(r.equity)} = ${fmt0(expectedAssets)} ≠ Assets ${fmt0(r.totalAssets)} (${t.detail}).`, r.label));
+        } else if (!t.pass) {
+          out.push(fail("forecast-bs-identity", "material", fmt0(expectedAssets), fmt0(r.totalAssets), `Forecast BS identity drift Y${i + 1}: ${t.detail}.`, r.label));
+        } else {
+          out.push(ok("forecast-bs-identity", `Forecast BS identity holds Y${i + 1}: ${fmt0(r.totalLiabilities)} + ${fmt0(r.equity)} = ${fmt0(r.totalAssets)}.`, r.label));
+        }
+      }
+    }
   }
 
   // ── DCF linkage (re-derive priced outputs from forecast rows) ──

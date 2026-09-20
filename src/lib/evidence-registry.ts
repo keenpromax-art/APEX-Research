@@ -132,6 +132,64 @@ export function coverageScore(
 }
 
 /**
+ * Compute an aggregate source quality score (0-100) based on the tier
+ * distribution of all evidence items. PRIMARY (tier 0) = 100 weight,
+ * SECONDARY (tier 1) = 70, TERTIARY (tier 2) = 40, MODEL_DERIVED (tier 3) = 30.
+ * Returns { score, tierCounts, primaryCoverage, stalenessFlags }.
+ */
+export function sourceQualityScore(registry: EvidenceRegistry): {
+  score: number;
+  tierCounts: Record<string, number>;
+  primaryCoverage: number;
+  stalenessFlags: Array<{ field: string; message: string }>;
+} {
+  const items = Array.from(registry.items);
+  const tierWeights: Record<number, number> = { 0: 100, 1: 70, 2: 40, 3: 30 };
+  const tierCounts: Record<string, number> = {};
+  let totalWeight = 0;
+  let totalItems = 0;
+  const fieldTiers = new Map<string, number>();
+  const fieldDates = new Map<string, string>();
+
+  for (const item of items) {
+    const tierNum = item.tier === "PRIMARY" ? 0 : item.tier === "SECONDARY" ? 1 : item.tier === "TERTIARY" ? 2 : 3;
+    const tierLabel = item.tier;
+    tierCounts[tierLabel] = (tierCounts[tierLabel] || 0) + 1;
+    const w = tierWeights[tierNum] ?? 30;
+    totalWeight += w;
+    totalItems++;
+
+    const existing = fieldTiers.get(item.field);
+    if (existing == null || tierNum < existing) {
+      fieldTiers.set(item.field, tierNum);
+    }
+    if (item.asOf) {
+      const existingDate = fieldDates.get(item.field);
+      if (!existingDate || item.asOf > existingDate) {
+        fieldDates.set(item.field, item.asOf);
+      }
+    }
+  }
+
+  const score = totalItems > 0 ? Math.round((totalWeight / totalItems) * 100) / 100 : 0;
+  const primaryCount = tierCounts["PRIMARY"] ?? 0;
+  const primaryCoverage = totalItems > 0 ? primaryCount / totalItems : 0;
+
+  const stalenessFlags: Array<{ field: string; message: string }> = [];
+  for (const [field, bestTier] of fieldTiers) {
+    if (bestTier > 0) {
+      const tierLabel = bestTier === 1 ? "SECONDARY" : bestTier === 2 ? "TERTIARY" : "MODEL_DERIVED";
+      stalenessFlags.push({
+        field,
+        message: `No PRIMARY source for ${field} — best available is ${tierLabel}. Verify data freshness.`,
+      });
+    }
+  }
+
+  return { score, tierCounts, primaryCoverage, stalenessFlags };
+}
+
+/**
  * Mint evidence IDs for a live report (additive — safe to attach to the
  * company-route payload as `evidenceRegistry`). Yahoo feeds register as
  * SECONDARY; DCF/ledger outputs as MODEL_DERIVED; caller-supplied filing

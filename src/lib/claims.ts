@@ -5,6 +5,7 @@
  */
 
 import type { MasterReportFacts } from "./report-facts";
+import type { AnnualFinancials } from "@/types/report";
 
 export interface Claim {
   id: string; // SHA-256-like deterministic hash of normalized sentence
@@ -80,7 +81,14 @@ export function extractClaims(text: string): Claim[] {
  * Validate claims against MasterReportFacts + DCF assumptions.
  * Returns claims with sourceFactId/evidence populated where match within tolerance.
  */
+/**
+ * @deprecated Use claim-validator.ts:validateClaimSet() instead.
+ * This function uses a flat allowlist; the unified validator uses the
+ * EvidenceRegistry with tier-aware matching, temporal grounding, and
+ * directional consistency checks.
+ */
 export function validateClaims(claims: Claim[], facts: MasterReportFacts, dcfFacts?: { wacc: number; tgr: number; growthRates: number[]; margins: number[]; rev: number }): Claim[] {
+  console.warn("[DEPRECATED] claims.ts:validateClaims() called — migrate to claim-validator.ts:validateClaimSet()");
   const allowlist: { id: string; value: number; evidence: string }[] = [];
   if (dcfFacts) {
     dcfFacts.growthRates.forEach((v, i) => allowlist.push({ id: `DCF:revenueGrowthRates[${i}]=${(v * 100).toFixed(1)}%`, value: v * 100, evidence: `DCF revenueGrowthRates[${i}]` }));
@@ -127,6 +135,62 @@ export function validateClaims(claims: Claim[], facts: MasterReportFacts, dcfFac
   });
 
   return validated;
+}
+
+/**
+ * Validate narrative growth-rate claims against actual historical financials.
+ * Extracts growth-rate claims from narrative text, computes actual revenue CAGR
+ * from annualFinancials, and flags claims where the narrative growth rate
+ * differs from actual by more than 10 percentage points.
+ */
+export function validateGrowthClaims(
+  narrativeText: string,
+  annualFinancials: AnnualFinancials[]
+): { claim: Claim; actualCAGR: number; divergence: number; flagged: boolean }[] {
+  const results: { claim: Claim; actualCAGR: number; divergence: number; flagged: boolean }[] = [];
+  if (!narrativeText || !annualFinancials || annualFinancials.length < 2) return results;
+
+  // Compute actual revenue CAGR from annualFinancials
+  const revenues = annualFinancials
+    .map((f) => f.revenue)
+    .filter((r): r is number => typeof r === "number" && r > 0);
+  if (revenues.length < 2) return results;
+
+  const firstRev = revenues[0];
+  const lastRev = revenues[revenues.length - 1];
+  const n = revenues.length - 1;
+  const actualCAGR = Math.pow(lastRev / firstRev, 1 / n) - 1;
+  const actualCAGRPercent = actualCAGR * 100;
+
+  // Extract growth-rate claims from narrative: look for sentences containing
+  // growth-related keywords and a percentage
+  const growthPatterns = [
+    /(?:revenue|sales|top[- ]line|turnover)\s+(?:grew|grew\s+by|increased|grew\s+at|expanded)\s+(\d+(?:\.\d+)?)\s*%/gi,
+    /revenue\s+(?:CAGR|compound\s+annual\s+growth)\s+of\s+(\d+(?:\.\d+)?)\s*%/gi,
+    /(?:revenue|sales)\s+growth\s+of\s+(\d+(?:\.\d+)?)\s*%/gi,
+    /revenue\s+(?:grew|increased)\s+(\d+(?:\.\d+)?)\s*%\s*(?:year[- ]over[- ]year|annually|per\s+year)/gi,
+    /revenue\s+at\s+a\s+cagr\s+of\s+(\d+(?:\.\d+)?)\s*%/gi,
+  ];
+
+  const claims = extractClaims(narrativeText);
+  for (const claim of claims) {
+    if (claim.kind !== "percentage" || claim.numericValue === undefined) continue;
+    // Check if the claim sentence relates to growth
+    const sentLower = claim.text.toLowerCase();
+    const isGrowthClaim = growthPatterns.some((re) => re.test(sentLower));
+    if (!isGrowthClaim) continue;
+
+    const divergence = Math.abs(claim.numericValue - actualCAGRPercent);
+    const flagged = divergence > 10;
+    results.push({
+      claim,
+      actualCAGR: actualCAGRPercent,
+      divergence,
+      flagged,
+    });
+  }
+
+  return results;
 }
 
 /**

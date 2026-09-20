@@ -11,7 +11,7 @@ const nextConfig: NextConfig = {
       {
         source: "/(.*)",
         headers: [
-          { key: "Content-Security-Policy", value: `default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; ${scriptSource}; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://logo.clearbit.com https://s.yimg.com; font-src 'self' data:; connect-src 'self'; worker-src 'self' blob:;` },
+          { key: "Content-Security-Policy", value: `default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; ${scriptSource}; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://logo.clearbit.com https://s.yimg.com; font-src 'self' data:; connect-src 'self' ws: wss:; worker-src 'self' blob:;` },
           { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
           { key: "X-Content-Type-Options", value: "nosniff" },
           { key: "X-Frame-Options", value: "DENY" },
@@ -39,6 +39,7 @@ const nextConfig: NextConfig = {
       allowedOrigins: ["*"],
     },
   },
+  allowedDevOrigins: ["http://192.168.1.7:3000"],
 };
 
 export default nextConfig;

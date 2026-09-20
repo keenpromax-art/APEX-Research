@@ -70,6 +70,20 @@ export interface StockData {
   targetHighPrice: number;
   targetLowPrice: number;
   targetMeanPrice: number;
+  /** New fields from Screener.in-style data */
+  pegRatio?: number;
+  evToEbitda?: number;
+  priceToSales?: number;
+  earningsDate?: string;
+  exDividendDate?: string;
+  dayRange?: string;
+  week52Range?: string;
+  avgVolume3m?: number;
+  avgVolume10d?: number;
+  maxDrawdown?: number;
+  volatility1y?: number;
+  trendVsMa50?: number;
+  trendVsMa200?: number;
 }
 
 /** Discriminant for sector-native vs corporate-native statements. */
@@ -699,6 +713,8 @@ export interface DCFResult {
    * DCF assumptions that differ from it are a publication blocker.
    */
   canonicalForecast?: import("@/lib/canonical-forecast").CanonicalForecast;
+  /** AI-supplied DCF overrides, passed through for reconciliation verification. */
+  aiDcfOverrides?: import("@/lib/calculations").AIDCFOverrides | null;
 }
 
 export interface ValuationCalibration {
@@ -1095,6 +1111,8 @@ export interface ReportQAResult {
     balanceSheetVariance: number;
     ratingAlignedWithUpside: boolean;
   };
+  /** QA-adjusted model credit rating — downgraded when P0/P1 failures exist. */
+  adjustedCreditRating?: string;
 }
 
 export interface ReportData {
@@ -1128,6 +1146,8 @@ export interface ReportData {
    * legacy fixtures (claim-validator treats absence as unevidenced).
    */
   evidenceRegistry?: import("@/lib/evidence-registry").EvidenceRegistry;
+  /** Single canonical forecast (P0 #4) — the ONLY authoritative forward numbers. */
+  canonicalForecast?: import("@/lib/canonical-forecast").CanonicalForecast;
 }
 
 export interface SearchResult {
@@ -1145,11 +1165,12 @@ export interface AgentCheckpoint {
   id: string;
   name: string;
   role: string;
-  status: "pending" | "running" | "verifying" | "complete" | "error";
+  status: "pending" | "running" | "verifying" | "complete" | "error" | "retrying";
   completedAt?: number;
   durationMs?: number;
   verifiedByCouncil?: boolean;
   councilAuditNote?: string;
+  retryRound?: number;
 }
 
 export type GenerationStep =
