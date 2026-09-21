@@ -967,6 +967,9 @@ function checkAnomalies(inp: IndependentInputs, issues: IndependentIssue[], pass
     grossMargin: (y.revenue.value ?? 0) > 0 && y.grossProfit.value !== null
       ? (y.grossProfit.value as number) / (y.revenue.value as number)
       : 0,
+    // Closing inventory enables the stocking-business guard in
+    // detectAccountingAnomalies (absent → guard inactive, legacy behavior).
+    inventory: (y as { inventory?: { value?: number | null } }).inventory?.value ?? 0,
   }));
   if (hist.length < 2) {
     issues.push({

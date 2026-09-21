@@ -736,6 +736,8 @@ export interface AccountingAnomaly {
 export function detectAccountingAnomalies(history: {
   year: string; revenue: number; netIncome: number; operatingCashFlow: number;
   netReceivables: number; totalAssets: number; grossMargin: number;
+  /** Closing inventory stock (optional — enables the stocking guard below). */
+  inventory?: number;
 }[], opts?: {
   /**
    * True for cash-burning platforms (EARLY_PLATFORM_GROWTH archetype): OCF
@@ -760,13 +762,31 @@ export function detectAccountingAnomalies(history: {
     // genuine collapses from a positive base (e.g. +6B → +3B).
     const ocfImprovedFromNonPositive = prev.operatingCashFlow <= 0 && cur.operatingCashFlow > prev.operatingCashFlow;
     if (revG > 0.25 && prev.operatingCashFlow > 0 && cur.operatingCashFlow / prev.operatingCashFlow - 1 < -0.25 && !ocfImprovedFromNonPositive) {
-      out.push({ code: "ANOM-REV-CASH", material: !expectCashBurn, message: `${cur.year}: revenue +${(revG * 100).toFixed(0)}% while operating cash flow collapsed — accrual quality review required.` });
+      // Inventory-absorption guard: for stocking businesses (jewellers,
+      // retailers, manufacturers carrying >15% of revenue as inventory), an
+      // OCF drop fully explained by the year's inventory build is working
+      // capital, not accrual fraud — a gold jeweller adding store stock
+      // consumes cash by design. Still reported, demoted to non-material.
+      // The 15% intensity floor keeps synthesized 10%-of-revenue fallback
+      // inventory (missing-field proxy) from ever arming the guard.
+      const prevInv = prev.inventory ?? 0;
+      const curInv = cur.inventory ?? 0;
+      const ocfDrop = prev.operatingCashFlow - cur.operatingCashFlow;
+      const invBuild = curInv - prevInv;
+      const absorbedByStocking =
+        cur.revenue > 0 && curInv / cur.revenue > 0.15 && invBuild > 0 && ocfDrop > 0 && ocfDrop <= invBuild;
+      out.push({ code: "ANOM-REV-CASH", material: !expectCashBurn && !absorbedByStocking, message: `${cur.year}: revenue +${(revG * 100).toFixed(0)}% while operating cash flow collapsed — accrual quality review required.` });
     }
-    // Receivables surging far ahead of revenue.
+    // Receivables surging far ahead of revenue. Materiality floor: a balance
+    // below 5% of revenue cannot inflate the top line materially no matter how
+    // fast it grows (e.g. cash-sale jewellers at <1%) — still reported,
+    // demoted to non-material. Real channel-stuffing always leaves a large
+    // receivables balance; that is precisely what stays material.
     if (prev.netReceivables > 0 && cur.netReceivables > 0) {
       const recG = cur.netReceivables / prev.netReceivables - 1;
       if (recG > 0.7 && recG > revG + 0.5) {
-        out.push({ code: "ANOM-RECEIVABLES", material: true, message: `${cur.year}: receivables +${(recG * 100).toFixed(0)}% vs revenue +${(revG * 100).toFixed(0)}% — channel-stuffing/collection review required.` });
+        const sizable = cur.revenue > 0 && cur.netReceivables / cur.revenue >= 0.05;
+        out.push({ code: "ANOM-RECEIVABLES", material: sizable, message: `${cur.year}: receivables +${(recG * 100).toFixed(0)}% vs revenue +${(revG * 100).toFixed(0)}% — channel-stuffing/collection review required.` });
       }
     }
     // Margin cliff: gross margin collapse >15pp YoY. Acquisition guard: when
