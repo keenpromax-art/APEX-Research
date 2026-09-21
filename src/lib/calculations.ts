@@ -1401,6 +1401,20 @@ export function computeDCF(
   } else if (!sharesOutstanding || sharesOutstanding <= 0) {
     status = "invalid_inputs";
     diagnostics.push("Shares outstanding is zero or missing.");
+  } else if (
+    stockData.marketCap > 0 &&
+    stockData.currentPrice > 0 &&
+    Math.abs(stockData.currentPrice * sharesOutstanding - stockData.marketCap) / stockData.marketCap > 0.5
+  ) {
+    // Absolute-scale self-check (10× class): internally-consistent bridges
+    // cannot see a share-count unit error — price × resolved shares must
+    // agree with reported market cap within 50%, else refuse to price.
+    const implied = stockData.currentPrice * sharesOutstanding;
+    const driftPct = (Math.abs(implied - stockData.marketCap) / stockData.marketCap) * 100;
+    status = "invalid_inputs";
+    diagnostics.push(
+      `Share-count scale error suspected: price × shares (${implied.toFixed(0)}) vs reported market cap (${stockData.marketCap.toFixed(0)}), drift ${driftPct.toFixed(0)}% > 50% — 10×-class unit error; refusing to price.`
+    );
   } else if (rawEquityValue <= 0 || !Number.isFinite(rawEquityValue)) {
     status = "calculation_error";
     diagnostics.push(`Calculated equity value is non-positive or non-finite: ${rawEquityValue}`);

@@ -117,7 +117,15 @@ export function createAssumptionsLedger({
   let equityValue = 0;
   let fairValue = 0;
 
-  if (isBankOrNbfc && dcf.intrinsicValue && dcf.intrinsicValue > 0) {
+  // SOTP primary (conglomerates): the adapted DCFResult already carries SOTP
+  // equity/intrinsic (GAV − holding discount − netDebt). Consume directly —
+  // recomputing EV − netDebt here would silently drop the holding discount
+  // and fork a second target price (FINCONS-04/XREF-05 own this bridge).
+  const sotpBreakdown = (dcf as any)?.sotpBreakdown;
+  if (sotpBreakdown && Number(dcf.equityValue) > 0 && Number(dcf.intrinsicValue) > 0) {
+    equityValue = Number(dcf.equityValue);
+    fairValue = Number(dcf.intrinsicValue);
+  } else if (isBankOrNbfc && dcf.intrinsicValue && dcf.intrinsicValue > 0) {
     equityValue = Number(dcf.equityValue) || 0;
     fairValue = Number(dcf.intrinsicValue);
   } else {

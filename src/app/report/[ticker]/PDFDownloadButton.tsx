@@ -16,7 +16,14 @@ export default function PDFDownloadButton({ data }: Props) {
   const councilPassed = councilAudit?.status === "VERIFIED" || councilAudit?.status === "CORRECTED";
   const councilScore = councilAudit?.integrityScore ?? 0;
   const failedChecks = councilAudit?.checks?.filter(c => c.status === "FLAG") ?? [];
-  const isBlocked = !councilPassed && councilAudit !== undefined;
+  // Hard export lock: QA BLOCKED (any FAIL check) or final QA canPublish=false
+  // disables export independently of the council audit. Detected numerical
+  // failures must stop publication — a rendered BLOCK banner is not enough.
+  const qaGateStatus = (data as any).qaReport?.gateStatus;
+  const qaCanPublish = (data as any).finalQAResult?.canPublish;
+  const qaBlocked = qaGateStatus === "BLOCKED" || qaCanPublish === false;
+  const qaFailCount = ((data as any).qaReport?.checks ?? []).filter((c: any) => c.status === "FAIL").length;
+  const isBlocked = (!councilPassed && councilAudit !== undefined) || qaBlocked;
 
   const handleDownload = async () => {
     try {
@@ -58,7 +65,7 @@ export default function PDFDownloadButton({ data }: Props) {
         className={`btn-primary ${styles.downloadBtn}`}
         onClick={handleDownload}
         disabled={loading || isBlocked}
-        title={isBlocked ? `Council audit not passed (${councilScore}/100, ${failedChecks.length} flags). Retry flagged agents until audit passes.` : "Export PDF report"}
+        title={qaBlocked ? `QA gate BLOCKED (${qaFailCount} FAIL check(s)) — resolve gate findings before export.` : isBlocked ? `Council audit not passed (${councilScore}/100, ${failedChecks.length} flags). Retry flagged agents until audit passes.` : "Export PDF report"}
       >
         {loading ? (
           <>
@@ -71,7 +78,7 @@ export default function PDFDownloadButton({ data }: Props) {
               <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
               <path d="M7 11V7a5 5 0 0 1 10 0v4" />
             </svg>
-            Council Audit Pending ({councilScore}/100 — {failedChecks.length} flag{failedChecks.length !== 1 ? "s" : ""})
+            {qaBlocked ? `QA Gate BLOCKED (${qaFailCount} FAIL)` : `Council Audit Pending (${councilScore}/100 — ${failedChecks.length} flag${failedChecks.length !== 1 ? "s" : ""})`}
           </>
         ) : (
           <>
@@ -85,9 +92,9 @@ export default function PDFDownloadButton({ data }: Props) {
         )}
       </button>
       {error && <span style={{ color: "#ef4444", fontSize: 12 }}>{error}</span>}
-      {isBlocked && failedChecks.length > 0 && (
+      {isBlocked && (failedChecks.length > 0 || qaBlocked) && (
         <span style={{ color: "#f59e0b", fontSize: 11, textAlign: "right", maxWidth: 300 }}>
-          Failed: {failedChecks.map(c => c.category).join(", ")}
+          Failed: {qaBlocked ? `QA gate (${qaFailCount} FAIL: ${((data as any).qaReport?.checks ?? []).filter((c: any) => c.status === "FAIL").slice(0, 3).map((c: any) => c.id).join(", ")})` : ""}{qaBlocked && failedChecks.length > 0 ? " | " : ""}{failedChecks.length > 0 ? failedChecks.map(c => c.category).join(", ") : ""}
         </span>
       )}
     </div>

@@ -12,11 +12,14 @@ import { classifySector, SectorProfile } from "../sectors";
 import { computeDCF, type AIDCFOverrides } from "../calculations";
 import { computeResidualIncomeValuation, ResidualIncomeResult } from "./residual-income";
 import { calibrateValuation, ValuationCalibrationResult } from "./calibration";
+import { computeSotpValuation, type SotpResult } from "./sotp";
+import { getFilingSegments } from "../filing-segments";
 import type { CompanyProfile, StockData, AnnualFinancials, DCFResult } from "@/types/report";
 import type { ArchetypeProfile } from "../company-archetype";
 
 export interface ValuationSelectionResult {
-  selectedModel: "FCFF_DCF" | "PB_RESIDUAL_INCOME";
+  selectedModel: "FCFF_DCF" | "PB_RESIDUAL_INCOME" | "SOTP_CONGLOMERATE";
+  sotp?: SotpResult;
   /** Operating-archetype valuation lens (Priority 5): primary DCF + corroborating multiple. */
   valuationLens?: string;
   corroboratingMultiple?: string;
@@ -187,8 +190,88 @@ export function selectAndComputeValuation(params: {
     };
   }
 
-  // 2. Non-financial institutions: driver-native FCFF DCF with archetype lens (Priority 3+5)
+  // 2. Conglomerates with PRIMARY filing segments: SOTP is PRIMARY (a single
+  // blended-multiple DCF mis-prices O2C cyclicality vs Jio/Retail growth).
+  // The FCFF DCF is still computed as the corroborating cross-check; the
+  // adapted DCFResult carries SOTP equity/intrinsic so ledger, QA, and PDF
+  // consume one target price (SOTP-01 independently verifies the bridge).
+  const filingSegments = getFilingSegments(profile.ticker);
   const standardDcf = computeDCF(annualFinancials, stockData, sectorProfile, archetypeProfile, profile.country, aiDcfOverrides);
+  if (filingSegments && latest) {
+    const sotpShares = stockData.sharesOutstanding || latest.sharesOutstanding || 0;
+    const sotp = computeSotpValuation({
+      ticker: profile.ticker,
+      currency: profile.currency,
+      filing: filingSegments,
+      netDebt: Number(standardDcf.netDebt) || 0,
+      sharesOutstanding: sotpShares,
+      currentPrice: stockData.currentPrice,
+    });
+    if (sotp.status === "valid" && sotp.fairValuePerShare !== null) {
+      const calibration = calibrateValuation({ upside: sotp.upside, sectorId: sectorProfile.id });
+      const adaptedDcf: DCFResult = {
+        ...standardDcf,
+        enterpriseValue: sotp.grossAssetValue,
+        equityValue: sotp.equityValue,
+        netDebt: sotp.netDebt,
+        sharesOutstanding: sotpShares,
+        intrinsicValue: sotp.fairValuePerShare,
+        fairValuePerShare: sotp.fairValuePerShare,
+        upsideDownside: sotp.upside ?? 0,
+        verdict: sotp.verdict,
+        diagnostics: [
+          `SOTP primary: ${sotp.segments.length} segment(s) (${filingSegments.period} filing EBITDA), holding discount ${(sotp.holdingDiscount * 100).toFixed(0)}%, coverage ${(sotp.coveragePct * 100).toFixed(0)}%.`,
+          ...sotp.diagnostics,
+          ...(standardDcf.diagnostics ?? []),
+          ...calibration.diagnostics,
+        ],
+        sotpBreakdown: {
+          ticker: sotp.ticker,
+          currency: sotp.currency,
+          period: sotp.period,
+          segments: sotp.segments,
+          grossAssetValue: sotp.grossAssetValue,
+          otherInvestments: sotp.otherInvestments,
+          netDebt: sotp.netDebt,
+          holdingDiscount: sotp.holdingDiscount,
+          equityValue: sotp.equityValue,
+          sharesOutstanding: sotp.sharesOutstanding,
+          fairValuePerShare: sotp.fairValuePerShare,
+          coveragePct: sotp.coveragePct,
+          crossCheck: {
+            enterpriseValue: standardDcf.enterpriseValue,
+            sumPvFcff: standardDcf.sumPvFcff,
+            pvTerminalValue: standardDcf.pvTerminalValue,
+            equityValue: standardDcf.equityValue,
+            fairValuePerShare: standardDcf.fairValuePerShare ?? standardDcf.intrinsicValue,
+          },
+        },
+      };
+      const lens = "SOTP (O2C + Jio + Retail + E&P + growth options) + FCFF cross-check";
+      return {
+        selectedModel: "SOTP_CONGLOMERATE",
+        valuationLens: lens,
+        corroboratingMultiple: `FCFF_DCF cross-check (FV ${standardDcf.fairValuePerShare ?? standardDcf.intrinsicValue})`,
+        sectorProfile,
+        dcf: adaptedDcf,
+        sotp,
+        fairValue: sotp.fairValuePerShare,
+        upside: sotp.upside,
+        rating: sotp.verdict,
+        calibration,
+        diagnostics: [`Valuation lens: ${lens}.`, ...(adaptedDcf.diagnostics || [])],
+      };
+    }
+    // Insufficient SOTP (no multiples / non-positive bridge): fall through to
+    // FCFF_DCF with the refusal recorded — a missing SOTP is disclosed, never
+    // synthesized.
+    standardDcf.diagnostics = [
+      ...(standardDcf.diagnostics || []),
+      `SOTP refused (${sotp.diagnostics.join("; ").slice(0, 200)}) — FCFF_DCF published as fallback with disclosed limitation.`,
+    ];
+  }
+
+  // 3. Non-financial institutions: driver-native FCFF DCF with archetype lens (Priority 3+5)
   const fairValue = standardDcf.fairValuePerShare || (standardDcf.intrinsicValue > 0 ? standardDcf.intrinsicValue : null);
   const upside = standardDcf.upsideDownside;
   const rating = standardDcf.verdict;

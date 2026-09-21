@@ -189,7 +189,12 @@ export function validateFinancialIdentities(params: {
       : 0;
     const claimedOffset = Number((dcf as any)?.financeReceivablesOffset) || 0;
     const verifiedOffset = Math.min(Math.max(0, claimedOffset), maxLegitOffset);
-    const expectedEquityValue = Math.max(0, dcf.enterpriseValue - (rawNetDebt - verifiedOffset));
+    // SOTP-primary: expected equity = GAV − holding discount − net debt
+    // (recomputed from the breakdown — SOTP-01 owns the segment arithmetic).
+    const sotpB = (dcf as any)?.sotpBreakdown;
+    const expectedEquityValue = sotpB
+      ? Math.max(0, Number(sotpB.grossAssetValue || 0) * (1 - Number(sotpB.holdingDiscount || 0)) - (rawNetDebt - verifiedOffset))
+      : Math.max(0, dcf.enterpriseValue - (rawNetDebt - verifiedOffset));
 
     if (claimedOffset > maxLegitOffset + 1000) {
       issues.push({
@@ -206,7 +211,9 @@ export function validateFinancialIdentities(params: {
         code: "DCF_EV_EQUITY_BRIDGE_FAIL",
         severity: "FATAL",
         identityName: "Equity Value = EV - Net Debt",
-        message: `DCF Equity Value (${dcf.equityValue}) violates the Enterprise Value bridge: EV (${dcf.enterpriseValue}) - Net Debt (${(rawNetDebt - verifiedOffset).toFixed(0)}${verifiedOffset > 0 ? " incl. verified captive offset" : ""}) != Equity Value.`,
+        message: sotpB
+          ? `SOTP Equity Value (${dcf.equityValue}) violates the SOTP bridge: GAV (${Number(sotpB.grossAssetValue || 0).toFixed(0)}) − ${(Number(sotpB.holdingDiscount || 0) * 100).toFixed(0)}% holding discount − Net Debt (${(rawNetDebt - verifiedOffset).toFixed(0)}) != Equity Value.`
+          : `DCF Equity Value (${dcf.equityValue}) violates the Enterprise Value bridge: EV (${dcf.enterpriseValue}) - Net Debt (${(rawNetDebt - verifiedOffset).toFixed(0)}${verifiedOffset > 0 ? " incl. verified captive offset" : ""}) != Equity Value.`,
         expected: expectedEquityValue,
         actual: dcf.equityValue,
         tolerance: 0.08,

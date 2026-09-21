@@ -667,6 +667,45 @@ export interface DCFResult {
   sharesOutstanding: number;
   intrinsicValue: number;
   fairValuePerShare?: number | null;
+  /**
+   * Conglomerate SOTP detail (selector SOTP_CONGLOMERATE path only).
+   * SOTP-01 independently re-verifies this bridge in QA; the PDF renders
+   * the segment table from it. Absent for single-business valuations.
+   */
+  sotpBreakdown?: {
+    ticker: string;
+    currency: string;
+    period: string;
+    segments: Array<{
+      name: string;
+      ebitda: number;
+      multiple: number;
+      multipleBasis: string;
+      enterpriseValue: number;
+      provenance: string;
+    }>;
+    grossAssetValue: number;
+    otherInvestments: number;
+    netDebt: number;
+    holdingDiscount: number;
+    equityValue: number;
+    sharesOutstanding: number;
+    fairValuePerShare: number | null;
+    coveragePct: number;
+    /**
+     * FCFF cross-check (the single-business DCF computed alongside SOTP).
+     * FCFF-bridge gates (XREF-01, MODEL-01 EV parts, FCST-04 linkage, IND-03
+     * EV leg) verify THESE numbers, so the corroborating DCF stays honest
+     * while SOTP prices the equity.
+     */
+    crossCheck?: {
+      enterpriseValue: number;
+      sumPvFcff: number;
+      pvTerminalValue: number;
+      equityValue: number;
+      fairValuePerShare: number | null;
+    };
+  };
   currentMarketPrice: number;
   upsideDownside: number;
   verdict: "BUY" | "HOLD" | "SELL" | "NR";

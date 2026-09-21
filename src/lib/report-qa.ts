@@ -6,18 +6,26 @@
 // QA CONTRACT (block-vs-warn policy — adversarially tested, see
 // scratch/test-publication-gate.ts two-phase fixtures; Priority 4 independent gate):
 //   FAIL (blocks export): primary-data gaps (DATA-01), ontology violations (ONT-01,
-//     OM-01, HOSP-01, HW-01), arithmetic breaks (XREF-01/03/04/05, SCEN-01/02, PROB-01, FV-RECOMP-01,
-//     CHAIN-01, BS-01, MODEL-01, IND-01..IND-05 independent recomputation), share/market-cap integrity (SHARE-01),
+//     OM-01, HOSP-01, HW-01, SEM-COMP-01 company-specific contamination), arithmetic breaks
+//     (XREF-01/03/04/05, SCEN-01/02, PROB-01, FV-RECOMP-01,
+//     CHAIN-01, BS-01, MODEL-01, IND-01..IND-05 independent recomputation), cross-page
+//     consistency (FINCONS-01..05 same-FY revenue/EBITDA/EBIT/net income/EPS/shares),
+//     cash-flow narrative contradiction (FCF-NARR-01), SOTP bridge breach (SOTP-01),
+//     share/market-cap integrity (SHARE-01),
 //     identity defects (IDENTITY-01),
 //     rating/moat/credit contradictions (RATING-01/02, MOAT-01/02, STEWARD-01,
 //     SEMANTIC-01, CREDIT-01, WACC-01, VAL-01, COV-01), contamination (BS-DETECTOR-04 ≥1,
-//     SANITIZE-01 ≥1), clone signatures (BS-DETECTOR-05), peer-similarity gate
+//     NARRATIVE-01 ≥1, SANITIZE-01 ≥1), clone signatures (BS-DETECTOR-05), peer-similarity gate
 //     (PEER-01 threshold), event-study evidence (EVENT-01 empirical-pose),
 //     unresolved tokens (PLACEHOLDER-01, CLAIM-01 placeholders),
 //     missing assumption evidence (ASSUME-01).
 //   WARN (costs score, never blocks): unverified council (BS-DETECTOR-06), margin step-change
-//     (MARGIN-01), loose chain tolerance (CHAIN-01), generic content screens
+//     (MARGIN-01), loose chain tolerance (CHAIN-01), primary-source disclosure
+//     (SRC-01 secondary-only figures), generic content screens
 //     (THESIS-01, OVERVIEW-01, COMPET-01, MGMT-01, CATALYST-01, GOV-01, CLAIM-01 evidence).
+//   Numerical-failure policy: every machine-verifiable numerical falsehood
+//     FAILs (blocks); WARN is reserved for disclosure-grade qualifications and
+//     style/evidence thinness. No critical numerical check may sit at WARN.
 //   IND-01..IND-05 (P0 #9, #23): independent recomputation (BS identity, cash
 //     chain, EV bridge, WACC re-solution, upside/rating map) from canonical
 //     facts through the math kernel — separate implementation, materiality-gated.
@@ -33,6 +41,9 @@ import { identityIssues } from "./canonical";
 import { getAllowlistedConcepts } from "./sector-allowlist";
 import { buildCompanyOntology, validateOntologyCoverage } from "./company-ontology";
 import { buildResearchOperatingModel, validateReportAgainstModel, type ResearchOperatingModel } from "./research-model";
+import { getCompanySemanticProfile, PLATFORM_SILICON_FORBIDDEN } from "./company-semantics";
+import { boundaryHit } from "./research-model/model-validator";
+import { checkCrossPageFinancials } from "./financial-consistency";
 import { assessProvenance, assessMarketIntegrity, resolveShareCount } from "./financial-provenance";
 import { gatePeerSet, SIMILARITY_THRESHOLD_AVG, SIMILARITY_MIN_QUALIFYING } from "./peer-similarity";
 import { buildCanonicalFacts } from "./canonical-facts";
@@ -51,7 +62,7 @@ const SECTOR_KEYWORD_BLOCKLIST: Record<string, { blocked: string[]; sectorNames:
   },
   energy_petrochem: {
     sectorNames: ["energy", "oil", "petrochem", "refining"],
-    blocked: ["saas churn", "arr expansion", "app store", "cloud subscription churn"],
+    blocked: ["saas churn", "arr expansion", "app store", "cloud subscription churn", ...PLATFORM_SILICON_FORBIDDEN],
   },
   pharma: {
     sectorNames: ["pharma", "health", "biotech"],
@@ -210,10 +221,13 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
     });
   }
 
-  // 2. Cross-Reference Check (DCF Bridge Arithmetic)
-  const sumPvFcff = Number(data.dcf.sumPvFcff) || 0;
-  const pvTv = Number(data.dcf.pvTerminalValue) || 0;
-  const ev = Number(data.dcf.enterpriseValue) || 0;
+  // 2. Cross-Reference Check (DCF Bridge Arithmetic). SOTP-primary reports
+  // verify the FCFF cross-check leg (the corroborating single-business DCF),
+  // not SOTP GAV — SOTP-01 owns the SOTP bridge.
+  const sotpX = (data.dcf as any)?.sotpBreakdown?.crossCheck;
+  const sumPvFcff = Number(sotpX?.sumPvFcff ?? data.dcf.sumPvFcff) || 0;
+  const pvTv = Number(sotpX?.pvTerminalValue ?? data.dcf.pvTerminalValue) || 0;
+  const ev = Number(sotpX?.enterpriseValue ?? data.dcf.enterpriseValue) || 0;
   const bridgeEvVariance = Math.abs(ev - (sumPvFcff + pvTv));
 
   if (bridgeEvVariance > 1000) {
@@ -239,7 +253,19 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
   // Single operating-model instance for ALL narrative QA below (ONT-01,
   // MODEL-01): built once here, shared by every section scan. Nothing below
   // re-classifies the company.
-  const operatingModel: ResearchOperatingModel = buildResearchOperatingModel({ profile: data.profile });
+  const operatingModelBase: ResearchOperatingModel = buildResearchOperatingModel({ profile: data.profile });
+  // Company-specific semantic overlay (item 3): conglomerate/holding profiles
+  // contribute extra forbidden concepts the sector pack cannot express. Merged
+  // once here so ONT-01/OM-01/SEM-COMP-01 all scan the same vocabulary.
+  const companySemantics = getCompanySemanticProfile({ ticker: data.profile.ticker, name: data.profile.name });
+  const operatingModel: ResearchOperatingModel = companySemantics
+    ? {
+        ...operatingModelBase,
+        forbiddenConcepts: Array.from(
+          new Set([...operatingModelBase.forbiddenConcepts, ...companySemantics.extraForbiddenConcepts])
+        ),
+      }
+    : operatingModelBase;
   const isBankOrNbfc = sectorProfile.isFinancialInstitution ||
     (data.dcf?.sumPvFcff === 0 && (data.dcf?.equityValue || 0) > 0);
 
@@ -251,7 +277,12 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
   // case); raw DCF EV as fallback. XREF-01 independently validates DCF internals.
   const ledgerEv = Number(ledger?.enterpriseValue);
   const evForBridge = Number.isFinite(ledgerEv) && ledgerEv !== 0 ? ledgerEv : ev;
-  const expectedEqVal = isBankOrNbfc ? dcfEqVal : evForBridge - dcfNetDebt;
+  // SOTP-primary: expected equity = GAV − holding discount − net debt
+  // (recomputed from the breakdown — never trusted from the headline field).
+  const sotpB = (data.dcf as any)?.sotpBreakdown;
+  const expectedEqVal = sotpB
+    ? Number(sotpB.grossAssetValue || 0) * (1 - Number(sotpB.holdingDiscount || 0)) - dcfNetDebt
+    : isBankOrNbfc ? dcfEqVal : evForBridge - dcfNetDebt;
   const bridgeEqVariance = Math.abs(dcfEqVal - expectedEqVal);
 
   if (bridgeEqVariance > 1000 && !isBankOrNbfc) {
@@ -270,9 +301,11 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
       category: "CROSS_REFERENCE",
       name: "DCF Equity Value Bridge Arithmetic Reconciled",
       status: "PASS",
-      details: isBankOrNbfc
-        ? "Equity value modeled directly via justified multiple/residual income for banking entity."
-        : `Enterprise Value minus Net Debt reconciles with Implied Equity Value (variance ${bridgeEqVariance.toFixed(0)} within ±1000 tolerance).`,
+      details: sotpB
+        ? `SOTP equity reconciles: GAV − ${(Number(sotpB.holdingDiscount || 0) * 100).toFixed(0)}% holding discount − net debt (variance ${bridgeEqVariance.toFixed(0)} within ±1000 tolerance).`
+        : isBankOrNbfc
+          ? "Equity value modeled directly via justified multiple/residual income for banking entity."
+          : `Enterprise Value minus Net Debt reconciles with Implied Equity Value (variance ${bridgeEqVariance.toFixed(0)} within ±1000 tolerance).`,
     });
   }
 
@@ -337,12 +370,33 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
     });
   }
 
-  // 2d. Implied Per-Share Fair Value Arithmetic Check (Equity Value / Diluted Shares = Fair Value)
-  const dcfShares = ledger?.sharesOutstanding || data.dcf.sharesOutstanding || data.stockData.sharesOutstanding || 1;
-  const expectedPerShare = dcfShares > 0 && dcfEqVal > 0 ? dcfEqVal / dcfShares : fv;
-  const perShareVariance = Math.abs(fv - expectedPerShare);
+  // 2d. Implied Per-Share Fair Value Arithmetic Check (Equity Value / Diluted Shares = Fair Value).
+  // Hard gate on EVERY valuation path (banks included — the residual-income
+  // bridge carries equityValue + sharesOutstanding + intrinsicValue, so the
+  // identity applies identically). Unresolved share counts FAIL instead of
+  // falling back to 1-share synthesis (which manufactures 10×-class targets).
+  const ledgerShares = Number(ledger?.sharesOutstanding);
+  const dcfShares = ledgerShares > 0
+    ? ledgerShares
+    : Number(data.dcf.sharesOutstanding) > 0
+      ? Number(data.dcf.sharesOutstanding)
+      : Number(data.stockData.sharesOutstanding) > 0
+        ? Number(data.stockData.sharesOutstanding)
+        : 0;
+  const expectedPerShare = dcfShares > 0 && dcfEqVal > 0 ? dcfEqVal / dcfShares : NaN;
+  const perShareVariance = Number.isFinite(expectedPerShare) ? Math.abs(fv - expectedPerShare) : NaN;
 
-  if (perShareVariance > 1.0 && !isBankOrNbfc && fv > 0 && dcfShares > 0) {
+  if (!(dcfShares > 0)) {
+    checks.push({
+      id: "XREF-05",
+      category: "CROSS_REFERENCE",
+      name: "DCF Per-Share Fair Value Arithmetic Reconciled",
+      status: "FAIL",
+      details: `FATAL PUBLICATION BLOCK: share base unresolved across ledger/dcf/quote (all ≤ 0 or missing) — per-share math unverifiable. Share-count synthesis is prohibited; resolve the base before publication.`,
+      expected: "Resolved share count > 0",
+      actual: "unresolved",
+    });
+  } else if (Number.isFinite(perShareVariance) && perShareVariance > 1.0 && fv > 0) {
     checks.push({
       id: "XREF-05",
       category: "CROSS_REFERENCE",
@@ -1190,8 +1244,10 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
       id: "NARRATIVE-01",
       category: "KEYWORD_BLOCKLIST",
       name: "Sector Template Keyword Leakage Filter",
-      status: "WARN",
-      details: `Detected out-of-sector terminology in narrative (${blocklistViolations.join(", ")}). Sanitizer active.`,
+      status: "FAIL",
+      details: `FATAL PUBLICATION BLOCK — TEMPLATE CONTAMINATION: out-of-sector terminology in narrative (${blocklistViolations.join(", ")}). Foreign-sector terms prove the wrong template generated this report — fix the template/prompt, not the output.`,
+      expected: "Zero out-of-sector terms",
+      actual: `${blocklistViolations.length} leaked term(s)`,
     });
   } else {
     checks.push({
@@ -2487,6 +2543,44 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
     }
   }
 
+  // SEM-COMP-01: company-specific semantic validation. Sector packs cannot
+  // express conglomerate semantics, so per-company profiles (company-
+  // semantics.ts) carry extra forbidden concepts. Any hit is TEMPLATE
+  // CONTAMINATION and BLOCKS publication — e.g. a Reliance dossier
+  // containing advertiser bidding / search index / custom silicon /
+  // two-sided network / hyperscale moat language.
+  {
+    if (companySemantics) {
+      // Report every company-profile hit with company attribution (TEMPLATE
+      // CONTAMINATION verdict). Overlap with the sector-pack scan
+      // (ONT-01/OM-01) is expected for general-sector names and is disclosed,
+      // not deduplicated — each check owns its attribution.
+      const narrativeAll = JSON.stringify(data.aiAnalysis || {}).toLowerCase();
+      const hits = companySemantics.extraForbiddenConcepts.filter((c) => boundaryHit(narrativeAll, c));
+      if (hits.length > 0) {
+        const packCovered = new Set(operatingModelBase.forbiddenConcepts.map((c) => c.toLowerCase()));
+        const overlap = hits.filter((h) => packCovered.has(h.toLowerCase())).length;
+        checks.push({
+          id: "SEM-COMP-01",
+          category: "BS_DETECTOR",
+          name: "Company-Specific Semantic Validation",
+          status: "FAIL",
+          details: `FATAL PUBLICATION BLOCK — TEMPLATE CONTAMINATION: ${data.profile.ticker || companySemantics.companyKey} narrative contains ${hits.length} company-forbidden concept(s) [${hits.slice(0, 6).join(", ")}]${overlap > 0 ? ` (${overlap} also sector-pack-forbidden — ONT-01/OM-01 corroborate)` : ""}. ${companySemantics.rationale}`,
+          expected: "Zero company-forbidden concepts",
+          actual: `${hits.length} forbidden`,
+        });
+      } else {
+        checks.push({
+          id: "SEM-COMP-01",
+          category: "BS_DETECTOR",
+          name: "Company-Specific Semantic Validation",
+          status: "PASS",
+          details: `Company profile ${companySemantics.companyKey}: zero company-forbidden concepts in narrative.`,
+        });
+      }
+    }
+  }
+
   // MODEL-01: independent published-output consistency (never trusts one stage).
   // Recomputes the PUBLISHED bridges (ledger equity/shares vs ledger fair value;
   // model EV vs PV parts) and cross-checks the share base against market cap.
@@ -2497,9 +2591,12 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
     const ledM = data.assumptionsLedger as unknown as Record<string, number> | undefined;
     const indepIssues: string[] = [];
     if (latestM && dcfM) {
-      const ev = Number(dcfM.enterpriseValue) || 0;
-      const sumPv = Number(dcfM.sumPvFcff) || 0;
-      const pvTv = Number(dcfM.pvTerminalValue) || 0;
+      // SOTP-primary: the EV-parts identity holds on the FCFF cross-check
+      // leg (SOTP GAV is verified by SOTP-01, never by FCFF parts).
+      const sotpCC = (dcfM as any)?.sotpBreakdown?.crossCheck;
+      const ev = Number(sotpCC?.enterpriseValue ?? dcfM.enterpriseValue) || 0;
+      const sumPv = Number(sotpCC?.sumPvFcff ?? dcfM.sumPvFcff) || 0;
+      const pvTv = Number(sotpCC?.pvTerminalValue ?? dcfM.pvTerminalValue) || 0;
       if (Math.abs(ev - (sumPv + pvTv)) > 1000 && ev > 0) indepIssues.push(`EV≠PV(FCFF)+PV(TV) gap ${(Math.abs(ev - (sumPv + pvTv))).toFixed(0)}`);
       const ledEq = Number(ledM?.equityValue);
       const ledSh = Number(ledM?.sharesOutstanding);
@@ -2538,6 +2635,181 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
     }
   }
 
+  // FINCONS-01..05: hard financial-consistency gate. The PDF renders the
+  // same fiscal year through independent code paths (statement tables from
+  // annualFinancials, KPI/cover from market facts, valuation pages from
+  // ledger/dcf). Any same-FY divergence in revenue/EBITDA/EBIT/net
+  // income/EPS/shares is a publication BLOCKER — the report would
+  // contradict itself on one year (FY26 net-income/EPS class of defect).
+  {
+    const fins = data.annualFinancials || [];
+    const latest = fins[fins.length - 1] as any;
+    const cf: any = (data as any).canonicalFacts;
+    const cfYears: any[] = Array.isArray(cf?.years) ? cf.years : [];
+    const cfLatest = cfYears[cfYears.length - 1];
+    const rv = (o: any): number | null =>
+      o && typeof o.value === "number" && Number.isFinite(o.value) ? o.value : null;
+    const finCons = checkCrossPageFinancials({
+      ticker: data.profile.ticker || "UNKNOWN",
+      latestYear: latest?.year || cfLatest?.year || "latest",
+      isFinancial: isBankOrNbfc,
+      statement: {
+        revenue: latest ? Number(latest.revenue ?? latest.totalRevenue) || null : null,
+        operatingIncome: latest ? stmtNum(latest, "operatingIncome") || null : null,
+        pretaxIncome: latest?.pretaxIncome ?? null,
+        incomeTaxExpense: latest?.incomeTaxExpense ?? null,
+        netIncome: latest?.netIncome ?? null,
+        totalEquity: latest?.totalEquity ?? null,
+        sharesOutstanding: latest?.sharesOutstanding ?? null,
+        dilutedEps: latest?.dilutedEps ?? null,
+        eps: latest?.eps ?? null,
+      },
+      canonical: {
+        revenue: cfLatest ? rv(cfLatest.revenue) : null,
+        netIncome: cfLatest ? rv(cfLatest.netIncome) : null,
+        sharesDiluted: cf?.market ? rv(cf.market.sharesDiluted) : null,
+      },
+      market: {
+        price: Number(data.stockData.currentPrice) || null,
+        shares: Number(data.stockData.sharesOutstanding) || null,
+        marketCap: Number(data.stockData.marketCap) || null,
+        trailingEps: Number((data.stockData as any).trailingEps) || null,
+      },
+      model: {
+        equityValue: Number(ledger?.equityValue) || Number(data.dcf.equityValue) || null,
+        shares: Number(ledger?.sharesOutstanding) || Number(data.dcf.sharesOutstanding) || null,
+        fairValue: Number(ledger?.fairValue ?? (data.dcf as any).intrinsicValue ?? (data.dcf as any).fairValuePerShare) || null,
+      },
+    });
+    for (const f of finCons) {
+      checks.push({
+        id: f.code,
+        category: "CROSS_REFERENCE",
+        name: "Cross-Page Financial Consistency",
+        status: f.pass ? "PASS" : f.severity === "blocker" ? "FAIL" : "WARN",
+        details: f.pass ? f.detail : `FATAL PUBLICATION BLOCK: ${f.detail}`,
+        expected: "Same-FY agreement across pages",
+        actual: f.pass ? "agree" : "divergent",
+      });
+    }
+  }
+
+  // FCF-NARR-01: cash-flow narrative reconciliation. When the model FCF is
+  // negative (trailing reported or forecast year-1), the narrative must not
+  // simultaneously claim operating cash comfortably funds growth capex. The
+  // funding source (cash balance, debt, asset sales, equity) must be stated
+  // explicitly, or the claim removed.
+  {
+    const fins = data.annualFinancials || [];
+    const latest = fins[fins.length - 1] as any;
+    const trailFcf = latest && Number.isFinite(Number(latest.freeCashFlow))
+      ? Number(latest.freeCashFlow)
+      : latest && Number.isFinite(Number(latest.operatingCashFlow))
+        ? Number(latest.operatingCashFlow) - Math.abs(Number(latest.capitalExpenditures) || 0)
+        : null;
+    const fc: any = (data as any).canonicalForecast;
+    const forecastY1Fcf = Array.isArray(fc?.projections) && fc.projections.length > 0
+      ? Number(fc.projections[0].freeCashFlow)
+      : null;
+    // Either leg failing contradicts a comfort claim: a negative trailing
+    // print makes "comfortably funds" false today, a negative forecast makes
+    // it false tomorrow. Detail cites the offending leg(s).
+    const negLegs: string[] = [];
+    if (trailFcf !== null && trailFcf < 0) negLegs.push(`trailing FCF ${trailFcf.toFixed(0)}`);
+    if (Number.isFinite(forecastY1Fcf as number) && (forecastY1Fcf as number) < 0) {
+      negLegs.push(`forecast Y1 FCF ${(forecastY1Fcf as number).toFixed(0)}`);
+    }
+    const modelFcf = Number.isFinite(forecastY1Fcf as number) ? (forecastY1Fcf as number) : trailFcf;
+    const ai = (data.aiAnalysis || {}) as unknown as Record<string, unknown>;
+    const narrativeCash = [
+      ai.cashFlowCommentary, ai.capitalAllocationCommentary, ai.investmentThesis,
+      ai.investmentConclusion, ai.dcfCommentary, ai.creditAnalysisCommentary,
+    ].filter((v): v is string => typeof v === "string").join("\n").toLowerCase();
+    const fundingClaims = [
+      "comfortably fund", "comfortably funds", "comfortably cover",
+      "self-fund", "self fund", "self-funded", "fully fund", "fully funds",
+      "funds growth capex", "fund growth capex", "funds all capex",
+      "ample headroom", "ample cover", "cash comfortably",
+    ].filter((p) => narrativeCash.includes(p));
+    if (negLegs.length > 0 && fundingClaims.length > 0) {
+      checks.push({
+        id: "FCF-NARR-01",
+        category: "CROSS_REFERENCE",
+        name: "Cash-Flow Narrative Reconciliation",
+        status: "FAIL",
+        details: `FATAL PUBLICATION BLOCK: FCF is negative (${negLegs.join("; ")}) yet the narrative claims FCF-funded growth ("${fundingClaims.slice(0, 3).join('", "')}"). State the actual funding source (cash balance, debt, asset sales) or remove the claim.`,
+        expected: "Narrative consistent with negative FCF",
+        actual: `${fundingClaims.length} funding claim(s)`,
+      });
+    } else {
+      checks.push({
+        id: "FCF-NARR-01",
+        category: "CROSS_REFERENCE",
+        name: "Cash-Flow Narrative Reconciliation",
+        status: "PASS",
+        details: negLegs.length > 0
+          ? `FCF negative (${negLegs.join("; ")}) but narrative makes no FCF-funding comfort claims — reconciled.`
+          : modelFcf === null
+            ? "Model FCF unavailable — narrative funding-claim scan skipped (no contradiction assertable)."
+            : "Model FCF non-negative — narrative cash-flow statements reconcile.",
+      });
+    }
+  }
+
+  // SOTP-01: conglomerate SOTP bridge verification. When the valuation ran
+  // sum-of-the-parts, re-verify the bridge independently (segment EVs sum,
+  // holding discount, net-debt bridge, per-share closure) and require sane
+  // segment coverage of consolidated EBITDA. Arithmetic breach BLOCKS.
+  {
+    const sotp: any = (data.dcf as any)?.sotpBreakdown;
+    if (sotp && Array.isArray(sotp.segments)) {
+      const issues: string[] = [];
+      const segSum = sotp.segments.reduce((s: number, x: any) => s + (Number(x.enterpriseValue) || 0), 0);
+      if (Math.abs(segSum + (Number(sotp.otherInvestments) || 0) - Number(sotp.grossAssetValue || 0)) > 1000) {
+        issues.push(`segment EVs + investments ≠ gross asset value (gap ${(Math.abs(segSum - Number(sotp.grossAssetValue || 0))).toFixed(0)})`);
+      }
+      const discountVal = Number(sotp.grossAssetValue || 0) * Number(sotp.holdingDiscount || 0);
+      const impliedEquity = Number(sotp.grossAssetValue || 0) - discountVal - Number(sotp.netDebt || 0);
+      if (Math.abs(impliedEquity - Number(sotp.equityValue || 0)) > 1000) {
+        issues.push(`GAV − discount − netDebt ≠ equity (gap ${(Math.abs(impliedEquity - Number(sotp.equityValue || 0))).toFixed(0)})`);
+      }
+      const sh = Number(sotp.sharesOutstanding) || 0;
+      if (sh > 0 && Number(sotp.equityValue) > 0 && Math.abs(Number(sotp.fairValuePerShare) - Number(sotp.equityValue) / sh) > 1.0) {
+        issues.push(`SOTP fair value ≠ equity/shares (gap ${Math.abs(Number(sotp.fairValuePerShare) - Number(sotp.equityValue) / sh).toFixed(2)})`);
+      }
+      const cov = Number(sotp.coveragePct);
+      if (issues.length > 0) {
+        checks.push({
+          id: "SOTP-01",
+          category: "CROSS_REFERENCE",
+          name: "SOTP Bridge Verification",
+          status: "FAIL",
+          details: `FATAL PUBLICATION BLOCK: SOTP bridge recomputation disagrees: ${issues.slice(0, 2).join("; ")}.`,
+          expected: "SOTP bridge agreement",
+          actual: issues.slice(0, 2).join("; "),
+        });
+      } else if (Number.isFinite(cov) && cov < 0.8) {
+        checks.push({
+          id: "SOTP-01",
+          category: "CROSS_REFERENCE",
+          name: "SOTP Bridge Verification",
+          status: "WARN",
+          details: `SOTP arithmetic holds, but filing segments cover only ${(cov * 100).toFixed(0)}% of consolidated EBITDA — residual valued at blended multiple (LOW confidence). Refresh segment filings.`,
+          expected: "≥80% segment coverage",
+          actual: `${(cov * 100).toFixed(0)}%`,
+        });
+      } else {
+        checks.push({
+          id: "SOTP-01",
+          category: "CROSS_REFERENCE",
+          name: "SOTP Bridge Verification",
+          status: "PASS",
+          details: `SOTP bridge recomputed: ${sotp.segments.length} segment(s), coverage ${Number.isFinite(cov) ? (cov * 100).toFixed(0) + "%" : "n/a"} — arithmetic agrees.`,
+        });
+      }
+    }
+  }
+
   // IND-01..IND-05: independent recomputation gate (P0 #9, #23, #26).
   // A separate implementation re-derives every load-bearing bridge from
   // canonical facts through the math kernel — never the model's own code.
@@ -2572,6 +2844,7 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
           wacc: data.dcf.assumptions?.wacc,
           terminalGrowthRate: data.dcf.assumptions?.terminalGrowthRate,
         },
+        sotpBreakdown: (data.dcf as any)?.sotpBreakdown,
       },
       ledger: {
         fairValue: Number(ledger?.fairValue ?? data.targetPrice) || 0,
@@ -2663,6 +2936,37 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
       checks.push({ id: "RECON-01", category: "BALANCE_SHEET", name: "Source Reconciliation", status: "PASS", details: `Source reconciliation: ${rec.length} field(s) checked, 0 material INVALID.` });
     }
   }
+  // SRC-01 — Primary-source reconciliation disclosure. Yahoo/secondary data
+  // is the ingestion layer, but material figures must be corroborated against
+  // the annual report / quarterly filing / investor presentation / exchange
+  // filing before publication. Fields stuck at MISSING_PRIMARY warn loudly
+  // (disclosure-grade qualification); MATERIAL_DIFF already FAILs via
+  // RECON-01. A filing fetcher that backfills PRIMARY TierFacts clears these.
+  {
+    const rec: any[] | undefined = (data as any).reconciliation;
+    if (Array.isArray(rec)) {
+      const unreconciled = rec.filter((r: any) => r.status === "MISSING_PRIMARY");
+      if (unreconciled.length > 0) {
+        checks.push({
+          id: "SRC-01",
+          category: "BALANCE_SHEET",
+          name: "Primary-Source Corroboration",
+          status: "WARN",
+          details: `${unreconciled.length} material figure(s) rest on SECONDARY data only [${unreconciled.map((r: any) => r.field).join(", ")}] — corroborate against the annual report / quarterly filing / investor presentation / exchange filing before relying; the dossier publishes as secondary-sourced.`,
+          expected: "PRIMARY corroboration",
+          actual: `${unreconciled.length} SECONDARY-only`,
+        });
+      } else {
+        checks.push({
+          id: "SRC-01",
+          category: "BALANCE_SHEET",
+          name: "Primary-Source Corroboration",
+          status: "PASS",
+          details: `All reconciled fields carry PRIMARY corroboration or a single-source disclosure.`,
+        });
+      }
+    }
+  }
   // P0 #3 — Hard accounting identities FAIL blocks (BS identity, cash chain, etc.)
   {
     const ids: any[] | undefined = (data as any).identityIssues;
@@ -2723,14 +3027,20 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
             wacc: dcfAny.assumptions?.wacc,
             terminalGrowthRate: dcfAny.assumptions?.terminalGrowthRate,
           },
-          dcfOutputs: {
-            sumPvFcff: dcfAny.sumPvFcff,
-            enterpriseValue: dcfAny.enterpriseValue,
-            equityValue: dcfAny.equityValue,
-            fairValuePerShare: (data as any).assumptionsLedger?.fairValue ?? dcfAny.intrinsicValue ?? dcfAny.fairValuePerShare ?? null,
-            netDebt: dcfAny.netDebt,
-            sharesOutstanding: dcfAny.sharesOutstanding,
-          },
+          dcfOutputs: (() => {
+            // SOTP-primary: forecast→DCF linkage holds on the FCFF
+            // cross-check leg (the forecast prices FCFF vectors; SOTP-01
+            // owns the SOTP bridge, FINCONS-04 the SOTP per-share closure).
+            const cc = dcfAny.sotpBreakdown?.crossCheck;
+            return {
+              sumPvFcff: cc?.sumPvFcff ?? dcfAny.sumPvFcff,
+              enterpriseValue: cc?.enterpriseValue ?? dcfAny.enterpriseValue,
+              equityValue: cc?.equityValue ?? dcfAny.equityValue,
+              fairValuePerShare: cc?.fairValuePerShare ?? (data as any).assumptionsLedger?.fairValue ?? dcfAny.intrinsicValue ?? dcfAny.fairValuePerShare ?? null,
+              netDebt: dcfAny.netDebt,
+              sharesOutstanding: dcfAny.sharesOutstanding,
+            };
+          })(),
           scenarioBaseVector: ledgerScen?.base?.inputVector ? { revenueGrowth: ledgerScen.base.inputVector.revenueGrowth, ebitMargin: ledgerScen.base.inputVector.ebitMargin } : null,
           enforceDcfLinkage: enforceLinkage,
           dilutedSharesFromFacts: (() => {

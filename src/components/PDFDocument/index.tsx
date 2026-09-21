@@ -700,7 +700,9 @@ const buildFiveYearStatementModel = (data: ReportData): StatementColumn[] => {
     const tax = f.incomeTaxExpense ? toMil(f.incomeTaxExpense) : Math.round(pretax * 0.22);
     const net = pretax - tax;
 
-    const eps = sh > 0 ? net / sh : (f.dilutedEps || f.eps || 2.5);
+    // No synthesized EPS: an unresolved share base must surface as 0 here and
+    // trip FINCONS-02/FINCONS-03 (publication BLOCK) — never a plausible 2.5.
+    const eps = sh > 0 ? net / sh : 0;
     const divPerShare = hasDividends ? (f.dividendsPaid ? Math.abs(toMil(f.dividendsPaid)) / (sh || 1) : eps * 0.25) : 0;
     const capex = f.capitalExpenditures ? toMil(Math.abs(f.capitalExpenditures)) : Math.round(rev * 0.05);
     const cfo = f.operatingCashFlow ? toMil(f.operatingCashFlow) : net + depr;
@@ -4796,6 +4798,59 @@ const AnalystForecastsSummaryPage = ({ data }: { data: ReportData }) => {
         </View>
       </View>
 
+      {/* SOTP segment table (conglomerates only): the business is priced part by
+          part — O2C + Jio + Retail + E&P + growth options — never as a single
+          homogeneous entity on one blended multiple. Renders only when the
+          valuation ran sum-of-the-parts (dcf.sotpBreakdown present). */}
+      {(() => {
+        const sotp = (data.dcf as any)?.sotpBreakdown;
+        if (!sotp || !Array.isArray(sotp.segments) || sotp.segments.length === 0) return null;
+        return (
+          <View style={{ borderTopWidth: 0.5, borderTopColor: COLORS.hairlineLight, paddingTop: 3, marginBottom: 3 }}>
+            <Text style={{ fontSize: 7.2, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2 }}>
+              Sum-of-the-Parts Valuation ({sotp.period} filing segment EBITDA)
+            </Text>
+            <View style={S.compactTable} wrap={false}>
+              <View style={S.compactRowHeader}>
+                <Text style={[S.compactCellHeader, { width: "34%" }]}>Segment</Text>
+                <Text style={[S.compactCellHeaderRight, { width: "22%" }]}>EBITDA ({currency})</Text>
+                <Text style={[S.compactCellHeaderRight, { width: "14%" }]}>EV/EBITDA</Text>
+                <Text style={[S.compactCellHeaderRight, { width: "30%" }]}>Enterprise Value ({currency})</Text>
+              </View>
+              {sotp.segments.map((seg: any, ri: number) => (
+                <View key={ri} style={ri % 2 === 0 ? S.compactRow : S.compactRowAlt}>
+                  <Text style={[S.compactCellBold, { width: "34%" }]}>{seg.name}</Text>
+                  <Text style={[S.compactCellRight, { width: "22%" }]}>{fmtBig(seg.ebitda, currency)}</Text>
+                  <Text style={[S.compactCellRight, { width: "14%" }]}>{Number(seg.multiple).toFixed(1)}×</Text>
+                  <Text style={[S.compactCellRight, { width: "30%" }]}>{fmtBig(seg.enterpriseValue, currency)}</Text>
+                </View>
+              ))}
+              <View style={S.compactRow}>
+                <Text style={[S.compactCellBold, { width: "34%" }]}>Gross Asset Value</Text>
+                <Text style={[S.compactCellRight, { width: "22%" }]}>—</Text>
+                <Text style={[S.compactCellRight, { width: "14%" }]}>—</Text>
+                <Text style={[S.compactCellBoldRight, { width: "30%" }]}>{fmtBig(sotp.grossAssetValue, currency)}</Text>
+              </View>
+              <View style={S.compactRowAlt}>
+                <Text style={[S.compactCell, { width: "34%" }]}>Less: Holding-company discount ({(Number(sotp.holdingDiscount) * 100).toFixed(0)}%) + Net debt</Text>
+                <Text style={[S.compactCellRight, { width: "22%" }]}>—</Text>
+                <Text style={[S.compactCellRight, { width: "14%" }]}>—</Text>
+                <Text style={[S.compactCellRight, { width: "30%" }]}>-{fmtBig(Number(sotp.grossAssetValue) * Number(sotp.holdingDiscount) + Number(sotp.netDebt), currency)}</Text>
+              </View>
+              <View style={S.compactRow}>
+                <Text style={[S.compactCellBold, { width: "34%" }]}>SOTP Equity Value ÷ Shares = Fair Value</Text>
+                <Text style={[S.compactCellRight, { width: "22%" }]}>—</Text>
+                <Text style={[S.compactCellRight, { width: "14%" }]}>—</Text>
+                <Text style={[S.compactCellBoldRight, { width: "30%", color: COLORS.primaryRed }]}>{fmtBig(sotp.equityValue, currency)} ÷ {fmtNum(Number(sotp.sharesOutstanding) / 1e6, 2)} M</Text>
+              </View>
+            </View>
+            <Text style={{ fontSize: 6.2, color: COLORS.textSecondary, marginTop: 2 }}>
+              Segment EBITDA: PRIMARY filing figures ({sotp.period}); multiples are disclosed analyst assumptions (see evidence trail). New Energy (pre-profit growth option) acknowledged, unvalued. SOTP-01 independently re-verifies this bridge in QA.
+            </Text>
+          </View>
+        );
+      })()}
+
       {/* Assumption Evidence Trail: every major forecast input states its basis */}
       <View style={{ borderTopWidth: 0.5, borderTopColor: COLORS.hairlineLight, paddingTop: 3, marginBottom: 3 }}>
         <Text style={{ fontSize: 7.2, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2 }}>
@@ -4810,7 +4865,7 @@ const AnalystForecastsSummaryPage = ({ data }: { data: ReportData }) => {
             const basis = data.dcf.assumptionBasis || {};
             const rows: [string, string][] = [
               ["Revenue growth", basis.revenueGrowth || "Basis not recorded — treat trajectory as judgmental."],
-              ["Revenue granularity", "Top-down company-level blend (no segment/product split in feed) — segment mix effects are not modeled."],
+              ["Revenue granularity", (data.dcf as any)?.sotpBreakdown ? `SOTP conglomerate: segment-level economics (${((data.dcf as any).sotpBreakdown.segments || []).map((s: any) => s.name).join(" + ")}) — segment mix modeled explicitly, not blended.` : "Top-down company-level blend (no segment/product split in feed) — segment mix effects are not modeled."],
               ["EBIT margin", basis.ebitMargin || "Basis not recorded — treat trajectory as judgmental."],
               ["Capex & D&A", basis.capex || "Basis not recorded."],
               ["Working capital", basis.workingCapital || "Basis not recorded."],

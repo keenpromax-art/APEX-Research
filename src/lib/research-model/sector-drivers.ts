@@ -17,6 +17,7 @@
  *    inherit neither software nor lending drivers.
  */
 import type { SectorId, SectorProfile } from "../sectors/types";
+import { PLATFORM_SILICON_FORBIDDEN } from "../company-semantics";
 
 export interface SectorDriverPack {
   revenueDrivers: string[];
@@ -399,6 +400,10 @@ export const SECTOR_DRIVER_PACKS: Record<SectorId, SectorDriverPack> = {
     requiredConcepts: ["revenue", "ebitda margin", "free cash flow"],
     forbiddenConcepts: [
       "spectrum auction", "spectrum holdings", "4g/5g", "wafer fab", "refinery throughput", "crack spread", "clinical trial", "dark stores",
+      // Platform/ad-tech + semiconductor vocabulary is foreign to general-sector
+      // companies (conglomerates such as Reliance): any such term proves the
+      // internet-platform template leaked in (TEMPLATE CONTAMINATION → BLOCK).
+      ...PLATFORM_SILICON_FORBIDDEN,
     ],
     unitEconomics: "Judged on reported revenue, margins, and cash conversion — no sector unit economics assumed.",
   },

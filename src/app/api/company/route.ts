@@ -235,10 +235,29 @@ export async function GET(request: NextRequest) {
 
     // P0 #2 — Source reconciliation (PRIMARY vs SECONDARY). Currently single-source Yahoo as SECONDARY;
     // when filings fetch is available, PRIMARY facts will populate here. Material diff = INVALID.
-    // We cross-check Yahoo timeseries against quote marketCap where both exist as a self-consistency proxy.
+    // Every material figure is registered (revenue, earnings, leverage, liquidity,
+    // share base, equity, cash generation) so SRC-01 can disclose exactly which
+    // figures lack PRIMARY corroboration (annual report / quarterly filing /
+    // investor presentation / exchange filing).
+    const latestYearFacts = canonicalFacts.years.length > 0 ? canonicalFacts.years[canonicalFacts.years.length - 1] : null;
+    const secondaryOf = (field: string): any => {
+      const fact = (latestYearFacts as unknown as Record<string, { value: number | null; source: string }> | null)?.[field];
+      if (!fact) return null;
+      return { value: fact.value, source: fact.source, tier: "SECONDARY", fact };
+    };
+    const secondaryShares: any = canonicalFacts.market.sharesBasic.value !== null
+      ? { value: canonicalFacts.market.sharesBasic.value, source: canonicalFacts.market.sharesBasic.source, tier: "SECONDARY", fact: canonicalFacts.market.sharesBasic }
+      : null;
     const reconciliation = reconcileAll([
-      { field: "revenue", primary: null, secondary: canonicalFacts.years.length > 0 ? { value: canonicalFacts.years[canonicalFacts.years.length-1].revenue.value, source: canonicalFacts.years[canonicalFacts.years.length-1].revenue.source, tier: "SECONDARY", fact: canonicalFacts.years[canonicalFacts.years.length-1].revenue } : null },
-      { field: "totalDebt", primary: null, secondary: canonicalFacts.years.length > 0 ? { value: canonicalFacts.years[canonicalFacts.years.length-1].totalDebt.value, source: canonicalFacts.years[canonicalFacts.years.length-1].totalDebt.source, tier: "SECONDARY", fact: canonicalFacts.years[canonicalFacts.years.length-1].totalDebt } : null },
+      { field: "revenue", primary: null, secondary: secondaryOf("revenue") },
+      { field: "operatingIncome", primary: null, secondary: secondaryOf("operatingIncome") },
+      { field: "netIncome", primary: null, secondary: secondaryOf("netIncome") },
+      { field: "incomeTaxExpense", primary: null, secondary: secondaryOf("incomeTaxExpense") },
+      { field: "totalDebt", primary: null, secondary: secondaryOf("totalDebt") },
+      { field: "cash", primary: null, secondary: secondaryOf("cash") },
+      { field: "totalEquity", primary: null, secondary: secondaryOf("totalEquity") },
+      { field: "operatingCashFlow", primary: null, secondary: secondaryOf("operatingCashFlow") },
+      { field: "sharesOutstanding", primary: null, secondary: secondaryShares },
     ]);
 
     // P0 #3 — Hard Accounting Identity Engine (every year)
@@ -313,7 +332,7 @@ export async function GET(request: NextRequest) {
       archetype: archetypeProfile.archetype,
       beta: stockData.beta as number | undefined,
       country: companyProfile.country,
-      dcf: { enterpriseValue: (dcf as any).enterpriseValue, sumPvFcff: (dcf as any).sumPvFcff, pvTerminalValue: (dcf as any).pvTerminalValue, equityValue: (dcf as any).equityValue, netDebt: (dcf as any).netDebt, financeReceivablesOffset: (dcf as any).financeReceivablesOffset, intrinsicValue: (dcf as any).intrinsicValue, fairValuePerShare: (dcf as any).intrinsicValue, sharesOutstanding: (dcf as any).sharesOutstanding ?? stockData.sharesOutstanding ?? 1, currentMarketPrice: stockData.currentPrice, assumptions: dcf.assumptions as any },
+      dcf: { enterpriseValue: (dcf as any).enterpriseValue, sumPvFcff: (dcf as any).sumPvFcff, pvTerminalValue: (dcf as any).pvTerminalValue, equityValue: (dcf as any).equityValue, netDebt: (dcf as any).netDebt, financeReceivablesOffset: (dcf as any).financeReceivablesOffset, intrinsicValue: (dcf as any).intrinsicValue, fairValuePerShare: (dcf as any).intrinsicValue, sharesOutstanding: (dcf as any).sharesOutstanding ?? stockData.sharesOutstanding ?? 1, currentMarketPrice: stockData.currentPrice, assumptions: dcf.assumptions as any, sotpBreakdown: (dcf as any).sotpBreakdown },
       ledger: { fairValue: (masterReportFacts as any).valuation?.fairValue ?? dcf.intrinsicValue, targetPrice: (masterReportFacts as any).valuation?.fairValue ?? dcf.intrinsicValue, currentPrice: stockData.currentPrice, enterpriseValue: (dcf as any).enterpriseValue, equityValue: (dcf as any).equityValue, netDebt: (dcf as any).netDebt, sharesOutstanding: (dcf as any).sharesOutstanding, wacc: (dcf.assumptions as any)?.wacc, rating: masterReportFacts.recommendation?.rating ?? "HOLD" },
     });
 

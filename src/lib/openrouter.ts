@@ -28,6 +28,7 @@ import {
   buildResearchOperatingModel,
   type ResearchOperatingModel,
 } from "./research-model";
+import { getCompanySemanticProfile } from "./company-semantics";
 import {
   SUPPORTED_PROVIDERS,
   CustomKeyConfig,
@@ -68,16 +69,24 @@ export function buildSectorGuardrail(profile: CompanyProfile, model?: ResearchOp
   // build below exists only for backward-compatible direct callers.
   const m = model ?? buildResearchOperatingModel({ profile });
   const kpis = m.kpis.slice(0, 10).join("; ");
-  const forbidden = m.forbiddenConcepts.join(", ") || "none";
+  const companySemantics = getCompanySemanticProfile({ ticker: profile.ticker, name: profile.name });
+  const companyForbidden = companySemantics
+    ? Array.from(new Set([...m.forbiddenConcepts, ...companySemantics.extraForbiddenConcepts]))
+    : [...m.forbiddenConcepts];
+  const forbidden = companyForbidden.join(", ") || "none";
   const required = m.requiredConcepts.slice(0, 8).join(", ");
   const drivers = m.revenueDrivers.join("; ");
+  const companyLine = companySemantics
+    ? `\n- COMPANY-SPECIFIC REJECTION (profile ${companySemantics.companyKey}): this company is a conglomerate — NEVER describe it with internet-platform or semiconductor vocabulary (advertiser bidding, search index, custom silicon, two-sided network, hyperscale moat, ad impressions/CPC/TAC/DAU/MAU). Value it segment by segment (O2C, Jio, Retail, E&P, New Energy), never as a single homogeneous business.`
+    : "";
+  const fcfLine = `\n- CASH-FLOW DISCIPLINE: if trailing or forecast free cash flow is negative, do NOT claim operating cash comfortably funds growth capex — state the actual funding source (cash balance, debt, asset sales) or omit the claim. A funding claim beside negative model FCF fails audit.`;
   return `Company Ontology Guardrail (authoritative operating model ${m.modelId} ${m.modelVersion} — violations BLOCK publication, the report is rejected):
 - REJECTION RULE: if you write ANY of the STRICTLY FORBIDDEN terms below (in any form, including inside compound phrases), the entire report FAILS audit and is discarded. When tempted by a forbidden term, use the sector's own KPIs instead.
 - Ontology: ${m.sectorName} (${m.sector}) / ${m.subSector}; operating archetype ${m.operatingArchetype} / ${m.financialArchetype}; segments: ${m.segments.join(", ")}.
 - Unit economics (how THIS business makes money): ${m.unitEconomics}
 - Revenue drivers (forecast ONLY via these): ${drivers}. Cost drivers: ${m.costDrivers.join("; ")}. Capex: ${m.capexDrivers.join("; ")}. NWC: ${m.nwcDrivers.join("; ")}. Valuation lens: ${m.valuationMethods.join(", ")}; margin metric: ${m.standardMarginMetric}.
 - Use ONLY these KPIs: ${kpis}. REQUIRED concepts (must evidence ≥2): ${required}.
-- STRICTLY FORBIDDEN terms (never mention in any form — complete list): ${forbidden}.
+- STRICTLY FORBIDDEN terms (never mention in any form — complete list): ${forbidden}.${companyLine}${fcfLine}
 - Never apply another sector's template (telecom carrier, FMCG, pharma, banking, energy, renewables). Internet platforms must not mention spectrum auctions, tower tenancies, telecom subscriber churn, or packaged-goods distribution. Telecom tariff/subscriber ARPU must not be confused with digital-advertising ARPU per DAU/MAU. For internet platforms (e.g. Alphabet, Meta), narrative MUST explicitly discuss digital advertising, Search ad revenue, YouTube ads, cloud infrastructure / backlog, TAC, and ad impressions / CPC. Every material number must carry source/period/currency/units provenance or be omitted.`;}
 interface OpenRouterMessage {
   role: "system" | "user" | "assistant";

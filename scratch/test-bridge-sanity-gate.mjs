@@ -59,6 +59,8 @@ const annualFinancials = [
     costOfRevenue: 6745990000000,
     grossProfit: 2264650000000,
     operatingIncome: 1116660000000,
+    pretaxIncome: 957210000000,
+    incomeTaxExpense: 261000000000,
     ebitda: 1769440000000,
     netIncome: 696210000000,
     operatingCashFlow: 1587880000000,

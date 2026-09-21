@@ -57,6 +57,25 @@ export interface IndependentInputs {
     sharesOutstanding: number;
     currentMarketPrice: number;
     assumptions?: { revenueGrowthRates?: number[]; ebitMargins?: number[]; wacc?: number; terminalGrowthRate?: number };
+    /**
+     * Conglomerate SOTP detail (selector SOTP_CONGLOMERATE path). When
+     * present, IND-03 verifies the FCFF cross-check leg and the SOTP
+     * recomputation (GAV − discount − netDebt) instead of the single-business
+     * EV bridge.
+     */
+    sotpBreakdown?: {
+      grossAssetValue: number;
+      holdingDiscount: number;
+      netDebt: number;
+      equityValue: number;
+      crossCheck?: {
+        enterpriseValue: number;
+        sumPvFcff: number;
+        pvTerminalValue: number;
+        equityValue: number;
+        fairValuePerShare: number | null;
+      };
+    };
   };
   ledger: {
     fairValue: number;
@@ -176,9 +195,14 @@ function checkEvBridge(inp: IndependentInputs, issues: IndependentIssue[], passe
   });
   const canonicalNetDebt = dec.netDebt;
 
-  const ev = Number(dcf.enterpriseValue) || 0;
-  const sumPv = Number(dcf.sumPvFcff) || 0;
-  const pvTv = Number(dcf.pvTerminalValue) || 0;
+  // SOTP-primary: EV-parts and equity legs verify the FCFF cross-check and
+  // the SOTP recomputation (GAV − discount − netDebt) respectively — SOTP-01
+  // owns the segment arithmetic; IND-03 verifies no leg was hand-edited.
+  const sotpB = (dcf as any)?.sotpBreakdown;
+  const sotpCC = sotpB?.crossCheck;
+  const ev = Number(sotpCC?.enterpriseValue ?? dcf.enterpriseValue) || 0;
+  const sumPv = Number(sotpCC?.sumPvFcff ?? dcf.sumPvFcff) || 0;
+  const pvTv = Number(sotpCC?.pvTerminalValue ?? dcf.pvTerminalValue) || 0;
   if (!isFinancialInstitution && ev > 0) {
     const v = magnitudeTolerance(sumPv + pvTv, ev, MONEY_BRIDGE_TOL);
     if (!v.pass && v.material) {
@@ -200,7 +224,9 @@ function checkEvBridge(inp: IndependentInputs, issues: IndependentIssue[], passe
       });
     }
     const eq = Number(ledger.equityValue ?? dcf.equityValue) || 0;
-    const expEq = ev - publishedNetDebt;
+    const expEq = sotpB
+      ? Number(sotpB.grossAssetValue || 0) * (1 - Number(sotpB.holdingDiscount || 0)) - publishedNetDebt
+      : ev - publishedNetDebt;
     const ev2 = magnitudeTolerance(expEq, eq, MONEY_BRIDGE_TOL);
     if (eq > 0 && !ev2.pass && ev2.material) {
       pushFail(issues, {
