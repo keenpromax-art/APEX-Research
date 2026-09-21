@@ -169,7 +169,27 @@ export default function ReportClient({ ticker }: Props) {
             i === 0 ? { ...cp, status: "running" as const } : cp
           ),
         }));
-        const companyRes = await fetch(`/api/company?symbol=${encodeURIComponent(ticker)}`, { headers: companyHeaders });
+        // Serverless platforms kill slow functions with a 502/503/504 HTML page.
+        // Retry ONCE automatically: the retry almost always lands on a warm
+        // function (cold start + Yahoo session already paid for) and succeeds.
+        // Only platform gateway statuses and network failures retry — app-level
+        // JSON errors (404/400/501) surface immediately.
+        let companyRes: Response | null = null;
+        for (let attempt = 1; attempt <= 2; attempt++) {
+          try {
+            companyRes = await fetch(`/api/company?symbol=${encodeURIComponent(ticker)}`, { headers: companyHeaders });
+            if (companyRes.ok || ![502, 503, 504].includes(companyRes.status) || attempt >= 2) break;
+          } catch (networkErr) {
+            if (attempt >= 2) throw networkErr;
+            companyRes = null;
+          }
+          setState(s => ({
+            ...s,
+            message: `Server function timed out on a cold start — retrying automatically (attempt ${attempt + 1}/2)…`,
+          }));
+          await new Promise(r => setTimeout(r, 2500));
+        }
+        if (!companyRes) throw new Error("Network request failed twice — check connectivity and press Retry Execution.");
         // Read as text FIRST: when the hosting platform kills the function
         // (timeout/crash), it returns an HTML/text error page instead of JSON,
         // and a blind .json() surfaces only "Unexpected token…" confusion.

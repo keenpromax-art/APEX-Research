@@ -26,6 +26,27 @@ import type { SupportedProvider, CustomKeyConfig } from "@/lib/ai-providers";
 export const runtime = "nodejs";
 export const maxDuration = 90;
 
+// ── Serverless time-boxing ─────────────────────────────────────────────
+// Every network leg races a timeout so a throttled Yahoo feed or a slow AI
+// provider degrades a feature (news/peers/AI enrichment) instead of killing
+// the whole function (platform 504 → client sees a non-JSON error page).
+// All raced promises are internally caught (they resolve, never reject), so
+// the loser of a race settles harmlessly in the background.
+function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const timeout = new Promise<T>((resolve) => {
+    timer = setTimeout(() => resolve(fallback), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
+}
+
+const AI_DCF_BUDGET_MS = 12000;
+const SUPERVISOR_BUDGET_MS = 15000;
+const NEWS_BUDGET_MS = 20000;
+const PEERS_BUDGET_MS = 20000;
+
 export async function GET(request: NextRequest) {
   const symbol = normalizeTicker(request.nextUrl.searchParams.get("symbol"));
   if (!symbol) {
@@ -292,8 +313,11 @@ export async function GET(request: NextRequest) {
     // The valuation computes the single canonical forecast internally (P0 #4);
     // nothing here rebuilds forward numbers in parallel (defect by definition).
 
-    // AI-driven DCF assumptions: await the promise launched above
-    const aiDcfOverrides = await aiDcfPromise;
+    // AI-driven DCF assumptions: await the promise launched above, time-boxed.
+    // The shared LLM gate can sleep 15–60s per throttle on free-tier keys —
+    // far beyond a serverless budget. Timeout → mechanical defaults (proven
+    // valid standalone); enrichment, not load-bearing.
+    const aiDcfOverrides = await withTimeout(aiDcfPromise, AI_DCF_BUDGET_MS, null);
 
     const preliminaryValuation = selectAndComputeValuation({
       profile: companyProfile,
@@ -311,43 +335,53 @@ export async function GET(request: NextRequest) {
     let supervision: Awaited<ReturnType<typeof runFinancialSupervisor>> | null = null;
     let valuationResult = preliminaryValuation;
     try {
-      supervision = await runFinancialSupervisor({
-        profile: companyProfile,
-        stockData,
-        annualFinancials,
-        ratiosByYear,
-        preliminaryDcf: preliminaryValuation.dcf,
-        preliminaryOverrides: aiDcfOverrides,
-        customConfig: supervisorKeyConfig,
-      });
-      // NOTE: ModelLifecycle is strict FETCHED→NORMALIZED→VALIDATED→MODELED→VERIFIED,
-      // so supervisor progress is recorded on the supervision payload itself, not as
-      // a lifecycle stage (an extra stage would throw + break the publication gate).
-      console.log(
-        `[supervisor] ${supervision.source} (${supervision.companyType.slice(0, 80)}) conf=${supervision.confidence.toFixed(2)} adjustments=${supervision.adjustments.length}`
-      );
-      const refined = supervision.refinedOverrides;
-      if (refined && supervision.confidence >= 0.55 && supervision.source === "ai-supervisor") {
-        const mergedOverrides = { ...(aiDcfOverrides ?? {}), ...refined };
-        const supervisedValuation = selectAndComputeValuation({
+      // Time-boxed: supervisor never throws (heuristic fallback), but the
+      // bound guarantees the sequential leg cannot eat the function budget.
+      supervision = await withTimeout(
+        runFinancialSupervisor({
           profile: companyProfile,
           stockData,
           annualFinancials,
-          archetypeProfile,
-          aiDcfOverrides: mergedOverrides,
-        });
-        const prelimFV = (preliminaryValuation.dcf as any)?.intrinsicValue ?? (preliminaryValuation.dcf as any)?.fairValuePerShare;
-        const superFV = (supervisedValuation.dcf as any)?.intrinsicValue ?? (supervisedValuation.dcf as any)?.fairValuePerShare;
-        const supervisedValid =
-          supervisedValuation.dcf?.status !== "insufficient_data" &&
-          typeof superFV === "number" && isFinite(superFV) && superFV > 0;
-        if (supervisedValid) {
-          valuationResult = supervisedValuation;
-          supervision.adjustments = supervision.adjustments.map((a) => ({ ...a, applied: true }));
-          supervision.flags = [...supervision.flags, `SUPERVISOR_APPLIED: 2nd-pass ${supervisedValuation.selectedModel} FV ${typeof prelimFV === "number" ? prelimFV.toFixed(2) : "?"} → ${superFV.toFixed(2)}.`];
-        } else {
-          supervision.adjustments = supervision.adjustments.map((a) => ({ ...a, applied: false }));
-          supervision.flags = [...supervision.flags, "SUPERVISOR_REJECTED: 2nd-pass valuation invalid — preliminary model stands."];
+          ratiosByYear,
+          preliminaryDcf: preliminaryValuation.dcf,
+          preliminaryOverrides: aiDcfOverrides,
+          customConfig: supervisorKeyConfig,
+        }),
+        SUPERVISOR_BUDGET_MS,
+        null
+      );
+      if (!supervision) {
+        console.log("[supervisor] budget exceeded — preliminary valuation stands without audit.");
+      } else {
+        // NOTE: ModelLifecycle is strict FETCHED→NORMALIZED→VALIDATED→MODELED→VERIFIED,
+        // so supervisor progress is recorded on the supervision payload itself, not as
+        // a lifecycle stage (an extra stage would throw + break the publication gate).
+        console.log(
+          `[supervisor] ${supervision.source} (${supervision.companyType.slice(0, 80)}) conf=${supervision.confidence.toFixed(2)} adjustments=${supervision.adjustments.length}`
+        );
+        const refined = supervision.refinedOverrides;
+        if (refined && supervision.confidence >= 0.55 && supervision.source === "ai-supervisor") {
+          const mergedOverrides = { ...(aiDcfOverrides ?? {}), ...refined };
+          const supervisedValuation = selectAndComputeValuation({
+            profile: companyProfile,
+            stockData,
+            annualFinancials,
+            archetypeProfile,
+            aiDcfOverrides: mergedOverrides,
+          });
+          const prelimFV = (preliminaryValuation.dcf as any)?.intrinsicValue ?? (preliminaryValuation.dcf as any)?.fairValuePerShare;
+          const superFV = (supervisedValuation.dcf as any)?.intrinsicValue ?? (supervisedValuation.dcf as any)?.fairValuePerShare;
+          const supervisedValid =
+            supervisedValuation.dcf?.status !== "insufficient_data" &&
+            typeof superFV === "number" && isFinite(superFV) && superFV > 0;
+          if (supervisedValid) {
+            valuationResult = supervisedValuation;
+            supervision.adjustments = supervision.adjustments.map((a) => ({ ...a, applied: true }));
+            supervision.flags = [...supervision.flags, `SUPERVISOR_APPLIED: 2nd-pass ${supervisedValuation.selectedModel} FV ${typeof prelimFV === "number" ? prelimFV.toFixed(2) : "?"} → ${superFV.toFixed(2)}.`];
+          } else {
+            supervision.adjustments = supervision.adjustments.map((a) => ({ ...a, applied: false }));
+            supervision.flags = [...supervision.flags, "SUPERVISOR_REJECTED: 2nd-pass valuation invalid — preliminary model stands."];
+          }
         }
       }
     } catch (e) {
@@ -366,7 +400,8 @@ export async function GET(request: NextRequest) {
     if (!canonicalForecast) console.warn("Canonical forecast missing from DCF result — QA must block (FCST-05).");
 
     // Await peer data promise (launched in parallel above)
-    const peers = await peersPromise;
+    // Time-boxed: peers are enrichment (relative comps), never load-bearing.
+    const peers = await withTimeout(peersPromise, PEERS_BUDGET_MS, []);
 
     const masterReportFacts = buildMasterReportFacts({
       stockData,
@@ -437,8 +472,13 @@ export async function GET(request: NextRequest) {
       });
     } catch (e) { console.warn("Evidence registry build failed (non-blocking):", e); }
 
-    // Await news + event price history promise (launched in parallel above)
-    const { tickerNews, eventPriceLookup } = await newsPromise;
+    // Await news + event price history promise (launched in parallel above),
+    // time-boxed: news is enrichment (pulse/catalysts), never load-bearing.
+    const { tickerNews, eventPriceLookup } = await withTimeout(
+      newsPromise,
+      NEWS_BUDGET_MS,
+      { tickerNews: [], eventPriceLookup: null }
+    );
 
     return NextResponse.json({
       pipeline: lifecycle.history_(),

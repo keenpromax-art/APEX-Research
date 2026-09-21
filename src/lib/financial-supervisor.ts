@@ -118,7 +118,7 @@ const isNum = (v: unknown): v is number => typeof v === "number" && Number.isFin
  * serverless function timeout so a slow provider degrades to the heuristic
  * audit instead of killing the whole /api/company response.
  */
-export const SUPERVISOR_LLM_TIMEOUT_MS = 25000;
+export const SUPERVISOR_LLM_TIMEOUT_MS = 12000;
 
 // ─────────────────────────────────────────────
 // Deterministic heuristic supervision (always available)
