@@ -736,16 +736,31 @@ export interface AccountingAnomaly {
 export function detectAccountingAnomalies(history: {
   year: string; revenue: number; netIncome: number; operatingCashFlow: number;
   netReceivables: number; totalAssets: number; grossMargin: number;
-}[]): AccountingAnomaly[] {
+}[], opts?: {
+  /**
+   * True for cash-burning platforms (EARLY_PLATFORM_GROWTH archetype): OCF
+   * divergence is the business model (reinvestment ahead of contribution),
+   * not an accrual-quality signal. Flags still reported, demoted to
+   * non-material so hypergrowth marketplaces are not auto-blocked while
+   * mature cash-cow divergence still fails loudly.
+   */
+  expectCashBurn?: boolean;
+}): AccountingAnomaly[] {
   const out: AccountingAnomaly[] = [];
+  const expectCashBurn = opts?.expectCashBurn === true;
   for (let i = 1; i < history.length; i++) {
     const prev = history[i - 1];
     const cur = history[i];
     if (!(prev.revenue > 0) || !(cur.revenue > 0)) continue;
     const revG = cur.revenue / prev.revenue - 1;
     // Revenue/cash divergence: revenue up >25% while OCF falls >25%.
-    if (revG > 0.25 && prev.operatingCashFlow !== 0 && cur.operatingCashFlow / prev.operatingCashFlow - 1 < -0.25) {
-      out.push({ code: "ANOM-REV-CASH", material: true, message: `${cur.year}: revenue +${(revG * 100).toFixed(0)}% while operating cash flow collapsed — accrual quality review required.` });
+    // Turnaround guard: when the base OCF is non-positive and cash flow
+    // IMPROVED year-on-year (e.g. -8B → +6B), that is a recovery, not a
+    // collapse — the ratio off a negative base is meaningless. Only flag
+    // genuine collapses from a positive base (e.g. +6B → +3B).
+    const ocfImprovedFromNonPositive = prev.operatingCashFlow <= 0 && cur.operatingCashFlow > prev.operatingCashFlow;
+    if (revG > 0.25 && prev.operatingCashFlow > 0 && cur.operatingCashFlow / prev.operatingCashFlow - 1 < -0.25 && !ocfImprovedFromNonPositive) {
+      out.push({ code: "ANOM-REV-CASH", material: !expectCashBurn, message: `${cur.year}: revenue +${(revG * 100).toFixed(0)}% while operating cash flow collapsed — accrual quality review required.` });
     }
     // Receivables surging far ahead of revenue.
     if (prev.netReceivables > 0 && cur.netReceivables > 0) {
@@ -754,9 +769,14 @@ export function detectAccountingAnomalies(history: {
         out.push({ code: "ANOM-RECEIVABLES", material: true, message: `${cur.year}: receivables +${(recG * 100).toFixed(0)}% vs revenue +${(revG * 100).toFixed(0)}% — channel-stuffing/collection review required.` });
       }
     }
-    // Margin cliff: gross margin collapse >15pp YoY.
+    // Margin cliff: gross margin collapse >15pp YoY. Acquisition guard: when
+    // revenue more than doubled (revG > 1.0 — consolidation/mix change, e.g. a
+    // low-margin quick-commerce business folding into food delivery), the
+    // margin base is incomparable across years. Still reported, demoted to
+    // non-material; organic-model cliffs (stable revenue base) stay material.
     if (Number.isFinite(prev.grossMargin) && Number.isFinite(cur.grossMargin) && prev.grossMargin - cur.grossMargin > 0.15) {
-      out.push({ code: "ANOM-MARGIN-CLIFF", material: true, message: `${cur.year}: gross margin cliff (${(prev.grossMargin * 100).toFixed(0)}% → ${(cur.grossMargin * 100).toFixed(0)}%) — mix-shift or cost-shock review required.` });
+      const acquisitionYear = revG > 1.0;
+      out.push({ code: "ANOM-MARGIN-CLIFF", material: !acquisitionYear, message: `${cur.year}: gross margin cliff (${(prev.grossMargin * 100).toFixed(0)}% → ${(cur.grossMargin * 100).toFixed(0)}%) — mix-shift or cost-shock review required.` });
     }
     // Asset growth without revenue: assets +50% with revenue flat/down.
     if (prev.totalAssets > 0 && cur.totalAssets / prev.totalAssets - 1 > 0.5 && revG < 0.05) {

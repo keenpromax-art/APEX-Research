@@ -26,6 +26,7 @@ import { resolveMoatRating, capPillarsToRating, type MoatRating } from "./moat";
 import { generatePEFirmAnalysis, generateDataDrivenFallback } from "./pe-analysis-engine";
 import {
   buildResearchOperatingModel,
+  scanTextForModel,
   type ResearchOperatingModel,
 } from "./research-model";
 import { getCompanySemanticProfile } from "./company-semantics";
@@ -45,6 +46,12 @@ import {
   buildMoatRefinePrompt,
   type WriterCheckerGroundTruth,
 } from "./writer-checker-loop";
+import {
+  buildResponseContract,
+  displayConceptWithAliases,
+  auditDraftSections,
+  runGuardedDraft,
+} from "./ai/draft-quality";
 
 export { RateLimitError };
 
@@ -85,8 +92,9 @@ export function buildSectorGuardrail(profile: CompanyProfile, model?: ResearchOp
 - Ontology: ${m.sectorName} (${m.sector}) / ${m.subSector}; operating archetype ${m.operatingArchetype} / ${m.financialArchetype}; segments: ${m.segments.join(", ")}.
 - Unit economics (how THIS business makes money): ${m.unitEconomics}
 - Revenue drivers (forecast ONLY via these): ${drivers}. Cost drivers: ${m.costDrivers.join("; ")}. Capex: ${m.capexDrivers.join("; ")}. NWC: ${m.nwcDrivers.join("; ")}. Valuation lens: ${m.valuationMethods.join(", ")}; margin metric: ${m.standardMarginMetric}.
-- Use ONLY these KPIs: ${kpis}. REQUIRED concepts (must evidence ≥2): ${required}.
+- Use ONLY these KPIs: ${kpis}. REQUIRED concepts (must evidence ≥2, full forms count): ${m.requiredConcepts.slice(0, 8).map((c) => displayConceptWithAliases(c)).join("; ") || required}.
 - STRICTLY FORBIDDEN terms (never mention in any form — complete list): ${forbidden}.${companyLine}${fcfLine}
+${buildResponseContract(m)}
 - Never apply another sector's template (telecom carrier, FMCG, pharma, banking, energy, renewables). Internet platforms must not mention spectrum auctions, tower tenancies, telecom subscriber churn, or packaged-goods distribution. Telecom tariff/subscriber ARPU must not be confused with digital-advertising ARPU per DAU/MAU. For internet platforms (e.g. Alphabet, Meta), narrative MUST explicitly discuss digital advertising, Search ad revenue, YouTube ads, cloud infrastructure / backlog, TAC, and ad impressions / CPC. Every material number must carry source/period/currency/units provenance or be omitted.`;}
 interface OpenRouterMessage {
   role: "system" | "user" | "assistant";
@@ -589,19 +597,39 @@ Return a valid JSON object matching this structure EXACTLY:
 }
 Return ONLY raw JSON, no markdown formatting.`;
 
-  const response = await callOpenRouterWithFailover([
-    {
-      role: "system",
-      content: "You are the Chief Corporate Intelligence & News Analyst. You extract actionable investment intelligence from market developments with zero generic filler.",
-    },
-    { role: "user", content: prompt },
-  ], 3000, 0.35, customConfig);
-
-  return extractJsonFromResponse(response, {
+  const systemPrompt = "You are the Chief Corporate Intelligence & News Analyst. You extract actionable investment intelligence from market developments with zero generic filler.";
+  const buildUserPrompt = (repair: string | null) => (repair ? `${prompt}\n\n${repair}` : prompt);
+  const fallback = {
     recentNewsAnalysis: [],
     catalysts: [],
     analystNotes: [],
+  };
+  // Guarded draft: deterministic audit (bleed/thin/placeholder/required-coverage)
+  // + one targeted repair retry. Catalyst impact bands are scenario-style by
+  // schema contract, so valuation-number grounding is intentionally skipped here.
+  const om = operatingModel ?? buildResearchOperatingModel({ profile });
+  const { draft, issues } = await runGuardedDraft({
+    writer: async (repairPrompt) => {
+      const response = await callOpenRouterWithFailover([
+        { role: "system", content: systemPrompt },
+        { role: "user", content: buildUserPrompt(repairPrompt) },
+      ], 3000, 0.35, customConfig);
+      return extractJsonFromResponse(response, fallback);
+    },
+    sectionsOf: (d) => ({
+      recentNewsAnalysis: d.recentNewsAnalysis,
+      catalysts: d.catalysts,
+      analystNotes: d.analystNotes,
+    }),
+    auditOpts: {
+      model: om,
+      minChars: { recentNewsAnalysis: 200, catalysts: 200, analystNotes: 150 },
+    },
+    shapeName: "news intelligence",
+    companyLabel: `${profile.name} (${profile.ticker})`,
   });
+  if (issues.length > 0) console.warn(`[draft-quality] news draft accepted with ${issues.length} residual issue(s): ${issues[0]}`);
+  return draft;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -962,15 +990,9 @@ Return a valid JSON object matching this structure EXACTLY:
 }
 Return ONLY raw JSON, no markdown formatting.`;
 
-  const response = await callOpenRouterWithFailover([
-    {
-      role: "system",
-      content: "You are a Forensic Financial Analyst and CFA Charterholder. You dissect financial statements with empirical precision, forensic scrutiny, and zero boilerplate.",
-    },
-    { role: "user", content: prompt },
-  ], 3000, 0.35, customConfig);
-
-  return extractJsonFromResponse(response, {
+  const systemPrompt = "You are a Forensic Financial Analyst and CFA Charterholder. You dissect financial statements with empirical precision, forensic scrutiny, and zero boilerplate.";
+  const buildUserPrompt = (repair: string | null) => (repair ? `${prompt}\n\n${repair}` : prompt);
+  const fallback = {
     revenueCommentary: "",
     ebitdaCommentary: "",
     ebitCommentary: "",
@@ -981,7 +1003,45 @@ Return ONLY raw JSON, no markdown formatting.`;
     ratioCommentary: "",
     segmentAnalysis: "",
     quarterlyResultsCommentary: "",
+  };
+  // Guarded draft: forensic prose carries no verdict/target fields, so the
+  // audit covers bleed/thin/placeholder/required-coverage (valuation-number
+  // grounding lives with the strategist loop, which owns CMP/fair value).
+  const om = operatingModel ?? buildResearchOperatingModel({ profile });
+  const { draft, issues } = await runGuardedDraft({
+    writer: async (repairPrompt) => {
+      const response = await callOpenRouterWithFailover([
+        { role: "system", content: systemPrompt },
+        { role: "user", content: buildUserPrompt(repairPrompt) },
+      ], 3000, 0.35, customConfig);
+      return extractJsonFromResponse(response, fallback);
+    },
+    sectionsOf: (d) => ({
+      revenueCommentary: d.revenueCommentary,
+      ebitdaCommentary: d.ebitdaCommentary,
+      ebitCommentary: d.ebitCommentary,
+      patCommentary: d.patCommentary,
+      balanceSheetCommentary: d.balanceSheetCommentary,
+      cashFlowCommentary: d.cashFlowCommentary,
+      dupontCommentary: d.dupontCommentary,
+      ratioCommentary: d.ratioCommentary,
+      segmentAnalysis: d.segmentAnalysis,
+      quarterlyResultsCommentary: d.quarterlyResultsCommentary,
+    }),
+    auditOpts: {
+      model: om,
+      minChars: {
+        revenueCommentary: 200, ebitdaCommentary: 200, ebitCommentary: 100,
+        patCommentary: 200, balanceSheetCommentary: 200, cashFlowCommentary: 200,
+        dupontCommentary: 200, ratioCommentary: 200, segmentAnalysis: 100,
+        quarterlyResultsCommentary: 100,
+      },
+    },
+    shapeName: "forensic commentary",
+    companyLabel: `${profile.name} (${profile.ticker})`,
   });
+  if (issues.length > 0) console.warn(`[draft-quality] forensic draft accepted with ${issues.length} residual issue(s): ${issues[0]}`);
+  return draft;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -1049,19 +1109,36 @@ Return a valid JSON object matching this structure EXACTLY:
 }
 Return ONLY raw JSON, no markdown formatting.`;
 
-  const response = await callOpenRouterWithFailover([
-    {
-      role: "system",
-      content: "You are the Head of Corporate Credit Ratings. You evaluate default probabilities, cash cushion coverage, and covenant headroom with institutional conservatism.",
-    },
-    { role: "user", content: prompt },
-  ], 3000, 0.35, customConfig);
-
-  return extractJsonFromResponse(response, {
+  const systemPrompt = "You are the Head of Corporate Credit Ratings. You evaluate default probabilities, cash cushion coverage, and covenant headroom with institutional conservatism.";
+  const buildUserPrompt = (repair: string | null) => (repair ? `${prompt}\n\n${repair}` : prompt);
+  const fallback = {
     creditAnalysisCommentary: { financialHealth: "", liquidityBuffers: "", debtMaturity: "", stressTesting: "" },
     keyRisks: [],
     enterpriseRiskCommentary: [],
+  };
+  const om = operatingModel ?? buildResearchOperatingModel({ profile });
+  const { draft, issues } = await runGuardedDraft({
+    writer: async (repairPrompt) => {
+      const response = await callOpenRouterWithFailover([
+        { role: "system", content: systemPrompt },
+        { role: "user", content: buildUserPrompt(repairPrompt) },
+      ], 3000, 0.35, customConfig);
+      return extractJsonFromResponse(response, fallback);
+    },
+    sectionsOf: (d) => ({
+      creditAnalysisCommentary: d.creditAnalysisCommentary,
+      keyRisks: d.keyRisks,
+      enterpriseRiskCommentary: d.enterpriseRiskCommentary,
+    }),
+    auditOpts: {
+      model: om,
+      minChars: { creditAnalysisCommentary: 300, keyRisks: 200, enterpriseRiskCommentary: 150 },
+    },
+    shapeName: "credit solvency",
+    companyLabel: `${profile.name} (${profile.ticker})`,
   });
+  if (issues.length > 0) console.warn(`[draft-quality] credit draft accepted with ${issues.length} residual issue(s): ${issues[0]}`);
+  return draft;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -1125,22 +1202,46 @@ Return a valid JSON object matching this structure EXACTLY:
 }
 Return ONLY raw JSON, no markdown formatting.`;
 
-  const response = await callOpenRouterWithFailover([
-    {
-      role: "system",
-      content: "You are the Fiduciary Stewardship and Corporate Governance Director. You scrutinize capital allocation discipline, executive alignment, and accounting integrity.",
-    },
-    { role: "user", content: prompt },
-  ], 3000, 0.35, customConfig);
-
-  return extractJsonFromResponse(response, {
+  const systemPrompt = "You are the Fiduciary Stewardship and Corporate Governance Director. You scrutinize capital allocation discipline, executive alignment, and accounting integrity.";
+  const buildUserPrompt = (repair: string | null) => (repair ? `${prompt}\n\n${repair}` : prompt);
+  const fallback = {
     managementCommentary: "",
     governanceCommentary: "",
     capitalAllocationCommentary: "",
     businessStrategyCommentary: "",
     operatingProfileCommentary: "",
     capitalDeploymentHistory: { narrative: "", dividends: "", repurchases: "", debtPaydown: "" },
+  };
+  const om = operatingModel ?? buildResearchOperatingModel({ profile });
+  const { draft, issues } = await runGuardedDraft({
+    writer: async (repairPrompt) => {
+      const response = await callOpenRouterWithFailover([
+        { role: "system", content: systemPrompt },
+        { role: "user", content: buildUserPrompt(repairPrompt) },
+      ], 3000, 0.35, customConfig);
+      return extractJsonFromResponse(response, fallback);
+    },
+    sectionsOf: (d) => ({
+      managementCommentary: d.managementCommentary,
+      governanceCommentary: d.governanceCommentary,
+      capitalAllocationCommentary: d.capitalAllocationCommentary,
+      businessStrategyCommentary: d.businessStrategyCommentary,
+      operatingProfileCommentary: d.operatingProfileCommentary,
+      capitalDeploymentHistory: d.capitalDeploymentHistory,
+    }),
+    auditOpts: {
+      model: om,
+      minChars: {
+        managementCommentary: 200, governanceCommentary: 200,
+        capitalAllocationCommentary: 200, businessStrategyCommentary: 200,
+        operatingProfileCommentary: 120, capitalDeploymentHistory: 200,
+      },
+    },
+    shapeName: "governance and capital allocation",
+    companyLabel: `${profile.name} (${profile.ticker})`,
   });
+  if (issues.length > 0) console.warn(`[draft-quality] governance draft accepted with ${issues.length} residual issue(s): ${issues[0]}`);
+  return draft;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -1167,6 +1268,19 @@ async function runCouncilVerificationOfficer(
   const netDebt = Math.max(0, totalDebt - cash);
   const ebitda = stmtNum(latest, "ebitda") || (latest.revenue * (stmtNum(latest, "ebitdaMargin") || 0.15));
   const netDebtToEbitda = ebitda > 0 ? netDebt / ebitda : 0;
+
+  // Deterministic pre-scan (free, same shared vocabulary QA uses): full
+  // assembled text against the operating model. Findings feed BOTH the LLM
+  // verifier prompt (quoted, so it confirms rather than invents violations —
+  // fewer false-positive FLAGs) and the data-driven fallback below.
+  const verifyModel = buildResearchOperatingModel({ profile });
+  const assembledFullText = JSON.stringify(assembled || {});
+  const preScan = scanTextForModel(verifyModel, assembledFullText);
+  const preScanBlock = [
+    `Deterministic vocabulary pre-scan (authoritative — confirm each item against the samples before flagging; do NOT flag terms outside this list unless genuinely cross-sector):`,
+    `- Forbidden-concept hits: ${preScan.forbiddenHits.length > 0 ? preScan.forbiddenHits.slice(0, 8).join("; ") : "none"}.`,
+    `- Required ${verifyModel.sector} concepts evidenced: ${preScan.requiredHits.length > 0 ? preScan.requiredHits.join(", ") : "NONE — sector language absent"}.`,
+  ].join("\n");
 
   // Data-driven deterministic fallback: performs what verification it can
   // without LLM — financial math checks, cross-reference validation, etc.
@@ -1226,19 +1340,20 @@ async function runCouncilVerificationOfficer(
         : `FLAG: Margin data inconsistent (gross ${(grossM * 100).toFixed(1)}%, net ${(netM * 100).toFixed(1)}%).`,
     });
 
-    // 5. ANTI_HALLUCINATION: Basic data completeness
+    // 5. ANTI_HALLUCINATION: Basic data completeness + vocabulary pre-scan
     const hasThesis = !!(assembled.investmentThesis || assembled.companyOverview);
     const hasMoat = !!(assembled.competitiveMoat || assembled.moatSources);
     const hasCredit = !!(assembled.creditAnalysisCommentary?.financialHealth);
     const antiStatus = (hasThesis && hasMoat && hasCredit) ? "PASS" : "FLAG";
     if (antiStatus === "PASS") score += 20;
+    const vocabNote = `Sector vocabulary (${verifyModel.sector}): required evidenced [${preScan.requiredHits.slice(0, 6).join(", ") || "none"}]; forbidden hits [${preScan.forbiddenHits.slice(0, 6).join(", ") || "none"}].`;
     checks.push({
       name: "Anti-Hallucination & Inter-Agent Cross-Check",
       category: "ANTI_HALLUCINATION",
       status: antiStatus,
       observation: antiStatus === "PASS"
-        ? `All key sections populated (thesis: ${hasThesis}, moat: ${hasMoat}, credit: ${hasCredit}). LLM cross-check deferred -- data-driven validation passed.`
-        : `FLAG: Missing outputs -- thesis: ${hasThesis}, moat: ${hasMoat}, credit: ${hasCredit}.`,
+        ? `All key sections populated (thesis: ${hasThesis}, moat: ${hasMoat}, credit: ${hasCredit}). ${vocabNote} LLM cross-check deferred -- data-driven validation passed.`
+        : `FLAG: Missing outputs -- thesis: ${hasThesis}, moat: ${hasMoat}, credit: ${hasCredit}. ${vocabNote}`,
     });
 
     return {
@@ -1266,21 +1381,27 @@ GROUND-TRUTH FINANCIAL FACTS (UNCOMPROMISING BASELINE):
 - Net Debt: ${formatLargeNum(netDebt, cur)} | Net Debt to EBITDA: ${netDebtToEbitda.toFixed(2)}x
 - Competitive Moat Identified: ${assembled.competitiveMoat || "Wide"}
 
-COUNCIL OUTPUT SAMPLES TO AUDIT:
-- Agent 1 Thesis & Overview: "${assembled.investmentThesis?.slice(0, 300) || assembled.companyOverview?.slice(0, 300) || ""}"
-- Agent 1 Investment Conclusion: "${assembled.investmentConclusion?.slice(0, 250) || ""}"
-- Agent 3 Moat Sources: "${JSON.stringify(assembled.moatSources || {}).slice(0, 250)}"
-- Agent 4 DuPont / Forensics: "${assembled.dupontCommentary?.slice(0, 250) || ""}"
-- Agent 5 Credit & Solvency: "${assembled.creditAnalysisCommentary?.financialHealth?.slice(0, 250) || ""}"
-- Agent 6 Governance & Capital: "${assembled.capitalAllocationCommentary?.slice(0, 250) || ""}"
+COUNCIL OUTPUT SAMPLES TO AUDIT (substantive excerpts — audit what is written, not fragments):
+- Agent 1 Thesis: "${assembled.investmentThesis?.slice(0, 1200) || ""}"
+- Agent 1 Overview: "${assembled.companyOverview?.slice(0, 800) || ""}"
+- Agent 1 Investment Conclusion: "${assembled.investmentConclusion?.slice(0, 800) || ""}"
+- Agent 3 Competitive Moat: "${(assembled.competitiveMoat || "").slice(0, 800)}"
+- Agent 3 Moat Sources: "${JSON.stringify(assembled.moatSources || {}).slice(0, 600)}"
+- Agent 4 DuPont / Forensics: "${assembled.dupontCommentary?.slice(0, 800) || ""}"
+- Agent 4 Cash-Flow Honesty: "${assembled.cashFlowCommentary?.slice(0, 600) || ""}"
+- Agent 5 Credit & Solvency: "${assembled.creditAnalysisCommentary?.financialHealth?.slice(0, 800) || ""}"
+- Agent 6 Governance & Capital: "${assembled.capitalAllocationCommentary?.slice(0, 800) || ""}"
+
+${preScanBlock}
 
 VERIFICATION AUDIT PROTOCOL:
 1. Check Valuation Alignment: Did any persona state an inverted upside, incorrect CMP, or conflicting fair value?
 2. Check Recommendation Consistency: Does the thesis verdict match the model verdict (${verdict})?
 3. Check Solvency Accuracy: Is the debt commentary consistent with net debt of ${formatLargeNum(netDebt, cur)} (Net Debt/EBITDA ${netDebtToEbitda.toFixed(2)}x)?
 4. Check Anti-Hallucination & Cross-Persona Contradictions: Are growth drivers, market position, or risk factors contradictory across personas?
-5. Check Sector-Template Contamination: Does any sample use another sector's vocabulary (telecom carrier terms like spectrum/subscriber/ARPU/tower for non-carriers; banking CASA/NIM/loan-book for non-banks; FMCG copra/packaged-goods for non-FMCG; wafer/refinery/clinical-trial terms outside their sectors)? Flag EVERY offending term explicitly in observations.
-6. Assign an Integrity Score (0-100) and list any corrections applied or verified.
+5. Check Sector-Template Contamination: Does any sample use another sector's vocabulary (telecom carrier terms like spectrum/subscriber/ARPU/tower for non-carriers; banking CASA/NIM/loan-book for non-banks; FMCG copra/packaged-goods for non-FMCG; wafer/refinery/clinical-trial terms outside their sectors)? The deterministic pre-scan above already lists machine-found hits — CONFIRM each quoted hit against the samples (quote the offending sentence) before marking FLAG; do not flag terms outside that list unless you can quote a genuinely cross-sector sentence. Flag EVERY confirmed offending term explicitly in observations.
+6. Check Required Sector Language: the pre-scan lists evidenced required concepts — if it says NONE, verify whether the samples truly avoid all sector KPIs (full forms count: e.g. "gross merchandise value" evidences GMV) and FLAG only on genuine absence.
+7. Assign an Integrity Score (0-100) and list any corrections applied or verified.
 
 OUTPUT FORMAT (RAW JSON ONLY, NO MARKDOWN):
 {
@@ -1414,22 +1535,39 @@ Output RAW JSON ONLY:
   }
 }`;
 
+  const newsSystem = "You are the Head of the News Sentiment & Executive Briefing Desk for an institutional investment committee.";
+  const buildNewsPrompt = (repair: string | null) => (repair ? `${prompt}\n\n${repair}` : prompt);
+  const newsFallback: { newsSummary: NewsSummaryDeskAnalysis } = {
+    newsSummary: {
+      executiveNewsSummary: `${profile.name} maintains a constructive corporate disclosure cadence with steady execution in core commercial verticals and prudent balance sheet oversight.`,
+      mediaSentimentScore: 0.70,
+      mediaSentimentLabel: "Constructive",
+      keyNarrativeThemes: ["Commercial Pipeline Execution", "Capital Discipline", "Operational Reinvestment"],
+      topDisclosures: [],
+      macroIndustryTransmission: "Positive sector dynamics support steady volume demand.",
+      earningsTransmissionVerdict: "News flow supports forward cash flow compounding.",
+    },
+  };
+  // Guarded draft on the success path only: the catch-path template fallback
+  // below is an availability guarantee (sections stay renderable offline) and
+  // is honestly flagged downstream as non-AI output.
+  const newsOm = operatingModel ?? buildResearchOperatingModel({ profile });
   try {
-    const res = await callOpenRouterWithFailover([
-      { role: "system", content: "You are the Head of the News Sentiment & Executive Briefing Desk for an institutional investment committee." },
-      { role: "user", content: prompt },
-    ], 2500, 0.35, customConfig);
-    return extractJsonFromResponse(res, {
-      newsSummary: {
-        executiveNewsSummary: `${profile.name} maintains a constructive corporate disclosure cadence with steady execution in core commercial verticals and prudent balance sheet oversight.`,
-        mediaSentimentScore: 0.70,
-        mediaSentimentLabel: "Constructive",
-        keyNarrativeThemes: ["Commercial Pipeline Execution", "Capital Discipline", "Operational Reinvestment"],
-        topDisclosures: [],
-        macroIndustryTransmission: "Positive sector dynamics support steady volume demand.",
-        earningsTransmissionVerdict: "News flow supports forward cash flow compounding.",
+    const { draft, issues } = await runGuardedDraft({
+      writer: async (repairPrompt) => {
+        const res = await callOpenRouterWithFailover([
+          { role: "system", content: newsSystem },
+          { role: "user", content: buildNewsPrompt(repairPrompt) },
+        ], 2500, 0.35, customConfig);
+        return extractJsonFromResponse(res, newsFallback);
       },
+      sectionsOf: (d) => ({ newsSummary: d.newsSummary }),
+      auditOpts: { model: newsOm, minChars: { newsSummary: 300 } },
+      shapeName: "news sentiment briefing",
+      companyLabel: `${profile.name} (${profile.ticker})`,
     });
+    if (issues.length > 0) console.warn(`[draft-quality] news-summary draft accepted with ${issues.length} residual issue(s): ${issues[0]}`);
+    return draft;
   } catch (err) {
     if (err instanceof RateLimitError) throw err;
     console.warn("News summary desk error:", err);

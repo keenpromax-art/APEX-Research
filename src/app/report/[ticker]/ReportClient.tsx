@@ -29,6 +29,12 @@ const INITIAL_AGENT_CHECKPOINTS: AgentCheckpoint[] = [
   { id: "verifier", name: "Council Quality & Audit Verifier", role: "Anti-Hallucination, Factual Integrity & Mistake Audit", status: "pending" },
 ];
 
+const INITIAL_SUPERVISOR_CHECKPOINTS: AgentCheckpoint[] = [
+  { id: "identify", name: "AI Supervisor — Company Identification", role: "Business model · revenue engine · archetype", status: "pending" },
+  { id: "audit-ratios", name: "AI Supervisor — Ratio Audit", role: "Trust / ignore map per company type", status: "pending" },
+  { id: "audit-dcf", name: "AI Supervisor — DCF Audit", role: "Growth · margin · WACC bounds check", status: "pending" },
+];
+
 import PDFDownloadButton from "./PDFDownloadButton";
 
 interface Props {
@@ -44,6 +50,7 @@ export default function ReportClient({ ticker }: Props) {
     progress: 0,
     message: "Initialising...",
     agentCheckpoints: INITIAL_AGENT_CHECKPOINTS,
+    supervisorCheckpoints: INITIAL_SUPERVISOR_CHECKPOINTS,
   });
   const [reportData, setReportData] = useState<ReportData | null>(null);
   const [activeTab, setActiveTab] = useState<TabKey>("overview");
@@ -121,21 +128,48 @@ export default function ReportClient({ ticker }: Props) {
           }
           return { ...cp };
         });
-        setState({
+        const cachedSup = (companyData as any)?.supervision;
+        setState(s => ({
           step: "generating_ai",
           progress: 50,
           message: `Resuming with ${bankedCount} banked agent(s)...`,
           agentCheckpoints: resumedCheckpoints,
-        });
+          supervisorCheckpoints: cachedSup
+            ? INITIAL_SUPERVISOR_CHECKPOINTS.map((cp) => ({ ...cp, status: "complete" as const, councilAuditNote: String(cachedSup.companyType || "Supervised").slice(0, 120) }))
+            : (s.supervisorCheckpoints || INITIAL_SUPERVISOR_CHECKPOINTS),
+        }));
       } else {
-        // Fresh run: fetch company data
+        // Fresh run: fetch company data (Step 01 Yahoo + Step 02 supervisor run server-side).
+        // Forward the user's AI key so the Step-02 AI Financial Supervisor can run
+        // company-aware LLM audit instead of heuristic fallback.
+        const savedCfg = customKeyConfig || loadSavedAiConfig();
+        const serverModel = loadServerModelOverride();
+        const companyHeaders: Record<string, string> = {};
+        if (savedCfg?.apiKey) {
+          companyHeaders["x-custom-api-key"] = savedCfg.apiKey;
+          companyHeaders["x-custom-api-provider"] = savedCfg.provider;
+          if (savedCfg.model) companyHeaders["x-custom-api-model"] = savedCfg.model;
+        } else if (serverModel) {
+          companyHeaders["x-custom-api-model"] = serverModel;
+        }
         setState({
           step: "fetching_data",
           progress: 15,
           message: "Connecting to Yahoo Finance API...",
           agentCheckpoints: INITIAL_AGENT_CHECKPOINTS,
+          supervisorCheckpoints: INITIAL_SUPERVISOR_CHECKPOINTS.map(cp => ({ ...cp })),
         });
-        const companyRes = await fetch(`/api/company?symbol=${encodeURIComponent(ticker)}`);
+        // Animate the supervisor auditing while the server computes ratios + DCF.
+        setState(s => ({
+          ...s,
+          step: "calculating",
+          progress: 32,
+          message: "AI Supervisor identifying company business model...",
+          supervisorCheckpoints: (s.supervisorCheckpoints || INITIAL_SUPERVISOR_CHECKPOINTS).map((cp, i) =>
+            i === 0 ? { ...cp, status: "running" as const } : cp
+          ),
+        }));
+        const companyRes = await fetch(`/api/company?symbol=${encodeURIComponent(ticker)}`, { headers: companyHeaders });
         if (!companyRes.ok) {
           const err = await companyRes.json();
           throw new Error(err.error || "Failed to fetch company data");
@@ -155,22 +189,51 @@ export default function ReportClient({ ticker }: Props) {
         calibration: companyData.calibration || companyData.dcf?.calibration,
       });
 
+      // Step 02 — surface the AI Financial Supervisor audit that ran inside
+      // /api/company (company-aware ratios + DCF check). Server already applied
+      // bounded 2nd-pass corrections; here we just narrate the audit outcome so
+      // the "Computing Financial Ratios & DCF Model" row shows WHAT was supervised.
+      const supervision = companyData.supervision || null;
+      const supCompanyType: string = supervision?.companyType || "Company-aware audit";
+      const supSource: string = supervision?.source === "ai-supervisor" ? "AI Supervisor" : "Supervisor (heuristics)";
+      const supAdjustments: number = Array.isArray(supervision?.adjustments) ? supervision.adjustments.length : 0;
+      const supApplied: number = Array.isArray(supervision?.adjustments)
+        ? supervision.adjustments.filter((a: any) => a?.applied).length
+        : 0;
+      const completedSupervisorCheckpoints: AgentCheckpoint[] = INITIAL_SUPERVISOR_CHECKPOINTS.map((cp) => {
+        let note = "";
+        if (cp.id === "identify") note = `${supCompanyType}${supervision?.confidence != null ? ` · conf ${(Number(supervision.confidence) * 100).toFixed(0)}%` : ""}`;
+        if (cp.id === "audit-ratios") {
+          const trust = Array.isArray(supervision?.ratiosToTrust) ? supervision.ratiosToTrust.slice(0, 4).join(", ") : "";
+          const ignore = Array.isArray(supervision?.ratiosToIgnore) ? supervision.ratiosToIgnore.slice(0, 3).join(", ") : "";
+          note = trust ? `Trust: ${trust}${ignore ? ` · Ignore: ${ignore}` : ""}` : "Ratio trust/ignore map applied";
+        }
+        if (cp.id === "audit-dcf") {
+          note = supervision
+            ? `${supervision.dcfLens || "DCF lens"} · ${supApplied}/${supAdjustments} adjustments applied`
+            : "DCF bounds check";
+        }
+        return { ...cp, status: "complete" as const, completedAt: Date.now(), councilAuditNote: note.slice(0, 140) };
+      });
       setState(s => ({
         ...s,
         step: "calculating",
         progress: 45,
-        message: "Computing financial ratios and DCF valuation...",
+        message: `${supSource}: ${supCompanyType} — ${supApplied}/${supAdjustments} DCF refinements applied.`,
+        supervisorCheckpoints: completedSupervisorCheckpoints,
       }));
-      await new Promise(r => setTimeout(r, 400));
+      await new Promise(r => setTimeout(r, 900));
 
       // Step 2: Generate AI analysis via 6 Specialized AI Personas
+      // Preserve the completed supervisor audit so the calculating row stays COMPLETE with notes.
       let currentCheckpoints = INITIAL_AGENT_CHECKPOINTS.map(cp => ({ ...cp }));
-      setState({
+      setState(s => ({
         step: "generating_ai",
         progress: 50,
         message: "Deploying 6 Specialized AI Analysts to synthesize equity thesis...",
         agentCheckpoints: currentCheckpoints,
-      });
+        supervisorCheckpoints: s.supervisorCheckpoints || completedSupervisorCheckpoints,
+      }));
 
       let aiAnalysis = null;
       let aiAnalysisEmpty = false;
@@ -609,6 +672,9 @@ export default function ReportClient({ ticker }: Props) {
         ratiosByYear: companyData.ratiosByYear,
         dupontByYear: companyData.dupontByYear,
         dcf,
+        supervision: companyData.supervision ?? null,
+        selectedModel: companyData.selectedModel ?? null,
+        valuationLens: companyData.valuationLens ?? companyData.supervision?.dcfLens ?? null,
         canonicalForecast: companyData.canonicalForecast ?? (dcf as any)?.canonicalForecast ?? null,
         shareholding: companyData.shareholding,
         peers: companyData.peers || [],
@@ -790,6 +856,7 @@ export default function ReportClient({ ticker }: Props) {
               message={state.message}
               progress={state.progress}
               agentCheckpoints={state.agentCheckpoints}
+              supervisorCheckpoints={state.supervisorCheckpoints}
             />
           </div>
         )}

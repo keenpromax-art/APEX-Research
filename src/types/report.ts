@@ -1155,6 +1155,24 @@ export interface ReportQAResult {
   adjustedCreditRating?: string;
 }
 
+export interface FinancialSupervisionSummary {
+  ticker: string;
+  companyName: string;
+  companyType: string;
+  businessModel: string;
+  revenueModel: string;
+  keyDrivers: string[];
+  ratiosToTrust: string[];
+  ratiosToIgnore: string[];
+  dcfLens: string;
+  adjustments: { field: string; previous: unknown; suggested: unknown; applied: boolean; reason: string }[];
+  flags: string[];
+  confidence: number;
+  source: "ai-supervisor" | "heuristic-fallback";
+  rationale: string;
+  auditedAt: string;
+}
+
 export interface ReportData {
   generatedAt: string;
   profile: CompanyProfile;
@@ -1164,6 +1182,10 @@ export interface ReportData {
   ratiosByYear: Ratios[];
   dupontByYear: DuPontAnalysis[];
   dcf: DCFResult;
+  /** Step-02 AI Financial Supervisor audit (company-aware ratios + DCF check). */
+  supervision?: FinancialSupervisionSummary | null;
+  selectedModel?: string | null;
+  valuationLens?: string | null;
   shareholding: ShareholdingData;
   peers: PeerData[];
   aiAnalysis: AIAnalysis;
@@ -1230,4 +1252,6 @@ export interface GenerationState {
   error?: string;
   data?: ReportData;
   agentCheckpoints?: AgentCheckpoint[];
+  /** Step-02 AI Financial Supervisor checkpoints (rendered under "calculating"). */
+  supervisorCheckpoints?: AgentCheckpoint[];
 }

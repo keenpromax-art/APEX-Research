@@ -81,8 +81,18 @@ function extractPctNumbers(sentence: string): number[] {
   return out;
 }
 
+/**
+ * Abbreviation-safe sentence splitter (shared with ai/draft-quality):
+ * "Rs. 335.90" must not fragment into ["…Rs.", "335.90…"], which detaches
+ * INR prices from their valuation sentences and lets ungrounded numbers
+ * slip through the deterministic gate.
+ */
 const splitSentences = (t: string): string[] =>
-  (t || "").split(/(?<=[.!?])\s+/).filter((s) => s.trim().length > 0);
+  (t || "")
+    .replace(/\bRs\.\s*/g, "Rs ")
+    .replace(/\bvs\.\s*/gi, "vs ")
+    .split(/(?<=[.!?])\s+/)
+    .filter((s) => s.trim().length > 0);
 
 /** Rating-stance contradiction on the combined draft text. */
 function ratingIssues(text: string, verdict: string, conclusion: string): string[] {
@@ -130,7 +140,12 @@ function valuationNumberIssues(text: string, truth: WriterCheckerGroundTruth): s
     const mentionsPrice = /(cmp|current.*price|trading at|prevailing)/i.test(low);
     const mentionsUpside = /(upside|implied|premium|discount|margin of safety)/i.test(low);
     if (!mentionsTarget && !mentionsPrice && !mentionsUpside) continue;
-    for (const n of extractCurrencyNumbers(sent)) {
+    // Currency grounding applies ONLY to price-anchored sentences (target /
+    // CMP): market-cap / EV sentences that merely use premium/discount
+    // language ("trades at a discount to peers, m-cap Rs X") carry different
+    // bases and must never false-fail — upside-% claims are judged below.
+    const priceAnchored = mentionsTarget || mentionsPrice;
+    if (priceAnchored) for (const n of extractCurrencyNumbers(sent)) {
       const nearFv = fv > 0 && Math.abs(n - fv) / Math.max(1, Math.abs(fv)) <= 0.03;
       const nearCmp = cmp > 0 && Math.abs(n - cmp) / Math.max(1, Math.abs(cmp)) <= 0.03;
       if (!nearFv && !nearCmp) {

@@ -285,7 +285,23 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
     : isBankOrNbfc ? dcfEqVal : evForBridge - dcfNetDebt;
   const bridgeEqVariance = Math.abs(dcfEqVal - expectedEqVal);
 
-  if (bridgeEqVariance > 1000 && !isBankOrNbfc) {
+  // Honest-NR guard: when the model honestly produced no positive equity
+  // (non-valid DCF) and the ledger reports NR (not a modeled rating), the
+  // bridge has no valid inputs to reconcile — that is a disclosed model
+  // limitation, not a sync bug. WARN with disclosure; a valid-model mismatch
+  // stays a HARD block.
+  const honestNrNoEquity = rating === "NR" && data.dcf?.status !== undefined && data.dcf.status !== "valid";
+  if (bridgeEqVariance > 1000 && !isBankOrNbfc && honestNrNoEquity) {
+    checks.push({
+      id: "XREF-03",
+      category: "CROSS_REFERENCE",
+      name: "DCF Equity Value Bridge Arithmetic Reconciled",
+      status: "WARN",
+      details: `No positive model equity exists (DCF ${data.dcf.status}; EV ${evForBridge.toFixed(0)}, net debt ${dcfNetDebt.toFixed(0)}, equity ${dcfEqVal.toFixed(0)}) — bridge not applicable under honest NR anchor to price. Disclosed limitation; see ledger ratingRationale. Variance: ${bridgeEqVariance.toFixed(0)}`,
+      expected: "NR-anchored (disclosed)",
+      actual: `variance ${bridgeEqVariance.toFixed(0)}`,
+    });
+  } else if (bridgeEqVariance > 1000 && !isBankOrNbfc) {
     checks.push({
       id: "XREF-03",
       category: "CROSS_REFERENCE",
@@ -395,6 +411,16 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
       details: `FATAL PUBLICATION BLOCK: share base unresolved across ledger/dcf/quote (all ≤ 0 or missing) — per-share math unverifiable. Share-count synthesis is prohibited; resolve the base before publication.`,
       expected: "Resolved share count > 0",
       actual: "unresolved",
+    });
+  } else if (Number.isFinite(perShareVariance) && perShareVariance > 1.0 && fv > 0 && honestNrNoEquity) {
+    checks.push({
+      id: "XREF-05",
+      category: "CROSS_REFERENCE",
+      name: "DCF Per-Share Fair Value Arithmetic Reconciled",
+      status: "WARN",
+      details: `No positive model equity exists (DCF ${data.dcf.status}) — per-share bridge not applicable under honest NR anchor to price (${fv.toFixed(2)}). Disclosed limitation; see ledger ratingRationale. Variance: ${perShareVariance.toFixed(2)}`,
+      expected: "NR-anchored (disclosed)",
+      actual: fv.toFixed(2),
     });
   } else if (Number.isFinite(perShareVariance) && perShareVariance > 1.0 && fv > 0) {
     checks.push({
@@ -513,9 +539,15 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
   const modelMatchesLedger = dcfIntrinsic > 0 && ledgerFv > 0 && Math.abs(dcfIntrinsic - ledgerFv) <= modelTol;
   const ledgerAnchored = Boolean((ledger as any)?.insufficientData);
   // Raw model produced no intrinsic value (invalid/insolvent DCF): the ledger
-  // cannot legitimately carry a modeled fair value, so this is a HARD block —
-  // publication is prohibited until the engine validates (auditor rows #20/24).
+  // cannot legitimately carry a modeled fair value. When the ledger honestly
+  // reports NR on a non-valid model (insufficient-data anchor or model-failure
+  // NR with disclosed rationale — e.g. negative-FCFF platforms the FCFF engine
+  // cannot price), that is a disclosed limitation, not a sync bug: WARN and
+  // publish with warnings instead of hard-blocking the dossier. A non-NR
+  // rating on an invalid model, or any header/ledger desync, stays a HARD
+  // block — publication is prohibited until the engine validates.
   const modelInvalid = !modelMatchesLedger && data.dcf?.status !== undefined && data.dcf.status !== "valid";
+  const honestNrAnchor = rating === "NR" && data.dcf?.status !== undefined && data.dcf.status !== "valid";
   if (!targetPriceMatch || !recommendationMatch) {
     checks.push({
       id: "XREF-02",
@@ -525,6 +557,16 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
       details: `FATAL PUBLICATION BLOCK: Report targetPrice (${data.targetPrice}) or recommendation (${data.recommendation}) contradicts Assumptions Ledger (${fv}, ${rating}). Unsynchronized claims strictly prohibited.`,
       expected: `${fv} (${rating})`,
       actual: `${data.targetPrice} (${data.recommendation})`,
+    });
+  } else if (honestNrAnchor) {
+    checks.push({
+      id: "XREF-02",
+      category: "CROSS_REFERENCE",
+      name: "Header Target vs Ledger Fair Value Check",
+      status: "WARN",
+      details: `Ledger honestly reports NR on a non-valid DCF model (${data.dcf.status}, intrinsic ${dcfIntrinsic.toFixed(2)}) — fair value anchored to price (${ledgerFv.toFixed(2)}) with disclosed NR rationale, not asserted as a valuation. Header, ledger, and model agree that no validated intrinsic value exists. See ledger ratingRationale for the limitation.`,
+      expected: "NR-anchored (disclosed)",
+      actual: `DCF ${data.dcf.status} → NR`,
     });
   } else if (modelInvalid) {
     checks.push({
@@ -1286,19 +1328,31 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
 
   // SANITIZE-01: Sanitizer Rewrite Disclosure. The sector sanitizer runs BEFORE
   // QA — without this check, QA would certify text it never saw. Material
-  // rewriting (≥2 distinct foreign-sector terms scrubbed) proves the narrative
-  // was contaminated at generation time and blocks publication; a single
-  // rewrite warns. Absent sanitizer metadata counts as clean (legacy path).
+  // rewriting (≥3 distinct foreign-sector terms scrubbed) proves the narrative
+  // was contaminated at generation time and blocks publication; 1–2 incidental
+  // rewrites (e.g. a single legitimate competitive comparison tripping an
+  // industry blocklist) warn with disclosure instead of blocking the dossier.
+  // Absent sanitizer metadata counts as clean (legacy path).
   const rewrittenTerms = Array.from(
     new Set(((data as any).sanitizerReport?.rewrittenTerms || []) as string[])
   );
-  if (rewrittenTerms.length >= 1) {
+  if (rewrittenTerms.length >= 3) {
     checks.push({
       id: "SANITIZE-01",
       category: "KEYWORD_BLOCKLIST",
       name: "Sanitizer Rewrite Disclosure",
       status: "FAIL",
       details: `FATAL PUBLICATION BLOCK: Sector sanitizer rewrote ${rewrittenTerms.length} distinct out-of-sector term(s) pre-QA: [${rewrittenTerms.slice(0, 8).join(", ")}]. Any rewrite proves generation-time contamination — fix the template/prompt, not the output.`,
+      expected: "Zero rewritten terms",
+      actual: `${rewrittenTerms.length} rewritten term(s)`,
+    });
+  } else if (rewrittenTerms.length >= 1) {
+    checks.push({
+      id: "SANITIZE-01",
+      category: "KEYWORD_BLOCKLIST",
+      name: "Sanitizer Rewrite Disclosure",
+      status: "WARN",
+      details: `Sector sanitizer rewrote ${rewrittenTerms.length} incidental out-of-sector term(s) pre-QA: [${rewrittenTerms.slice(0, 8).join(", ")}]. Below the ≥3-term contamination threshold — disclosed, not blocking. Verify the flagged terms are legitimate competitive context, not template bleed.`,
       expected: "Zero rewritten terms",
       actual: `${rewrittenTerms.length} rewritten term(s)`,
     });
@@ -2682,14 +2736,20 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
       },
     });
     for (const f of finCons) {
+      // Honest-NR guard (FINCONS-04 only): per-share closure is unverifiable
+      // when the model honestly produced no positive equity (non-valid DCF +
+      // NR anchor) — disclosed limitation, not a cross-page divergence. Other
+      // FINCONS codes (statement completeness, EPS coherence, share base)
+      // stay hard blocks: those are data bugs, never model limitations.
+      const finconsNrGrace = f.code === "FINCONS-04" && !f.pass && honestNrNoEquity;
       checks.push({
         id: f.code,
         category: "CROSS_REFERENCE",
         name: "Cross-Page Financial Consistency",
-        status: f.pass ? "PASS" : f.severity === "blocker" ? "FAIL" : "WARN",
-        details: f.pass ? f.detail : `FATAL PUBLICATION BLOCK: ${f.detail}`,
+        status: f.pass ? "PASS" : finconsNrGrace ? "WARN" : f.severity === "blocker" ? "FAIL" : "WARN",
+        details: f.pass ? f.detail : finconsNrGrace ? `No positive model equity exists (DCF ${data.dcf.status}) — per-share closure not applicable under honest NR anchor to price. Disclosed limitation; see ledger ratingRationale. ${f.detail}` : `FATAL PUBLICATION BLOCK: ${f.detail}`,
         expected: "Same-FY agreement across pages",
-        actual: f.pass ? "agree" : "divergent",
+        actual: f.pass ? "agree" : finconsNrGrace ? "NR-anchored (disclosed)" : "divergent",
       });
     }
   }

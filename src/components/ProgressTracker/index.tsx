@@ -18,6 +18,7 @@ interface ProgressTrackerProps {
   message: string;
   progress: number;
   agentCheckpoints?: AgentCheckpoint[];
+  supervisorCheckpoints?: AgentCheckpoint[];
 }
 
 export default function ProgressTracker({
@@ -25,6 +26,7 @@ export default function ProgressTracker({
   message,
   progress,
   agentCheckpoints,
+  supervisorCheckpoints,
 }: ProgressTrackerProps) {
   const currentIndex = STEP_ORDER.indexOf(step);
 
@@ -132,6 +134,64 @@ export default function ProgressTracker({
                               </span>
                             )}
                             {isAgentPending && <span className={`${styles.subStepTag} ${styles.subTagPending}`}>QUEUED</span>}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {s.key === "calculating" && supervisorCheckpoints && supervisorCheckpoints.length > 0 && (isActive || isDone) && (
+                <div className={styles.subProgressContainer}>
+                  <div className={styles.subProgressHeader}>
+                    <div className={styles.subProgressHeaderLeft}>
+                      <span className={styles.subProgressPulse} />
+                      <span className={styles.subProgressTitle}>AI FINANCIAL SUPERVISOR</span>
+                    </div>
+                    <span className={styles.subProgressBadge}>
+                      {supervisorCheckpoints.filter((c) => c.status === "complete").length} / {supervisorCheckpoints.length} AUDITED
+                    </span>
+                  </div>
+
+                  <div className={styles.subSteps}>
+                    {supervisorCheckpoints.map((chk, chkIdx) => {
+                      const isDone_ = chk.status === "complete";
+                      const isRunning_ = chk.status === "running" || chk.status === "verifying";
+                      const isPending_ = chk.status === "pending";
+
+                      return (
+                        <div
+                          key={chk.id}
+                          className={`${styles.subStep} ${isDone_ ? styles.subStepDone : ""} ${isRunning_ ? styles.subStepActive : ""} ${isPending_ ? styles.subStepPending : ""}`}
+                        >
+                          <div className={styles.subStepLeft}>
+                            <div className={styles.subStepIndex}>
+                              {isDone_ ? (
+                                <span className={styles.subCheck}>✓</span>
+                              ) : isRunning_ ? (
+                                <span className={styles.subSpinner}>⟳</span>
+                              ) : (
+                                `0${chkIdx + 1}`
+                              )}
+                            </div>
+                            <div className={styles.subStepText}>
+                              <span className={styles.subStepName}>{chk.name}</span>
+                              <span className={styles.subStepRole}>{chk.role}</span>
+                              {chk.councilAuditNote && (
+                                <span className={styles.subStepAuditNote}>{chk.councilAuditNote}</span>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className={styles.subStepStatus}>
+                            {isDone_ && (
+                              <span className={`${styles.subStepTag} ${styles.subTagDone}`}>AUDITED ✓</span>
+                            )}
+                            {isRunning_ && (
+                              <span className={`${styles.subStepTag} ${styles.subTagRunning}`}>SUPERVISING</span>
+                            )}
+                            {isPending_ && <span className={`${styles.subStepTag} ${styles.subTagPending}`}>QUEUED</span>}
                           </div>
                         </div>
                       );

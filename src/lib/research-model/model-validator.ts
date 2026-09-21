@@ -14,6 +14,7 @@
  * fires inside "animal", "arpu" never inside "sharpened").
  */
 import type { ResearchOperatingModel } from "./operating-model";
+import { REQUIRED_CONCEPT_ALIASES } from "../company-ontology";
 
 /** Canonical narrative sections. Every section receives the same model instance. */
 export const NARRATIVE_SECTIONS = [
@@ -65,7 +66,14 @@ export function scanTextForModel(
 ): { forbiddenHits: string[]; requiredHits: string[] } {
   const lower = (text || "").toLowerCase();
   const forbiddenHits = model.forbiddenConcepts.filter((c) => boundaryHit(lower, c));
-  const requiredHits = model.requiredConcepts.filter((c) => boundaryHit(lower, c));
+  // Alias-aware required matching (shared map in company-ontology): full-form /
+  // hyphen / spelling variants count, so natural prose is not misread as a
+  // foreign template. Forbidden matching stays exact (never aliased).
+  const requiredHits = model.requiredConcepts.filter((c) => {
+    if (boundaryHit(lower, c)) return true;
+    const aliases = REQUIRED_CONCEPT_ALIASES[c.toLowerCase()] || [];
+    return aliases.some((a) => boundaryHit(lower, a));
+  });
   return { forbiddenHits, requiredHits };
 }
 

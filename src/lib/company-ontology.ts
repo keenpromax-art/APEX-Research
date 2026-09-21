@@ -233,18 +233,54 @@ export function buildCompanyOntology(
   };
 }
 
+/**
+ * Natural-language aliases for required concepts. QA demands sector vocabulary
+ * (gmv, aov, casa…), but analysts — human or LLM — write full forms
+ * ("gross merchandise value", "low-cost deposits"), hyphen/spelling variants
+ * ("take-rate", "fulfilment"). Without aliases, a correct food-delivery thesis
+ * evidences ZERO required concepts and blocks on ONT-01/OM-01. Aliases apply
+ * to REQUIRED matching only — forbidden matching stays exact (expanding it
+ * would manufacture false contamination FAILs).
+ */
+export const REQUIRED_CONCEPT_ALIASES: Record<string, string[]> = {
+  gmv: ["gross merchandise value", "gross order value"],
+  aov: ["average order value", "average basket value", "average basket size"],
+  "take rate": ["take-rate", "take rates", "commission rate"],
+  "order volume": ["order volumes", "food delivery orders", "number of orders", "monthly orders", "order frequency", "quick commerce orders"],
+  fulfillment: ["fulfilment", "last-mile", "last mile", "dark store", "dark stores"],
+  arpu: ["average revenue per user", "average realization per user"],
+  dau: ["daily active users", "daily active user"],
+  mau: ["monthly active users", "monthly active user"],
+  casa: ["current account savings account", "low-cost deposits", "low-cost deposit"],
+  nim: ["net interest margin"],
+  gnpa: ["gross npa", "gross non-performing assets"],
+  revpar: ["revenue per available room"],
+  adr: ["average daily rate"],
+};
+
+function boundaryPhraseHit(lower: string, phrase: string): boolean {
+  const esc = phrase.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(^|[^a-z0-9])${esc}([^a-z0-9]|$)`, "i").test(lower);
+}
+
+/** Required-concept match: canonical phrase OR any natural-language alias. */
+export function requiredConceptHit(narrativeText: string, concept: string): boolean {
+  const lower = (narrativeText || "").toLowerCase();
+  if (boundaryPhraseHit(lower, concept)) return true;
+  const aliases = REQUIRED_CONCEPT_ALIASES[concept.toLowerCase()] || [];
+  return aliases.some((a) => boundaryPhraseHit(lower, a));
+}
+
 /** Validate narrative against ontology: missing required + present forbidden. Boundary-safe. */
 export function validateOntologyCoverage(
   ontology: Pick<CompanyOntology, "requiredConcepts" | "forbiddenConcepts">,
   narrativeText: string
 ): { missingRequired: string[]; presentForbidden: string[] } {
   const lower = (narrativeText || "").toLowerCase();
-  const hit = (phrase: string): boolean => {
-    const esc = phrase.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    return new RegExp(`(^|[^a-z0-9])${esc}([^a-z0-9]|$)`, "i").test(lower);
-  };
-  // Required: at least 2 of the required concepts must be evidenced (hospitality needs revpar+adr+occupancy — enforced stricter in QA HOSP-01/ONT-01)
-  const missingRequired = ontology.requiredConcepts.filter((c) => !hit(c));
+  const hit = (phrase: string): boolean => boundaryPhraseHit(lower, phrase);
+  // Required: at least 2 of the required concepts must be evidenced (hospitality needs revpar+adr+occupancy — enforced stricter in QA HOSP-01/ONT-01).
+  // Alias-aware: full-form/hyphen/spelling variants count (see REQUIRED_CONCEPT_ALIASES).
+  const missingRequired = ontology.requiredConcepts.filter((c) => !requiredConceptHit(narrativeText, c));
   const presentForbidden = ontology.forbiddenConcepts.filter((c) => hit(c));
   return { missingRequired, presentForbidden };
 }

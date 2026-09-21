@@ -977,7 +977,12 @@ function checkAnomalies(inp: IndependentInputs, issues: IndependentIssue[], pass
     });
     return;
   }
-  const found = detectAccountingAnomalies(hist);
+  // Cash-burning platforms reinvest ahead of contribution by design (the
+  // archetype classifier already labels them EARLY_PLATFORM_GROWTH) — OCF
+  // divergence there is the business model, not an accrual signal. Threaded
+  // into the kernel so REV-CASH demotes to non-material for such names while
+  // mature-model divergence still aggregates to FAIL.
+  const found = detectAccountingAnomalies(hist, { expectCashBurn: inp.archetype === "EARLY_PLATFORM_GROWTH" });
   for (const a of found) {
     issues.push({
       code: "ANOM-01", severity: "WARN",

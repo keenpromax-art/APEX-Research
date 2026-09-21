@@ -20,6 +20,8 @@ import { buildCanonicalReport } from "@/lib/canonical-report";
 import { reconcileAll } from "@/lib/source-reconciliation";
 import { buildEvidenceRegistryFromInputs } from "@/lib/evidence-registry";
 import { generateAIDCFAssumptions } from "@/lib/openrouter";
+import { runFinancialSupervisor } from "@/lib/financial-supervisor";
+import type { SupportedProvider, CustomKeyConfig } from "@/lib/ai-providers";
 
 export const runtime = "nodejs";
 export const maxDuration = 90;
@@ -31,6 +33,19 @@ export async function GET(request: NextRequest) {
       { error: "A valid ticker symbol is required." },
       { status: 400 }
     );
+  }
+
+  // Custom AI key headers (same contract as /api/analyze): lets the Step-02
+  // AI Financial Supervisor run company-aware LLM audit on the user's key.
+  // Absence is fine — supervisor falls back to deterministic heuristics.
+  const headerApiKey = request.headers.get("x-custom-api-key")?.trim();
+  const headerProvider = (request.headers.get("x-custom-api-provider")?.trim() || "openrouter") as SupportedProvider;
+  const headerModel = request.headers.get("x-custom-api-model")?.trim() || undefined;
+  let supervisorKeyConfig: CustomKeyConfig | null = null;
+  if (headerApiKey) {
+    supervisorKeyConfig = { provider: headerProvider, apiKey: headerApiKey, model: headerModel };
+  } else if (headerModel && process.env.OPENROUTER_API_KEY) {
+    supervisorKeyConfig = { provider: "openrouter", apiKey: process.env.OPENROUTER_API_KEY, model: headerModel };
   }
 
   try {
@@ -91,7 +106,7 @@ export async function GET(request: NextRequest) {
       }
     })();
 
-    const aiDcfPromise = generateAIDCFAssumptions(companyProfile, stockData, annualFinancials).catch(e => {
+    const aiDcfPromise = generateAIDCFAssumptions(companyProfile, stockData, annualFinancials, supervisorKeyConfig).catch(e => {
       console.warn("[company] AI DCF assumption generation failed, using mechanical defaults:", e);
       return null;
     });
@@ -280,13 +295,65 @@ export async function GET(request: NextRequest) {
     // AI-driven DCF assumptions: await the promise launched above
     const aiDcfOverrides = await aiDcfPromise;
 
-    const valuationResult = selectAndComputeValuation({
+    const preliminaryValuation = selectAndComputeValuation({
       profile: companyProfile,
       stockData,
       annualFinancials,
       archetypeProfile,
       aiDcfOverrides,
     });
+
+    // ── STEP 02 AI SUPERVISOR ──────────────────────────────────────
+    // Company-aware audit of ratios + preliminary DCF. Returns bounded
+    // refined overrides (or null). A 2nd valuation pass applies them ONLY
+    // when confidence is sufficient and the result stays valid — otherwise
+    // the preliminary model stands and the audit trail discloses why.
+    let supervision: Awaited<ReturnType<typeof runFinancialSupervisor>> | null = null;
+    let valuationResult = preliminaryValuation;
+    try {
+      supervision = await runFinancialSupervisor({
+        profile: companyProfile,
+        stockData,
+        annualFinancials,
+        ratiosByYear,
+        preliminaryDcf: preliminaryValuation.dcf,
+        preliminaryOverrides: aiDcfOverrides,
+        customConfig: supervisorKeyConfig,
+      });
+      // NOTE: ModelLifecycle is strict FETCHED→NORMALIZED→VALIDATED→MODELED→VERIFIED,
+      // so supervisor progress is recorded on the supervision payload itself, not as
+      // a lifecycle stage (an extra stage would throw + break the publication gate).
+      console.log(
+        `[supervisor] ${supervision.source} (${supervision.companyType.slice(0, 80)}) conf=${supervision.confidence.toFixed(2)} adjustments=${supervision.adjustments.length}`
+      );
+      const refined = supervision.refinedOverrides;
+      if (refined && supervision.confidence >= 0.55 && supervision.source === "ai-supervisor") {
+        const mergedOverrides = { ...(aiDcfOverrides ?? {}), ...refined };
+        const supervisedValuation = selectAndComputeValuation({
+          profile: companyProfile,
+          stockData,
+          annualFinancials,
+          archetypeProfile,
+          aiDcfOverrides: mergedOverrides,
+        });
+        const prelimFV = (preliminaryValuation.dcf as any)?.intrinsicValue ?? (preliminaryValuation.dcf as any)?.fairValuePerShare;
+        const superFV = (supervisedValuation.dcf as any)?.intrinsicValue ?? (supervisedValuation.dcf as any)?.fairValuePerShare;
+        const supervisedValid =
+          supervisedValuation.dcf?.status !== "insufficient_data" &&
+          typeof superFV === "number" && isFinite(superFV) && superFV > 0;
+        if (supervisedValid) {
+          valuationResult = supervisedValuation;
+          supervision.adjustments = supervision.adjustments.map((a) => ({ ...a, applied: true }));
+          supervision.flags = [...supervision.flags, `SUPERVISOR_APPLIED: 2nd-pass ${supervisedValuation.selectedModel} FV ${typeof prelimFV === "number" ? prelimFV.toFixed(2) : "?"} → ${superFV.toFixed(2)}.`];
+        } else {
+          supervision.adjustments = supervision.adjustments.map((a) => ({ ...a, applied: false }));
+          supervision.flags = [...supervision.flags, "SUPERVISOR_REJECTED: 2nd-pass valuation invalid — preliminary model stands."];
+        }
+      }
+    } catch (e) {
+      console.warn("[company] Financial supervisor failed, preliminary valuation stands:", e);
+    }
+
     const dcf = valuationResult.dcf;
     const valuationCalibration = valuationResult.calibration;
 
@@ -382,6 +449,12 @@ export async function GET(request: NextRequest) {
       ratiosByYear,
       dupontByYear,
       dcf,
+      // Step-02 AI Financial Supervisor audit (company-aware ratios + DCF check).
+      // Null only if the supervisor threw before producing even a heuristic.
+      supervision,
+      selectedModel: valuationResult.selectedModel,
+      valuationLens: valuationResult.valuationLens ?? null,
+      supervisorDiagnostics: valuationResult.diagnostics ?? [],
       shareholding,
       peers,
       news: tickerNews,
