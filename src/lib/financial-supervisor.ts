@@ -113,6 +113,13 @@ const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v
 const clampArr = (arr: number[], lo: number, hi: number) => arr.map((v) => clamp(v, lo, hi));
 const isNum = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
 
+/**
+ * Single-attempt LLM budget for the Step-02 supervisor. Well inside the
+ * serverless function timeout so a slow provider degrades to the heuristic
+ * audit instead of killing the whole /api/company response.
+ */
+export const SUPERVISOR_LLM_TIMEOUT_MS = 25000;
+
 // ─────────────────────────────────────────────
 // Deterministic heuristic supervision (always available)
 // ─────────────────────────────────────────────
@@ -271,6 +278,9 @@ async function aiEnhancement(
 ): Promise<FinancialSupervision> {
   const cfg = resolveProviderRequestConfig(params.customConfig ?? null);
   if (!cfg.apiKey) throw new Error("No AI key for supervisor");
+  // Hard timeout: a hanging provider must NEVER stall the /api/company
+  // serverless function (platform kills the function → client sees a
+  // non-JSON error page). Abort → caught below → heuristic fallback.
   const res = await fetch(cfg.endpointUrl, {
     method: "POST",
     headers: cfg.headers,
@@ -284,6 +294,7 @@ async function aiEnhancement(
       max_tokens: 1400,
       ...(cfg.provider === "openrouter" ? { response_format: { type: "json_object" } } : {}),
     }),
+    signal: AbortSignal.timeout(SUPERVISOR_LLM_TIMEOUT_MS),
   });
   const text = await res.text();
   if (!res.ok) throw new Error(`Supervisor LLM HTTP ${res.status}: ${text.slice(0, 200)}`);

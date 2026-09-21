@@ -170,11 +170,24 @@ export default function ReportClient({ ticker }: Props) {
           ),
         }));
         const companyRes = await fetch(`/api/company?symbol=${encodeURIComponent(ticker)}`, { headers: companyHeaders });
-        if (!companyRes.ok) {
-          const err = await companyRes.json();
-          throw new Error(err.error || "Failed to fetch company data");
+        // Read as text FIRST: when the hosting platform kills the function
+        // (timeout/crash), it returns an HTML/text error page instead of JSON,
+        // and a blind .json() surfaces only "Unexpected token…" confusion.
+        const rawBody = await companyRes.text();
+        let parsed: any = null;
+        try { parsed = JSON.parse(rawBody); } catch { parsed = null; }
+        if (!companyRes.ok || !parsed) {
+          if (parsed && typeof parsed.error === "string" && parsed.error) {
+            throw new Error(parsed.error);
+          }
+          const snippet = rawBody.replace(/\s+/g, " ").trim().slice(0, 160);
+          throw new Error(
+            companyRes.ok
+              ? `Server returned a non-JSON response${snippet ? ` (${snippet})` : ""}. This usually means the hosting function timed out — press Retry Execution.`
+              : `Request failed (HTTP ${companyRes.status})${snippet ? ` — ${snippet}` : ""}. The hosting function may have timed out — press Retry Execution.`
+          );
         }
-        companyData = await companyRes.json();
+        companyData = parsed;
         companyDataRef.current = companyData;
       }
 
