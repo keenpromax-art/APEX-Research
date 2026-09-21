@@ -1692,9 +1692,17 @@ const CoverPage = ({ data, concise = true }: { data: ReportData; concise?: boole
             {(() => {
               const rawRepUnit = data.assumptionsLedger?.reportingUnit || (currency === "INR" ? "Cr" : "Mil");
               const repUnit = rawRepUnit.replace(/^(USD|INR|GBP|EUR|CAD|AUD|JPY|CHF)\s*/i, "").trim() || rawRepUnit;
-              const mcapText = currency === "INR"
-                ? `${cmpSym}${fmtNum(data.stockData.marketCap / 1e7, 0)} Cr`
-                : fmtBig(data.stockData.marketCap, currency);
+              // Price×shares fallback mirrors the web hero: Yahoo intermittently
+              // omits marketCap while price/shares arrive intact — never print 0.
+              const mcapRaw = data.stockData.marketCap > 0
+                ? data.stockData.marketCap
+                : (data.stockData.currentPrice || data.cmp || 0) *
+                  (data.assumptionsLedger?.sharesOutstanding || data.stockData.sharesOutstanding || 0);
+              const mcapText = mcapRaw > 0
+                ? (currency === "INR"
+                  ? `${cmpSym}${fmtNum(mcapRaw / 1e7, 0)} Cr`
+                  : fmtBig(mcapRaw, currency))
+                : "—";
 
               return [
                 [`Market Cap (${currency} ${repUnit})`, mcapText],

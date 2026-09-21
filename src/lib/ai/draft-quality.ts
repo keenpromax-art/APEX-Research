@@ -51,7 +51,7 @@ export function buildResponseContract(model: ResearchOperatingModel | null | und
   const required = model.requiredConcepts.slice(0, 6).map(displayConceptWithAliases).join("; ");
   return [
     `RESPONSE CONTRACT (violations are machine-checked before your draft is accepted):`,
-    `- Evidence ≥2 of these sector concepts in natural prose: ${required || "none"}. Full forms count — write them out, do not force abbreviations.`,
+    `- Evidence ≥2 of these sector concepts, using the terms VERBATIM as listed (each parenthesized full form counts equally): ${required || "none"}. On first use give both forms, e.g. total contract value (TCV). Do not paraphrase them away into generic filler (growth was good, strong execution) — the sector nouns must appear in the text.`,
     `- NEVER write the STRICTLY FORBIDDEN terms from the guardrail above (any form, including inside compound phrases). When tempted, use the sector KPIs instead.`,
     `- NUMERIC LAW: every price, %, or multiple you state must come from the inputs in THIS prompt (CMP, fair value, margins, growth). Never invent targets, growth rates, or valuation impacts. Restate given numbers exactly; do not round fair value or upside.`,
     `- No {{PLACEHOLDER}} tokens, no markdown, no boilerplate openers ("In today's dynamic…"). Every section must carry substance, not filler.`,

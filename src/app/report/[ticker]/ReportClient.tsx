@@ -932,6 +932,12 @@ export default function ReportClient({ ticker }: Props) {
           const cv = canonicalValuation(reportData);
           const upsidePct = (cv.upside * 100).toFixed(1);
           const isBullish = cv.upside >= 0;
+          // Display market cap with price×shares fallback: Yahoo intermittently
+          // omits marketCap on some edge POPs while price/shares arrive intact —
+          // printing raw 0 ("₹0") contradicts the engine's own EV beside it.
+          const displayMarketCap = stockData.marketCap > 0
+            ? stockData.marketCap
+            : cv.cmp * (stockData.sharesOutstanding || (latest as any).sharesOutstanding || 0);
 
           return (
             <div className={styles.resultWrapper}>
@@ -980,7 +986,7 @@ export default function ReportClient({ ticker }: Props) {
                 <div className={styles.heroSubRow}>
                   <div className={styles.subMetric}>
                     <span className={styles.subMetricLabel}>Market Cap</span>
-                    <span className={styles.subMetricVal}>{fmtMoney(stockData.marketCap)}</span>
+                    <span className={styles.subMetricVal}>{displayMarketCap > 0 ? fmtMoney(displayMarketCap) : "—"}</span>
                   </div>
                   <div className={styles.subMetric}>
                     <span className={styles.subMetricLabel}>{isBankOrNbfc ? "Book Value / Sh" : "Enterprise Value"}</span>
@@ -2441,7 +2447,7 @@ export default function ReportClient({ ticker }: Props) {
                               ★ {profile.name} ({profile.ticker})
                             </td>
                             <td className="align-right">{sym}{stockData.currentPrice.toFixed(2)}</td>
-                            <td className="align-right">{fmtMoney(stockData.marketCap)}</td>
+                            <td className="align-right">{displayMarketCap > 0 ? fmtMoney(displayMarketCap) : "—"}</td>
                             <td className="align-right">{stockData.pe > 0 ? fmtMult(stockData.pe) : "—"}</td>
                             <td className="align-right">{stockData.enterpriseValue && stmtNum(latest, "ebitda") > 0 ? fmtMult(stockData.enterpriseValue / stmtNum(latest, "ebitda")) : "—"}</td>
                             <td className="align-right">{stockData.pb > 0 ? fmtMult(stockData.pb) : "—"}</td>

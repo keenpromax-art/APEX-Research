@@ -256,6 +256,21 @@ export const REQUIRED_CONCEPT_ALIASES: Record<string, string[]> = {
   gnpa: ["gross npa", "gross non-performing assets"],
   revpar: ["revenue per available room"],
   adr: ["average daily rate"],
+  // IT services: analysts write plurals ("EBIT margins"), full forms
+  // ("total contract value") and deal language ("deal wins") — none of which
+  // match the bare canonical terms. Without these, a correct TCS thesis
+  // evidences zero concepts and blocks on ONT-01/OM-01.
+  "revenue growth": ["revenue grew", "revenue growing", "revenues grew", "top-line growth", "topline growth", "constant currency growth", "constant-currency growth", "cc growth", "revenue expansion"],
+  "ebit margin": ["ebit margins", "operating margin", "operating margins", "ebit-margin"],
+  tcv: ["total contract value", "deal wins", "large deal wins", "large deals", "mega deals", "mega deal wins", "order book", "deal signings", "tcv wins"],
+  attrition: ["employee turnover", "talent attrition", "voluntary attrition", "staff turnover", "employee churn", "attrition rate"],
+  utilization: ["utilisation", "employee utilization", "employee utilisation", "blended utilization", "resource utilization", "delivery utilization"],
+  // Industrials / consumer / agro: same plural disease on cadence nouns.
+  "order inflow": ["order inflows", "order wins", "fresh orders", "inflow growth"],
+  "volume growth": ["volumes grew", "volume expansion", "volume recovery"],
+  "gross margin": ["gross margins"],
+  "r&d": ["research and development", "r&d spend", "research & development"],
+  "us generics": ["us generic", "generics business"],
 };
 
 function boundaryPhraseHit(lower: string, phrase: string): boolean {
