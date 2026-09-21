@@ -34,7 +34,7 @@
 //   on legitimate LLM phrasing. Every WARN names the remediation. Independent checks
 //   recompute from primaries and block regardless of other passes.
 // ============================================================
-import type { ReportData, ReportQAResult, QACheckItem } from "@/types/report";
+import type { AnnualFinancials, PeerData, ReportData, ReportQAResult, QACheckItem } from "@/types/report";
 import { stmtNum, isBankStatement, isInsuranceStatement, isReitStatement, isAssetLightStatement } from "@/types/report";
 import { getSectorProfile, classifySector } from "./sectors/index";
 import { identityIssues } from "./canonical";
@@ -51,6 +51,8 @@ import { validateIndependently } from "./independent-validator";
 import type { IndependentIssue } from "./independent-validator";
 import { reconcileForecast } from "./forecast-reconciliation";
 import { validateGrowthClaims } from "./claims";
+import { auditValuation } from "./valuation-audit";
+import { checkEconomicPlausibility } from "./economic-plausibility";
 // TODO: claims.ts:validateClaims() is deprecated. Use claim-validator.ts:validateClaimSet() with EvidenceRegistry
 // for unified temporal/directional matching. The old flat-allowlist validator does not support period-aware
 // evidence filtering or directional consistency checks.
@@ -2754,6 +2756,90 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
     }
   }
 
+  // VAL-AUDIT + ECON: first-class valuation audit and economic plausibility.
+  // The audit engine re-derives the DCF bridge, decomposes ₹/share, checks
+  // WACC inputs, and tabulates cross-method disagreement (DCF vs peer
+  // multiples vs Street). The plausibility engine reconciles the model
+  // against demonstrated history (capex, D&A, debt, terminal scale,
+  // growth/margin ceilings). Findings are WARN-grade by design: they inform
+  // conviction; accounting/bridge FAILs keep owning the hard gate — so this
+  // block can never newly block a publishable dossier.
+  {
+    const finList = (data.annualFinancials || []) as AnnualFinancials[];
+    if (finList.length > 0 && data.dcf) {
+      const audit = auditValuation({
+        ticker: data.profile.ticker || "UNKNOWN",
+        dcf: data.dcf,
+        stockData: data.stockData,
+        annualFinancials: finList,
+        peers: (data.peers || []) as PeerData[],
+      });
+
+      // VAL-AUDIT-01 never FAILs on its own: a genuine bridge break is
+      // already a hard block under XREF-01/03 — duplicating the FAIL would
+      // double-count one defect. The audit's job here is the ₹/share
+      // decomposition and the pointer, not a second gate.
+      checks.push({
+        id: "VAL-AUDIT-01",
+        category: "CROSS_REFERENCE",
+        name: "Valuation Bridge Audit (per-share decomposition)",
+        status: audit.bridge.status === "PASS" ? "PASS" : "WARN",
+        details: audit.bridge.status === "PASS" ? audit.bridge.detail : `${audit.bridge.detail} XREF-01/03 own the hard block for bridge breaks.`,
+        expected: "Independently recomputed bridge",
+        actual: audit.bridge.status,
+      });
+      checks.push({
+        id: "VAL-AUDIT-02",
+        category: "CROSS_REFERENCE",
+        name: "Terminal Value Concentration",
+        status: audit.terminal.status === "WARN" ? "WARN" : "PASS",
+        details: audit.terminal.detail,
+        expected: "<75% of EV",
+        actual: audit.terminal.tvPctOfEv !== null ? `${(audit.terminal.tvPctOfEv * 100).toFixed(0)}% (${audit.terminal.band})` : audit.terminal.band,
+      });
+      checks.push({
+        id: "VAL-AUDIT-03",
+        category: "CROSS_REFERENCE",
+        name: "WACC Input Audit",
+        status: audit.wacc.status === "WARN" ? "WARN" : "PASS",
+        details: audit.wacc.detail,
+        expected: "All inputs inside sanity bands",
+        actual: audit.wacc.status,
+      });
+      checks.push({
+        id: "VAL-AUDIT-04",
+        category: "CROSS_REFERENCE",
+        name: "Cross-Method Valuation Disagreement",
+        status: audit.disagreement.status === "WARN" ? "WARN" : "PASS",
+        details: `${audit.disagreement.detail} Model reliability: ${audit.reliability} — ${audit.reliabilityReasons.join("; ")}.`,
+        expected: "Corroborated target",
+        actual: audit.disagreement.verdict,
+      });
+
+      const plaus = checkEconomicPlausibility({
+        annualFinancials: finList,
+        dcf: data.dcf,
+        stockData: {
+          targetMeanPrice: (data.stockData as any)?.targetMeanPrice,
+          targetHighPrice: (data.stockData as any)?.targetHighPrice,
+          targetLowPrice: (data.stockData as any)?.targetLowPrice,
+          numberOfAnalystOpinions: (data.stockData as any)?.numberOfAnalystOpinions,
+        },
+      });
+      for (const f of plaus.findings) {
+        checks.push({
+          id: f.id,
+          category: "BS_DETECTOR",
+          name: `Economic Plausibility — ${f.name}`,
+          status: f.status === "WARN" ? "WARN" : "PASS",
+          details: f.status === "WARN" ? f.detail : f.detail,
+          expected: "Model consistent with demonstrated economics",
+          actual: f.status,
+        });
+      }
+    }
+  }
+
   // FCF-NARR-01: cash-flow narrative reconciliation. When the model FCF is
   // negative (trailing reported or forecast year-1), the narrative must not
   // simultaneously claim operating cash comfortably funds growth capex. The
@@ -3133,7 +3219,27 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
       };
       emit("FCST-02", "Forecast Bridges (Revenue/EBIT/Pretax/NI/CFO/FCF)", ["revenue-bridge", "ebit-bridge", "pretax-bridge", "net-income-bridge", "cfo-bridge", "fcf-bridge"]);
       emit("FCST-03", "Forecast Roll-Forwards (Cash/Debt/PP&E/Shares)", ["cash-roll-forward", "debt-roll-forward", "ppe-roll-forward", "share-count-roll-forward", "share-count-reconciliation"]);
-      emit("FCST-04", "Forecast→DCF Linkage + Scenario Vectors", ["dcf-linkage", "scenario-vector-identity"], enforceLinkage ? undefined : "RI vectors-only path — FCFF stream is narrative consistency only; linkage not enforced.");
+      // Honest-NR grace for dcf-linkage ONLY (same doctrine as XREF-02/03/05):
+      // when the engine honestly produced no equity (non-valid DCF, NR
+      // anchor), linkage to a non-existent bridge is a disclosed limitation,
+      // not a forecast bug. Scenario-vector mismatches still FAIL — a
+      // ledger/forecast fork is a real bug under any rating.
+      {
+        const linkBlockers = group("FCST-04", ["dcf-linkage"]).filter((f) => f.severity === "blocker");
+        const vectorBlockers = group("FCST-04", ["scenario-vector-identity"]).filter((f) => f.severity === "blocker");
+        const honestNrLinkage = rating === "NR" && (data.dcf as any)?.status !== undefined && (data.dcf as any)?.status !== "valid";
+        if (enforceLinkage && honestNrLinkage && linkBlockers.length > 0 && vectorBlockers.length === 0) {
+          checks.push({
+            id: "FCST-04", category: "CROSS_REFERENCE", name: "Forecast→DCF Linkage + Scenario Vectors",
+            status: "WARN",
+            details: `No positive model equity exists (DCF ${(data.dcf as any).status}) — forecast→DCF linkage not applicable under honest NR anchor; scenario vectors reconcile. Disclosed limitation; see ledger ratingRationale. Linkage gaps: ${linkBlockers.slice(0, 2).map((f) => `${f.rule}${f.year ? ` @ ${f.year}` : ""}`).join("; ")}${linkBlockers.length > 2 ? ` (+${linkBlockers.length - 2} more)` : ""}`,
+            expected: "NR-anchored (disclosed)",
+            actual: `${linkBlockers.length} linkage gap(s), vectors reconcile`,
+          });
+        } else {
+          emit("FCST-04", "Forecast→DCF Linkage + Scenario Vectors", ["dcf-linkage", "scenario-vector-identity"], enforceLinkage ? undefined : "RI vectors-only path — FCFF stream is narrative consistency only; linkage not enforced.");
+        }
+      }
       emit("FCST-05", "Forecast Continuity + Funding Liquidity", ["margin-continuity", "funding-liquidity"]);
     }
   }

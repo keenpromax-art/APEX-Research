@@ -21,6 +21,9 @@ import { reconcileAll } from "@/lib/source-reconciliation";
 import { buildEvidenceRegistryFromInputs } from "@/lib/evidence-registry";
 import { generateAIDCFAssumptions } from "@/lib/openrouter";
 import { runFinancialSupervisor } from "@/lib/financial-supervisor";
+import { auditValuation } from "@/lib/valuation-audit";
+import { buildBaselineReconciliation } from "@/lib/guidance-reconciliation";
+import { assessDataConfidence } from "@/lib/data-confidence";
 import type { SupportedProvider, CustomKeyConfig } from "@/lib/ai-providers";
 
 export const runtime = "nodejs";
@@ -480,6 +483,52 @@ export async function GET(request: NextRequest) {
       { tickerNews: [], eventPriceLookup: null }
     );
 
+    // ── Valuation audit + baseline reconciliation + data confidence ──
+    // Deterministic, non-blocking: every builder is pure and internally
+    // guarded (nulls → disclosed SKIP/UNVERIFIED, never throws). Failures
+    // here must not sink the response — the dossier without an audit annex
+    // beats no dossier at all.
+    let valuationAudit: ReturnType<typeof auditValuation> | null = null;
+    let baselineReconciliation: ReturnType<typeof buildBaselineReconciliation> | null = null;
+    let dataConfidence: ReturnType<typeof assessDataConfidence> | null = null;
+    try {
+      const cf: any = (dcf as any)?.canonicalForecast ?? null;
+      valuationAudit = auditValuation({
+        ticker: symbol,
+        dcf: dcf as never,
+        stockData: stockData as never,
+        annualFinancials: annualFinancials as never,
+        peers: (peers as never[]) || [],
+      });
+      baselineReconciliation = buildBaselineReconciliation({
+        annualFinancials: annualFinancials as never,
+        modelGrowth: Array.isArray(cf?.revenueGrowthRates) && cf.revenueGrowthRates.length > 0
+          ? cf.revenueGrowthRates
+          : Array.isArray((dcf.assumptions as any)?.revenueGrowthRates) ? (dcf.assumptions as any).revenueGrowthRates : [],
+        modelMargins: Array.isArray(cf?.ebitMargins) && cf.ebitMargins.length > 0
+          ? cf.ebitMargins
+          : Array.isArray((dcf.assumptions as any)?.ebitMargins) ? (dcf.assumptions as any).ebitMargins : [],
+        modelCapexPct: typeof cf?.avgCapexPct === "number" ? cf.avgCapexPct
+          : typeof (dcf as any)?.avgCapexPct === "number" ? (dcf as any).avgCapexPct : null,
+        modelTaxRate: typeof cf?.assumptions?.marginalTaxRate === "number" ? cf.assumptions.marginalTaxRate
+          : typeof (dcf.assumptions as any)?.marginalTaxRate === "number" ? (dcf.assumptions as any).marginalTaxRate : null,
+        modelPayout: typeof cf?.assumptions?.dividendPayout === "number" ? cf.assumptions.dividendPayout : null,
+        modelNetDebt: typeof (dcf as any)?.netDebt === "number" ? (dcf as any).netDebt : null,
+        modelFairValue: typeof (dcf as any)?.fairValuePerShare === "number" && (dcf as any).fairValuePerShare > 0
+          ? (dcf as any).fairValuePerShare
+          : typeof (dcf as any)?.intrinsicValue === "number" && (dcf as any).intrinsicValue > 0 ? (dcf as any).intrinsicValue : null,
+        stockData: stockData as never,
+      });
+      dataConfidence = assessDataConfidence({
+        stockData: stockData as never,
+        annualFinancials: annualFinancials as never,
+        dcf: dcf as never,
+        aiOverridesUsed: !!aiDcfOverrides || (supervision?.source === "ai-supervisor" && (supervision?.adjustments?.some((a) => a.applied) ?? false)),
+      });
+    } catch (e) {
+      console.warn("[company] Audit annex build failed (non-blocking):", e instanceof Error ? e.message : e);
+    }
+
     return NextResponse.json({
       pipeline: lifecycle.history_(),
       profile: companyProfile,
@@ -509,6 +558,13 @@ export async function GET(request: NextRequest) {
       identityIssues,
       dependencyState: depState,
       independentReport,
+      // Audit annex: first-class valuation audit (₹/share bridge, WACC,
+      // terminal concentration, cross-method disagreement), model-vs-baseline
+      // reconciliation, and data-confidence tiers. Renderers treat absence
+      // as "not computed" — never as failure.
+      valuationAudit,
+      baselineReconciliation,
+      dataConfidence,
     });
   } catch (error) {
     console.error("Company data fetch error:", error);

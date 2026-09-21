@@ -1186,6 +1186,12 @@ export interface ReportData {
   supervision?: FinancialSupervisionSummary | null;
   selectedModel?: string | null;
   valuationLens?: string | null;
+  /** First-class valuation audit (bridge, WACC, terminal, disagreement). */
+  valuationAudit?: import("@/lib/valuation-audit").ValuationAuditReport | null;
+  /** Model-vs-baseline reconciliation (history + Street + guidance slot). */
+  baselineReconciliation?: import("@/lib/guidance-reconciliation").BaselineReconciliation | null;
+  /** Claim-level data-confidence tiers + grade. */
+  dataConfidence?: import("@/lib/data-confidence").DataConfidenceReport | null;
   shareholding: ShareholdingData;
   peers: PeerData[];
   aiAnalysis: AIAnalysis;
