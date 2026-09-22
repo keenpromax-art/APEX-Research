@@ -22,6 +22,7 @@ import type {
 import { parseLlmJson } from "./llm";
 import { executeForecast } from "./forecast-engine";
 import { executeValuation } from "./valuation-engine";
+import { buildHistoricalAnalysisPack } from "./historical-analysis";
 
 export type ScenarioTransport = (opts: {
   system: string;
@@ -56,7 +57,7 @@ Respond with ONLY JSON:
 }
 Note: values are in the same units as the model variables (growth rates as decimals, 0.08 = 8%).`;
 
-/** Compact SCENARIO_CONTEXT: model variables + base anchors only. */
+/** Rich SCENARIO_CONTEXT with historical derived + model variables/formulas/base assumptions. */
 export function scenarioContext(
   pack: FactPack,
   understanding: CompanyUnderstanding,
@@ -65,19 +66,27 @@ export function scenarioContext(
   const price = pack.market.facts.find((f: Fact) => f.metric === "currentPrice")?.value;
   const currency = pack.market.facts.find((f: Fact) => f.metric === "currentPrice")?.currency || "";
   const inputs = modelSpec.variables.filter((v) => v.kind === "input");
+  let derivedBlock = "";
+  try { derivedBlock = buildHistoricalAnalysisPack(pack).summaryLines.slice(0, 25).join("\n"); } catch { derivedBlock = "(derived unavailable)"; }
   return [
     `COMPANY: ${understanding.companyName} (${pack.ticker})`,
     `Primary economic abstraction: ${understanding.primaryEconomicAbstraction}`,
+    `How it makes money: ${String(understanding.howItMakesMoney).slice(0, 400)}`,
     price !== undefined ? `CURRENT PRICE: ${price} ${currency}` : "CURRENT PRICE: Not available from yfinance",
     "",
+    "HISTORICAL DERIVED:",
+    derivedBlock,
+    "",
     "FORECAST MODEL VARIABLES (inputs the scenarios may change):",
-    ...inputs.map((v) => `- ${v.name} (${v.label}, unit: ${v.unit}, base: ${v.baseValue ?? "N/A"})`),
+    ...inputs.map((v) => `- ${v.name} (${v.label}, unit: ${v.unit}, base: ${v.baseValue ?? "N/A"}, kind: ${v.kind})`),
     "",
     "MODEL FORMULAS:",
-    ...modelSpec.formulas.map((f) => `- [${f.id}] ${f.equation}`),
+    ...modelSpec.formulas.map((f) => `- [${f.id}] ${f.equation} — vars: ${f.variables.join(", ")} — ${f.explanation.slice(0, 100)}`),
     "",
     "BASE ASSUMPTIONS (anchor values):",
-    ...modelSpec.assumptions.map((a) => `- ${a.variable}: ${a.value} ${a.unit} — ${a.assumption}`),
+    ...modelSpec.assumptions.map((a) => `- ${a.variable}: ${a.value} ${a.unit} — ${a.assumption} | ${a.historicalEvidence.slice(0, 100)}`),
+    "",
+    "KEY KPIS: " + understanding.keyKpis.map((k) => k.name).join(", ") + " | Avoid: " + understanding.metricsToAvoid.map((m) => m.metric).join(", "),
   ].join("\n");
 }
 

@@ -152,6 +152,14 @@ function mockTransport(kind: "bank" | "ads" | "auto") {
   return async ({ system }: { system: string; user: string }) => {
     const s = system.toLowerCase();
     // Order matters: specific stage markers first, generic understanding last.
+    if (s.includes("research plan")) return JSON.stringify({
+      questions: [{ question: `Mock question for ${kind}`, why: "mock", requiredFor: "model", yfinanceAvailable: false, evidenceNeeded: "mock filing" }],
+      unknowns: ["mock unknown"], requiredResearch: ["mock report"], epistemicSummary: `KNOWN: ${kind} facts | INFERRED: mock | UNKNOWN: mock`,
+    });
+    if (s.includes("most important debates") || s.includes("thesis engine")) return JSON.stringify({
+      debates: [{ debate: `Mock debate for ${kind}`, evidenceFor: [{ evidence: "mock for", factIds: ["[F-totalRevenue]"], tier: 4 }], evidenceAgainst: [{ evidence: "mock against", factIds: [], tier: 6 }], mechanism: "mock", significance: "mock" }],
+      centralDebateIndex: 0, thesis: `Mock ${kind} debate thesis`, thesisEvidence: ["mock evidence [F-totalRevenue]"], thesisCounterEvidence: ["mock counter"], keyUncertainty: "mock uncertainty", invalidationCondition: "mock invalidation", monitoringKpi: "Revenue", confidence: 0.8,
+    });
     if (s.includes("valuation specialist")) return valuationJson(kind);
     if (s.includes("three scenarios")) return JSON.stringify({
       scenarios: [
@@ -162,7 +170,7 @@ function mockTransport(kind: "bank" | "ads" | "auto") {
       generationRationale: "mock", scenarioDriverSummary: "mock",
     });
     if (s.includes("financial modeling agent")) return modelJson(kind);
-    if (s.includes("qualitative research narrative") || s.includes("investment thesis")) return JSON.stringify({
+    if (s.includes("qualitative research narrative") || s.includes("investment thesis") || s.includes("writer role")) return JSON.stringify({
       thesis: { thesis: `Mock ${kind} thesis`, bullCase: [], bearCase: [], keyDebate: "", keyInflectionPoints: [], whatMarketMayBeMissing: "", whatCouldInvalidate: [] },
       catalysts: [], risks: [{ risk: "mock risk", mechanism: "mock mechanism for this company", affectedKpi: "revenue", financialConsequence: "mock", valuationConsequence: "mock", monitoringIndicator: "mock" }],
       competitiveAnalysis: { competitors: [], insufficient: true },

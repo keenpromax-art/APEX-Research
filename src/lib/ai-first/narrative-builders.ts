@@ -19,6 +19,8 @@ import type {
   MoatAnalysis,
 } from "./types";
 import { parseLlmJson } from "./llm";
+import { buildAnalystBrief, renderAnalystBrief } from "./analyst-brief";
+import { buildHistoricalAnalysisPack, renderHistoricalAnalysisPack } from "./historical-analysis";
 
 export type NarrativeTransport = (opts: {
   system: string;
@@ -28,14 +30,20 @@ export type NarrativeTransport = (opts: {
   jsonMode?: boolean;
 }) => Promise<string>;
 
-const SYSTEM_PROMPT = `You are an institutional equity research analyst. Generate the qualitative research narrative for this company: investment thesis, catalysts, risks, competitive analysis, and moat.
+const SYSTEM_PROMPT = `You are an institutional equity research analyst (Writer role). You receive the canonical Analyst Brief — company identity, economic engine, DERIVED historical trajectory (CAGR, margins, ROE, FCF, leverage — not raw rows), forecast assumptions, valuation, scenarios, contradictions, missing information, and the full [F-...] evidence table.
+
+RESEARCHER→WRITER: Before writing, think as Researcher:
+What do we know? What don't we know? What changed? What matters? What contradicts? What is unusual? What is the key debate? What evidence supports vs challenges the thesis?
 
 RULES:
-- Every quantitative statement must cite a yfinance fact ID [F-...] or an AI model output.
-- Risks must be company-specific with mechanism → affected KPI → financial consequence → valuation consequence → monitoring indicator. Not generic "competition" or "macro risk" unless you explain why those matter HERE.
-- Catalysts: for each, establish the chain: catalyst → business mechanism → financial variable → forecast impact → valuation impact. If you cannot establish a quantitative chain, set "quantitative": false (QUALITATIVE ONLY). Do NOT invent percentage valuation impacts.
-- Competitive analysis: you determine relevant competitors from the business model. If appropriate peers cannot be identified, set "insufficient": true. Explain overlap, economic similarity, key difference, strengths, weaknesses.
-- Moat: you determine the competitive advantage sources from the company — cost advantage, brand, network effects, switching costs, distribution, scale, technology, regulatory position, IP, data, customer relationships — selecting only what applies. Do NOT force five pillars.
+- Thesis is DEBATE-DRIVEN: identify 1 central debate, build thesis around it, state what would prove you WRONG + monitoring KPI (do NOT just list bull/bear).
+- Every quantitative statement must cite a yfinance fact ID [F-...] or an AI model output (assumption/forecast/valuation). Tier6 inference alone = low confidence — never present as fact.
+- Evidence-constrained output: if you cannot support a catalyst/risk/competitor/moat pillar with evidence, OMIT it (do NOT force 3 catalysts / 5 risks / 5 moat pillars / 3 competitors). If generic, say insufficient evidence.
+- Risks: mechanism → affected KPI → financial consequence → valuation consequence → monitoring indicator. Not generic "competition" unless company-specific.
+- Catalysts: catalyst → business mechanism → financial variable → forecast impact → valuation impact. If no quantitative chain, set "quantitative": false (QUALITATIVE ONLY). Do NOT invent % impacts.
+- Competitive analysis: you determine peers from business model. If insufficient evidence, set "insufficient": true. Explain overlap/economic similarity/key difference.
+- Moat: select ONLY what applies from cost/brand/network/switching/distribution/scale/tech/regulatory/IP/data/relationships. Do NOT force pillars; if no moat, say so.
+- Thesis must include counter-thesis and contradiction handling.
 
 Respond with ONLY JSON:
 {
@@ -60,11 +68,22 @@ export function narrativeContext(
   understanding: CompanyUnderstanding,
   modelSpec: ForecastSpecification
 ): string {
+  // Prefer canonical AnalystBrief — falls back to legacy compact if brief unavailable
+  try {
+    const brief = buildAnalystBrief({ pack, understanding, forecastSpec: modelSpec });
+    return renderAnalystBrief(brief);
+  } catch {}
   const clip = (s: string, n: number) => (s.length > n ? s.slice(0, n) + "…" : s);
-  const incomeAnchors = pack.incomeStatement.facts
-    .filter((f) => f.value !== undefined)
-    .slice(0, 12)
-    .map((f) => `- [F-${f.metric}] (${f.period}): ${f.value}`);
+  // Full evidence packet: income + balance + cash + market anchors + derived metrics
+  const allAnchors = [
+    ...pack.incomeStatement.facts,
+    ...pack.balanceSheet.facts,
+    ...pack.cashFlow.facts,
+  ].filter((f) => f.value !== undefined).slice(0, 40).map((f) => `- [F-${f.metric}] (${f.period}): ${f.value}`);
+  let derived = "";
+  try {
+    derived = renderHistoricalAnalysisPack(buildHistoricalAnalysisPack(pack));
+  } catch { derived = "(derived metrics unavailable)"; }
   return [
     `COMPANY: ${understanding.companyName} (${pack.ticker})`,
     `What it does: ${clip(understanding.whatItDoes, 700)}`,
@@ -74,6 +93,10 @@ export function narrativeContext(
     "",
     "REVENUE DRIVERS:",
     ...understanding.revenueDrivers.map((d) => `- ${d.name}: ${d.mechanism}`),
+    "COST DRIVERS:",
+    ...understanding.costDrivers.map((d) => `- ${d.name}: ${d.mechanism}`),
+    "MARGIN DRIVERS:",
+    ...understanding.marginDrivers.map((d) => `- ${d.name}: ${d.mechanism}`),
     "",
     "KEY KPIS:",
     ...understanding.keyKpis.map((k) => `- ${k.name} (${k.availability}): ${k.rationale}`),
@@ -81,11 +104,15 @@ export function narrativeContext(
     "METRICS TO AVOID (determined by the understanding stage):",
     ...understanding.metricsToAvoid.map((m) => `- ${m.metric} — ${m.reason}`),
     "",
-    "FORECAST ASSUMPTIONS (AI model outputs):",
-    ...modelSpec.assumptions.map((a) => `- ${a.variable}: ${a.value} ${a.unit} — ${a.assumption}`),
+    "FORECAST ASSUMPTIONS (AI model outputs — with historicalEvidence):",
+    ...modelSpec.assumptions.map((a) => `- ${a.variable}: ${a.value} ${a.unit} [${a.period}] — ${a.assumption} | evidence: ${a.historicalEvidence.slice(0, 120)} | conf ${a.confidence}`),
+    `FORMULAS: ${modelSpec.formulas.map((f) => `[${f.id}] ${f.equation}`).join(" | ")}`,
     "",
-    "HISTORICAL FACT ANCHORS (yfinance):",
-    ...incomeAnchors,
+    "HISTORICAL DERIVED (deterministic from yfinance):",
+    derived,
+    "",
+    "HISTORICAL FACT ANCHORS (yfinance, up to 40 facts):",
+    ...allAnchors,
   ].join("\n");
 }
 

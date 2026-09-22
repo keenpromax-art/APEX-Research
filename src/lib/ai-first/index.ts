@@ -406,7 +406,7 @@ export {
   currentPriceOf,
 } from "./reverse-valuation";
 
-// Quality review — 8 AI reviewers + adjudicator self-correction loop
+// Quality review — 8 AI reviewers + adjudicator + Research Judge (adversarial) self-correction loop
 // (src/lib/ai-first/quality-review.ts)
 export { runQualityReview, adjudicateRegeneration } from "./quality-review";
 
@@ -414,7 +414,27 @@ export { runQualityReview, adjudicateRegeneration } from "./quality-review";
 // (src/lib/ai-first/research-report.ts)
 export { assembleResearchReport, renderReportSummary } from "./research-report";
 
-// Orchestration pipeline — ONE dynamic AI pipeline (no sector gates)
+// Historical analysis pack — deterministic derived metrics (CAGR, margins, ROE, FCF)
+// (src/lib/ai-first/historical-analysis.ts)
+export { buildHistoricalAnalysisPack, renderHistoricalAnalysisPack } from "./historical-analysis";
+
+// Analyst brief — canonical evidence packet (single source of truth)
+// (src/lib/ai-first/analyst-brief.ts)
+export { buildAnalystBrief, renderAnalystBrief } from "./analyst-brief";
+
+// Research planner — what don't we know? required research gaps
+// (src/lib/ai-first/research-planner.ts)
+export { buildResearchPlan, mechanicalResearchPlan, researchPlannerContext } from "./research-planner";
+
+// Debate engine — thesis from debates (evidence → mechanism → debate → conclusion)
+// (src/lib/ai-first/debate-engine.ts)
+export { buildDebates, mechanicalDebates, debateContext } from "./debate-engine";
+
+// Evidence graph + source hierarchy — claim → evidence tier validation
+// (src/lib/ai-first/evidence-graph.ts)
+export { buildEvidenceTableFromPack, validateClaimTiers, renderEvidenceGraph } from "./evidence-graph";
+
+// Orchestration pipeline — ONE dynamic AI pipeline (no sector gates) with AnalystBrief + debate layer
 // (src/lib/ai-first/pipeline.ts)
 export { runAiFirstResearch, makeProviderTransport } from "./pipeline";
 export type { PipelineTransport, AiFirstProgress, RunAiFirstOptions, AiFirstRunResult } from "./pipeline";

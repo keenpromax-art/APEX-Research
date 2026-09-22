@@ -258,12 +258,100 @@ const valuationAnalyzer = (report: ResearchReport): ReviewFinding[] => {
   return findings;
 };
 
-/** Reviewer 4: Industry analyst — checks industry-specific terminology, competitive consistency */
+/** Reviewer 4: Industry analyst — semantic company-identity + emergency contamination net */
 const industryAnalyzer = (report: ResearchReport, pack: FactPack): ReviewFinding[] => {
   const findings: ReviewFinding[] = [];
-  const { thesis, risks, moat, competitiveAnalysis } = report;
+  const { thesis, risks, moat, competitiveAnalysis, companyUnderstanding, forecast, valuation } = report;
 
-  // Check for cross-sector contamination
+  // SEMANTIC QA (audit §22): does thesis use the company's actual economic drivers?
+  const abstraction = (companyUnderstanding?.primaryEconomicAbstraction || "").toLowerCase();
+  const thesisLower = thesis.thesis.toLowerCase();
+  const driverNames = [
+    ...(companyUnderstanding?.revenueDrivers || []).map((d) => d.name.toLowerCase()),
+    ...(companyUnderstanding?.costDrivers || []).map((d) => d.name.toLowerCase()),
+    ...(companyUnderstanding?.marginDrivers || []).map((d) => d.name.toLowerCase()),
+  ].filter(Boolean);
+  const kpiNames = (companyUnderstanding?.keyKpis || []).map((k) => k.name.toLowerCase());
+  const thesisUsesEconomics = !abstraction || thesisLower.includes(abstraction) || driverNames.some((d) => thesisLower.includes(d));
+  if (!thesisUsesEconomics && thesis.thesis.length > 30) {
+    findings.push({
+      reviewer: "Industry Analyst",
+      severity: "major",
+      component: "thesis",
+      finding: `Thesis does not use the company's actual economic drivers/abstraction ("${abstraction || "missing"}") — appears generic. Drivers: ${driverNames.slice(0, 3).join(", ") || "none"}`,
+      recommendation: "Regenerate thesis grounded in the company's primary abstraction and driver mechanism, citing [F-...] or model outputs",
+    });
+  }
+
+  // Check that risks map to an identified KPI/driver
+  for (const r of risks) {
+    const kpi = (r.affectedKpi || "").toLowerCase();
+    const matchesKpi = !kpi || kpiNames.some((k) => kpi.includes(k) || k.includes(kpi)) || driverNames.some((d) => kpi.includes(d));
+    if (!matchesKpi && kpi) {
+      findings.push({
+        reviewer: "Industry Analyst",
+        severity: "major",
+        component: "risks",
+        finding: `Risk [${r.risk}] affected KPI "${r.affectedKpi}" does not match any identified KPI/driver for this company (${kpiNames.slice(0, 4).join(", ") || "none"})`,
+        recommendation: "Align risk's affectedKPI to the company's actual KPI set or regenerate with company-specific mechanism",
+      });
+    }
+    // Catalyst ↔ forecast variable link
+    // (checked below for catalysts)
+  }
+
+  // Catalyst → financialVariable must be a model variable when forecast exists
+  const modelVars = new Set([
+    ...((report.operatingModel?.variables || []).map((v: any) => String(v.name).toLowerCase())),
+    ...Object.keys((forecast as any)?.identityChecks ? {} : {}),
+  ]);
+  // also check thesis vs forecast linkage: if thesis mentions valuation driver not in model, flag
+  if (forecast?.incomeStatement?.[0]?.values) {
+    const forecastKeys = Object.keys(forecast.incomeStatement[0].values).map((k) => k.toLowerCase());
+    for (const c of report.catalysts || []) {
+      const fv = (c.financialVariable || "").toLowerCase();
+      if (fv && fv !== "n/a" && !forecastKeys.includes(fv) && !modelVars.has(fv) && !kpiNames.includes(fv)) {
+        findings.push({
+          reviewer: "Industry Analyst",
+          severity: "minor",
+          component: "catalysts",
+          finding: `Catalyst [${c.catalyst}] financialVariable "${c.financialVariable}" does not map to any forecast variable/KPI for this company`,
+          recommendation: "Map catalyst to the model's actual variable or mark quantitative=false",
+        });
+      }
+    }
+  }
+
+  // Moat evidence check
+  if (moat?.hasMoat && moat.sources?.length) {
+    for (const s of moat.sources) {
+      if (!s.evidence || s.evidence.length < 15) {
+        findings.push({
+          reviewer: "Industry Analyst",
+          severity: "major",
+          component: "moat",
+          finding: `Moat source "${s.source}" has weak/missing evidence — moat must be defended with [F-...] or model output`,
+          recommendation: "Regenerate moat with evidence-constrained sources only; if insufficient, set hasMoat=false",
+        });
+        break;
+      }
+    }
+  }
+  // Competitive overlap check
+  for (const comp of competitiveAnalysis?.competitors || []) {
+    if (!comp.businessOverlap || comp.businessOverlap.length < 15) {
+      findings.push({
+        reviewer: "Industry Analyst",
+        severity: "major",
+        component: "competitiveAnalysis",
+        finding: `Competitor "${comp.company}" lacks meaningful businessOverlap explanation — not evidence-constrained`,
+        recommendation: "Remove tenuous peer or add overlap/economic similarity grounded in business model",
+      });
+      break;
+    }
+  }
+
+  // Emergency hardcoded contamination net (retained as safety, not primary intelligence)
   const forbiddenInThesis = thesis.thesis.toLowerCase();
   const forbiddenConcepts = [
     "search index",
@@ -282,7 +370,7 @@ const industryAnalyzer = (report: ResearchReport, pack: FactPack): ReviewFinding
         reviewer: "Industry Analyst",
         severity: "blocker",
         component: "thesis",
-        finding: `Cross-sector contamination: thesis mentions "${concept}" — not appropriate for this company`,
+        finding: `Cross-sector contamination (emergency net): thesis mentions "${concept}" — not appropriate for this company`,
         recommendation: "Regenerate thesis from company-specific facts only",
       });
       // Only flag first occurrence
@@ -324,10 +412,100 @@ const industryAnalyzer = (report: ResearchReport, pack: FactPack): ReviewFinding
   return findings;
 };
 
-/** Reviewer 5: Skeptical analyst — challenges assumptions, looks for unsupported claims */
+/** Reviewer 5: Skeptical analyst — adversarial: try to prove report wrong (audit §25) */
 const skepticalAnalyzer = (report: ResearchReport): ReviewFinding[] => {
   const findings: ReviewFinding[] = [];
-  const { thesis, risks, catalysts, moat, competitiveAnalysis } = report;
+  const { thesis, risks, catalysts, moat, competitiveAnalysis, companyUnderstanding, valuation, forecast } = report;
+
+  // Adversarial: what is the weakest assumption? which valuation input does most work?
+  if (valuation?.executedFrom) {
+    const disc = valuation.executedFrom.discountRate;
+    const tg = valuation.executedFrom.terminalAssumptions?.growth;
+    if (disc !== undefined && tg !== undefined) {
+      if (disc - tg < 0.02) {
+        findings.push({
+          reviewer: "Skeptical Analyst",
+          severity: "major",
+          component: "valuation",
+          finding: `Valuation spread ke - g = ${((disc - tg) * 100).toFixed(1)}% is very tight — terminal value dominates fair value (doing most work)`,
+          recommendation: "Widen spread or stress-test terminal growth; regenerate valuation with justified terminal assumption citing [F-...]",
+        });
+      }
+      if (disc !== undefined && (disc < 0.06 || disc > 0.18)) {
+        findings.push({
+          reviewer: "Skeptical Analyst",
+          severity: "major",
+          component: "valuation",
+          finding: `Discount rate ${disc} outside 6-18% — check against market risk and company leverage`,
+          recommendation: "Justify discount rate with CAPM/leverage evidence or regenerate",
+        });
+      }
+    }
+    // weakest assumption heuristic: lowest confidence assumption
+    const weakest = [...(valuation.executedFrom.assumptions || [])].sort((a, b) => (a.confidence ?? 0.7) - (b.confidence ?? 0.7))[0];
+    if (weakest && (weakest.confidence ?? 0.7) < 0.4) {
+      findings.push({
+        reviewer: "Skeptical Analyst",
+        severity: "major",
+        component: "valuation",
+        finding: `Weakest valuation assumption "${weakest.variable}" confidence ${(weakest.confidence ?? 0).toFixed(2)} — valuation is heavily dependent on low-evidence input`,
+        recommendation: "Add historical evidence [F-...] or mark as key uncertainty with monitoring KPI",
+      });
+    }
+  }
+
+  // What fact contradicts the thesis? — check thesis vs contradictions
+  // If thesis is bullish but forecast shows flat/declining revenue, flag
+  if (forecast?.incomeStatement?.length >= 2) {
+    const last = forecast.incomeStatement[forecast.incomeStatement.length - 1]?.values?.revenue;
+    const first = forecast.incomeStatement[0]?.values?.revenue;
+    if (last !== undefined && first !== undefined && last < first && /growth|expand|bull/i.test(thesis.thesis)) {
+      findings.push({
+        reviewer: "Skeptical Analyst",
+        severity: "major",
+        component: "thesis",
+        finding: "Thesis is growth/bullish yet deterministic forecast shows declining revenue — contradiction",
+        recommendation: "Reconcile thesis with forecast trajectory or regenerate one of them",
+      });
+    }
+  }
+
+  // Which sentence sounds generic?
+  const genericPhrases = ["strong fundamentals", "well positioned", "poised for growth", "robust outlook"];
+  for (const phrase of genericPhrases) {
+    if (thesis.thesis.toLowerCase().includes(phrase)) {
+      findings.push({
+        reviewer: "Skeptical Analyst",
+        severity: "major",
+        component: "thesis",
+        finding: `Thesis contains generic phrase "${phrase}" without company-specific mechanism`,
+        recommendation: "Replace with evidence-constrained mechanism citing [F-...] or driver",
+      });
+      break;
+    }
+  }
+
+  // What would cause valuation to fall 30%? — flag missing downside
+  if (!thesis.bearCase?.length || thesis.bearCase.every((s) => s.length < 15)) {
+    findings.push({
+      reviewer: "Skeptical Analyst",
+      severity: "major",
+      component: "thesis",
+      finding: "Bear case is missing or generic — report cannot defend downside (what falls 30%?)",
+      recommendation: "Generate bear case grounded in an identified KPI/driver failure with monitoring indicator",
+    });
+  }
+
+  // Thesis must contain invalidation condition / whatCouldInvalidate
+  if (!thesis.whatCouldInvalidate?.length || thesis.whatCouldInvalidate.some((s) => s.length < 10)) {
+    findings.push({
+      reviewer: "Skeptical Analyst",
+      severity: "major",
+      component: "thesis",
+      finding: "Thesis lacks falsifiable invalidation condition — not institutional quality",
+      recommendation: "Add 'what would prove thesis wrong' with observable KPI/monitoring indicator",
+    });
+  }
 
   // Check thesis for unsupported quantitative claims
   const thesisLower = thesis.thesis.toLowerCase();
@@ -385,10 +563,47 @@ const skepticalAnalyzer = (report: ResearchReport): ReviewFinding[] => {
   return findings;
 };
 
-/** Reviewer 6: Fact checker — verifies all quantitative statements trace to yfinance or model output */
+/** Reviewer 6: Fact checker — verifies all quantitative statements trace to yfinance or model output + tier hierarchy (audit §17, §21) */
 const factChecker = (report: ResearchReport, pack: FactPack): ReviewFinding[] => {
   const findings: ReviewFinding[] = [];
-  const { thesis, risks, catalysts, forecast, valuation } = report;
+  const { thesis, risks, catalysts, forecast, valuation, companyUnderstanding } = report;
+
+  // Source hierarchy: flag Tier6 inference presented as filing fact
+  const allText = [thesis.thesis, ...risks.map((r) => r.mechanism), ...catalysts.map((c) => c.mechanism)].join(" ").toLowerCase();
+  const inferenceAsFactPhrases = ["as reported in the filing", "per the annual report", "management guided"];
+  for (const phrase of inferenceAsFactPhrases) {
+    if (allText.includes(phrase)) {
+      // yfinance cannot supply filings/calls — if pack has no filing facts, this is likely Tier6 masquerading
+      const hasFilingFact = pack.company.facts.some((f) => f.source !== "yfinance");
+      if (!hasFilingFact) {
+        findings.push({
+          reviewer: "Fact Checker",
+          severity: "major",
+          component: "thesis",
+          finding: `Phrase "${phrase}" implies Tier1/Tier2 filing evidence, but no filing source exists in fact pack — likely Tier6 inference presented as fact`,
+          recommendation: "Remove filing-like phrasing or downgrade to 'AI-inferred' with low confidence and required research note",
+        });
+        break;
+      }
+    }
+  }
+
+  // Quantitative claims must have [F-...] or model provenance
+  const factIdsPresent = new Set([
+    ...pack.incomeStatement.facts.map((f) => `[F-${f.metric}]`.toLowerCase()),
+    ...pack.balanceSheet.facts.map((f) => `[F-${f.metric}]`.toLowerCase()),
+    ...pack.market.facts.map((f) => `[F-${f.metric}]`.toLowerCase()),
+  ]);
+  const hasFactCitation = (s: string) => /\[F-[^\]]+\]/i.test(s) || /forecast|model output|assumption/i.test(s);
+  if (thesis.thesis.length > 40 && /\d+(?:\.\d+)?\s*%/.test(thesis.thesis) && !hasFactCitation(thesis.thesis)) {
+    findings.push({
+      reviewer: "Fact Checker",
+      severity: "major",
+      component: "thesis",
+      finding: "Thesis contains percentage quantitative claim without [F-...] citation or model-output provenance",
+      recommendation: "Add fact citation or link to AI model assumption with historicalEvidence",
+    });
+  }
 
   // Check that fair value has traceable inputs
   if (valuation?.fairValuePerShare !== undefined) {
@@ -487,6 +702,36 @@ const reportEditor = (report: ResearchReport): ReviewFinding[] => {
   return findings;
 };
 
+/** Research Judge — sentence-level evidence audit (audit §23): pretend you are receiving report for first time, identify every statement you could not defend */
+const researchJudge = (report: ResearchReport, pack: FactPack): ReviewFinding[] => {
+  const findings: ReviewFinding[] = [];
+  const sentences = report.thesis.thesis.split(/(?<=[.!?])\s+/).filter((s) => s.trim().length > 15);
+  const packText = [
+    ...pack.company.facts.map((f) => f.textValue || ""),
+    ...pack.incomeStatement.facts.map((f) => f.metric),
+    pack.ticker,
+    (report.companyUnderstanding?.primaryEconomicAbstraction || ""),
+  ].join(" ").toLowerCase();
+  // Very generic sentence that could apply to any company — not defensible for THIS company
+  const companySpecific = (s: string) =>
+    packText.split(/\s+/).some((tok) => tok.length > 4 && s.toLowerCase().includes(tok)) ||
+    /\[F-[^\]]+\]/i.test(s) ||
+    (report.companyUnderstanding?.keyKpis || []).some((k) => s.toLowerCase().includes(k.name.toLowerCase()));
+  for (const sent of sentences.slice(0, 8)) {
+    if (!companySpecific(sent) && sent.length > 60 && !/insufficient evidence|pending|not available/i.test(sent)) {
+      findings.push({
+        reviewer: "Research Judge",
+        severity: "major",
+        component: "thesis",
+        finding: `Sentence not defensible from supplied evidence: "${sent.slice(0, 90)}..." — no company-specific [F-...]/KPI/driver link`,
+        recommendation: "Regenerate sentence evidence-constrained: cite [F-...] or model output, or mark as qualitative with low confidence",
+      });
+      break; // one per report to avoid flood
+    }
+  }
+  return findings;
+};
+
 /** Reviewer 8: Final institutional research reviewer — overall quality and adherence to principles */
 const finalReviewer = (report: ResearchReport, planDocRef: any): ReviewFinding[] => {
   const findings: ReviewFinding[] = [];
@@ -562,6 +807,7 @@ export function runQualityReview(
     { name: "Skeptical Analyst", fn: (r: ResearchReport) => skepticalAnalyzer(r) },
     { name: "Fact Checker", fn: (r: ResearchReport) => factChecker(r, pack) },
     { name: "Report Editor", fn: (r: ResearchReport) => reportEditor(r) },
+    { name: "Research Judge", fn: (r: ResearchReport) => researchJudge(r, pack) },
     { name: "Final Institutional Research Reviewer", fn: (r: ResearchReport) => finalReviewer(r, undefined) },
   ];
 

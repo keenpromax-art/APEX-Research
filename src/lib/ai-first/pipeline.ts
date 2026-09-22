@@ -24,6 +24,10 @@
  */
 
 import { buildFactPack } from "./fact-pack";
+import { buildHistoricalAnalysisPack, renderHistoricalAnalysisPack } from "./historical-analysis";
+import { buildAnalystBrief, renderAnalystBrief } from "./analyst-brief";
+import { buildResearchPlan, mechanicalResearchPlan } from "./research-planner";
+import { buildDebates, mechanicalDebates } from "./debate-engine";
 import { understandCompany } from "./company-understanding";
 import { buildModelSpec } from "./model-builder";
 import { executeForecast } from "./forecast-engine";
@@ -347,23 +351,28 @@ function fmtMoney(v: number | undefined): string {
 }
 
 function buildHistoricalAnalysis(pack: FactPack): string {
-  const revs = revenueSeries(pack);
-  const last = revs[revs.length - 1];
-  const cagr = revs.length >= 2 ? historicalCagr(revs) : null;
-  const price = pack.market.facts.find((f) => f.metric === "currentPrice");
-  const cap = pack.market.facts.find((f) => f.metric === "marketCap");
-  return [
-    `Historical analysis grounded in yfinance facts for ${pack.ticker}.`,
-    last !== undefined
-      ? `Latest reported revenue: ${fmtMoney(last)} (${revs.length} annual observations).`
-      : `Revenue history: Not available from yfinance.`,
-    cagr !== null
-      ? `Historical revenue CAGR: ${(cagr * 100).toFixed(1)}% (computed deterministically from yfinance history).`
-      : `Historical CAGR cannot be computed (insufficient yfinance history).`,
-    price?.value !== undefined
-      ? `Current price: ${price.value} ${price.currency ?? ""}; market cap: ${fmtMoney(cap?.value)}.`
-      : `Market price: Not available from yfinance.`,
-  ].join(" ");
+  try {
+    const hist = buildHistoricalAnalysisPack(pack);
+    return renderHistoricalAnalysisPack(hist);
+  } catch {
+    const revs = revenueSeries(pack);
+    const last = revs[revs.length - 1];
+    const cagr = revs.length >= 2 ? historicalCagr(revs) : null;
+    const price = pack.market.facts.find((f) => f.metric === "currentPrice");
+    const cap = pack.market.facts.find((f) => f.metric === "marketCap");
+    return [
+      `Historical analysis grounded in yfinance facts for ${pack.ticker}.`,
+      last !== undefined
+        ? `Latest reported revenue: ${fmtMoney(last)} (${revs.length} annual observations).`
+        : `Revenue history: Not available from yfinance.`,
+      cagr !== null
+        ? `Historical revenue CAGR: ${(cagr * 100).toFixed(1)}% (computed deterministically from yfinance history).`
+        : `Historical CAGR cannot be computed (insufficient yfinance history).`,
+      price?.value !== undefined
+        ? `Current price: ${price.value} ${price.currency ?? ""}; market cap: ${fmtMoney(cap?.value)}.`
+        : `Market price: Not available from yfinance.`,
+    ].join(" ");
+  }
 }
 
 // ─────────────────────────────────────────────
@@ -411,6 +420,19 @@ export async function runAiFirstResearch(
   const understanding: CompanyUnderstanding = aiUsed
     ? await understandCompany(transport!, factPack)
     : mechanicalUnderstanding(factPack);
+
+  // 3b. Research planner (what do we not know? what research is required?)
+  // Deterministic fallback keeps pipeline honest when no AI key.
+  let researchPlan: Awaited<ReturnType<typeof buildResearchPlan>> | ReturnType<typeof mechanicalResearchPlan> = mechanicalResearchPlan(factPack, understanding);
+  if (aiUsed) {
+    emit("research-plan", "Planning research gaps and required evidence");
+    try {
+      researchPlan = await buildResearchPlan(transport!, factPack, understanding);
+    } catch (e) {
+      console.warn("[ai-first] research planner failed, using mechanical plan:", e);
+      researchPlan = mechanicalResearchPlan(factPack, understanding);
+    }
+  }
 
   // 4. Model spec
   emit("model", "Building financial model specification");
@@ -480,12 +502,67 @@ export async function runAiFirstResearch(
     }
   }
 
-  // 9. Narratives
-  emit("narrative", "Writing thesis / risks / catalysts / moat");
+  // 8b. Canonical AnalystBrief — single source of truth for narrative/debate stages
+  // Built deterministically from all prior outputs; eliminates context drift.
+  emit("analyst-brief", "Assembling canonical Analyst Brief");
+  const analystBrief = buildAnalystBrief({
+    pack: factPack,
+    understanding,
+    forecastSpec,
+    forecast: forecastOut.forecast,
+    valuationSpec,
+    valuation,
+    scenarios: finalScenarios,
+  });
+  // Inject research-planner gaps into brief's missing info
+  try {
+    const rpUnknowns = (researchPlan as any)?.unknowns as string[] | undefined;
+    const rpRequired = (researchPlan as any)?.requiredResearch as string[] | undefined;
+    if (rpUnknowns?.length) analystBrief.missingInformation = [...new Set([...analystBrief.missingInformation, ...rpUnknowns])];
+    if (rpRequired?.length) analystBrief.contradictions = [...analystBrief.contradictions, `Required research per planner: ${rpRequired.slice(0, 3).join(", ")}`];
+  } catch {}
+
+  // 8c. Debate engine — thesis from debates (evidence → mechanism → debate → conclusion)
+  // AI chooses central debate; mechanical fallback is honest low-confidence preview.
+  let debateOutput: Awaited<ReturnType<typeof buildDebates>> | ReturnType<typeof mechanicalDebates> | null = null;
+  if (aiUsed) {
+    emit("debates", "Building debate-driven thesis");
+    try {
+      debateOutput = await buildDebates(transport!, analystBrief);
+      analystBrief.coreDebate = debateOutput.debates[debateOutput.centralDebateIndex]?.debate || debateOutput.thesis.slice(0, 200);
+    } catch (e) {
+      console.warn("[ai-first] debate engine failed, mechanical fallback:", e);
+      debateOutput = mechanicalDebates(analystBrief, factPack);
+    }
+  } else {
+    debateOutput = mechanicalDebates(analystBrief, factPack);
+  }
+
+  // 9. Narratives — now debate-informed and AnalystBrief-grounded (Writer receives Researcher memo)
+  emit("narrative", "Writing thesis / risks / catalysts / moat (debate-driven, evidence-constrained)");
   let narrative;
   if (aiUsed) {
     try {
+      // buildNarrative now renders the AnalystBrief internally (includes derived metrics, debates, contradictions)
+      // Pass the brief-aware path: buildNarrativeWithBrief if available, else buildNarrative
       narrative = await buildNarrative(transport!, factPack, understanding, forecastSpec);
+      // Override thesis with debate engine's central thesis when debate succeeded and narrative is generic
+      if (debateOutput && debateOutput.thesis && debateOutput.confidence > 0.5) {
+        const debateThesis = debateOutput.thesis;
+        // Only override if narrative thesis is weak/generic or debate is higher confidence
+        const isGenericNarrative = /mechanical preview|pending ai analysis/i.test(narrative.thesis.thesis) || narrative.thesis.thesis.length < 60;
+        if (isGenericNarrative || debateOutput.confidence > 0.7) {
+          narrative.thesis.thesis = debateThesis;
+          if (debateOutput.keyUncertainty) narrative.thesis.keyDebate = debateOutput.debates[debateOutput.centralDebateIndex]?.debate || debateOutput.keyUncertainty;
+          if (debateOutput.invalidationCondition) narrative.thesis.whatCouldInvalidate = [debateOutput.invalidationCondition, ...narrative.thesis.whatCouldInvalidate].slice(0, 5);
+          if (debateOutput.monitoringKpi) {
+            // inject monitoring KPI into first risk if missing
+            if (!narrative.risks.some((r) => r.monitoringIndicator.includes(debateOutput!.monitoringKpi))) {
+              narrative.risks = narrative.risks.map((r, i) => i === 0 ? { ...r, monitoringIndicator: `${r.monitoringIndicator} | Debate monitor: ${debateOutput!.monitoringKpi}` } : r);
+            }
+          }
+        }
+      }
     } catch (e) {
       console.warn("[ai-first] narrative generation failed, mechanical fallback:", e);
       narrative = mechanicalNarrative(factPack, valuation);

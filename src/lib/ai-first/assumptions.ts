@@ -86,54 +86,32 @@ Each assumption must be:
 2. Forward-looking but justified — explain the rationale based on historical evidence.
 3. Explicitly marked with: assumption (statement), variable name, value, unit, period, rationale (with fact citations), confidence (0..1).
 
-COVER THESE CATEGORIES (generate 8-12 assumptions total across these areas):
+COVER ONLY ECONOMICALLY REQUIRED CATEGORIES — GENERATE ONLY WHAT THE DISCOVERED MODEL NEEDS (NO MINIMUM COUNT):
 
-REVENUE ASSUMPTIONS:
-- Revenue growth CAGR or year-by-year growth rates
-- What historical trend drives the forecast (e.g., "5-year CAGR of X% based on revenue from FY20-FY24")
-- Any inflection points or structural changes
+- Generate an assumption ONLY if the discovered economic model has a variable that requires it.
+- There is NO minimum of 8-12. If the model needs 4 assumptions, output 4. If it needs 9, output 9.
+- Do NOT invent dividend/ROIC/working-capital/share-count assumptions to fill a quota when they are not economically relevant.
+- Every assumption must be GROUNDED in yfinance evidence and the model's own variables — do not pad with generic categories.
 
-COST ASSUMPTIONS:
-- Growth rates for primary cost drivers
-- Inflation, wage pressure, commodity cost trends as evidenced historically
-
-MARGIN ASSUMPTIONS:
-- Gross margin trajectory
-- EBIT margin assumptions
-- Net margin assumptions
-- Explain how these connect to the margin drivers identified in the model
-
-BALANCE SHEET ASSUMPTIONS:
-- Working capital as % of revenue
-- Capex as % of revenue or as fixed amount
-- Debt repayment or issuance assumptions
-- Cash build/draw assumptions
-
-TAX ASSUMPTIONS:
-- Effective tax rate
-- Historical effective rate evidence
-
-SHARES ASSUMPTIONS:
-- Share count changes (buybacks, dilution)
-- Dividend payout assumptions
-
-FORECAST HORIZON ASSUMPTIONS:
-- Why X-year horizon (vs X+1 years)?
-- Terminal growth rate assumption and rationale
-
-RETURN ASSUMPTIONS:
-- ROE, ROIC assumptions and historical basis
+Consider (ONLY if relevant to THIS company's discovered engine):
+- Revenue: growth path grounded in historical CAGR from facts [F-...], inflection explanation
+- Costs/margins: only if model has cost/margin drivers (explain mechanism → forecast variable)
+- Balance sheet / capex / working capital: only if model requires them (e.g., capital-intensive)
+- Tax: only if PBT/tax modeling is part of the forecast
+- Shares/dividend: only if equity-bridge or DDM requires it
+- Horizon/terminal growth: only with explicit rationale for why X years
+- Returns: only if ROIC/ROE is a model output
 
 For each assumption, provide:
 - assumption: the statement (e.g., "Revenue grows at 7% annually")
-- variable: the variable name this feeds into
-- value: the numeric value
-- unit: the unit (%, dollars, etc.)
-- period: "FY2027", "FY2028", etc. or "annual"
-- rationale: specific reference to yfinance facts (cite metric names), e.g., "Based on 5-year revenue CAGR of 6.2% (FY20-FY24, fact [F-REV-FY24])"
-- confidence: 0-1
+- variable: the variable name this feeds into (MUST match a model variable)
+- value: the numeric value (growth rates as DECIMALS — 0.07 = 7%)
+- unit: the unit (%, decimal, currency, etc.)
+- period: "FY2027", "FY2028", etc. or "annual" or "Y1-Y5"
+- rationale: specific reference to yfinance facts (cite metric names / [F-...]), e.g., "Based on 5-year revenue CAGR of 6.2% (FY20-FY24, fact [F-totalRevenue FY24])"
+- confidence: 0-1 (lower if inferring beyond yfinance)
 
-Return STRICT JSON matching this schema. Do NOT include prose outside the JSON. The JSON array must contain 8-12 assumptions minimum.
+Return STRICT JSON array. Do NOT include prose outside the JSON. Do NOT pad to reach a fixed count — quality and evidence-link > quantity.
 
 FACT PACK VERSION: ${pack.version}
 CURRENT DATE: ${new Date().toISOString()}

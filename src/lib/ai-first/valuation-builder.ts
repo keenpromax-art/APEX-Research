@@ -16,6 +16,7 @@ import type {
   Fact,
 } from "./types";
 import { parseLlmJson } from "./llm";
+import { buildHistoricalAnalysisPack } from "./historical-analysis";
 
 export type ValuationTransport = (opts: {
   system: string;
@@ -56,7 +57,7 @@ Respond with ONLY JSON:
 }
 Note: rates are DECIMALS (0.105 = 10.5%). The methodology MUST be executable by the deterministic engine — if the economically ideal method is not executable, choose the closest executable one and explain the limitation.`;
 
-/** Compact VALUATION_CONTEXT (Principle 33): understanding + forecast anchors. */
+/** Rich VALUATION_CONTEXT with historical derived + forecast anchors. */
 export function valuationContext(input: ValuationBuilderInput): string {
   const { pack, understanding, forecastSpec } = input;
   const price = pack.market.facts.find((f: Fact) => f.metric === "currentPrice")?.value;
@@ -64,14 +65,20 @@ export function valuationContext(input: ValuationBuilderInput): string {
   const bvps = pack.market.facts.find((f: Fact) => f.metric === "bookValuePerShare")?.value;
   const inputs = forecastSpec.variables.filter((v) => v.kind === "input").map((v) => v.name);
   const assumptionList = forecastSpec.assumptions
-    .map((a) => `- ${a.variable}: ${a.value} ${a.unit} — ${a.assumption}`)
+    .map((a) => `- ${a.variable}: ${a.value} ${a.unit} — ${a.assumption} | evidence: ${a.historicalEvidence.slice(0, 100)}`)
     .join("\n");
+  let derivedBlock = "";
+  try { derivedBlock = buildHistoricalAnalysisPack(pack).summaryLines.slice(0, 30).join("\n"); } catch { derivedBlock = "(derived unavailable)"; }
   return [
     `COMPANY: ${understanding.companyName} (${pack.ticker})`,
     `Primary economic abstraction: ${understanding.primaryEconomicAbstraction}`,
     `How it makes money: ${understanding.howItMakesMoney}`,
+    `What it does: ${String(understanding.whatItDoes).slice(0, 500)}`,
     price !== undefined ? `CURRENT PRICE: ${price} ${currency}` : "CURRENT PRICE: Not available from yfinance",
     `BOOK VALUE PER SHARE: ${bvps ?? "Not available from yfinance"}`,
+    "",
+    "HISTORICAL DERIVED (for valuation grounding):",
+    derivedBlock,
     "",
     "AI-DETERMINED APPROPRIATE METHODS (from understanding stage):",
     ...understanding.appropriateValuationMethods.map((m) => `- ${m.method}: ${m.why}`),
@@ -83,6 +90,8 @@ export function valuationContext(input: ValuationBuilderInput): string {
     assumptionList,
     "",
     `FORECAST INPUT VARIABLES: ${inputs.join(", ")}`,
+    `FORMULAS: ${forecastSpec.formulas.map((f) => `[${f.id}] ${f.equation}`).join(" | ")}`,
+    `HORIZON: ${forecastSpec.horizonYears}Y — ${forecastSpec.horizonRationale.slice(0, 200)}`,
   ].join("\n");
 }
 

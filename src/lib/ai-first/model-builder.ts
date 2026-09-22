@@ -16,6 +16,7 @@ import type {
   KpiDefinition,
 } from "./types";
 import { parseLlmJson } from "./llm";
+import { buildHistoricalAnalysisPack } from "./historical-analysis";
 
 export type ModelTransport = (opts: {
   system: string;
@@ -46,7 +47,14 @@ export interface AIResearchModel {
   confidence: number; // 0..1 overall confidence in this model
 }
 
-const SYSTEM_PROMPT = `You are a financial modeling agent on an institutional equity research desk. You receive a company understanding (from a prior AI stage) plus the yfinance statement lines available. Design the financial model DYNAMICALLY for this company.
+const SYSTEM_PROMPT = `You are a financial modeling agent on an institutional equity research desk. You receive a company understanding (from a prior AI stage) plus the yfinance statement lines and deterministic historical derived metrics (CAGR, margins, ROE, FCF). Design the financial model DYNAMICALLY for this company.
+
+ECONOMIC EQUATION DISCOVERY — DO NOT jump to formulas. First reason:
+
+Step A — What PHYSICALLY causes revenue/costs/margin/cash/capital for THIS company? (volume×ASP? NIM×advances? subs×ARPU? fee×AUM?)
+Step B — Which measurable variables drive those engines?
+Step C — Which variables are observable in yfinance (baseValue available), derived, or unavailable/estimated?
+Step D — Then build ONLY the formulas required by the discovered engine.
 
 RULES:
 - Derive formulas from the company's economics. No generic corporate/sector equations.
@@ -54,6 +62,7 @@ RULES:
 - Formulas are machine-executable expressions over forecast variables, e.g. "volume * asp", "interestIncome - interestExpense".
 - Every variable maps to a yfinance statement line when one exists (baseValue = latest yfinance value) or is declared an AI-forecast input.
 - Never invent historical numbers. Never zero-fill missing data.
+- Generate ONLY economically required assumptions — NO minimum count. If the model needs 3 assumptions, output 3. Do not pad with generic categories (see assumptions.ts rule).
 
 Respond with ONLY JSON:
 {
@@ -65,7 +74,7 @@ Respond with ONLY JSON:
   "driverPaths": { "volume": [0.08, 0.06] }
 }
 Note: growth rates and ratio assumptions are DECIMALS (0.08 = 8%).`;
-/** Compact MODEL_CONTEXT (Principle 33): statement lines + drivers + anchors. */
+/** Rich MODEL_CONTEXT with deterministic derived metrics (no longer compact-only). */
 export function modelContext(input: ModelBuilderInput): string {
   const { pack, understanding } = input;
   const lineNames = (sec: { facts: Array<{ metric: string }> }) =>
@@ -84,20 +93,34 @@ export function modelContext(input: ModelBuilderInput): string {
   const lastNii = pack.incomeStatement.facts.find((f) => /netInterest|net interest/i.test(f.metric) && f.period === latestIncome)?.value;
   const price = pack.market.facts.find((f) => f.metric === "currentPrice")?.value;
   const shares = pack.market.facts.find((f) => f.metric === "sharesOutstanding")?.value;
+  // Deterministic derived metrics — so AI reasons over research data, not raw rows
+  let derivedBlock = "";
+  try {
+    const hist = buildHistoricalAnalysisPack(pack);
+    derivedBlock = hist.summaryLines.slice(0, 40).join("\n");
+  } catch { derivedBlock = "(historical derived metrics unavailable)"; }
 
   return [
     `COMPANY: ${understanding.companyName} (${pack.ticker})`,
+    `What it does: ${String(understanding.whatItDoes).slice(0, 700)}`,
     `Primary economic abstraction: ${understanding.primaryEconomicAbstraction}`,
     `How it makes money: ${understanding.howItMakesMoney}`,
+    `Industry: ${String(understanding.industryContext).slice(0, 500)}`,
     "",
     "DRIVERS (from understanding stage):",
     ...understanding.revenueDrivers.map((d) => `- ${d.name}: ${d.mechanism}`),
     ...understanding.costDrivers.map((d) => `- ${d.name}: ${d.mechanism} [cost]`),
     ...understanding.marginDrivers.map((d) => `- ${d.name}: ${d.mechanism} [margin]`),
+    ...understanding.balanceSheetDrivers.map((d) => `- ${d.name}: ${d.mechanism} [BS]`),
+    ...understanding.cashGenerationDrivers.map((d) => `- ${d.name}: ${d.mechanism} [cash]`),
+    ...understanding.returnsDrivers.map((d) => `- ${d.name}: ${d.mechanism} [returns]`),
     ...understanding.metricsToAvoid.map((m) => `- AVOID: ${m.metric} — ${m.reason}`),
     "",
     "KEY KPIS:",
     ...understanding.keyKpis.map((k) => `- ${k.name} (${k.availability}): ${k.rationale}`),
+    "",
+    "HISTORICAL DERIVED (deterministic from yfinance facts — use for assumption grounding):",
+    derivedBlock,
     "",
     "AVAILABLE STATEMENT LINES (fact IDs are [F-metricKey]):",
     `incomeStatement: ${incomeLines}`,
@@ -110,6 +133,7 @@ export function modelContext(input: ModelBuilderInput): string {
     `LATEST NII (if bank): ${lastNii ?? "N/A"}`,
     `CURRENT PRICE: ${price ?? "N/A"}`,
     `CURRENT SHARES: ${shares ?? "N/A"}`,
+    `CONFIDENCE: ${understanding.confidence.overall} — ${understanding.confidence.reasoning.slice(0, 200)}`,
   ].join("\n");
 }
 /** AI model specification. transport calls the LLM; normalization + validation below. */

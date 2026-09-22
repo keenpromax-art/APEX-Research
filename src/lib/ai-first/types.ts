@@ -125,6 +125,13 @@ export interface CompanyUnderstanding {
   /** AI-determined appropriate valuation methods with rationale. */
   appropriateValuationMethods: Array<{ method: string; why: string }>;
   confidence: ConfidenceAssessment;
+  /** Optional epistemic breakdown (known/inferred/unknown) — audit §14. */
+  epistemic?: {
+    knownFacts: string[];
+    inferences: string[];
+    unknowns: string[];
+    requiredResearch: string[];
+  };
 }
 
 export interface ConfidenceAssessment {
