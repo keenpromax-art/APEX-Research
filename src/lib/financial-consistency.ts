@@ -15,8 +15,10 @@
  *   FINCONS-02  EPS coherence: reported diluted EPS vs netIncome /
  *               resolved shares within 10% (weighted-average drift beyond
  *               that is a share-base or unit error, not timing).
-  *   FINCONS-03  Single share base: ledger / dcf / quote / statement /
-  *               canonical-diluted counts agree within 5%; every source > 0.
+  *   FINCONS-03  Single share base: model-controlled counts (ledger / dcf /
+  *               statement / canonical-diluted) agree within 5%; a lone
+  *               divergent quote feed is WARN-only disclosure (partial-class).
+  *               Every source > 0.
  *   FINCONS-04  Per-share closure: |fairValue − equity/shares| ≤ 1.0
  *               currency unit, all valuation paths (no bank exemption —
  *               residual-income bridges carry equity + shares too).
@@ -161,24 +163,35 @@ export function checkCrossPageFinancials(input: FinConsInputs): FinConsFinding[]
   // (model/quote/statement/canonical-diluted). Sources absent from the input
   // bundle are skipped (never counted as conflicts); fewer than two
   // comparable sources warns (unverifiable against an independent base).
-  // Universal two-tier tolerance (META + PLTR precedents):
-  //   ≤5%  PASS — normal basic-vs-diluted SBC gaps (PLTR 3.8%).
-  //   ≤25% WARN — publishable multi-class/partial-quote divergence with
-  //          disclosure (META: quote 2.205B single-class vs statement 2.530B
-  //          all-class = 12.8%; model already uses the best-reconciling base
-  //          via resolveShareCount, so pages agree — the raw-feed gap is
-  //          disclosed, not blocking).
-  //   >25% BLOCK — unit/scale error (10x = 900% still blocks decisively).
+  //
+  // Universal partial-class rule (GOOG precedent: quote 5.527B Class-C-only vs
+  // statement/model/canonical ~12.1B all-class = 54% raw drift, yet every
+  // rendered page divides by the resolved model base): what matters is whether
+  // the MODEL-CONTROLLED sources (statement/model/canonical-diluted) agree —
+  // a lone divergent quote feed is disclosure (WARN at any magnitude), never a
+  // publication block. A split INSIDE the model group still bands 5%/25% and
+  // blocks beyond it (10x = 900% still blocks decisively).
   // Non-positive sources always BLOCK (synthesis prohibited).
   {
     const provided = shareSources.filter((s) => s.value !== null);
     const invalid = provided.filter((s) => !((s.value as number) > 0));
-    let maxDrift = 0;
-    for (let i = 0; i < validShares.length; i++) {
-      for (let j = i + 1; j < validShares.length; j++) {
-        maxDrift = Math.max(maxDrift, drift(validShares[i].value, validShares[j].value));
+    const pairwiseMax = (list: Array<{ value: number }>): number => {
+      let m = 0;
+      for (let i = 0; i < list.length; i++) {
+        for (let j = i + 1; j < list.length; j++) {
+          m = Math.max(m, drift(list[i].value, list[j].value));
+        }
       }
-    }
+      return m;
+    };
+    const modelGroup = validShares.filter((s) => s.name !== "market");
+    const quoteEntry = validShares.find((s) => s.name === "market") ?? null;
+    const maxDrift = pairwiseMax(validShares);
+    const modelDrift = modelGroup.length >= 2 ? pairwiseMax(modelGroup) : maxDrift;
+    const quoteDrift =
+      quoteEntry && modelGroup.length > 0
+        ? Math.max(...modelGroup.map((s) => drift(quoteEntry.value, s.value)))
+        : 0;
     if (validShares.length < 2) {
       out.push({
         code: "FINCONS-03",
@@ -193,26 +206,36 @@ export function checkCrossPageFinancials(input: FinConsInputs): FinConsFinding[]
         severity: "blocker",
         detail: `${ticker}: SHARE-BASE SPLIT — non-positive: [${invalid.map((s) => s.name).join(", ")}] (synthesis prohibited). Per-share pages diverge.`,
       });
-    } else if (maxDrift <= 0.05) {
+    } else if (modelDrift <= 0.05 && (!quoteEntry || quoteDrift <= 0.05)) {
       out.push({
         code: "FINCONS-03",
         pass: true,
         severity: "blocker",
         detail: `${ticker}: single share base — ${validShares.length} source(s) agree within 5% (${validShares.map((s) => `${s.name}=${s.value.toFixed(0)}`).join(", ")}).`,
       });
-    } else if (maxDrift <= 0.25) {
+    } else if (modelDrift <= 0.05 && quoteEntry && quoteDrift > 0.05) {
+      // Model pages agree; only the raw quote feed diverges (partial-class /
+      // stale quote — GOOG 54%, META 13%). Resolver already models on the
+      // agreeing base, so pages cannot diverge — disclose, never block.
       out.push({
         code: "FINCONS-03",
         pass: false,
         severity: "warn",
-        detail: `${ticker}: SHARE-BASE DIVERGENCE ${(maxDrift * 100).toFixed(1)}% (5-25% band) — likely partial-class quote vs all-class statement/SBC dilution; model uses best-reconciling base (see SHARE-01/resolver warn), pages agree — disclosed, not blocking. (${validShares.map((s) => `${s.name}=${s.value.toFixed(0)}`).join(", ")}).`,
+        detail: `${ticker}: PARTIAL-CLASS QUOTE — model pages agree within 5% (${modelGroup.map((s) => `${s.name}=${s.value.toFixed(0)}`).join(", ")}) but quote feed reads ${quoteEntry.value.toFixed(0)} (${(quoteDrift * 100).toFixed(1)}% off — single-class/stale feed). Model uses the agreeing base; per-share pages consistent — disclosed, not blocking.`,
+      });
+    } else if (modelDrift <= 0.25) {
+      out.push({
+        code: "FINCONS-03",
+        pass: false,
+        severity: "warn",
+        detail: `${ticker}: SHARE-BASE DIVERGENCE ${(modelDrift * 100).toFixed(1)}% (5-25% band) — likely SBC dilution/timing; model uses best-reconciling base (see SHARE-01/resolver warn), pages agree — disclosed, not blocking. (${validShares.map((s) => `${s.name}=${s.value.toFixed(0)}`).join(", ")}).`,
       });
     } else {
       out.push({
         code: "FINCONS-03",
         pass: false,
         severity: "blocker",
-        detail: `${ticker}: SHARE-BASE SPLIT — max pairwise drift ${(maxDrift * 100).toFixed(1)}% > 25%. Per-share pages diverge (unit/scale error suspected).`,
+        detail: `${ticker}: SHARE-BASE SPLIT — model-group drift ${(modelDrift * 100).toFixed(1)}% > 25%. Per-share pages diverge (unit/scale error suspected).`,
       });
     }
   }

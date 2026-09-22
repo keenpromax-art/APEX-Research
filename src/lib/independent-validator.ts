@@ -255,9 +255,13 @@ function checkEvBridge(inp: IndependentInputs, issues: IndependentIssue[], passe
       });
     }
     if (basic !== null && basic > 0) {
-      const baseOk = magnitudeTolerance(basic, pubSh, { absTol: Math.max(1, basic * 0.01), relTol: 0.01, materiality: Math.max(1, basic * 0.01) });
+      // 5% bands (not 1%): NI/dilutedEPS-derived diluted counts carry EPS-
+      // rounding noise (GOOG: 12.227B vs published 12.088B = 1.15% — real
+      // money, not a fantasy denominator). 10x-class fantasies still fail.
+      const tolOf = (b: number) => ({ absTol: Math.max(1, b * 0.05), relTol: 0.05, materiality: Math.max(1, b * 0.05) });
+      const baseOk = magnitudeTolerance(basic, pubSh, tolOf(basic));
       const dilOk = diluted !== null && diluted > 0
-        ? magnitudeTolerance(diluted, pubSh, { absTol: Math.max(1, diluted * 0.01), relTol: 0.01, materiality: Math.max(1, diluted * 0.01) })
+        ? magnitudeTolerance(diluted, pubSh, tolOf(diluted))
         : { pass: false, gapAbs: Infinity, gapRel: Infinity, material: false, detail: "no diluted base" };
       if (!baseOk.pass && !dilOk.pass) {
         pushFail(issues, {

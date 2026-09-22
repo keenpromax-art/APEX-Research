@@ -27,6 +27,7 @@ import { ScenarioSet, buildScenarioSet } from "./scenarios";
 import { classifySector } from "./sectors/profiles";
 import type { StockData, CompanyProfile, AnnualFinancials, Ratios, DuPontAnalysis, DCFResult, AssumptionsLedger } from "@/types/report";
 import { stmtNum } from "@/types/report";
+import { resolveShareCount } from "./financial-provenance";
 
 export type ProvenanceType = "REPORTED" | "DERIVED" | "ASSUMPTION" | "INFERENCE" | "HYPOTHESIS";
 
@@ -190,11 +191,19 @@ export function buildMasterReportFacts(params: {
   const currency = profile.currency || "USD";
   const reportingScale = currency === "INR" ? "crore" : "million";
   const cmp = ledger?.currentPrice ?? (stockData.currentPrice > 0 ? stockData.currentPrice : null);
-  // Zero-tolerant chain: a fail-closed ledger 0 must not mask a valid count
-  // from another source, and the model carry-through is a last resort.
-  // A persistent 0 still yields missing ShareCount → DATA_INVALID_SHARES blocks.
+  // Zero-tolerant chain: the resolved market-cap-reconciling base wins so the
+  // facts layer divides by the SAME count as ledger/DCF (GOOG precedent: raw
+  // quote 5.527B Class-C-only must not override the resolved 12.088B
+  // all-class base). Falls back through model sources; persistent 0 still
+  // yields missing ShareCount → DATA_INVALID_SHARES blocks.
   const latestShares = annualFinancials.length > 0 ? annualFinancials[annualFinancials.length - 1].sharesOutstanding : 0;
-  const shares = [ledger?.sharesOutstanding, stockData.sharesOutstanding, latestShares, dcf?.sharesOutstanding]
+  let resolvedBase = 0;
+  try {
+    resolvedBase = resolveShareCount({ stockData, annualFinancials }).shares || 0;
+  } catch {
+    resolvedBase = 0;
+  }
+  const shares = [ledger?.sharesOutstanding, resolvedBase, dcf?.sharesOutstanding, latestShares, stockData.sharesOutstanding]
     .map((v) => Number(v) || 0)
     .find((v) => v > 0) ?? 0;
 
