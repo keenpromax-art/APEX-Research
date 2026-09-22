@@ -187,12 +187,21 @@ export function computeDriverForecast(params: {
   const depOnPpeRate = inputs.rawAvgDepOnPpe && inputs.rawAvgDepOnPpe > 0 && inputs.rawAvgDepOnPpe < 0.5 && (inputs.ppeBase ?? 0) > 0
     ? inputs.rawAvgDepOnPpe
     : null;
+  // CAPEX: derived from actual PPE/capex history, not flat 3%. Software/IT services are capex-light by construction,
+  // but must still honor reported intensity when history shows higher investment (data centers, infra).
+  // PP&E-anchored D&A (depOnPpeRate) drives depreciation via the PPE stock; capex then covers replacement + growth.
   if (sectorId === "technology-hardware") { avgCapexPct = Math.max(avgCapexPct, 0.05); avgDeptPct = Math.max(avgDeptPct, 0.035); avgNwcChangePct = 0.025; }
-  else if (sectorId === "technology-software") { avgCapexPct = Math.min(avgCapexPct, 0.03); avgNwcChangePct = 0.015; }
+  else if (sectorId === "technology-software") {
+    // Remove flat 3% cap — honor historical capex up to generic 12% ceiling; PP&E economics drive D&A.
+    avgCapexPct = Math.min(avgCapexPct, 0.08); avgNwcChangePct = 0.015;
+    // When PPE stock exists, capex floor is 1.1× D&A via canonical-forecast (replacement + growth), not revenue %.
+  }
   else if (sectorId === "hospitality") { avgCapexPct = Math.max(avgCapexPct, 0.06); avgDeptPct = Math.max(avgDeptPct, 0.04); avgNwcChangePct = 0.012; }
   else if (sectorId === "real-estate") { avgCapexPct = Math.max(avgCapexPct, 0.045); avgNwcChangePct = 0.008; }
   else if (sectorId === "auto") { avgCapexPct = Math.max(avgCapexPct, 0.06); avgNwcChangePct = 0.018; }
-  else if (sectorId === "it-services") { avgCapexPct = Math.min(avgCapexPct, 0.03); avgNwcChangePct = 0.02; }
+  else if (sectorId === "it-services") {
+    avgCapexPct = Math.min(avgCapexPct, 0.08); avgNwcChangePct = 0.02;
+  }
   else if (sectorId === "telecom") { avgCapexPct = Math.max(avgCapexPct, 0.07); avgNwcChangePct = 0.012; }
   else if (sectorId === "internet-platform") { avgCapexPct = Math.max(avgCapexPct, 0.05); avgNwcChangePct = 0.012; }
   else if (sectorId === "bank" || sectorId === "nbfc" || sectorId === "insurance") { avgCapexPct = Math.min(avgCapexPct, 0.025); avgDeptPct = Math.min(avgDeptPct, 0.02); avgNwcChangePct = 0.005; }

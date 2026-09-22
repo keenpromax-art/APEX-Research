@@ -30,20 +30,23 @@ export type NarrativeTransport = (opts: {
   jsonMode?: boolean;
 }) => Promise<string>;
 
-const SYSTEM_PROMPT = `You are an institutional equity research analyst (Writer role). You receive the canonical Analyst Brief — company identity, economic engine, DERIVED historical trajectory (CAGR, margins, ROE, FCF, leverage — not raw rows), forecast assumptions, valuation, scenarios, contradictions, missing information, and the full [F-...] evidence table.
+const SYSTEM_PROMPT = `You are an institutional equity research analyst (Writer role). You receive the canonical Analyst Brief — company identity, economic engine, DERIVED historical trajectory (CAGR, margins, ROE, FCF, leverage — not raw rows), forecast assumptions from ONE canonicalForecast (cover/SCENARIO/DCF single object, no parallel model), valuation, scenarios, contradictions, missing information, and the full [F-...] evidence table plus filing segment registry when available.
 
 RESEARCHER→WRITER: Before writing, think as Researcher:
-What do we know? What don't we know? What changed? What matters? What contradicts? What is unusual? What is the key debate? What evidence supports vs challenges the thesis?
+What do we know (Tier1 filing / Tier4 yfinance fact [F-...])? What don't we know (requires filings/calls)? What changed (trailing → Y1 gap)? What matters (driver that moves valuation)? What contradicts (e.g., Other Operating Expense disappearing, 62.5% vs 30% margin fork)? What is unusual? What is the key debate? What evidence supports vs challenges the thesis?
+
+THESIS CHAIN (mandatory for every thesis sentence):
+  EVIDENCE [F-...] or canonical forecast assumption → MECHANISM (how the business makes money, e.g., occupancy×ADR→RevPAR, subs×ARPU, units×ASP, NIM×advances) → AFFECTED KPI (one of the driver-native KPIs for THIS company, not generic revenue) → FINANCIAL CONSEQUENCE (DCF row: revenue/EBIT/FCF) → VALUATION CONSEQUENCE (EV/equity/per-share via canonical DCF). A thesis without this chain is generic and will be blocked by QA.
 
 RULES:
-- Thesis is DEBATE-DRIVEN: identify 1 central debate, build thesis around it, state what would prove you WRONG + monitoring KPI (do NOT just list bull/bear).
-- Every quantitative statement must cite a yfinance fact ID [F-...] or an AI model output (assumption/forecast/valuation). Tier6 inference alone = low confidence — never present as fact.
-- Evidence-constrained output: if you cannot support a catalyst/risk/competitor/moat pillar with evidence, OMIT it (do NOT force 3 catalysts / 5 risks / 5 moat pillars / 3 competitors). If generic, say insufficient evidence.
-- Risks: mechanism → affected KPI → financial consequence → valuation consequence → monitoring indicator. Not generic "competition" unless company-specific.
-- Catalysts: catalyst → business mechanism → financial variable → forecast impact → valuation impact. If no quantitative chain, set "quantitative": false (QUALITATIVE ONLY). Do NOT invent % impacts.
-- Competitive analysis: you determine peers from business model. If insufficient evidence, set "insufficient": true. Explain overlap/economic similarity/key difference.
-- Moat: select ONLY what applies from cost/brand/network/switching/distribution/scale/tech/regulatory/IP/data/relationships. Do NOT force pillars; if no moat, say so.
-- Thesis must include counter-thesis and contradiction handling.
+- Thesis is DEBATE-DRIVEN + CHAIN-DRIVEN: identify 1 central debate, build thesis around the chain above, state what would prove you WRONG + monitoring KPI + explicit Other Operating Expense classification if material historically (RECURRING/NON_RECURRING/RECLASSIFIED). Do NOT just list bull/bear.
+- Every quantitative statement must cite a yfinance fact ID [F-...] or the canonical forecast assumption/output (revenueGrowthRates/ebitMargins/caF etc from the single object). Tier6 inference alone = low confidence — never present as fact. Cover/Scenario/DCF numbers must match canonicalForecast verbatim (no parallel recomputation).
+- Evidence-constrained output: if you cannot support a catalyst/risk/competitor/moat pillar with evidence, OMIT it (do NOT force 3 catalysts / 5 risks / 5 moat pillars / 3 competitors). If generic, set insufficient=true and state why. A report with 20 generic warnings is BLOCKED, not READY_WITH_WARNINGS.
+- Risks: mechanism → affected KPI (must be company-native, e.g., RevPAR/ADR/Occupancy for hospitality, subs×ARPU for Jio, units×ASP for auto) → financial consequence → valuation consequence → monitoring indicator. Not generic "competition/macro" unless company-specific channel.
+- Catalysts: MUST be company-specific events, never generic "earnings/margin expansion". For each: trigger (regulatory order, product launch, store rollout, spectrum auction result, clinical read-out) → business mechanism → financial variable (from canonical forecast variables) → forecast impact (with segment when conglomerate) → valuation impact. Generic "earnings beat/margin improvement" without trigger is blocked by QA. If no quantitative chain, set "quantitative": false (QUALITATIVE ONLY). Do NOT invent % impacts.
+- Competitive analysis: SEGMENT-LEVEL when filing registry holds segments (e.g., RELIANCE: O2C vs Jio vs Retail vs E&P each need separate peer set with segment revenue/EBITDA overlap, economic similarity, key difference, strengths/weaknesses). When registry has no segments, build company-level peers dynamically from business model (use allowed concepts + peer-similarity score ≥30). If insufficient evidence for any segment, set "insufficient": true per segment and explain. Never compare a hospitality REIT to a bank loan-book or an auto OEM to a software SaaS churn model — ontology hard gate blocks it.
+- Moat: EVIDENCE-DRIVEN only: each source MUST have [F-...] or canonical forecast linkage (e.g., ROCE history vs WACC, gross margin stability, network effects proven by user/merchant scale). Structure: source → evidence (fact ID + period) → economic consequence (spread/margin) → durability (years, with historical variance) → threats. Select ONLY what applies from cost/brand/network/switching/distribution/scale/tech/regulatory/IP/data/relationships. Do NOT force pillars; if ROCE trails WACC and no durable advantage evidenced, hasMoat=false and verdict must state "No economic moat" (harmonized with canonical ROCE/WACC). Generic "strong moat / wide moat" without evidence is blocked.
+- Thesis must include counter-thesis, contradiction handling (explicitly address DISC-01 Other Opex disappearance and any 62.5% vs 30% margin fork if present), and monitoring KPI that would invalidate the chain.
 
 Respond with ONLY JSON:
 {
@@ -62,16 +65,34 @@ Respond with ONLY JSON:
   "moat": { "hasMoat": true, "sources": [{ "source": "string", "evidence": "string", "economicConsequence": "string", "durability": "string", "threatsToDurability": "string" }], "verdict": "string" }
 }`;
 
-/** Compact NARRATIVE_CONTEXT: understanding + model anchors only (Principle 33). */
+/** Rich NARRATIVE_CONTEXT with filing segments, canonical basis, PP&E economics, and chain-ready KPIs. */
 export function narrativeContext(
   pack: FactPack,
   understanding: CompanyUnderstanding,
-  modelSpec: ForecastSpecification
+  modelSpec: ForecastSpecification,
+  canonicalForecast?: any
 ): string {
   // Prefer canonical AnalystBrief — falls back to legacy compact if brief unavailable
   try {
     const brief = buildAnalystBrief({ pack, understanding, forecastSpec: modelSpec });
-    return renderAnalystBrief(brief);
+    // Inject filing segments when registry holds PRIMARY data (segment-level comps)
+    try {
+      const { getFilingSegments } = require("../filing-segments") as typeof import("../filing-segments");
+      const segs = getFilingSegments(pack.ticker);
+      if (segs) {
+        (brief as any).filingSegments = segs;
+        brief.evidenceLines.push(`FILING SEGMENTS (PRIMARY): ${segs.segments.map((s: any) => `${s.name} rev ${s.revenue ?? "n/a"} EBITDA ${s.ebitda} — ${s.sourceDoc} ${s.period}`).join(" | ")}`);
+      }
+    } catch {}
+    // Inject canonical basis for chain: capex PPE-anchored, D&A, OtherOpex classification, continuity
+    if (canonicalForecast?.basis) {
+      const b = canonicalForecast.basis;
+      brief.evidenceLines.push(`CANONICAL BASIS capex: ${b.capex ?? b.capex}`);
+      brief.evidenceLines.push(`CANONICAL BASIS depreciation: ${b.depreciation ?? b.depreciation}`);
+      if (b.otherOperatingExpense) brief.evidenceLines.push(`CANONICAL BASIS otherOperatingExpense: ${b.otherOperatingExpense}`);
+      if (b.continuity) brief.evidenceLines.push(`CANONICAL BASIS continuity: ${b.continuity}`);
+    }
+    return renderAnalystBrief(brief as any);
   } catch {}
   const clip = (s: string, n: number) => (s.length > n ? s.slice(0, n) + "…" : s);
   // Full evidence packet: income + balance + cash + market anchors + derived metrics
@@ -84,12 +105,34 @@ export function narrativeContext(
   try {
     derived = renderHistoricalAnalysisPack(buildHistoricalAnalysisPack(pack));
   } catch { derived = "(derived metrics unavailable)"; }
+  // Filing segment injection for non-brief path
+  let segmentBlock = "";
+  try {
+    const { getFilingSegments } = require("../filing-segments") as typeof import("../filing-segments");
+    const segs = getFilingSegments(pack.ticker);
+    if (segs) segmentBlock = `FILING SEGMENTS (PRIMARY — use for segment-level competitive matrix):\n${segs.segments.map((s: any) => `- ${s.name}: rev ${s.revenue ?? "n/a"} EBITDA ${s.ebitda} — ${s.sourceDoc} ${s.period}`).join("\n")}\n`;
+  } catch {}
+  // Append segment block if present (segment-level comps for conglomerates)
+  const segmentSection = segmentBlock ? [segmentBlock] : [];
+  // Append canonical basis if available (for fallback path)
+  let canonicalBasisBlock = "";
+  try {
+    if (canonicalForecast?.basis) {
+      canonicalBasisBlock = `CANONICAL BASIS (single object — cover/Scenario/DCF must match verbatim):\n` +
+        `capex: ${canonicalForecast.basis.capex ?? ""}\n` +
+        `depreciation: ${canonicalForecast.basis.depreciation ?? ""}\n` +
+        `otherOperatingExpense: ${canonicalForecast.basis.otherOperatingExpense ?? ""}\n` +
+        `continuity: ${canonicalForecast.basis.continuity ?? ""}\n`;
+    }
+  } catch {}
   return [
     `COMPANY: ${understanding.companyName} (${pack.ticker})`,
     `What it does: ${clip(understanding.whatItDoes, 700)}`,
     `How it makes money: ${clip(understanding.howItMakesMoney, 500)}`,
     `Primary economic abstraction: ${understanding.primaryEconomicAbstraction}`,
     `Industry context: ${clip(understanding.industryContext, 500)}`,
+    ...(segmentSection.length ? ["", ...segmentSection] : []),
+    ...(canonicalBasisBlock ? ["", canonicalBasisBlock] : []),
     "",
     "REVENUE DRIVERS:",
     ...understanding.revenueDrivers.map((d) => `- ${d.name}: ${d.mechanism}`),
@@ -124,14 +167,15 @@ export interface NarrativeOutput {
   moat: MoatAnalysis;
 }
 
-/** AI narrative generation from fact pack + model spec. */
+/** AI narrative generation from fact pack + model spec + optional canonical forecast (single object). */
 export async function buildNarrative(
   transport: NarrativeTransport,
   pack: FactPack,
   understanding: CompanyUnderstanding,
-  modelSpec: ForecastSpecification
+  modelSpec: ForecastSpecification,
+  canonicalForecast?: any
 ): Promise<NarrativeOutput> {
-  const ctx = narrativeContext(pack, understanding, modelSpec);
+  const ctx = narrativeContext(pack, understanding, modelSpec, canonicalForecast);
   const user = `RESEARCH CONTEXT
 ================
 ${ctx}

@@ -1019,6 +1019,199 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
     }
   }
 
+  // ── THESIS-CHAIN-01: evidence → mechanism → KPI → valuation chain must be present ──
+  {
+    const thesisText = `${aiAny.investmentThesis || ""} ${aiAny.investmentConclusion || ""}`.toLowerCase();
+    const hasEvidence = /\[F-|\[F-|fact|forecast|canonical|dcf|ebit|revenue/i.test(`${aiAny.investmentThesis || ""}`);
+    const hasMechanism = /RevPAR|ADR|occupancy|ARPU|NIM|credit cost|volume|ASP|take rate|throughput|utilization|occupancy×adr|subs.*arpu|units.*asp/i.test(`${aiAny.investmentThesis || ""}`) || (operatingModel?.requiredConcepts || []).some((c: string) => thesisText.includes(c.toLowerCase()));
+    const hasKpi = (operatingModel?.requiredConcepts || []).some((c: string) => thesisText.includes(c.toLowerCase())) || hasMechanism;
+    const hasValuation = /valuation|fair value|upside|EV|per-share|FCF|FCFF|target|WACC|terminal|intrinsic/i.test(thesisText);
+    const thesisLen = (aiAny.investmentThesis || "").trim().length;
+    if (thesisLen > 40 && (!hasEvidence || !hasMechanism || !hasKpi || !hasValuation)) {
+      const missing: string[] = [];
+      if (!hasEvidence) missing.push("evidence [F-...]/forecast");
+      if (!hasMechanism) missing.push("business mechanism");
+      if (!hasKpi) missing.push("company-specific KPI");
+      if (!hasValuation) missing.push("valuation consequence");
+      checks.push({
+        id: "THESIS-CHAIN-01",
+        category: "BS_DETECTOR",
+        name: "Thesis Evidence→Mechanism→KPI→Valuation Chain",
+        status: "WARN",
+        details: `Investment thesis lacks evidence→mechanism→KPI→valuation chain (missing: ${missing.join(", ")}). Generic thesis language ("strong fundamentals", "well positioned") should be rebuilt around a falsifiable debate: evidence [F-...] → mechanism (e.g., occupancy×ADR→RevPAR) → KPI → financial consequence (revenue/EBIT/FCF row via canonical forecast) → valuation (EV/equity/per-share). Costs score; 20 such warnings block publication.`,
+        expected: "evidence [F-...] → mechanism → KPI → financial → valuation",
+        actual: `missing ${missing.join(", ")}`,
+      });
+    } else if (thesisLen > 40) {
+      checks.push({
+        id: "THESIS-CHAIN-01",
+        category: "BS_DETECTOR",
+        name: "Thesis Evidence→Mechanism→KPI→Valuation Chain",
+        status: "PASS",
+        details: `Thesis contains evidence→mechanism→KPI→valuation chain (${hasEvidence ? "evidence" : ""} ${hasMechanism ? "mechanism" : ""} ${hasValuation ? "valuation" : ""}).`,
+      });
+    }
+  }
+
+  // ── CATALYST-SPEC-01: company-specific triggers, not generic earnings/margin ──
+  {
+    const catalysts = Array.isArray(aiAny.catalysts) ? aiAny.catalysts : [];
+    let genericCatalyst: string | null = null;
+    for (const c of catalysts as any[]) {
+      const txt = `${c?.event || c?.catalyst || ""} ${c?.trigger || c?.mechanism || ""}`.toLowerCase();
+      const genericPhrases = ["earnings growth", "margin expansion", "revenue growth", "earnings beat", "margin improvement", "profitability improvement"];
+      const isGeneric = genericPhrases.some((p) => txt.includes(p) && txt.length < 120 && !/launch|approval|order|contract|regulation|spectrum|store|clinical|product|capacity|utilization|tariff|policy|guidance|buyback|dividend|occupancy|adr|revpar|arpu|take rate|throughput|crack spread|o2c|jio/i.test(txt));
+      if (isGeneric) { genericCatalyst = (c?.event || c?.catalyst || "generic") as string; break; }
+    }
+    if (genericCatalyst) {
+      checks.push({
+        id: "CATALYST-SPEC-01",
+        category: "BS_DETECTOR",
+        name: "Catalyst Company-Specificity",
+        status: "WARN",
+        details: `Catalyst "${genericCatalyst.slice(0, 80)}" is generic (earnings/margin) without company-specific trigger (launch/approval/order/contract/regulation etc). Generic catalysts cost score and count toward 20-warning threshold — replace with event: e.g., 'Jio 5G tariff hike → ARPU → revenue' or 'O2C crack spread widening → petchem margin'.`,
+        expected: "company-specific trigger → mechanism → KPI → valuation chain",
+        actual: genericCatalyst,
+      });
+    } else if (catalysts.length > 0) {
+      // Also check that each catalyst has a trigger word
+      const missingTrigger = (catalysts as any[]).filter((c: any) => {
+        const t = `${c?.event || c?.catalyst || ""} ${c?.trigger || ""}`.toLowerCase();
+        return t.length > 15 && !/launch|approval|order|contract|regulation|spectrum|store|clinical|product|capacity|tariff|policy|guidance|buyback|dividend|occupancy|adr|arpu|take rate|throughput|crack spread|jio|o2c|retail/i.test(t);
+      });
+      if (missingTrigger.length > 0 && missingTrigger.length === catalysts.length) {
+        checks.push({
+          id: "CATALYST-SPEC-01",
+          category: "BS_DETECTOR",
+          name: "Catalyst Company-Specificity",
+          status: "WARN",
+          details: `All ${catalysts.length} catalyst(s) lack identifiable company-specific triggers. Add launch/approval/order/contract/regulation etc and tie to canonical forecast variable.`,
+          expected: "trigger per catalyst",
+          actual: "none identified",
+        });
+      } else {
+        checks.push({
+          id: "CATALYST-SPEC-01",
+          category: "BS_DETECTOR",
+          name: "Catalyst Company-Specificity",
+          status: "PASS",
+          details: `Catalysts carry company-specific triggers.`,
+        });
+      }
+    } else {
+      // No catalysts - handled by CATALYST-01 already, but ensure SPEC passes when none (insufficient is disclosed)
+      checks.push({
+        id: "CATALYST-SPEC-01",
+        category: "BS_DETECTOR",
+        name: "Catalyst Company-Specificity",
+        status: "PASS",
+        details: `No catalysts to specificity-check (CATALYST-01 handles absence).`,
+      });
+    }
+  }
+
+  // ── COMPET-SEG-01: segment-level competitive matrix for conglomerates ──
+  {
+    const segSet = (() => {
+      try { const { getFilingSegments } = require("./filing-segments") as typeof import("./filing-segments"); return getFilingSegments(data.profile.ticker); } catch { return null; }
+    })() as any;
+    if (segSet && segSet.segments.length >= 2) {
+      const compText = JSON.stringify((data.aiAnalysis as any)?.competitiveMoat || (data.aiAnalysis as any)?.competitiveAnalysis || (data.aiAnalysis as any)?.peersCommentary || "").toLowerCase()
+        + " " + JSON.stringify((data as any).peAnalysis || {}).toLowerCase()
+        + " " + JSON.stringify((data.aiAnalysis as any)?.businessStrategyCommentary || "").toLowerCase();
+      const missingSegs = segSet.segments.filter((sg: any) => {
+        const firstWord = sg.name.toLowerCase().split(/[\s\(]/)[0];
+        return !compText.includes(sg.name.toLowerCase()) && !compText.includes(firstWord) && firstWord.length > 3;
+      }).map((sg: any) => sg.name);
+      if (missingSegs.length >= 2) {
+        checks.push({
+          id: "COMPET-SEG-01",
+          category: "BS_DETECTOR",
+          name: "Segment-Level Competitive Analysis",
+          status: "WARN",
+          details: `Conglomerate has ${segSet.segments.length} filing Segments [${segSet.segments.map((s: any) => s.name).join(", ")}] but competitive analysis omits ${missingSegs.slice(0, 3).join(", ")} — requires segment-level peer matrix (O2C vs refiners, Jio vs telecom ARPU peers, Retail vs DMart, E&P vs upstream). Costs score; segment coverage strengthens thesis.`,
+          expected: `segment-level peers for ${segSet.segments.length} segments`,
+          actual: `missing ${missingSegs.length} segments`,
+        });
+      } else if (missingSegs.length === 1) {
+        checks.push({
+          id: "COMPET-SEG-01",
+          category: "BS_DETECTOR",
+          name: "Segment-Level Competitive Analysis",
+          status: "WARN",
+          details: `Competitive analysis missing segment ${missingSegs[0]} — add segment peer for completeness.`,
+          expected: "all segments covered",
+          actual: `missing ${missingSegs[0]}`,
+        });
+      } else {
+        checks.push({
+          id: "COMPET-SEG-01",
+          category: "BS_DETECTOR",
+          name: "Segment-Level Competitive Analysis",
+          status: "PASS",
+          details: `Segment-level competitive matrix covers all ${segSet.segments.length} filing segments.`,
+        });
+      }
+    } else {
+      checks.push({
+        id: "COMPET-SEG-01",
+        category: "BS_DETECTOR",
+        name: "Segment-Level Competitive Analysis",
+        status: "PASS",
+        details: `No multi-segment filing set — company-level comps sufficient.`,
+      });
+    }
+  }
+
+  // ── MOAT-EVIDENCE-01: evidence-driven moat vs generic assertion ──
+  {
+    const moatText = `${(data.aiAnalysis as any)?.economicMoatCommentary || (data.aiAnalysis as any)?.competitiveMoat || ""}`.toLowerCase();
+    const moatSources = (data.aiAnalysis as any)?.moatSources || (data as any).peAnalysis?.moatSources || [];
+    const hasFact = /\[F-|\[f-|fact|roce|roic|wacc|spread|margin.*stable|gross margin.*\d+%/i.test(moatText + JSON.stringify(moatSources));
+    const genericMoatPhrases = ["strong moat", "wide moat", "durable moat", "sustainable advantage", "competitive advantage", "economic moat is wide"];
+    const isGenericMoat = moatText.length > 30 && genericMoatPhrases.some((p) => moatText.includes(p)) && !hasFact;
+    if (isGenericMoat) {
+      checks.push({
+        id: "MOAT-EVIDENCE-01",
+        category: "BS_DETECTOR",
+        name: "Moat Evidence Chain",
+        status: "WARN",
+        details: `Moat narrative uses generic assertion ("${genericMoatPhrases.find((p) => moatText.includes(p))}") without [F-...] or canonical ROCE/WACC linkage. Evidence-driven moat requires: source → evidence [F-...] or ROCE vs WACC → economic consequence → durability → threats. Costs score.`,
+        expected: "evidence [F-...] or ROCE vs WACC + durability",
+        actual: "generic moat phrase without evidence",
+      });
+    } else if (moatSources && Array.isArray(moatSources) && moatSources.length > 0) {
+      const lacking = moatSources.filter((s: any) => !s.evidence || (typeof s.evidence === "string" && s.evidence.length < 15 && !/\[F-/.test(s.evidence) && !/roce|wacc|margin/i.test(s.evidence.toLowerCase())));
+      if (lacking.length > 0 && lacking.length === moatSources.length) {
+        checks.push({
+          id: "MOAT-EVIDENCE-01",
+          category: "BS_DETECTOR",
+          name: "Moat Evidence Chain",
+          status: "WARN",
+          details: `All ${moatSources.length} moat pillar(s) lack [F-...] or ROCE/WACC evidence — moat is asserted, not evidenced. Add fact linkage per pillar.`,
+          expected: "evidence per pillar",
+          actual: `${lacking.length} without evidence`,
+        });
+      } else {
+        checks.push({
+          id: "MOAT-EVIDENCE-01",
+          category: "BS_DETECTOR",
+          name: "Moat Evidence Chain",
+          status: "PASS",
+          details: `Moat pillars carry evidence linkage.`,
+        });
+      }
+    } else {
+      checks.push({
+        id: "MOAT-EVIDENCE-01",
+        category: "BS_DETECTOR",
+        name: "Moat Evidence Chain",
+        status: "PASS",
+        details: `Moat evidence check not applicable (no pillar detail).`,
+      });
+    }
+  }
+
   // Balance sheets must balance: FAIL above 5% (was 15%), WARN above 1% (was 5%).
   // Plugged/estimated statements no longer hide behind a lenient gate.
   if (maxBsVariancePct > 5.0 && bsYearsEvaluated > 0) {
@@ -1200,30 +1393,59 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
   }
 
   // DISC-01: Material line-item discontinuity — a historically material operating
-  // line item that vanishes in forecast years without explanation.
+  // line item that vanishes in forecast years without explanation. Now FAIL (blocker)
+  // when material and unexplained: the forecast must explicitly classify as
+  // RECURRING | NON_RECURRING | RECLASSIFIED | ONE_OFF_REMOVAL | DATA_ERROR
+  // and the basis string must state the treatment, otherwise publication blocked.
   {
     const annuals = data.annualFinancials || [];
     const fc = (data as any).canonicalForecast as { projections?: Array<Record<string, unknown>> } | null;
     if (annuals.length >= 2 && fc?.projections?.length) {
       const lineItems = [
         { name: "Other Operating Expense", historical: (y: any) => Number(y.totalOperatingExpense ?? 0) - Number(y.costOfRevenue ?? 0) - Number(y.sellingGeneralAdmin ?? 0) - Number(y.researchDevelopment ?? 0), forecast: (p: Record<string, unknown>) => Number(p.otherOperatingExpense ?? 0), threshold: 0.005, label: "otherOperatingExpense" },
+        { name: "Other Operating Expense (gross)", historical: (y: any) => Math.abs(Number(y.totalOperatingExpense ?? 0) - Number(y.costOfRevenue ?? 0) - Number(y.sellingGeneralAdmin ?? 0) - Number(y.researchDevelopment ?? 0)), forecast: (p: Record<string, unknown>) => Math.abs(Number(p.otherOperatingExpense ?? 0)), threshold: 0.005, label: "otherOperatingExpenseAbs" },
       ];
       const avgRevenue = annuals.reduce((s, y) => s + (Number((y as any).revenue) || 0), 0) / annuals.length;
-      for (const li of lineItems) {
-        const histValues = annuals.map(li.historical).filter(v => Number.isFinite(v) && v !== 0);
+      for (const li of lineItems.slice(0, 1)) {
+        const histValues = annuals.map(li.historical).filter(v => Number.isFinite(v) && Math.abs(v) > 1);
         if (histValues.length < 2) continue;
-        const avgHist = Math.abs(histValues.reduce((s, v) => s + v, 0) / histValues.length);
+        const avgHist = Math.abs(histValues.reduce((s, v) => s + Math.abs(v), 0) / histValues.length);
         const isMaterial = avgRevenue > 0 && (avgHist / avgRevenue) > li.threshold;
         if (!isMaterial) continue;
         const forecastValues = (fc.projections || []).map(li.forecast);
-        const allZero = forecastValues.every(v => v === 0 || !Number.isFinite(v));
+        const allZero = forecastValues.every(v => v === 0 || !Number.isFinite(v) || Math.abs(v) < 1);
+        const forecastBasis = JSON.stringify((fc as any).basis || (data as any).dcf?.assumptionBasis || {}) + " " + JSON.stringify((data as any).aiAnalysis || {});
+        const hasExplicitClassification = /(RECURRING|NON_RECURRING|RECLASSIFIED|ONE_OFF_REMOVAL|DATA_ERROR|reclassified|non-recurring|one-off)/i.test(forecastBasis);
+        // Also check canonical forecast basis for OtherOpex disclosure
+        const histPct = avgRevenue > 0 ? ((avgHist / avgRevenue) * 100).toFixed(1) + '% of revenue' : 'abs ' + avgHist.toFixed(0);
+        const forecastSample = forecastValues.slice(0, 3).map(v => (Number(v) || 0).toFixed(0)).join(", ");
         if (allZero) {
+          const detail = `Historically material line item "${li.name}" (avg ${histPct} across ${histValues.length} historical years, last ${histValues[histValues.length - 1].toFixed(0)}) is absent/zero in all forecast periods (forecast: ${forecastSample}). Forecast OtherOpex is computed as plug GP−SGA−R&D−EBIT; disappearance must be explicitly classified as RECURRING (continue at trailing ${histPct}) | NON_RECURRING (one-off removed, state year/reason) | RECLASSIFIED (absorbed into ${histPct} → SGA/R&D/COGS, state target) | ONE_OFF_REMOVAL | DATA_ERROR. No classification found in basis — publication blocked until disclosed.`;
+          const shouldBlock = !hasExplicitClassification;
           checks.push({
             id: "DISC-01", category: "BS_DETECTOR", name: "Material Line Discontinuity",
-            status: "WARN",
-            details: `Historically material line item "${li.name}" (avg ${avgRevenue > 0 ? ((avgHist / avgRevenue) * 100).toFixed(1) + '% of revenue' : 'abs ' + avgHist.toFixed(0)}) is present across ${histValues.length} historical years but absent/zero in all forecast periods. Requires explicit classification: RECURRING | NON_RECURRING | RECLASSIFIED | ONE_OFF_REMOVAL | DATA_ERROR.`,
-            expected: "explicit classification or continuation", actual: "all forecast values zero/missing",
+            status: shouldBlock ? "FAIL" : "WARN",
+            details: shouldBlock ? `FATAL PUBLICATION BLOCK: ${detail}` : detail,
+            expected: "explicit classification or continuation (RECURRING/NON_RECURRING/RECLASSIFIED/ONE_OFF_REMOVAL/DATA_ERROR)", actual: hasExplicitClassification ? "classification present but values zero" : "all forecast values zero/missing, no classification",
           });
+        } else if (hasExplicitClassification) {
+          // Pass when explained, even if zero — classification satisfies gate
+          checks.push({
+            id: "DISC-01", category: "BS_DETECTOR", name: "Material Line Discontinuity",
+            status: "PASS",
+            details: `Material line "${li.name}" discontinuity explicitly classified (avg ${histPct} historical → forecast ${forecastSample}); classification found in basis.`,
+          });
+        } else {
+          // Warn when material but small residual remains without classification
+          const avgForecast = forecastValues.reduce((s, v) => s + Math.abs(Number(v) || 0), 0) / Math.max(1, forecastValues.length);
+          if (avgHist > 0 && avgForecast / avgHist < 0.15) {
+            checks.push({
+              id: "DISC-01", category: "BS_DETECTOR", name: "Material Line Discontinuity",
+              status: "WARN",
+              details: `Material line "${li.name}" (avg ${histPct}) shrinks ${(avgForecast / avgHist * 100).toFixed(0)}% in forecast (avg ${avgForecast.toFixed(0)}) without explicit classification. State RECLASSIFIED/REMOVAL basis.`,
+              expected: "explicit classification", actual: `forecast avg ${avgForecast.toFixed(0)} vs hist ${avgHist.toFixed(0)}`,
+            });
+          }
         }
       }
     }

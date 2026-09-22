@@ -120,19 +120,63 @@ export function checkHistoricalDiscontinuities(
   return out;
 }
 
+/** High-severity QA codes that must block publication (not merely warn) when present.
+ * THESIS-CHAIN-01 / CATALYST-SPEC-01 / COMPET-SEG-01 / MOAT-EVIDENCE-01 are
+ * evidence-quality warnings — they cost score and count toward the 20-warning
+ * overflow, but a single missing chain does not alone block a clean report
+ * (otherwise every minimal test fixture would BLOCK). */
+export const HIGH_SEVERITY_QA_BLOCKERS = new Set<string>([
+  "THESIS-01", "OVERVIEW-01", "COMPET-01", "CATALYST-01", "MOAT-01", "MOAT-02", "MOAT-03",
+  "CLAIM-01", "GOV-01", "DISC-01", "BS-01", "CHAIN-01", "ASSUME-01",
+  "XREF-01", "XREF-02", "XREF-03", "XREF-04", "XREF-05", "FV-RECOMP-01",
+  "IDENTITY-01", "PLACEHOLDER-01", "NARRATIVE-01", "SANITIZE-01",
+  "BS-DETECTOR-04", "BS-DETECTOR-05", "PEER-01", "RATING-01", "RATING-02",
+  "SEMANTIC-01", "VAL-01", "CREDIT-01", "ARCH-01", "ARCH-02", "ARCH-03", "ARCH-04",
+  "GATE-OVERFLOW",
+]);
+
+/** Substantive-warning threshold beyond which disclosure is insufficient — publication blocked. */
+export const SUBSTANTIVE_WARNING_THRESHOLD = 20;
+
 /** Evaluate ONE gate decision from canonical-severity findings. */
 export function evaluatePublicationGate(findings: GateFinding[]): PublicationGateResult {
-  const severities = findings.map((f) => f.severity);
-  const top = findings.length === 0 ? ("info" as ResearchSeverity) : maxSeverity(severities);
+  // Count substantive warnings before escalation (warn + material).
+  const preSeverities = findings.map((f) => f.severity);
+  const preBlockers = findings.filter((f) => f.severity === "blocker");
+  const preWarnings = findings.filter((f) => f.severity === "material" || f.severity === "warn");
+  const substantiveCount = preWarnings.length;
+
+  // Enforce 20-warning threshold: escalate to BLOCKED with synthetic blocker.
+  let escalatedFindings = [...findings];
+  if (substantiveCount >= SUBSTANTIVE_WARNING_THRESHOLD) {
+    escalatedFindings.push({
+      source: "QA",
+      code: "GATE-OVERFLOW",
+      severity: "blocker",
+      priority: "P0",
+      detail: `Report carries ${substantiveCount} material/warn qualifications (threshold ${SUBSTANTIVE_WARNING_THRESHOLD}) — exceeds substantive-warning budget; publication requires remediation, not disclosure.`,
+    });
+  }
+
+  // High-severity QA findings escalate from material/warn -> blocker.
+  escalatedFindings = escalatedFindings.map((f) => {
+    if ((f.severity === "material" || f.severity === "warn") && HIGH_SEVERITY_QA_BLOCKERS.has(f.code)) {
+      return { ...f, severity: "blocker" as ResearchSeverity, priority: "P0" as GatePriority };
+    }
+    return f;
+  });
+
+  const severities = escalatedFindings.map((f) => f.severity);
+  const top = escalatedFindings.length === 0 ? ("info" as ResearchSeverity) : maxSeverity(severities);
   const gateLevel = researchToGate(top);
   const decision: GateDecision =
     gateLevel === "BLOCKED" ? "BLOCKED" : gateLevel === "WARNING" ? "READY_WITH_WARNINGS" : "READY";
   const score = scoreFromSeverities(severities);
-  const blockers = findings.filter((f) => f.severity === "blocker");
-  const warnings = findings.filter((f) => f.severity === "material" || f.severity === "warn");
+  const blockers = escalatedFindings.filter((f) => f.severity === "blocker");
+  const warnings = escalatedFindings.filter((f) => f.severity === "material" || f.severity === "warn");
 
   const priorityBreakdown: PriorityBreakdown = { P0: 0, P1: 0, P2: 0, P3: 0 };
-  for (const f of findings) {
+  for (const f of escalatedFindings) {
     priorityBreakdown[f.priority]++;
   }
 

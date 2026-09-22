@@ -1170,19 +1170,21 @@ export function computeDCF(
   const rawAvgDeptPct =
     annualFinancials.reduce((s, f) => s + (getRevenue(f) > 0 ? getDepreciation(f) / getRevenue(f) : 0), 0) /
     nonZeroRevCount;
-  // D&A rate on opening PP&E stock (PP&E roll-forward anchor — item 10). Pairs
-  // D&A_t against netPPE_{t-1}; needs ≥2 pairs, else revenue-based fallback.
+  // D&A rate on opening PP&E stock (PP&E roll-forward anchor — item 10). Build from PPE economics:
+  // When ≥1 valid D&A/prevPPE pair and opening PPE exists, use PP&E-anchored rate (even single pair beats revenue %).
+  // Fallback to revenue-based only when no PPE stock exists — capex then covers replacement via revenue intensity.
   const ppePairs: number[] = [];
   for (let i = 1; i < annualFinancials.length; i++) {
     const prevPpe = Number((annualFinancials[i - 1] as unknown as Record<string, unknown>).netFixedAssets) || 0;
     if (prevPpe > 0 && getRevenue(annualFinancials[i]) > 0) {
-      ppePairs.push(getDepreciation(annualFinancials[i]) / prevPpe);
+      const rate = getDepreciation(annualFinancials[i]) / prevPpe;
+      if (rate > 0 && rate < 0.5) ppePairs.push(rate);
     }
   }
-  const rawAvgDepOnPpe = ppePairs.length >= 2
+  const ppeBase = Number((latest as unknown as Record<string, unknown>).netFixedAssets) || 0;
+  const rawAvgDepOnPpe = ppePairs.length >= 1 && ppeBase > 0
     ? ppePairs.reduce((s, r) => s + r, 0) / ppePairs.length
     : 0;
-  const ppeBase = Number((latest as unknown as Record<string, unknown>).netFixedAssets) || 0;
   // effectiveMargin mirrors computeWACC's mid-cycle anchor (first explicit margin minus 1pp ramp).
   // SINGLE-SEED RULE: this seed is computed ONCE here and handed to the
   // canonical forecast builder below. Nothing downstream re-seeds, re-ramps,

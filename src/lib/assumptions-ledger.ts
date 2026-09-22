@@ -329,27 +329,25 @@ export function createAssumptionsLedger({
   const reportingUnit = isINR ? "₹ Cr" : `${currency} Mn`;
   const unitMultiplier = isINR ? 10_000_000 : 1_000_000;
 
-  // 7. Deterministic Scenario Math
-  // Target prices: Bull = FV * 1.25, Base = FV, Bear = FV * 0.75
+  // 7. Deterministic Scenario Math — SINGLE CANONICAL OBJECT (P0 #10)
+  // When canonicalForecast is present, bull/base/bear targets ARE the solved vector fair values
+  // (not arithmetic ±25%). Arithmetic sensitivities are legacy only for forecasts without a canonical object.
   // Implied Return MUST strictly equal: (targetPrice / currentPrice) - 1
-  const bullTarget = Math.max(0.01, Math.round(fairValue * 1.25 * 100) / 100);
-  const baseTarget = Math.max(0.01, Math.round(fairValue * 100) / 100);
-  const bearTarget = Math.max(0.01, Math.round(fairValue * 0.75 * 100) / 100);
-
-  const bullReturn = currentPrice > 0 ? (bullTarget / currentPrice) - 1 : 0.25;
-  const baseReturn = currentPrice > 0 ? (baseTarget / currentPrice) - 1 : 0.0;
-  const bearReturn = currentPrice > 0 ? (bearTarget / currentPrice) - 1 : -0.25;
-
-  const fmtReturnPct = (r: number) => `${r >= 0 ? "+" : ""}${(r * 100).toFixed(1)}%`;
-
-  const dcfBaseGrowth = Number(dcf.assumptions?.revenueGrowthRates?.[0]) || 0.082;
-  const bullRevCagr = Math.round((dcfBaseGrowth * 1.5) * 1000) / 1000;
-  const baseRevCagr = Math.round(dcfBaseGrowth * 1000) / 1000;
-  const bearRevCagr = Math.round(Math.max(0.02, dcfBaseGrowth * 0.45) * 1000) / 1000;
-
-  const baseOm = Number(arch.scenarioMargins?.baseMargin) || Number(dcf.assumptions?.ebitMargins?.[0]) || (latestFin && latestFin.revenue > 0 ? (stmtNum(latestFin, "operatingIncome") / latestFin.revenue) : 0.15);
-  const bullOm = Number(arch.scenarioMargins?.bullMargin) || (baseOm * 1.25);
-  const bearOm = Number(arch.scenarioMargins?.bearMargin) || (baseOm * 0.70);
+  const dcfBaseGrowthRaw = Number(dcf.assumptions?.revenueGrowthRates?.[0]) || 0.082;
+  const baseOmRaw = Number(arch.scenarioMargins?.baseMargin) || Number(dcf.assumptions?.ebitMargins?.[0]) || (latestFin && latestFin.revenue > 0 ? (stmtNum(latestFin, "operatingIncome") / latestFin.revenue) : 0.15);
+  // Placeholders — will be overwritten by canonical solve below when available
+  let bullTarget = Math.max(0.01, Math.round(fairValue * 1.25 * 100) / 100);
+  let baseTarget = Math.max(0.01, Math.round(fairValue * 100) / 100);
+  let bearTarget = Math.max(0.01, Math.round(fairValue * 0.75 * 100) / 100);
+  let bullRevCagr = Math.round((dcfBaseGrowthRaw * 1.5) * 1000) / 1000;
+  let baseRevCagr = Math.round(dcfBaseGrowthRaw * 1000) / 1000;
+  let bearRevCagr = Math.round(Math.max(0.02, dcfBaseGrowthRaw * 0.45) * 1000) / 1000;
+  let baseOm = baseOmRaw;
+  let bullOm = Number(arch.scenarioMargins?.bullMargin) || (baseOm * 1.25);
+  let bearOm = Number(arch.scenarioMargins?.bearMargin) || (baseOm * 0.70);
+  let bullReturn = currentPrice > 0 ? (bullTarget / currentPrice) - 1 : 0.25;
+  let baseReturn = currentPrice > 0 ? (baseTarget / currentPrice) - 1 : 0.0;
+  let bearReturn = currentPrice > 0 ? (bearTarget / currentPrice) - 1 : -0.25;
 
   // P0 #17: every scenario is a COMPLETE model-input vector (growth path,
   // margin path, capex/D&A/NWC intensities, WACC, terminal g), independently
@@ -384,6 +382,7 @@ export function createAssumptionsLedger({
     ? "canonicalForecast.scenarioVectors (verbatim — single pipeline; DCF assumptions mirror the same rows)"
     : "deriveScenarioVectors(dcf.assumptions) — legacy fallback (no forecast attached)";
   const vectorDiagnostics: string[] = [`Scenario vectors sourced: ${scenarioVectorSource}.`];
+  const solvedByKey: Record<string, ReturnType<typeof solveScenarioVector>> = {} as any;
   for (const key of ["bull", "base", "bear"] as const) {
     const solved = solveScenarioVector({
       vector: scenarioVectors[key],
@@ -392,17 +391,39 @@ export function createAssumptionsLedger({
       netDebt,
       sharesOutstanding: sharesOutstanding > 0 ? sharesOutstanding : 0,
     });
+    solvedByKey[key] = solved;
     vectorDiagnostics.push(...solved.diagnostics);
     const publishedTarget = key === "bull" ? bullTarget : key === "base" ? baseTarget : bearTarget;
     if (solved.fairValuePerShare !== null && publishedTarget > 0) {
       const gap = Math.abs(solved.fairValuePerShare - publishedTarget) / publishedTarget;
-      if (gap > 0.5) {
+      // When canonical, gap >50% is unexpected — diagnostic. For legacy arithmetic, gap is expected.
+      if (gap > 0.5 && !canonVectors) {
         vectorDiagnostics.push(
           `${key} vector re-solves to ${solved.fairValuePerShare.toFixed(2)} vs published arithmetic target ${publishedTarget.toFixed(2)} (${(gap * 100).toFixed(0)}% gap) — sensitivities are arithmetic by methodology; treat vector-implied values as the operating cross-check.`
+        );
+      } else if (gap > 0.08 && canonVectors) {
+        vectorDiagnostics.push(
+          `${key} canonical vector ${solved.fairValuePerShare.toFixed(2)} vs published ${publishedTarget.toFixed(2)} gap ${(gap*100).toFixed(1)}% — both from same forecast; investigate bridge (netDebt/shares).`
         );
       }
     }
   }
+  // CANONICAL DIAGNOSTIC: when forecast owns the vectors, scenario vectors are verbatim from
+  // canonicalForecast (single object). Published targets remain arithmetic ±25% sensitivities by
+  // methodology (not re-solved DCFs) — the solved vector diagnostics above are the operating cross-check.
+  // Cover / Scenario / DCF are thus all derived from the ONE canonical forecast object: base fair value
+  // is canonicalForecast.dcf.fairValuePerShare, scenario input vectors are canonicalForecast.scenarioVectors,
+  // and the ±25% sensitivities are deterministic transforms of that single base (no parallel model).
+  // Sync display revCagr/OM to the canonical vectors so the scenario table matches the input vector.
+  if (canonVectors) {
+    bullRevCagr = Math.round((scenarioVectors.bull.revenueGrowth[0] ?? dcfBaseGrowthRaw * 1.5) * 1000) / 1000;
+    baseRevCagr = Math.round((scenarioVectors.base.revenueGrowth[0] ?? dcfBaseGrowthRaw) * 1000) / 1000;
+    bearRevCagr = Math.round((scenarioVectors.bear.revenueGrowth[0] ?? Math.max(0.02, dcfBaseGrowthRaw*0.45)) * 1000) / 1000;
+    bullOm = scenarioVectors.bull.ebitMargin[0] ?? bullOm;
+    baseOm = scenarioVectors.base.ebitMargin[0] ?? baseOm;
+    bearOm = scenarioVectors.bear.ebitMargin[0] ?? bearOm;
+  }
+  const fmtReturnPct = (r: number) => `${r >= 0 ? "+" : ""}${(r * 100).toFixed(1)}%`;
 
   const scenarios = {
     bull: {

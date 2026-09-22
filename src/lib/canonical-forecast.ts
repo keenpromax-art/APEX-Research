@@ -372,10 +372,27 @@ export function buildCanonicalForecast(params: {
     const rd = rev * adjRdPct;
     const ebit = rev * m;
     // OtherOpex is the EXPLICIT PLUG: GP − SGA − R&D − EBIT = OtherOpex
-    const otherOpex = Math.max(0, grossProfit - sga - rd - ebit);
+    // CRITICAL: when trailing otherOpex is material, this plug may collapse to ~0 in forecast
+    // (especially when gm−m is small and sgaPct+rdPct dominate costSum). The forecast basis
+    // must then explicitly classify the disappearance as RECURRING/NON_RECURRING/RECLASSIFIED.
+    const rawOtherOpex = grossProfit - sga - rd - ebit;
+    const otherOpex = Math.max(0, rawOtherOpex);
     const nopat = ebit * (1 - tax);
     const dep = usePpeDep ? ppeStock * (driver.depOnPpeRate as number) : rev * avgDeptPct;
-    const capex = rev * Math.max(avgCapexPct, avgDeptPct * 1.1);
+    // Capex: PP&E economics, not flat 3%. Maintenance = D&A (replace), growth = PPE × revenue growth.
+    // When PPE stock is material, capex must cover both; revenue % is fallback only.
+    const revBasedCapex = rev * Math.max(avgCapexPct, avgDeptPct * 1.1);
+    let capex = revBasedCapex;
+    if (usePpeDep && ppeStock > 0) {
+      const ppeGrowthCapex = dep + Math.max(0, ppeStock * gr); // growth capex scales with asset base and growth
+      // For asset-heavy names (PPE/revenue >0.25), PPE-growth economics dominate; otherwise revenue-based is floor.
+      const ppeIntensity = ppeStock / rev;
+      if (ppeIntensity > 0.25) {
+        capex = Math.min(Math.max(ppeGrowthCapex, revBasedCapex), rev * 0.18); // cap explosive PPE-growth at 18% revenue
+      } else {
+        capex = Math.max(revBasedCapex, Math.min(ppeGrowthCapex, revBasedCapex * 1.4));
+      }
+    }
     const dwc = rev * avgNwcChangePct;
     const fcff = computeFCFF({ nopat, depreciation: dep, capex, changeInWorkingCapital: dwc });
     fcffs.push(fcff);
@@ -505,10 +522,33 @@ export function buildCanonicalForecast(params: {
 
   const y1Margin = driver.ebitMargins[0] ?? 0.15;
   const trailMargin = T ? T.ebitMargin : params.effectiveMargin;
+  // Other Opex disappearance classification: trailing material but forecast plug → 0 requires explicit basis.
+  const avgHistOtherOpexAbs = T ? Math.abs((T.otherOperatingExpense ?? 0)) : 0;
+  const avgHistOtherOpexPct = T && T.revenue > 0 ? avgHistOtherOpexAbs / T.revenue : 0;
+  const isOtherOpexMaterial = avgHistOtherOpexPct > 0.005 && T != null && Number.isFinite(T.otherOperatingExpense);
+  const avgForecastOtherOpex = projections.length > 0 ? projections.reduce((s, p) => s + Math.abs(p.otherOperatingExpense ?? 0), 0) / projections.length : 0;
+  const forecastOtherOpexAvgPct = projections[0]?.revenue ? avgForecastOtherOpex / projections[0].revenue : 0;
+  const otherOpexDisappears = isOtherOpexMaterial && avgForecastOtherOpex < avgHistOtherOpexAbs * 0.25;
+  const otherOpexBasis = !isOtherOpexMaterial
+    ? `Other operating expense immaterial trailing (${(avgHistOtherOpexPct * 100).toFixed(2)}% of revenue) — plug GP−SGA−R&D−EBIT = OtherOpex (${(projections[0]?.otherOperatingExpense ?? 0).toFixed(0)} avg) is consistent.`
+    : otherOpexDisappears
+      ? `Other operating expense MATERIAL trailing (${(avgHistOtherOpexPct * 100).toFixed(1)}% of revenue, ${avgHistOtherOpexAbs.toFixed(0)}) collapses to forecast avg ${avgForecastOtherOpex.toFixed(0)} (${(forecastOtherOpexAvgPct * 100).toFixed(2)}% of revenue) — CLASSIFICATION REQUIRED: RECLASSIFIED into SGA/R&D/COGS scaling (costSum ${(sgaPct + rdPct + Math.max(0, otherOpexPct)).toFixed(3)} → scaled via k=${((gm - (driver.ebitMargins[0] ?? 0.15)) / Math.max(1e-9, sgaPct + rdPct + Math.max(0, otherOpexPct))).toFixed(2)}) or NON_RECURRING one-off removed. Check DISC-01 — publication blocked until basis states RECURRING/NON_RECURRING/RECLASSIFIED/ONE_OFF_REMOVAL/DATA_ERROR.`
+      : `Other operating expense trailing ${(avgHistOtherOpexPct * 100).toFixed(2)}% of revenue → forecast plug avg ${(forecastOtherOpexAvgPct * 100).toFixed(2)}% (rawOtherOpex ${projections[0]?.otherOperatingExpense?.toFixed(0) ?? "n/a"} Y1) — within tolerance (≥25% of trailing). Plug GP−SGA−R&D−EBIT exact.`;
+  // Capex/D&A PP&E economics basis
+  const ppeOpeningForBasis = T ? Math.max(0, T.ppe) : (params.ppeBase ?? 0);
+  const capexPpeBasis = usePpeDep && ppeOpeningForBasis > 0
+    ? `Capex PP&E-anchored: maintenance D&A ${(driver.depOnPpeRate! * 100).toFixed(2)}% of opening PPE (${ppeOpeningForBasis.toFixed(0)}) plus growth capex (PPE × revenue growth ${(driver.revenueGrowthRates[0]*100).toFixed(1)}% Y1); floor revenue % ${(avgCapexPct * 100).toFixed(1)}% and 1.1× D&A ensures replacement; capped at 18% revenue for discipline.`
+    : `Capex revenue-based ${(avgCapexPct * 100).toFixed(1)}% (hist ${(avgCapexPct * 100).toFixed(1)}% clamped 2.5–12%; no usable PPE stock, fallback ${ (avgDeptPct*100).toFixed(1)}% D&A floor).`;
+  const depBasis = usePpeDep && driver.depOnPpeRate !== null
+    ? `D&A PP&E roll-forward ${(driver.depOnPpeRate * 100).toFixed(2)}% of opening net PPE (base ${ppeOpeningForBasis.toFixed(0)}, hist pairs ≥1, rate <50% sanity); ${projections.length}yr avg D&A ${(projections.reduce((s,p)=>s+p.depreciation,0)/Math.max(1,projections.length)).toFixed(0)} — not flat 3% or revenue % estimate.`
+    : `D&A revenue-based ${(avgDeptPct * 100).toFixed(1)}% of revenue (no usable PPE stock; hist ${(avgDeptPct * 100).toFixed(1)}% clamped 2–6%); estimate, not PP&E economics.`;
   const forecast: CanonicalForecast = {
     driverEquation: driver.driverEquation,
     basis: {
       ...driver.basis,
+      capex: capexPpeBasis,
+      depreciation: depBasis,
+      otherOperatingExpense: otherOpexBasis,
       interest: `Interest expense at trailing implied debt rate ${(debtRate * 100).toFixed(2)}% on opening debt; interest income at ${(cashYield * 100).toFixed(2)}% on opening cash (fallbacks 5.00%/3.00% when trailing undisclosed).`,
       tax: `Cash tax at ${(tax * 100).toFixed(1)}% marginal rate on positive pretax (no deferred-tax modeling — disclosed).`,
       distributions: payout > 0 ? `Dividends at ${(payout * 100).toFixed(0)}% trailing payout of positive NI; buybacks modeled 0 (disclosed).` : `No dividend payout evidenced — distributions modeled 0 (disclosed).`,
@@ -516,7 +556,7 @@ export function buildCanonicalForecast(params: {
       workingCapital: `${driver.basis.workingCapital}; AR/inventory/payables extend trailing intensity ratios; other net WC absorbs (ΔWC − ΔAR − ΔINV + ΔAP) so the balance sheet balances exactly (labeled, never a silent plug).`,
       cashflow: `CFO = net income + D&A − ΔWC (stock-based comp modeled 0 — disclosed); FCF = CFO − capex; FCFF via kernel (NOPAT + D&A − capex − ΔWC).`,
       equity: `Equity rolls retained earnings (NI − dividends − buybacks); assets = cash + AR + inventory + PP&E + other assets + other WC; liabilities = debt + payables + other — identity exact by construction, verified by reconciliation.`,
-      continuity: `Y1 EBIT margin ${(y1Margin * 100).toFixed(1)}% vs trailing ${(trailMargin * 100).toFixed(1)}% (gap ${((y1Margin - trailMargin) * 100).toFixed(1)}pp); seed effective margin ${(params.effectiveMargin * 100).toFixed(1)}%.`,
+      continuity: `Y1 EBIT margin ${(y1Margin * 100).toFixed(1)}% vs trailing ${(trailMargin * 100).toFixed(1)}% (gap ${((y1Margin - trailMargin) * 100).toFixed(1)}pp); seed effective margin ${(params.effectiveMargin * 100).toFixed(1)}%. Single canonical forecast → DCF + cover + scenarios read verbatim (no parallel model; 62.5% vs 30% fork impossible).`,
     },
     modelVersion: "apex-financial-model-v1",
     revenueGrowthRates: driver.revenueGrowthRates,

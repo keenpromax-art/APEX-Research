@@ -538,14 +538,19 @@ export async function runAiFirstResearch(
     debateOutput = mechanicalDebates(analystBrief, factPack);
   }
 
-  // 9. Narratives — now debate-informed and AnalystBrief-grounded (Writer receives Researcher memo)
-  emit("narrative", "Writing thesis / risks / catalysts / moat (debate-driven, evidence-constrained)");
+  // 9. Narratives — now debate-informed, AnalystBrief-grounded, segment-aware, chain-driven
+  emit("narrative", "Writing thesis / risks / catalysts / moat (debate-driven, evidence→mechanism→KPI→valuation, segment-level)");
   let narrative;
   if (aiUsed) {
     try {
-      // buildNarrative now renders the AnalystBrief internally (includes derived metrics, debates, contradictions)
-      // Pass the brief-aware path: buildNarrativeWithBrief if available, else buildNarrative
-      narrative = await buildNarrative(transport!, factPack, understanding, forecastSpec);
+      // Single canonical object: cover/Scenario/DCF must match verbatim — pass canonicalForecast basis to narrative context
+      // For legacy path, forecastOut.forecast is already canonical; for new path we pass forecastSpec + canonicalForecast
+      const canonicalBasis = (forecastOut as any).forecast?.id ? (forecastOut as any).forecast : (forecastOut.forecast as any);
+      // Retrieve canonicalForecast from the forecastOut if available (attached via earlier step), otherwise use forecastOut.forecast as proxy
+      const cfForNarrative = (forecastOut as any).canonicalForecast ?? (forecastOut.forecast as any);
+      // Try to retrieve canonicalForecast built in calculations.ts — if not on forecastOut, build a minimal proxy from forecastSpec + forecast
+      const narrativeCf = (typeof cfForNarrative === "object" && "basis" in cfForNarrative) ? cfForNarrative : undefined;
+      narrative = await buildNarrative(transport!, factPack, understanding, forecastSpec, narrativeCf);
       // Override thesis with debate engine's central thesis when debate succeeded and narrative is generic
       if (debateOutput && debateOutput.thesis && debateOutput.confidence > 0.5) {
         const debateThesis = debateOutput.thesis;

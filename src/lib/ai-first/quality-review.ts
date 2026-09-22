@@ -416,6 +416,13 @@ const industryAnalyzer = (report: ResearchReport, pack: FactPack): ReviewFinding
 const skepticalAnalyzer = (report: ResearchReport): ReviewFinding[] => {
   const findings: ReviewFinding[] = [];
   const { thesis, risks, catalysts, moat, competitiveAnalysis, companyUnderstanding, valuation, forecast } = report;
+  const thesisLowerEarly = thesis.thesis.toLowerCase();
+  const driverNamesSk = [
+    ...(companyUnderstanding?.revenueDrivers || []).map((d) => d.name.toLowerCase()),
+    ...(companyUnderstanding?.costDrivers || []).map((d) => d.name.toLowerCase()),
+    ...(companyUnderstanding?.marginDrivers || []).map((d) => d.name.toLowerCase()),
+  ].filter(Boolean);
+  const kpiNamesSk = (companyUnderstanding?.keyKpis || []).map((k) => k.name.toLowerCase());
 
   // Adversarial: what is the weakest assumption? which valuation input does most work?
   if (valuation?.executedFrom) {
@@ -507,14 +514,35 @@ const skepticalAnalyzer = (report: ResearchReport): ReviewFinding[] => {
     });
   }
 
+  // THESIS CHAIN: evidence → mechanism → KPI → valuation must be present (anti-generic)
+  {
+    const hasEvidence = /\[F-[^\]]+\]/i.test(thesis.thesis) || /\[F-/.test(thesis.bullCase?.join(" ") || "") || /forecast|canonical|assumption/i.test(thesis.thesis);
+    const hasMechanism = driverNamesSk.some((d) => thesisLowerEarly.includes(d)) || /RevPAR|ADR|occupancy|ARPU|NIM|credit cost|volume|ASP|take rate|throughput|utilization/i.test(thesis.thesis);
+    const hasKpi = kpiNamesSk.some((k) => thesisLowerEarly.includes(k)) || hasMechanism;
+    const hasValuation = /valuation|fair value|upside|EV|per-share|FCF|FCFF|target|WACC|terminal/i.test(thesisLowerEarly);
+    if (!hasEvidence || !hasMechanism || !hasKpi || !hasValuation) {
+      const missing: string[] = [];
+      if (!hasEvidence) missing.push("evidence [F-...]/forecast");
+      if (!hasMechanism) missing.push("business mechanism");
+      if (!hasKpi) missing.push("company-specific KPI");
+      if (!hasValuation) missing.push("valuation consequence");
+      findings.push({
+        reviewer: "Skeptical Analyst",
+        severity: "blocker",
+        component: "thesis",
+        finding: `Thesis lacks evidence→mechanism→KPI→valuation chain (missing: ${missing.join(", ")}). Generic thesis language will be blocked — rebuild around a falsifiable debate with quantified chain.`,
+        recommendation: "Rewrite thesis as: evidence [F-...] → mechanism (e.g., occupancy×ADR→RevPAR) → affected KPI → financial consequence (revenue/EBIT/FCF row) → valuation consequence (EV/equity/per-share via canonical DCF). Cite the canonical forecast verbatim.",
+      });
+    }
+  }
+
   // Check thesis for unsupported quantitative claims
-  const thesisLower = thesis.thesis.toLowerCase();
   const unsupportedPatterns = ["cagr of", "growth to", "margin to", "target price of"];
   for (const pattern of unsupportedPatterns) {
-    if (thesisLower.includes(pattern)) {
+    if (thesisLowerEarly.includes(pattern)) {
       // Check if there's a number preceding it that might be unsupported
       const regex = new RegExp(`\\d+(?:\\.\\d+)?\\s*%?\\s*${pattern}`, "i");
-      const match = thesisLower.match(regex);
+      const match = thesisLowerEarly.match(regex);
       if (match && !thesis.whatCouldInvalidate?.includes(match[0])) {
         findings.push({
           reviewer: "Skeptical Analyst",
@@ -545,6 +573,33 @@ const skepticalAnalyzer = (report: ResearchReport): ReviewFinding[] => {
     }
   }
 
+  // CATALYST-SPECIFIC: company-specific trigger required, not generic earnings/margin
+  for (const c of catalysts) {
+    const txt = `${c.catalyst} ${c.mechanism}`.toLowerCase();
+    const genericPhrases = ["earnings growth", "margin expansion", "revenue growth", "earnings beat", "margin improvement", "profitability improvement", "earnings momentum"];
+    const isGeneric = genericPhrases.some((p) => txt === p || (txt.includes(p) && txt.length < 80 && !/launch|approval|order|contract|regulation|spectrum|store|clinical|trial|product|capacity|acquisition|divestiture|tariff|policy|rate hike|cut|guidance|buyback|dividend/i.test(txt)));
+    const hasTrigger = /launch|approval|order|contract|regulation|spectrum|auction|store|rollout|expansion|acquisition|divestiture|clinical|trial|product|capacity|utilization|tariff|policy|rate|guidance|buyback|dividend|occupancy|ADR|RevPAR|ARPU|take rate|throughput|crack spread|O2C|Jio/i.test(txt);
+    if (isGeneric && !hasTrigger) {
+      findings.push({
+        reviewer: "Skeptical Analyst",
+        severity: "blocker",
+        component: "catalysts",
+        finding: `Catalyst [${c.catalyst}] is generic ("${c.catalyst.slice(0, 60)}") without company-specific trigger (launch/approval/order/contract/regulation etc). Generic earnings/margin catalysts are blocked.`,
+        recommendation: "Replace with company-specific event: e.g., 'Jio 5G tariff hike → ARPU → revenue', 'O2C crack spread widening → petchem margin', 'new store rollout 500 stores → retail throughput'",
+      });
+      break;
+    }
+    if (!hasTrigger && txt.length > 20) {
+      findings.push({
+        reviewer: "Skeptical Analyst",
+        severity: "major",
+        component: "catalysts",
+        finding: `Catalyst [${c.catalyst}] lacks identifiable trigger (regulatory/product/capacity/contract). Add trigger and tie to canonical forecast variable.`,
+        recommendation: "Add trigger and financialVariable that exists in forecast (e.g., revenueGrowth[0], ebitMargin[0], capexPct)",
+      });
+    }
+  }
+
   // Check moat for forced pillar selection
   if (moat?.sources) {
     const pillarKeys = ["cost advantage", "brand", "network effects", "switching costs", "distribution"];
@@ -559,6 +614,45 @@ const skepticalAnalyzer = (report: ResearchReport): ReviewFinding[] => {
       });
     }
   }
+
+  // MOAT EVIDENCE-DRIVEN: each source must have fact or canonical linkage, not generic assertion
+  if (moat?.hasMoat && moat.sources) {
+    for (const s of moat.sources) {
+      const ev = (s.evidence || "").toLowerCase();
+      const hasFact = /\[F-/.test(s.evidence) || /\[F-/.test(s.economicConsequence);
+      const hasCanonical = /roce|roic|wacc|margin|spread|ebit|FCF|FCFF|canonical/i.test(ev);
+      const isGenericMoat = ["strong moat", "wide moat", "durable moat", "sustainable advantage", "competitive advantage"].some((p) => ev.includes(p) && ev.length < 80);
+      if (!hasFact && !hasCanonical && (isGenericMoat || ev.length < 30)) {
+        findings.push({
+          reviewer: "Skeptical Analyst",
+          severity: "blocker",
+          component: "moat",
+          finding: `Moat source "${s.source}" evidence "${s.evidence.slice(0, 60)}" lacks [F-...] or canonical ROCE/WACC linkage — generic moat language blocked.`,
+          recommendation: "Provide evidence: e.g., 'ROCE history vs WACC spread' or '[F-grossMargin] stability 30-32% over 4y' plus durability and threats.",
+        });
+        break;
+      }
+    }
+  }
+
+  // COMPETITIVE SEGMENT-LEVEL: when filing segments exist, analysis must be segment-level
+  try {
+    const { getFilingSegments } = require("../filing-segments") as typeof import("../filing-segments");
+    const segs = getFilingSegments((report.companyUnderstanding as any)?.ticker || (report as any).companyTicker || "");
+    if (segs && segs.segments.length >= 2) {
+      const compText = JSON.stringify(competitiveAnalysis || {}).toLowerCase();
+      const missingSegments = segs.segments.filter((sg: any) => !compText.includes(sg.name.toLowerCase().split(" ")[0]) ).map((sg: any) => sg.name);
+      if (missingSegments.length >= 2) {
+        findings.push({
+          reviewer: "Skeptical Analyst",
+          severity: "blocker",
+          component: "competitiveAnalysis",
+          finding: `Competitive analysis is not segment-level: filing has ${segs.segments.length} segments [${segs.segments.map((s: any) => s.name).join(", ")}] but analysis omits ${missingSegments.slice(0, 3).join(", ")} — conglomerate requires segment-level peer matrix.`,
+          recommendation: "Generate per-segment peers: e.g., O2C vs petchem refiners, Jio vs telecom ARPU peers, Retail vs DMart, E&P vs upstream — each with overlap/economic similarity/key difference.",
+        });
+      }
+    }
+  } catch {}
 
   return findings;
 };
@@ -835,8 +929,23 @@ export function runQualityReview(
     }
   }
 
+  // Enforce 20-warning threshold: 20 substantive findings cannot be READY_WITH_WARNINGS
+  if (allFindings.length >= 20) {
+    const hasOverflowBlocker = allFindings.some((f) => f.finding.includes("GATE-OVERFLOW"));
+    if (!hasOverflowBlocker) {
+      allFindings.push({
+        reviewer: "Final Institutional Research Reviewer",
+        severity: "blocker",
+        component: "gate",
+        finding: `GATE-OVERFLOW: Report carries ${allFindings.length} substantive findings (threshold 20) — exceeds substantive-warning budget; publication requires remediation, not disclosure.`,
+        recommendation: "Remediate high-severity findings (thesis chain, catalysts, competitive segment, moat evidence, Other Opex classification) until substantive count <20.",
+      });
+      perReviewer["Final Institutional Research Reviewer"] = [...(perReviewer["Final Institutional Research Reviewer"] || []), allFindings[allFindings.length - 1]];
+    }
+  }
+
   // Calculate overall score (0-100)
-  const overallScore = Math.max(0, Math.min(100, totalScore + 100));
+  const overallScore = Math.max(0, Math.min(100, totalScore + 100 + (allFindings.some((f) => f.finding.includes("GATE-OVERFLOW")) ? -15 : 0)));
 
   // Determine if report passed (no blockers overall, score above threshold)
   const hasAnyBlocker = allFindings.some((f: any) => f.severity === "blocker");
