@@ -3155,6 +3155,89 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
       }
     }
   }
+  // SRC-02 — Screener.in advisory cross-check (India-only). Screener is a
+  // SECONDARY elaboration source: it explains Yahoo inconsistencies (share-base
+  // splits, revenue scale) in the annex but NEVER reprices anything — every
+  // priced figure stays Yahoo-only. This check is WARN/PASS only (never FAIL):
+  // unavailable (US tickers, timeout, bot-block) is a silent SKIP.
+  {
+    const sc: any = (data as any).screenerCrosscheck;
+    if (sc && sc.available === true && Array.isArray(sc.findings) && sc.findings.length > 0) {
+      const notable = sc.findings.filter(
+        (f: any) => typeof f.driftPct === "number" && f.driftPct > 0.1
+      );
+      if (notable.length === 0) {
+        checks.push({
+          id: "SRC-02",
+          category: "BALANCE_SHEET",
+          name: "Screener Cross-Check (Advisory)",
+          status: "PASS",
+          details: `Screener.in (${sc.screenerSymbol}) reconciles with Yahoo within 10% on shares/revenue/profit — secondary corroboration; priced figures remain Yahoo-only.`,
+          expected: "Cross-check agreement",
+          actual: "agree ≤10%",
+        });
+      } else {
+        checks.push({
+          id: "SRC-02",
+          category: "BALANCE_SHEET",
+          name: "Screener Cross-Check (Advisory)",
+          status: "WARN",
+          details:
+            `Screener.in (${sc.screenerSymbol}) elaboration — Yahoo stays authoritative, ` +
+            `no figure repriced: ${notable.map((f: any) => f.note).join(" ")}`.slice(0, 600),
+          expected: "Cross-check agreement",
+          actual: `${notable.length} divergent field(s), Yahoo retained`,
+        });
+      }
+    }
+  }
+  // SRC-03 — International advisory annex (EDGAR 10-K + Nasdaq close vs Yahoo).
+  // Same contract as SRC-02: elaborates gaps, never reprices — WARN/PASS only
+  // (never FAIL). Unavailable legs (non-US, no CIK, timeout) skip silently.
+  {
+    const gc: any = (data as any).globalCrosscheck;
+    const ed = gc?.edgar;
+    if (ed && ed.available === true && Array.isArray(ed.findings) && ed.findings.length > 0) {
+      const notable = ed.findings.filter(
+        (f: any) => typeof f.driftPct === "number" && f.driftPct > 0.1
+      );
+      if (notable.length === 0) {
+        checks.push({
+          id: "SRC-03",
+          category: "BALANCE_SHEET",
+          name: "EDGAR Cross-Check (Advisory)",
+          status: "PASS",
+          details: `EDGAR 10-K (${ed.cik}) reconciles with Yahoo within 10% on shares/revenue/income — filing-grade corroboration; priced figures remain Yahoo-only.`,
+          expected: "Cross-check agreement",
+          actual: "agree ≤10%",
+        });
+      } else {
+        checks.push({
+          id: "SRC-03",
+          category: "BALANCE_SHEET",
+          name: "EDGAR Cross-Check (Advisory)",
+          status: "WARN",
+          details:
+            `EDGAR 10-K (${ed.cik}) elaboration — Yahoo stays authoritative, ` +
+            `no figure repriced: ${notable.map((f: any) => f.note).join(" ")}`.slice(0, 600),
+          expected: "Cross-check agreement",
+          actual: `${notable.length} divergent field(s), Yahoo retained`,
+        });
+      }
+    }
+    const nq = gc?.nasdaq;
+    if (nq && nq.available === true && typeof nq.driftPct === "number" && nq.driftPct > 0.03) {
+      checks.push({
+        id: "SRC-03",
+        category: "BALANCE_SHEET",
+        name: "Nasdaq Price Sanity (Advisory)",
+        status: "WARN",
+        details: `${nq.note || "Nasdaq close diverges from Yahoo price."} CMP stays Yahoo-only.`.slice(0, 400),
+        expected: "Price agreement ≤3%",
+        actual: `drift ${((nq.driftPct as number) * 100).toFixed(1)}%, Yahoo retained`,
+      });
+    }
+  }
   // P0 #3 — Hard accounting identities FAIL blocks (BS identity, cash chain, etc.)
   {
     const ids: any[] | undefined = (data as any).identityIssues;

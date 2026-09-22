@@ -192,7 +192,28 @@ export function resolveShareCount(params: {
       shares: f, source: "statement",
       warn: `Quote shares (${q.toFixed(0)}) do not reconcile with market cap while statement shares (${f.toFixed(0)}) do — probable partial-class quote feed. Model uses statement count; verify fully-diluted shares.`,
     };
-    if (qOk && fOk) return { shares: q, source: "quote", warn: null };
+    // Both reconcile within 30%: pick the count closest to marketCap/price.
+    // Universal multi-class fix (META precedent): quote often reports a single
+    // class (2.205B) while statements carry all-class diluted (2.530B, 0.7% vs
+    // 15.5% drift). Preferring quote unconditionally overstated per-share FV
+    // by ~15%. Small SBC gaps (PLTR 3.8%) resolve the same way with disclosure.
+    if (qOk && fOk) {
+      const qDrift = price > 0 && mktCap > 0 ? Math.abs(mktCap - price * q) / Math.max(1, price * q) : 1;
+      const fDrift = price > 0 && mktCap > 0 ? Math.abs(mktCap - price * f) / Math.max(1, price * f) : 1;
+      if (fDrift + 0.05 < qDrift) {
+        return {
+          shares: f, source: "statement-multiclass",
+          warn: `Statement shares (${f.toFixed(0)}, ${(fDrift * 100).toFixed(1)}% from marketCap) reconcile materially better than quote shares (${q.toFixed(0)}, ${(qDrift * 100).toFixed(1)}%) — probable partial-class quote feed. Model uses all-class statement count.`,
+        };
+      }
+      if (qDrift + 0.05 < fDrift) {
+        return {
+          shares: q, source: "quote",
+          warn: `Quote shares (${q.toFixed(0)}, ${(qDrift * 100).toFixed(1)}% from marketCap) reconcile materially better than statement shares (${f.toFixed(0)}, ${(fDrift * 100).toFixed(1)}%) — model uses quote count; verify fully-diluted shares.`,
+        };
+      }
+      return { shares: q, source: "quote", warn: null };
+    }
     // Neither reconciles — attempt multi-class inference from market cap directly
     if (price > 0 && mktCap > 0) {
       const impliedShares = mktCap / price;

@@ -1216,6 +1216,20 @@ export interface ReportData {
   evidenceRegistry?: import("@/lib/evidence-registry").EvidenceRegistry;
   /** Single canonical forecast (P0 #4) — the ONLY authoritative forward numbers. */
   canonicalForecast?: import("@/lib/canonical-forecast").CanonicalForecast;
+  /**
+   * Screener.in advisory cross-check (India-only, Yahoo stays authoritative).
+   * Elaboration annex only — never prices anything. Absent on US/global tickers
+   * and legacy fixtures.
+   */
+  screenerCrosscheck?: import("@/lib/screener-crosscheck").ScreenerCrosscheck | null;
+  /**
+   * International advisory annex (non-India tickers): EDGAR 10-K facts + Nasdaq
+   * close vs Yahoo. Same contract as Screener — elaborates, never prices.
+   */
+  globalCrosscheck?: {
+    edgar: import("@/lib/edgar-crosscheck").EdgarCrosscheck;
+    nasdaq: import("@/lib/nasdaq-crosscheck").NasdaqCheck;
+  } | null;
 }
 
 export interface SearchResult {

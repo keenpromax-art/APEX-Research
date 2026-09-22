@@ -724,6 +724,10 @@ export default function ReportClient({ ticker }: Props) {
         masterReportFacts,
         calibration: companyData.calibration || dcf.calibration,
         sanitizerReport: { rewrittenTerms: bleedRewriteLog },
+        // Advisory only: Screener.in vs Yahoo elaboration (Yahoo stays priced).
+        screenerCrosscheck: companyData.screenerCrosscheck ?? null,
+        // Advisory only: EDGAR + Stooq vs Yahoo (non-India tickers).
+        globalCrosscheck: (companyData as any).globalCrosscheck ?? null,
       };
 
       const qaReport = validateReportIntegrity(report);

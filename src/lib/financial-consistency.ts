@@ -161,10 +161,15 @@ export function checkCrossPageFinancials(input: FinConsInputs): FinConsFinding[]
   // (model/quote/statement/canonical-diluted). Sources absent from the input
   // bundle are skipped (never counted as conflicts); fewer than two
   // comparable sources warns (unverifiable against an independent base).
-  // Tolerance is 5% (not 1%): basic point-in-time vs weighted-average diluted
-  // counts routinely diverge 3-4% for SBC-heavy tech names (PLTR: quote 2.300B
-  // vs statement 2.391B = 3.8% drift from normal dilution, not a unit error).
-  // 10x-class errors (900% drift) still BLOCK decisively.
+  // Universal two-tier tolerance (META + PLTR precedents):
+  //   ≤5%  PASS — normal basic-vs-diluted SBC gaps (PLTR 3.8%).
+  //   ≤25% WARN — publishable multi-class/partial-quote divergence with
+  //          disclosure (META: quote 2.205B single-class vs statement 2.530B
+  //          all-class = 12.8%; model already uses the best-reconciling base
+  //          via resolveShareCount, so pages agree — the raw-feed gap is
+  //          disclosed, not blocking).
+  //   >25% BLOCK — unit/scale error (10x = 900% still blocks decisively).
+  // Non-positive sources always BLOCK (synthesis prohibited).
   {
     const provided = shareSources.filter((s) => s.value !== null);
     const invalid = provided.filter((s) => !((s.value as number) > 0));
@@ -181,15 +186,33 @@ export function checkCrossPageFinancials(input: FinConsInputs): FinConsFinding[]
         severity: "warn",
         detail: `${ticker}: only ${validShares.length} share source(s) available — single-base agreement unverifiable against an independent count; treat per-share outputs as provisional.`,
       });
-    } else {
-      const pass = invalid.length === 0 && maxDrift <= 0.05;
+    } else if (invalid.length > 0) {
       out.push({
         code: "FINCONS-03",
-        pass,
+        pass: false,
         severity: "blocker",
-        detail: pass
-          ? `${ticker}: single share base — ${validShares.length} source(s) agree within 5% (${validShares.map((s) => `${s.name}=${s.value.toFixed(0)}`).join(", ")}).`
-          : `${ticker}: SHARE-BASE SPLIT — ${invalid.length > 0 ? `non-positive: [${invalid.map((s) => s.name).join(", ")}] (synthesis prohibited). ` : ""}max pairwise drift ${(maxDrift * 100).toFixed(1)}% > 5%. Per-share pages diverge.`,
+        detail: `${ticker}: SHARE-BASE SPLIT — non-positive: [${invalid.map((s) => s.name).join(", ")}] (synthesis prohibited). Per-share pages diverge.`,
+      });
+    } else if (maxDrift <= 0.05) {
+      out.push({
+        code: "FINCONS-03",
+        pass: true,
+        severity: "blocker",
+        detail: `${ticker}: single share base — ${validShares.length} source(s) agree within 5% (${validShares.map((s) => `${s.name}=${s.value.toFixed(0)}`).join(", ")}).`,
+      });
+    } else if (maxDrift <= 0.25) {
+      out.push({
+        code: "FINCONS-03",
+        pass: false,
+        severity: "warn",
+        detail: `${ticker}: SHARE-BASE DIVERGENCE ${(maxDrift * 100).toFixed(1)}% (5-25% band) — likely partial-class quote vs all-class statement/SBC dilution; model uses best-reconciling base (see SHARE-01/resolver warn), pages agree — disclosed, not blocking. (${validShares.map((s) => `${s.name}=${s.value.toFixed(0)}`).join(", ")}).`,
+      });
+    } else {
+      out.push({
+        code: "FINCONS-03",
+        pass: false,
+        severity: "blocker",
+        detail: `${ticker}: SHARE-BASE SPLIT — max pairwise drift ${(maxDrift * 100).toFixed(1)}% > 25%. Per-share pages diverge (unit/scale error suspected).`,
       });
     }
   }

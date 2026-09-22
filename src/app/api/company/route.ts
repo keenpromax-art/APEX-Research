@@ -24,6 +24,9 @@ import { runFinancialSupervisor } from "@/lib/financial-supervisor";
 import { auditValuation } from "@/lib/valuation-audit";
 import { buildBaselineReconciliation } from "@/lib/guidance-reconciliation";
 import { assessDataConfidence } from "@/lib/data-confidence";
+import { fetchScreenerSnapshot, type ScreenerCrosscheck } from "@/lib/screener-crosscheck";
+import { fetchEdgarSnapshot, type EdgarCrosscheck } from "@/lib/edgar-crosscheck";
+import { fetchNasdaqCheck, type NasdaqCheck } from "@/lib/nasdaq-crosscheck";
 import type { SupportedProvider, CustomKeyConfig } from "@/lib/ai-providers";
 
 export const runtime = "nodejs";
@@ -49,6 +52,13 @@ const AI_DCF_BUDGET_MS = 12000;
 const SUPERVISOR_BUDGET_MS = 15000;
 const NEWS_BUDGET_MS = 20000;
 const PEERS_BUDGET_MS = 20000;
+// Screener.in advisory cross-check (India-only, Yahoo stays authoritative).
+// Time-boxed enrichment like news/peers: timeout → `{available:false}`, never blocking.
+const SCREENER_BUDGET_MS = 8000;
+// International legs (non-Indian tickers): EDGAR filings + Nasdaq price sanity.
+// Same advisory contract — Yahoo stays the sole pricing source.
+const EDGAR_BUDGET_MS = 10000;
+const NASDAQ_BUDGET_MS = 6000;
 
 export async function GET(request: NextRequest) {
   const symbol = normalizeTicker(request.nextUrl.searchParams.get("symbol"));
@@ -137,6 +147,26 @@ export async function GET(request: NextRequest) {
 
     const archetypeProfile = classifyArchetype(companyProfile, stockData, annualFinancials);
     const ontology = buildCompanyOntology(companyProfile, archetypeProfile as never);
+
+    // Screener.in advisory cross-check (India-only): elaborates Yahoo
+    // inconsistencies (share-base splits, revenue scale) in the QA annex.
+    // Yahoo remains the SOLE pricing source — screener values never enter
+    // ledger/DCF/facts. Resolves, never rejects; timeout → unavailable.
+    const screenerPromise: Promise<ScreenerCrosscheck> = (async () => {
+      try {
+        const latest: any = annualFinancials[annualFinancials.length - 1] || {};
+        return await fetchScreenerSnapshot(symbol, companyProfile.country, {
+          // Statement-first: weighted-average all-class count compares
+          // apples-to-apples with Screener's mcap÷price implied base.
+          shares: Number(latest.sharesOutstanding) || Number(stockData.sharesOutstanding) || null,
+          revenue: Number(latest.revenue) || null,
+          netIncome: Number(latest.netIncome) || null,
+        });
+      } catch (e) {
+        console.warn("[company] Screener cross-check failed (non-blocking):", e);
+        return { available: false, reason: "fetch failed — skipped", findings: [], fetchedAt: new Date().toISOString() };
+      }
+    })();
 
     // Peer data: selection + fetchPeerQuotes + enrichment — runs in parallel with news + AI DCF
     const peersPromise = (async () => {
@@ -406,6 +436,47 @@ export async function GET(request: NextRequest) {
     // Time-boxed: peers are enrichment (relative comps), never load-bearing.
     const peers = await withTimeout(peersPromise, PEERS_BUDGET_MS, []);
 
+    // Screener cross-check: advisory annex only (Yahoo stays authoritative).
+    const screenerCrosscheck = await withTimeout(
+      screenerPromise,
+      SCREENER_BUDGET_MS,
+      { available: false, reason: "budget exceeded — skipped", findings: [], fetchedAt: new Date().toISOString() } as ScreenerCrosscheck
+    );
+
+    // International legs (non-Indian tickers): EDGAR 10-K facts + Nasdaq close.
+    // Advisory only — same contract as Screener (Yahoo stays priced).
+    const isIndianTicker =
+      symbol.toUpperCase().endsWith(".NS") || symbol.toUpperCase().endsWith(".BO");
+    const globalCrosscheck = isIndianTicker
+      ? null
+      : await (async () => {
+          try {
+            const latest: any = annualFinancials[annualFinancials.length - 1] || {};
+            const [edgar, nasdaq] = await Promise.all([
+              withTimeout(
+                fetchEdgarSnapshot(symbol, companyProfile.country, {
+                  // Statement-first: filing weighted-avg diluted vs statement
+                  // weighted-avg (not point-in-time quote) is like-for-like.
+                  shares: Number(latest.sharesOutstanding) || Number(stockData.sharesOutstanding) || null,
+                  revenue: Number(latest.revenue) || null,
+                  netIncome: Number(latest.netIncome) || null,
+                }),
+                EDGAR_BUDGET_MS,
+                { available: false, reason: "budget exceeded — skipped", findings: [], fetchedAt: new Date().toISOString() } as EdgarCrosscheck
+              ),
+              withTimeout(
+                fetchNasdaqCheck(symbol, companyProfile.country, Number(stockData.currentPrice) || null),
+                NASDAQ_BUDGET_MS,
+                { available: false, reason: "budget exceeded — skipped", fetchedAt: new Date().toISOString() } as NasdaqCheck
+              ),
+            ]);
+            return { edgar, nasdaq };
+          } catch (e) {
+            console.warn("[company] Global cross-check failed (non-blocking):", e);
+            return null;
+          }
+        })();
+
     const masterReportFacts = buildMasterReportFacts({
       stockData,
       profile: companyProfile,
@@ -565,6 +636,12 @@ export async function GET(request: NextRequest) {
       valuationAudit,
       baselineReconciliation,
       dataConfidence,
+      // Advisory cross-check annex: Screener.in vs Yahoo (India-only).
+      // Priced figures everywhere remain Yahoo-only; this elaborates gaps.
+      screenerCrosscheck,
+      // International annex: EDGAR 10-K + Nasdaq close vs Yahoo (non-India).
+      // Same contract — elaborates gaps, never reprices.
+      globalCrosscheck,
     });
   } catch (error) {
     console.error("Company data fetch error:", error);
