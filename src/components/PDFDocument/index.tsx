@@ -1300,7 +1300,7 @@ const CoverPage = ({ data, concise = true }: { data: ReportData; concise?: boole
             <Text style={{ fontSize: 7.2, color: COLORS.textPrimary, lineHeight: 1.45, textAlign: "justify" }}>
               {(() => {
                 const t = pe.investmentThesis || pe.companyOverview;
-                return completeSentence(t, 320);
+                return completeSentence(t, 1800);
               })()}
             </Text>
           </View>
@@ -1325,7 +1325,7 @@ const CoverPage = ({ data, concise = true }: { data: ReportData; concise?: boole
               // AI-only: council moat narrative or the evidenced switching-cost
               // source; never ledger boilerplate or template sentences.
               const t = pe.competitiveMoat || pe.moatSources?.switchingCosts || "";
-              return completeSentence(t, 260);
+              return completeSentence(t, 900);
             })()}
           </Text>
 
@@ -1373,7 +1373,7 @@ const CoverPage = ({ data, concise = true }: { data: ReportData; concise?: boole
                   </View>
                 </View>
                 <Text style={{ fontSize: 7.0, color: COLORS.textPrimary, lineHeight: 1.45, textAlign: "justify", marginBottom: 2.5 }}>
-                  {completeSentence(pe.investmentConclusion, 260)}
+                  {completeSentence(pe.investmentConclusion, 900)}
                 </Text>
                 <View style={{ height: 0.5, backgroundColor: COLORS.hairlineFaint, marginBottom: 2.5 }} />
                 <View wrap={false} style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "baseline" }}>

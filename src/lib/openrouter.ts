@@ -425,7 +425,7 @@ Derive ALL SWOT items from the sector guardrail KPIs above — never reuse wind-
 Return a valid JSON object matching this structure EXACTLY:
 {
   "investmentThesis": "3 comprehensive, flowing paragraphs. Paragraph 1: Core investment thesis and multi-year secular growth runway. Paragraph 2: Operating leverage, margin expansion drivers, and unit economics. Paragraph 3: Valuation re-rating runway, intrinsic fair value support, and risk-reward asymmetry.",
-  "companyOverview": "2 detailed paragraphs detailing commercial segment composition, proprietary technological advantages, geographic footprint, and competitive uniqueness.",
+  "companyOverview": "5-7 comprehensive paragraphs (700-900 words, exhaustive). Cover: (1) Founding, history and corporate evolution, (2) Detailed segment-wise business model with revenue contribution and product/service portfolio, (3) Proprietary technology, IP, manufacturing or distribution moats, (4) Operational footprint — plants, branches, digital infrastructure, supply chain and logistics, (5) Geographic presence, market share and distribution network by region/channel, (6) Customer base, end-markets and go-to-market, (7) Competitive differentiation, strategic positioning and recent evolution. Be deeply data-rich and specific — never generic. Do NOT confine yourself to 1-2 paragraphs; write as much depth as needed to fully explain the business. Let the section flow as long as required.",
   "investmentConclusion": "2 paragraphs synthesizing the valuation verdict, price-to-fair-value corridor, margin of safety, and final investment recommendation stance.",
   "swotStrengths": [
     "1. Structural Market Leadership: Detailed analytical sentence citing revenue, market share, and backlog scale specific to the sector guardrail.",
@@ -484,7 +484,7 @@ Return ONLY raw JSON, no markdown formatting.`;
     const response = await callOpenRouterWithFailover([
       { role: "system", content: writerSystem },
       { role: "user", content: userPrompt },
-    ], 3000, 0.35, customConfig);
+    ], 5500, 0.35, customConfig);
 
     const draft = extractJsonFromResponse(response, emptyStrategist);
     const det = checkStrategistDraft(draft, truth);
@@ -613,7 +613,7 @@ Return ONLY raw JSON, no markdown formatting.`;
       const response = await callOpenRouterWithFailover([
         { role: "system", content: systemPrompt },
         { role: "user", content: buildUserPrompt(repairPrompt) },
-      ], 3000, 0.35, customConfig);
+      ], 5500, 0.35, customConfig);
       return extractJsonFromResponse(response, fallback);
     },
     sectionsOf: (d) => ({
@@ -888,7 +888,7 @@ Return ONLY raw JSON, no markdown formatting.`;
     const response = await callOpenRouterWithFailover([
       { role: "system", content: writerSystem },
       { role: "user", content: userPrompt },
-    ], 3000, 0.35, customConfig);
+    ], 5500, 0.35, customConfig);
 
     const draft = extractJsonFromResponse(response, emptyMoat);
     const det = checkMoatDraft(draft, truth);
@@ -1013,7 +1013,7 @@ Return ONLY raw JSON, no markdown formatting.`;
       const response = await callOpenRouterWithFailover([
         { role: "system", content: systemPrompt },
         { role: "user", content: buildUserPrompt(repairPrompt) },
-      ], 3000, 0.35, customConfig);
+      ], 5500, 0.35, customConfig);
       return extractJsonFromResponse(response, fallback);
     },
     sectionsOf: (d) => ({
@@ -1122,7 +1122,7 @@ Return ONLY raw JSON, no markdown formatting.`;
       const response = await callOpenRouterWithFailover([
         { role: "system", content: systemPrompt },
         { role: "user", content: buildUserPrompt(repairPrompt) },
-      ], 3000, 0.35, customConfig);
+      ], 5500, 0.35, customConfig);
       return extractJsonFromResponse(response, fallback);
     },
     sectionsOf: (d) => ({
@@ -1188,17 +1188,17 @@ Company: ${profile.name} (${profile.ticker} — Sector: ${profile.sector} | Indu
 
 Return a valid JSON object matching this structure EXACTLY:
 {
-  "managementCommentary": "2 detailed paragraphs evaluating executive leadership capability, strategic clarity, operational turnaround execution, and incentive compensation alignment.",
-  "governanceCommentary": "2 detailed paragraphs evaluating board independence, audit committee oversight rigor, accounting conservatism, and protection of minority shareholder rights.",
-  "capitalAllocationCommentary": "2 detailed paragraphs analyzing reinvestment hurdle rates, organic capex ROI discipline, M&A prudence, and sustained economic value added (ROIC > WACC).",
+  "managementCommentary": "3-4 detailed paragraphs evaluating executive leadership capability, strategic clarity, operational turnaround execution, and incentive compensation alignment.",
+  "governanceCommentary": "3-4 detailed paragraphs evaluating board independence, audit committee oversight rigor, accounting conservatism, and protection of minority shareholder rights.",
+  "capitalAllocationCommentary": "3-4 detailed paragraphs analyzing reinvestment hurdle rates, organic capex ROI discipline, M&A prudence, and sustained economic value added (ROIC > WACC).",
   "capitalDeploymentHistory": {
-    "narrative": "Detailed paragraph summarizing cumulative 5-year capital deployment across internal high-ROIC capex, debt repayment, and shareholder returns.",
-    "dividends": "Analysis of dividend distribution policy, cash flow coverage, and payout sustainability.",
-    "repurchases": "Analysis of share buyback execution, counter-cyclical timing, and valuation accretiveness.",
-    "debtPaydown": "Analysis of debt reduction discipline, balance sheet strengthening, and capital structure optimization."
+    "narrative": "2-3 detailed paragraphs summarizing cumulative 5-year capital deployment across internal high-ROIC capex, debt repayment, and shareholder returns.",
+    "dividends": "1-2 paragraphs on dividend distribution policy, cash flow coverage, and payout sustainability.",
+    "repurchases": "1-2 paragraphs on share buyback execution, counter-cyclical timing, and valuation accretiveness.",
+    "debtPaydown": "1-2 paragraphs on debt reduction discipline, balance sheet strengthening, and capital structure optimization."
   },
-  "businessStrategyCommentary": "2-3 paragraphs on this company's evidenced strategic roadmap (expansion, product, capital allocation) — concrete moves from its own disclosures and operating model, never another company's playbook.",
-  "operatingProfileCommentary": "1-2 paragraphs profiling how this business operates day-to-day (segments, footprint, operating cadence) from evidenced facts."
+  "businessStrategyCommentary": "5-8 comprehensive paragraphs (800-1100 words, exhaustive). Provide a complete strategic roadmap: core business model and revenue engine mechanics, segment-wise growth strategy and product/technology roadmap, geographic expansion and go-to-market, distribution and channel evolution, capital allocation and reinvestment priorities, balance sheet and funding strategy, M&A/partnership and inorganic roadmap, competitive positioning vs named peers, operating leverage and margin expansion path, and 3-5 year forward outlook. Ground every claim in the company's own disclosures, operating model and KPIs — never another company's playbook. Do NOT limit to 2-3 paragraphs; write as much depth as needed. Let the section extend across pages if required — completeness over brevity.",
+  "operatingProfileCommentary": "3-4 detailed paragraphs profiling how this business operates day-to-day (segments, footprint, supply chain, operating cadence, capacity and utilization) from evidenced facts."
 }
 Return ONLY raw JSON, no markdown formatting.`;
 
@@ -1218,7 +1218,7 @@ Return ONLY raw JSON, no markdown formatting.`;
       const response = await callOpenRouterWithFailover([
         { role: "system", content: systemPrompt },
         { role: "user", content: buildUserPrompt(repairPrompt) },
-      ], 3000, 0.35, customConfig);
+      ], 5500, 0.35, customConfig);
       return extractJsonFromResponse(response, fallback);
     },
     sectionsOf: (d) => ({
@@ -1232,9 +1232,9 @@ Return ONLY raw JSON, no markdown formatting.`;
     auditOpts: {
       model: om,
       minChars: {
-        managementCommentary: 200, governanceCommentary: 200,
-        capitalAllocationCommentary: 200, businessStrategyCommentary: 200,
-        operatingProfileCommentary: 120, capitalDeploymentHistory: 200,
+        managementCommentary: 500, governanceCommentary: 500,
+        capitalAllocationCommentary: 500, businessStrategyCommentary: 800,
+        operatingProfileCommentary: 400, capitalDeploymentHistory: 500,
       },
     },
     shapeName: "governance and capital allocation",
