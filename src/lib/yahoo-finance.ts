@@ -152,14 +152,42 @@ export function toBankFinancials(c: CorporateAnnualFinancials, kind: "bank" | "n
     nonInterestExpenses = Math.round(totalRev * 0.45);
     filtered.push("bank:nonInterestExpenses-partial@45%-of-totalRev");
   }
-  const ppop = totalRev - nonInterestExpenses; // pre-provision operating profit (PPOP)
-  // Bank P&L identity by construction: pretax = PPOP − provisions, NI = pretax − tax.
-  // The corporate pretax (which deducts COGS-like costs banks don't carry) is NOT
-  // reused — it cannot reconcile with PPOP and made every bank report permanently
-  // QA-red. Reported anchors kept: totalRevenue, tax expense, expense/provision parts.
-  const pretax = ppop - provision;
+  let ppop = totalRev - nonInterestExpenses; // pre-provision operating profit (PPOP)
+  // Bank P&L identity anchored to REPORTED net income (SMFG-class fix):
+  // the legacy rebuild (pretax = PPOP − provisions, NI = pretax − tax with a
+  // 45%-of-revenue opex fallback) discarded the audited netIncome and minted a
+  // 56%-overstated PAT (¥2.47T vs reported ¥1.58T), permanently failing
+  // FINCONS-02 EPS coherence. Reported NI + tax are the anchors; PPOP/opex
+  // back-solve around them so the identity holds WITHOUT overriding filings.
   const taxExp = (c as any).incomeTaxExpense || 0;
-  const bankNetIncome = pretax - taxExp;
+  const reportedNI = (c as any).netIncome;
+  const hasReportedNI = typeof reportedNI === "number" && Number.isFinite(reportedNI) && reportedNI !== 0;
+  let pretax: number;
+  let bankNetIncome: number;
+  if (hasReportedNI && totalRev > 0) {
+    bankNetIncome = reportedNI;
+    pretax = bankNetIncome + taxExp;
+    // Back-solve opex so PPOP − provisions = pretax exactly (identity by
+    // construction, audited anchors preserved). Guard against degenerate
+    // negatives: opex is floored at the reported line when back-solve implies
+    // negative costs (over-provisioned year), tagged for QA.
+    const impliedPpop = pretax + provision;
+    const impliedOpex = totalRev - impliedPpop;
+    if (impliedOpex >= 0) {
+      nonInterestExpenses = Math.round(impliedOpex);
+      ppop = impliedPpop;
+      filtered.push("bank:opex-backsolved-to-reported-NI");
+    } else {
+      pretax = ppop - provision;
+      bankNetIncome = pretax - taxExp;
+      filtered.push("bank:reported-NI-irreconcilable-with-PPOP-kept-model");
+    }
+  } else {
+    // No reported net — legacy identity rebuild (tagged estimate, QA-gated).
+    pretax = ppop - provision;
+    bankNetIncome = pretax - taxExp;
+    if (totalRev > 0) filtered.push("bank:netIncome-rebuilt-no-reported-anchor");
+  }
   // Balance sheet: loans/deposits are real bank concepts; we don't have them in Yahoo — keep as 0 not invented
   const loans = (c as any).loans || 0;
   const deposits = (c as any).deposits || 0;
@@ -294,13 +322,30 @@ export function toInsuranceFinancials(c: CorporateAnnualFinancials): InsuranceAn
   if (float === 0) est.push("insurance:float-undisclosed");
   const policyholderLiab = float;
   const totalRev = nep + invIncome;
-  // Insurer P&L identity by construction: pretax = UW result + investment income,
-  // NI = pretax − tax. The corporate pretax (built on COGS/gross-profit concepts
-  // insurers don't carry) is NOT reused — same permanent-QA-red trap as banks.
-  const insPretax = uwResult + invIncome;
+  // Insurer identity anchored to REPORTED net (same SMFG-class fix as banks):
+  // UW + investment rebuilds must not override audited PAT. Reported NI + tax
+  // are anchors; UW result back-solves only when the rebuild contradicts them.
   const insTax = (c as any).incomeTaxExpense || 0;
-  const insNetIncome = insPretax - insTax;
-  est.push("insurance:pretax=UW+investmentIncome-identity");
+  const reportedInsNI = (c as any).netIncome;
+  const hasReportedInsNI = typeof reportedInsNI === "number" && Number.isFinite(reportedInsNI) && reportedInsNI !== 0;
+  let insPretax = uwResult + invIncome;
+  let insNetIncome = insPretax - insTax;
+  if (hasReportedInsNI && totalRev > 0) {
+    const impliedPretax = reportedInsNI + insTax;
+    // Keep disclosed UW parts; absorb the gap in underwriting expenses only
+    // when the gap is material (>10%) to preserve FINCONS-02 coherence.
+    const gap = Math.abs(insPretax - impliedPretax) / Math.max(1, Math.abs(impliedPretax));
+    if (gap > 0.10) {
+      est.push("insurance:UW-backsolved-to-reported-NI");
+      insPretax = impliedPretax;
+      insNetIncome = reportedInsNI;
+    } else {
+      insNetIncome = insPretax - insTax;
+      est.push("insurance:pretax=UW+investmentIncome-identity");
+    }
+  } else {
+    est.push("insurance:pretax=UW+investmentIncome-identity");
+  }
   return {
     year: c.year,
     fiscalYearEnd: c.fiscalYearEnd,
@@ -1353,6 +1398,17 @@ export function parseQuoteSummary(raw: Record<string, unknown>, symbol: string) 
     (priceData.currency as string) ||
     (summary.currency as string) ||
     "";
+  // Reporting currency (SMFG-class fix): fundamentals arrive in the HOME
+  // currency (financialData.financialCurrency, e.g. JPY) while the listing
+  // trades in another (price currency, e.g. USD for the NYSE ADR). The legacy
+  // pipeline treated JPY totals as USD, minting $5.79T revenue / $4604 fair
+  // value. Expose both so /api/company can translate once, upstream of every
+  // valuation/QA/UI consumer.
+  const rawFinCurr = (finData as Record<string, unknown>).financialCurrency;
+  const reportingCurrency: string =
+    (typeof rawFinCurr === "string" && rawFinCurr) ||
+    ((rawFinCurr as Record<string, unknown> | undefined)?.raw as string) ||
+    currency;
 
   // ── Profile ──────────────────────────────────────────────────────────────
   const companyProfile = {
@@ -1369,6 +1425,8 @@ export function parseQuoteSummary(raw: Record<string, unknown>, symbol: string) 
     industry: (profile.industry as string) || "N/A",
     country: (profile.country as string) || "N/A",
     currency,
+    reportingCurrency,
+    tradingCurrency: currency,
     description: (profile.longBusinessSummary as string) || "",
     website: (profile.website as string) || "",
     employees: safeNum((profile.fullTimeEmployees as unknown)),

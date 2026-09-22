@@ -1122,7 +1122,7 @@ export default function ReportClient({ ticker }: Props) {
                           {isInsurer ? `Float Yield: ${fmtPct(latest.float > 0 ? latest.investmentIncome / latest.float : 0)}`
                             : isReit ? `AFFO Payout: ${fmtPct(latest.adjustedFundsFromOperations > 0 ? latest.dividendsPaid / latest.adjustedFundsFromOperations : 0)}`
                             : isFeeCo ? (latest.aumEnding > 0 ? "Ending AUM" : "Fee Revenue (AUM undisclosed)")
-                            : isBankOrNbfc ? `Operating Margin: ${fmtPct(stmtNum(latest, "ebitMargin"))}` : `Margin: ${fmtPct(stmtNum(latest, "ebitMargin"))}`}
+                            : isBankOrNbfc ? `Operating Margin: ${fmtPct((latest.totalRevenue || latest.revenue) > 0 ? (latest.operatingIncome as number) / (latest.totalRevenue || latest.revenue) : 0)}` : `Margin: ${fmtPct(stmtNum(latest, "ebitMargin"))}`}
                         </span>
                       </div>
                       <div className={styles.statCard}>

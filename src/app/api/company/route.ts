@@ -27,6 +27,7 @@ import { assessDataConfidence } from "@/lib/data-confidence";
 import { fetchScreenerSnapshot, type ScreenerCrosscheck } from "@/lib/screener-crosscheck";
 import { fetchEdgarSnapshot, type EdgarCrosscheck } from "@/lib/edgar-crosscheck";
 import { fetchNasdaqCheck, type NasdaqCheck } from "@/lib/nasdaq-crosscheck";
+import { fetchFxRate, normalizeCrossListing } from "@/lib/cross-listing";
 import type { SupportedProvider, CustomKeyConfig } from "@/lib/ai-providers";
 
 export const runtime = "nodejs";
@@ -87,9 +88,79 @@ export async function GET(request: NextRequest) {
     // VERIFIED is appended client-side after QA, so a skipped stage is visible.
     const lifecycle = new ModelLifecycle();
     const raw = await fetchQuoteSummary(symbol);
-    const { companyProfile, stockData, annualFinancials, quarterlyFinancials, shareholding } =
-      parseQuoteSummary(raw as Record<string, unknown>, symbol);
+    const parsed = parseQuoteSummary(raw as Record<string, unknown>, symbol);
+    let companyProfile: any = parsed.companyProfile;
+    const stockData: any = parsed.stockData;
+    let annualFinancials: any[] = parsed.annualFinancials as any[];
+    let quarterlyFinancials: any[] = parsed.quarterlyFinancials as any[];
+    const shareholding = parsed.shareholding;
     lifecycle.advance("FETCHED", "Yahoo quoteSummary + timeseries retrieved");
+
+    // ── Cross-listing normalization (SMFG-class permanent fix) ─────────
+    // ADR/GDR listings quote in one currency while fundamentals arrive in the
+    // home reporting currency (SMFG: USD price vs JPY statements). Without a
+    // one-time translation every downstream consumer divides JPY totals by USD
+    // prices ($5.79T revenue, $4604 fair value, +17163% upside, FINCONS BLOCKs).
+    // Normalize ONCE here — upstream of ratios/valuation/QA/UI — so all pages
+    // share one canonical (trading-currency, depositary-share) basis.
+    try {
+      const tradingCurrency = String(companyProfile.currency || "").toUpperCase();
+      const reportingCurrency = String(
+        companyProfile.reportingCurrency || companyProfile.currency || ""
+      ).toUpperCase();
+      if (tradingCurrency && reportingCurrency && tradingCurrency !== reportingCurrency) {
+        const fxRes = await withTimeout(
+          fetchFxRate(reportingCurrency, tradingCurrency),
+          6000,
+          null
+        );
+        if (fxRes && fxRes.rate > 0 && Number.isFinite(fxRes.rate)) {
+          const norm = normalizeCrossListing({
+            annualFinancials: annualFinancials as never,
+            quarterlyFinancials: quarterlyFinancials as never,
+            quoteShares: Number(stockData.sharesOutstanding) || null,
+            reportingCurrency,
+            tradingCurrency,
+            fxReportingToTrading: fxRes.rate,
+            fxSource: fxRes.source,
+          });
+          annualFinancials = norm.annualFinancials as any[];
+          quarterlyFinancials = (norm.quarterlyFinancials ?? quarterlyFinancials) as any[];
+          companyProfile = {
+            ...companyProfile,
+            currency: tradingCurrency,
+            tradingCurrency,
+            reportingCurrency,
+            fxReportingToTrading: fxRes.rate,
+            fxSource: fxRes.source,
+            depositaryRatio: norm.info.depositaryRatio,
+            crossListingNote:
+              `Cross-listed ADR/GDR: ${reportingCurrency} statements → ${tradingCurrency} ` +
+              `@ ${fxRes.rate.toFixed(4)} (${fxRes.source})` +
+              (norm.info.depositaryRatio !== 1
+                ? `; home→depositary shares ×${norm.info.depositaryRatio.toFixed(4)}`
+                : "; share basis unchanged") +
+              `. Totals translated, per-share restated; see statement footnotes.`,
+          };
+          // Do NOT advance lifecycle here — NORMALIZED is advanced once below after
+          // ratios are computed (strict FETCHED→NORMALIZED→VALIDATED order).
+        } else {
+          // Fail-closed: no FX means no safe translation — proceed unnormalized
+          // and let FINCONS/QA BLOCK the fantasy (never publish untranslated).
+          console.warn(
+            `[company] Cross-listing ${reportingCurrency}->${tradingCurrency} detected but FX unavailable — proceeding unnormalized (QA must block).`
+          );
+          companyProfile = {
+            ...companyProfile,
+            tradingCurrency,
+            reportingCurrency,
+            crossListingNote: `Cross-listed (${reportingCurrency} statements vs ${tradingCurrency} quote) but live FX unavailable — figures untranslated; QA blocks publication.`,
+          };
+        }
+      }
+    } catch (e) {
+      console.warn("[company] Cross-listing normalization failed (non-blocking, QA backstops):", e);
+    }
 
     if (annualFinancials.length === 0) {
       return NextResponse.json(

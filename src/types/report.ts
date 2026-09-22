@@ -11,6 +11,17 @@ export interface CompanyProfile {
   industry: string;
   country: string;
   currency: string;
+  /** Home reporting currency of fundamentals (Yahoo financialData.financialCurrency, e.g. JPY). */
+  reportingCurrency?: string;
+  /** Listing/trading currency (price currency, e.g. USD for NYSE ADR). */
+  tradingCurrency?: string;
+  /** FX reporting->trading applied by cross-listing normalization (1 when single-currency). */
+  fxReportingToTrading?: number;
+  fxSource?: string;
+  /** Depositary (ADR/GDR) share restatement: home shares × this = trading shares. */
+  depositaryRatio?: number;
+  /** Human-readable cross-listing disclosure (FX + share restatement). */
+  crossListingNote?: string;
   description: string;
   website: string;
   employees: number;
