@@ -2492,9 +2492,21 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
   // Forbidden presence is a hard BLOCK; required absence blocks only when
   // ZERO required concepts are evidenced for a known sector (generic or
   // foreign template applied). `general` never blocks on required absence.
+  // Empty-narrative exception: when AI was unavailable the values are empty
+  // strings (not a wrong template) — required absence is WARN (missing AI
+  // coverage), never FAIL. Forbidden hits still BLOCK even when empty.
   {
     const narrativeAll = JSON.stringify({ ...(data.aiAnalysis || {}), ...(data as unknown as { peAnalysis?: unknown }).peAnalysis || {} });
     const cov = validateOntologyCoverage(operatingModel, narrativeAll);
+    const flatVals = (v: unknown): string => {
+      if (v === null || v === undefined) return "";
+      if (typeof v === "string") return v;
+      if (Array.isArray(v)) return v.map(flatVals).join(" ");
+      if (typeof v === "object") return Object.values(v as Record<string, unknown>).map(flatVals).join(" ");
+      return "";
+    };
+    const narrativeValueLen = flatVals({ ...(data.aiAnalysis || {}), ...((data as unknown as { peAnalysis?: Record<string, unknown> }).peAnalysis || {}) }).trim().length;
+    const isEmptyNarrative = narrativeValueLen < 300;
     if (cov.presentForbidden.length > 0) {
       checks.push({
         id: "ONT-01",
@@ -2507,17 +2519,29 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
       });
     } else if (operatingModel.isKnownSector && cov.missingRequired.length >= operatingModel.requiredConcepts.length && operatingModel.requiredConcepts.length > 0) {
       // Zero of N required concepts evidenced = the dossier speaks no word of
-      // its own sector's language. BLOCK (never WARN): this is cross-sector
-      // failure, not thin phrasing.
-      checks.push({
-        id: "ONT-01",
-        category: "BS_DETECTOR",
-        name: "Ontology Required Concepts",
-        status: "FAIL",
-        details: `FATAL PUBLICATION BLOCK: narrative evidences ZERO of the required ${operatingModel.sector} concepts [${operatingModel.requiredConcepts.slice(0, 6).join(", ")}] — generic or foreign template applied. Rebuild every section around the sector drivers.`,
-        expected: `≥2 of: ${operatingModel.requiredConcepts.slice(0, 4).join(", ")}`,
-        actual: `missing all ${cov.missingRequired.length}`,
-      });
+      // its own sector's language. BLOCK when narrative exists (wrong template);
+      // WARN when narrative is empty (AI unavailable — coverage missing, not contamination).
+      if (isEmptyNarrative) {
+        checks.push({
+          id: "ONT-01",
+          category: "BS_DETECTOR",
+          name: "Ontology Required Concepts",
+          status: "WARN",
+          details: `AI narrative unavailable (${narrativeValueLen} chars) — ontology coverage unverifiable for ${operatingModel.sector} [${operatingModel.requiredConcepts.slice(0, 6).join(", ")}]. Supply an AI key to evidence sector vocabulary; numbers and tables remain valid.`,
+          expected: `≥2 of: ${operatingModel.requiredConcepts.slice(0, 4).join(", ")}`,
+          actual: `missing all ${cov.missingRequired.length} (empty narrative)`,
+        });
+      } else {
+        checks.push({
+          id: "ONT-01",
+          category: "BS_DETECTOR",
+          name: "Ontology Required Concepts",
+          status: "FAIL",
+          details: `FATAL PUBLICATION BLOCK: narrative evidences ZERO of the required ${operatingModel.sector} concepts [${operatingModel.requiredConcepts.slice(0, 6).join(", ")}] — generic or foreign template applied. Rebuild every section around the sector drivers.`,
+          expected: `≥2 of: ${operatingModel.requiredConcepts.slice(0, 4).join(", ")}`,
+          actual: `missing all ${cov.missingRequired.length}`,
+        });
+      }
     } else if (cov.missingRequired.length >= operatingModel.requiredConcepts.length - 1 && operatingModel.requiredConcepts.length > 2) {
       // All-but-one required concepts missing = likely generic template.
       // WARN (not FAIL): conglomerates and GENERAL-sector names legitimately lack
@@ -2577,17 +2601,35 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
       news: [pick("recentNewsAnalysis"), pick("newsSummary")].join(" "),
     };
     const res = validateReportAgainstModel(operatingModel, sections);
+    const totalSectionLen = Object.values(sections).join(" ").trim().length;
+    const onlyRequiredBlockers = res.blockers.length > 0 && res.blockers.every((b) => b.kind === "required");
+    const isEmptySections = totalSectionLen < 300;
     if (!res.pass) {
-      const first = res.blockers[0];
-      checks.push({
-        id: "OM-01",
-        category: "BS_DETECTOR",
-        name: "Operating-Model Section Scan",
-        status: "FAIL",
-        details: `FATAL PUBLICATION BLOCK: ${res.blockers.length} operating-model violation(s) under model ${operatingModel.modelId} — ${first.message}${res.blockers.length > 1 ? ` (+${res.blockers.length - 1} more: ${res.blockers.slice(1, 3).map((b) => `${b.section}: ${b.terms.slice(0, 3).join(", ")}`).join("; ")})` : ""} Required evidenced: [${res.requiredEvidenced.join(", ") || "none"}].`,
-        expected: "Zero forbidden concepts in every section",
-        actual: `${res.blockers.length} violation(s)`,
-      });
+      // Empty-sections exception mirrors ONT-01: required absence with no AI
+      // prose is missing coverage (WARN), not template contamination (FAIL).
+      // Forbidden leaks still BLOCK even when empty.
+      if (onlyRequiredBlockers && isEmptySections) {
+        checks.push({
+          id: "OM-01",
+          category: "BS_DETECTOR",
+          name: "Operating-Model Section Scan",
+          status: "WARN",
+          details: `AI narrative unavailable (${totalSectionLen} chars) — operating-model required coverage unverifiable under ${operatingModel.modelId}. Supply an AI key; numbers and tables remain valid. Required evidenced: [${res.requiredEvidenced.join(", ") || "none"}].`,
+          expected: "Zero forbidden concepts in every section",
+          actual: `${res.blockers.length} required-coverage advisory`,
+        });
+      } else {
+        const first = res.blockers[0];
+        checks.push({
+          id: "OM-01",
+          category: "BS_DETECTOR",
+          name: "Operating-Model Section Scan",
+          status: "FAIL",
+          details: `FATAL PUBLICATION BLOCK: ${res.blockers.length} operating-model violation(s) under model ${operatingModel.modelId} — ${first.message}${res.blockers.length > 1 ? ` (+${res.blockers.length - 1} more: ${res.blockers.slice(1, 3).map((b) => `${b.section}: ${b.terms.slice(0, 3).join(", ")}`).join("; ")})` : ""} Required evidenced: [${res.requiredEvidenced.join(", ") || "none"}].`,
+          expected: "Zero forbidden concepts in every section",
+          actual: `${res.blockers.length} violation(s)`,
+        });
+      }
     } else {
       checks.push({
         id: "OM-01",

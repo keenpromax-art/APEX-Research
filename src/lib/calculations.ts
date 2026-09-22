@@ -1028,8 +1028,23 @@ export function computeWACC(
   // company already earns (trailing), with a 14% floor for turnarounds whose
   // trailing margin is depressed. Cyclical trough protection unchanged.
   const marginCeiling = Math.max(0.14, (finEbitMargin > 0 ? finEbitMargin : 0) * 0.9);
+  // Sticky-margin guard for asset-light mature compounders (SaaS / platforms /
+  // fee franchises): historical averages that include startup-loss years must
+  // not decapitate demonstrated profitability. PLTR precedent: trailing 31.6%
+  // with mid-cycle 15.9% (avg dragged by -8% FY22) printed 17% forecast margins
+  // and $10.97 (-94%) on a $183 price. For these sectors when trailing exceeds
+  // 15%, floor the anchor at 90% of trailing (same demonstrated level as the
+  // ceiling) so inflectors keep their operating leverage.
+  const isStickyMarginSector =
+    archetypeProfile?.sector === "technology_software" ||
+    archetypeProfile?.sector === "technology_platform" ||
+    archetypeProfile?.sector === "asset_management" ||
+    archetypeProfile?.sector === "financial_data_ratings";
+  const demonstratedFloor = Math.max(0.14, (finEbitMargin > 0 ? finEbitMargin : 0) * 0.9);
   const effectiveMargin = midCycleMargin !== undefined
-    ? Math.max(cyclicalFloor, Math.min(marginCeiling, midCycleMargin))
+    ? (isStickyMarginSector && archetypeProfile?.archetype === "MATURE_COMPOUNDER" && finEbitMargin > 0.15
+      ? Math.max(cyclicalFloor, Math.max(demonstratedFloor, Math.min(marginCeiling, midCycleMargin)))
+      : Math.max(cyclicalFloor, Math.min(marginCeiling, midCycleMargin)))
     : (archetypeBaseMargin !== undefined && archetypeBaseMargin > 0)
     ? archetypeBaseMargin
     : (finEbitMargin > 0.03

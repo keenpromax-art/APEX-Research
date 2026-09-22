@@ -15,8 +15,8 @@
  *   FINCONS-02  EPS coherence: reported diluted EPS vs netIncome /
  *               resolved shares within 10% (weighted-average drift beyond
  *               that is a share-base or unit error, not timing).
- *   FINCONS-03  Single share base: ledger / dcf / quote / statement /
- *               canonical-diluted counts agree within 1%; every source > 0.
+  *   FINCONS-03  Single share base: ledger / dcf / quote / statement /
+  *               canonical-diluted counts agree within 5%; every source > 0.
  *   FINCONS-04  Per-share closure: |fairValue − equity/shares| ≤ 1.0
  *               currency unit, all valuation paths (no bank exemption —
  *               residual-income bridges carry equity + shares too).
@@ -161,6 +161,10 @@ export function checkCrossPageFinancials(input: FinConsInputs): FinConsFinding[]
   // (model/quote/statement/canonical-diluted). Sources absent from the input
   // bundle are skipped (never counted as conflicts); fewer than two
   // comparable sources warns (unverifiable against an independent base).
+  // Tolerance is 5% (not 1%): basic point-in-time vs weighted-average diluted
+  // counts routinely diverge 3-4% for SBC-heavy tech names (PLTR: quote 2.300B
+  // vs statement 2.391B = 3.8% drift from normal dilution, not a unit error).
+  // 10x-class errors (900% drift) still BLOCK decisively.
   {
     const provided = shareSources.filter((s) => s.value !== null);
     const invalid = provided.filter((s) => !((s.value as number) > 0));
@@ -178,14 +182,14 @@ export function checkCrossPageFinancials(input: FinConsInputs): FinConsFinding[]
         detail: `${ticker}: only ${validShares.length} share source(s) available — single-base agreement unverifiable against an independent count; treat per-share outputs as provisional.`,
       });
     } else {
-      const pass = invalid.length === 0 && maxDrift <= 0.01;
+      const pass = invalid.length === 0 && maxDrift <= 0.05;
       out.push({
         code: "FINCONS-03",
         pass,
         severity: "blocker",
         detail: pass
-          ? `${ticker}: single share base — ${validShares.length} source(s) agree within 1% (${validShares.map((s) => `${s.name}=${s.value.toFixed(0)}`).join(", ")}).`
-          : `${ticker}: SHARE-BASE SPLIT — ${invalid.length > 0 ? `non-positive: [${invalid.map((s) => s.name).join(", ")}] (synthesis prohibited). ` : ""}max pairwise drift ${(maxDrift * 100).toFixed(1)}% > 1%. Per-share pages diverge.`,
+          ? `${ticker}: single share base — ${validShares.length} source(s) agree within 5% (${validShares.map((s) => `${s.name}=${s.value.toFixed(0)}`).join(", ")}).`
+          : `${ticker}: SHARE-BASE SPLIT — ${invalid.length > 0 ? `non-positive: [${invalid.map((s) => s.name).join(", ")}] (synthesis prohibited). ` : ""}max pairwise drift ${(maxDrift * 100).toFixed(1)}% > 5%. Per-share pages diverge.`,
       });
     }
   }

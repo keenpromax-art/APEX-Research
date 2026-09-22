@@ -16,7 +16,7 @@
 
 **Live Yahoo data · Deterministic valuation engine · 6-agent LLM narratives · Machine-checked QA · No paid data keys**
 
-[Quickstart](#run-it) · [Sample reports](#sample-outputs) · [How scoring works](#how-scoring-works) · [Backtesting](#backtesting) · [BYOK](#bring-your-own-ai-key)
+[Quickstart](#run-it) · [Sample reports](#sample-outputs) · [How scoring works](#how-scoring-works) · [BYOK](#bring-your-own-ai-key)
 
 </div>
 
@@ -29,7 +29,7 @@
 | [`1788519619311.md`](1788519619311.md) — Cipla Ltd (NSE) | SELL | Rs. 1,415 → Rs. 1,019 |
 | Swiggy `SWIGGY.NS` | HOLD | Rs. 276 → Rs. 311 · 24 sections / ~38 printed pages |
 
-**Try it:** `npm run dev` → search `SWIGGY.NS` or `CIPLA.NS` → watch the analysts work live → download the PDF. Or open `/backtest` to inspect model win-rates first.
+**Try it:** `npm run dev` → search `SWIGGY.NS` or `CIPLA.NS` → watch the analysts work live → download the PDF.
 
 ---
 
@@ -42,7 +42,6 @@
 - [AI architecture](#ai-architecture)
 - [Bring your own AI key](#bring-your-own-ai-key)
 - [Data coverage](#data-coverage)
-- [Backtesting](#backtesting)
 - [Event intelligence](#event-intelligence)
 - [Project tour](#project-tour)
 - [Architecture](#architecture)
@@ -55,7 +54,7 @@
 
 ## Why this exists
 
-Real equity dossiers take analysts days and Bloomberg-grade data. This terminal turns any public ticker into a 24-section A4 dossier: DCF valuation, DuPont, 5-year statements, peer comps, credit scorecard, moat and Five Forces, catalysts, governance, plus a machine-checked QA page — and then lets you backtest whether its calls actually worked.
+Real equity dossiers take analysts days and Bloomberg-grade data. This terminal turns any public ticker into a 24-section A4 dossier: DCF valuation, DuPont, 5-year statements, peer comps, credit scorecard, moat and Five Forces, catalysts, governance, plus a machine-checked QA page.
 
 Three hard problems, solved with deterministic-core-plus-LLM-prose:
 
@@ -75,7 +74,6 @@ Landing → Search "SWIGGY.NS"  (Yahoo autocomplete, /api/search)
         → /api/analyze?stream  (6 agents in parallel, SSE: agent_start / agent_complete / done)
         → ReportDocument       (star rating, 10-column KPI strip, 24 sections, QA page)
         → Download PDF
-        → /backtest            (win-rate dashboard: filter by sector / rating / region)
 ```
 
 Landing ships with quick chips: `SUZLON.NS · RELIANCE.NS · AAPL · NVDA · TCS.NS · MSFT · CIPLA.NS`. Every request is validated (`request-validation.ts`); every report must pass `report-validator.ts` before it renders.
@@ -144,15 +142,6 @@ Peers are geography- and sector-mapped in `api/company/route.ts` (e.g. India pha
 
 ---
 
-## Backtesting
-
-Two harnesses, same ±12% judging rule (`BUY` wins above +12%, `SELL` below −12%, `HOLD` inside the band; `NR` is exempt):
-
-- **In-app dashboard — `/backtest`.** `BacktestDashboard` + `/api/backtest` over a curated historical record set: filter by sector, rating, and region; summary win-rate, decile performance, Spearman rank correlation, and alpha; per-record verdicts with reasons.
-- **Colab harness — `fownloads/backtest_recommendations_colab.py`.** Rewind one year, rebuild the THEN-rating from only statements ending before the signal date (no lookahead; banks via residual income), judge against realized 1-year returns with benchmark excess (`^NSEI` / `^GSPC`). Add tickers in the `EXTRA_TICKERS` box without editing code; saves `backtest_1y_results.csv` with win rate by rating and calibration (correlation, MAE, bias).
-
----
-
 ## Event intelligence
 
 `event-price-engine.ts` turns the news feed into tradable context: each headline is categorized (earnings, M&A, regulatory, product, management, macro…), then mapped to historical price impact, volume surges, and abnormal returns with full trajectories — powering the report's catalyst calendar and exit triggers.
@@ -169,7 +158,6 @@ Two harnesses, same ±12% judging rule (`BUY` wins above +12%, `SELL` below −1
 | Valuation | `lib/calculations.ts` + `lib/valuation/` (selector, residual-income, reverse-dcf, calibration) | Ratios, DuPont, Blume WACC, 3-stage DCF with TV cap; bank P/B routing; implied-expectations check |
 | Guardrails | `company-archetype.ts` · `assumptions-ledger.ts` · `report-qa.ts` · `report-facts.ts` · `report-validator.ts` · `ratio-guards.ts` · `financial-validation.ts` · `units.ts` | Archetypes, single-source ledger, 11-check QA, facts layer, gates, `N/M` guards |
 | Knowledge | `lib/sectors/` · `lib/moat.ts` · `lib/uncertainty.ts` · `lib/scenarios.ts` · `lib/recommendation.ts` | Sector ontology with forbidden concepts, moat points, uncertainty, scenario math, ±12% rating law |
-| Proof | `lib/backtest/` + `app/backtest/` + `app/api/backtest/` | Win-rate engine, dashboard, filterable API |
 | Access | `lib/ai-providers.ts` + `components/ApiKeyModal.tsx` + `app/api/test-key/` | 5-provider BYOK with live validation |
 
 ---
@@ -179,19 +167,16 @@ Two harnesses, same ±12% judging rule (`BUY` wins above +12%, `SELL` below −1
 ```text
 Next.js 15 (App Router, nodejs runtime)
 ├── app/page.tsx                        terminal landing
-├── app/backtest/page.tsx               win-rate dashboard
 ├── app/report/[ticker]/                report + PDF download
 ├── app/api/search | company | analyze  autocomplete · valuation pipeline · 6 agents (SSE)
-├── app/api/backtest | test-key         backtest metrics · live key validation
+├── app/api/test-key                   live key validation
 ├── lib/yahoo-finance · calculations · openrouter · pe-analysis-engine
 ├── lib/valuation (selector, residual-income, reverse-dcf, calibration, index)
 ├── lib/sectors (types, profiles, index) · moat · uncertainty · scenarios · recommendation
 ├── lib/company-archetype · assumptions-ledger · report-facts · report-validator
 ├── lib/report-qa · ratio-guards · financial-validation · units · request-validation
 ├── lib/ai (sanitizer) · ai-providers · event-price-engine
-├── lib/backtest (types, data, engine, index)
-├── components/PDFDocument · BacktestDashboard · ApiKeyModal · SearchBar · ProgressTracker
-├── fownloads/backtest_recommendations_colab.py
+├── components/PDFDocument · ApiKeyModal · SearchBar · ProgressTracker
 ├── scratch/test-golden-regression.mjs + test-ai-provider.mjs
 └── @opennextjs/cloudflare → Cloudflare Pages
 ```
@@ -229,7 +214,6 @@ Cloudflare Pages: build `npx @opennextjs/cloudflare build`, output `.open-next/a
 
 - `npm run test:golden` — deterministic regression over valuation, ledger, QA, and sector guards.
 - `npm test` — golden suite plus AI provider checks.
-- `/backtest` + Colab harness — out-of-sample checks of THEN-ratings vs realized returns (win rate, deciles, Spearman IC).
 
 ---
 
@@ -237,10 +221,9 @@ Cloudflare Pages: build `npx @opennextjs/cloudflare build`, output `.open-next/a
 
 - No database; reports generate on demand. Yahoo is unofficial — quotes are delayed and newly listed names can have gaps (e.g. `Revenue 0` → CAGR artifact, flagged in-report; verify pre-IPO names manually).
 - Tables take precedence over prose; LLMs can still err — the mandatory AI disclosure applies.
-- Historical beta/shares in the backtest fall back to current values where point-in-time data is unavailable.
 - Non-registered academic/demonstration software — not investment advice.
 
-Good first contributions: broader peer maps, extra sector blocklists, stricter `N/M` enforcement in comp tables, DDM/SOTP models, PDF charts, larger backtest universe.
+Good first contributions: broader peer maps, extra sector blocklists, stricter `N/M` enforcement in comp tables, DDM/SOTP models, PDF charts.
 
 ---
 

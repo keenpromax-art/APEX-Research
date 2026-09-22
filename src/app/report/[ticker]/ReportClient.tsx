@@ -14,7 +14,6 @@ import { classifySector } from "@/lib/sectors";
 import { sanitizeAIText, sanitizeSectorBleed } from "@/lib/ai/sanitizer";
 import { capPillarsToRating, harmonizeMoatSources } from "@/lib/moat";
 import { buildEventPriceMovements } from "@/lib/event-price-engine";
-import BacktestDashboard from "@/components/BacktestDashboard";
 import ApiKeyModal, { loadSavedAiConfig, loadServerModelOverride } from "@/components/ApiKeyModal";
 import { SUPPORTED_PROVIDERS, type CustomKeyConfig } from "@/lib/ai-providers";
 import styles from "./report.module.css";
@@ -41,7 +40,7 @@ interface Props {
   ticker: string;
 }
 
-type TabKey = "overview" | "council" | "dcf" | "financials" | "dupont" | "peers" | "risks" | "backtest";
+type TabKey = "overview" | "council" | "dcf" | "financials" | "dupont" | "peers" | "risks";
 
 export default function ReportClient({ ticker }: Props) {
   const router = useRouter();
@@ -967,19 +966,19 @@ export default function ReportClient({ ticker }: Props) {
                     </div>
 
                     <div className={styles.quoteMetric}>
-                      <span className={styles.quoteMetricLabel}>{isBankOrNbfc ? "Fair Value (P/B Model)" : "DCF Intrinsic Value"}</span>
+                      <span className={styles.quoteMetricLabel}>{cv.rating === "NR" ? (isBankOrNbfc ? "Fair Value (P/B Model, Indicative — NR)" : "DCF Indicative Value (NR)") : (isBankOrNbfc ? "Fair Value (P/B Model)" : "DCF Intrinsic Value")}</span>
                       <span className={styles.quoteMetricVal}>
                         {sym}{cv.targetPrice.toFixed(2)}
                       </span>
-                      <span className={isBullish ? styles.quoteDeltaPositive : styles.quoteDeltaNegative}>
-                        {isBullish ? `▲ +${upsidePct}%` : `▼ ${upsidePct}%`}
+                      <span className={isBullish ? styles.quoteDeltaPositive : styles.quoteDeltaNegative} title={cv.rating === "NR" ? "Model output exceeds institutional confidence bounds (-80% / +150%). Not a rated target — low conviction, do not trade on precision." : undefined}>
+                        {isBullish ? `▲ +${upsidePct}%` : `▼ ${upsidePct}%`}{cv.rating === "NR" ? " · Low conviction" : ""}
                       </span>
                     </div>
 
                     <div className={styles.quoteMetric}>
                       <span className={styles.quoteMetricLabel}>Verdict</span>
-                      <span className={`badge-solid ${cv.rating === "BUY" ? "badge-buy" : cv.rating === "SELL" ? "badge-sell" : "badge-hold"}`}>
-                        {cv.rating}
+                      <span className={`badge-solid ${cv.rating === "BUY" ? "badge-buy" : cv.rating === "SELL" ? "badge-sell" : cv.rating === "NR" ? "badge-hold" : "badge-hold"}`} title={cv.rating === "NR" ? (reportData.assumptionsLedger?.ratingRationale || "Not Rated: model output outside confidence bounds.") : undefined}>
+                        {cv.rating === "NR" ? "NR" : cv.rating}
                       </span>
                     </div>
                   </div>
@@ -1063,7 +1062,6 @@ export default function ReportClient({ ticker }: Props) {
                   { key: "dupont", label: "DuPont & Ratios" },
                   { key: "peers", label: "Peer Cohort" },
                   { key: "risks", label: "SWOT & Risk Matrix" },
-                  { key: "backtest", label: "Rating Win-Rate & Backtest" },
                 ].map(t => (
                   <button
                     key={t.key}
@@ -2573,14 +2571,6 @@ export default function ReportClient({ ticker }: Props) {
                   </>
                 )}
 
-                {/* ── TAB 8: MODEL SCORING WIN-RATE & BACKTEST ── */}
-                {activeTab === "backtest" && (
-                  <BacktestDashboard
-                    currentTicker={reportData.profile.ticker}
-                    currentSector={reportData.profile.sector}
-                    currentDecile={reportData.assumptionsLedger?.calibrationDecile ?? (reportData as any).calibration?.decile}
-                  />
-                )}
               </div>
 
               {/* Bottom Generate Another Report */}
