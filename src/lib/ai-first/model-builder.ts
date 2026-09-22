@@ -119,7 +119,17 @@ export async function buildModelSpec(
 ): Promise<ForecastSpecification> {
   const { pack, understanding } = input;
   const ctx = modelContext(input);
-  const user = `Design the financial model for ${understanding.companyName} now. Respond with ONLY the JSON object.`;
+  const user = `RESEARCH CONTEXT
+================
+${ctx}
+
+TASK
+====
+Design the financial model for ${understanding.companyName} now.
+
+OUTPUT
+======
+Respond with ONLY the JSON object.`;
 
   const resp = await transport({ system: SYSTEM_PROMPT, user, temperature: 0.25, maxTokens: 3500, jsonMode: true });
   const parsed = parseLlmJson<Record<string, any>>(resp);

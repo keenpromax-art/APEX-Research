@@ -105,7 +105,17 @@ export async function buildNarrative(
   modelSpec: ForecastSpecification
 ): Promise<NarrativeOutput> {
   const ctx = narrativeContext(pack, understanding, modelSpec);
-  const user = `Write the research narrative (thesis, catalysts, risks, competitive analysis, moat) for ${understanding.companyName} now. Respond with ONLY the JSON object.`;
+  const user = `RESEARCH CONTEXT
+================
+${ctx}
+
+TASK
+====
+Write the research narrative (thesis, catalysts, risks, competitive analysis, moat) for ${understanding.companyName} now.
+
+OUTPUT
+======
+Respond with ONLY the JSON object.`;
 
   const resp = await transport({ system: SYSTEM_PROMPT, user, temperature: 0.4, maxTokens: 3500, jsonMode: true });
   const parsed = parseLlmJson<Record<string, any>>(resp);
