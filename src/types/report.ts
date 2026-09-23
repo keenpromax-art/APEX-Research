@@ -893,7 +893,7 @@ export interface AIAnalysis {
   industryDynamicsCommentary?: string;
   fiveForces?: { force: string; level: string; commentary: string }[];
   businessStrategyCommentary?: string;
-  catalysts?: { event: string; horizon: string; probability: string; impact: string }[];
+  catalysts?: { event: string; horizon: string; probability: string; impact: string; kpi?: string; direction?: string; invalidation?: string }[];
   creditAnalysisCommentary?: {
     financialHealth: string;
     liquidityBuffers: string;
@@ -917,6 +917,29 @@ export interface AIAnalysis {
     date: string;
     strategicTakeaway: string;
   }[];
+
+  // Content-intelligence extensions (ai-first ResearchReport → report UI/PDF)
+  whyThisCompany?: string;
+  researchDebates?: {
+    debate: string;
+    evidenceFor: string;
+    evidenceAgainst: string;
+    financialConsequence?: string;
+    valuationConsequence?: string;
+    resolutionSignal?: string;
+    central?: boolean;
+  }[];
+  moatChains?: { source: string; chain?: string; evidence: string; durability: string; threats: string }[];
+  competitiveLandscape?: {
+    company: string;
+    segment?: string;
+    overlap: string;
+    difference: string;
+    strengths: string;
+    weaknesses: string;
+  }[];
+  evidenceMapConfidence?: number;
+  evidenceUnsupported?: string[];
 
   // Council Quality & Audit Verification Agent (Agent 7)
   councilVerification?: CouncilVerificationAudit;
@@ -1227,6 +1250,8 @@ export interface ReportData {
   evidenceRegistry?: import("@/lib/evidence-registry").EvidenceRegistry;
   /** Single canonical forecast (P0 #4) — the ONLY authoritative forward numbers. */
   canonicalForecast?: import("@/lib/canonical-forecast").CanonicalForecast;
+  /** AI-first content-intelligence ResearchReport (economic engine, debates, evidence map). */
+  researchReport?: import("@/lib/ai-first/types").ResearchReport | null;
   /**
    * Screener.in advisory cross-check (India-only, Yahoo stays authoritative).
    * Elaboration annex only — never prices anything. Absent on US/global tickers

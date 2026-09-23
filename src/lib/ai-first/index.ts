@@ -438,6 +438,10 @@ export { buildEconomicEngine, mechanicalEconomicEngine } from "./economic-engine
 // (src/lib/ai-first/evidence-mapper.ts)
 export { buildEvidenceMap, mechanicalEvidenceMap, renderEvidenceMap } from "./evidence-mapper";
 
+// Bridge: ResearchReport → AIAnalysis content fields for UI/PDF
+// (src/lib/ai-first/enrich-report.ts)
+export { enrichAIAnalysisFromResearchReport, renderResearchDebates } from "./enrich-report";
+
 // Evidence graph + source hierarchy — claim → evidence tier validation
 // (src/lib/ai-first/evidence-graph.ts)
 export { buildEvidenceTableFromPack, validateClaimTiers, renderEvidenceGraph } from "./evidence-graph";

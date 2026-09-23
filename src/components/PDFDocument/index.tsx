@@ -644,6 +644,11 @@ const completeSentence = (text?: string, maxLen?: number): string => {
   return cleaned;
 };
 
+const clipEngine = (s: string, n = 140): string => {
+  if (!s) return "";
+  return s.length > n ? s.slice(0, n).trimEnd() + "…" : s;
+};
+
 const buildFiveYearStatementModel = (data: ReportData): StatementColumn[] => {
   // P0 #4 — Single Canonical Forecast: when canonicalForecast is present, forecast columns derive from its
   // projections (revenue/margin) so PDF cannot diverge from the valuation model. Historical columns remain
@@ -1299,7 +1304,16 @@ const CoverPage = ({ data, concise = true }: { data: ReportData; concise?: boole
           <View style={{ borderLeftWidth: 2, borderLeftColor: COLORS.primaryRed, paddingLeft: 6, marginBottom: 4 }}>
             <Text style={{ fontSize: 7.2, color: COLORS.textPrimary, lineHeight: 1.45, textAlign: "justify" }}>
               {(() => {
-                const t = pe.investmentThesis || pe.companyOverview;
+                // Content-intelligence: researchReport.thesis + central debate first
+                const rr = data.researchReport;
+                const debate = rr?.debates?.length
+                  ? `Core debate: ${rr.debates[0].debate}\n`
+                  : "";
+                const fromResearch = rr?.thesis?.thesis
+                  ? `${debate}${rr.thesis.thesis}${rr.thesis.whatCouldInvalidate?.length ? `\n\nInvalidation: ${rr.thesis.whatCouldInvalidate[0]}` : ""}`
+                  : "";
+                const t = pe.investmentThesis || fromResearch || "";
+                if (!t) return completeSentence(pe.companyOverview || "", 400);
                 return completeSentence(t, 1800);
               })()}
             </Text>
@@ -1322,10 +1336,15 @@ const CoverPage = ({ data, concise = true }: { data: ReportData; concise?: boole
           </View>
           <Text style={{ fontSize: 7.0, color: COLORS.textPrimary, lineHeight: 1.45, textAlign: "justify", marginBottom: 4 }}>
             {(() => {
-              // AI-only: council moat narrative or the evidenced switching-cost
-              // source; never ledger boilerplate or template sentences.
-              const t = pe.competitiveMoat || pe.moatSources?.switchingCosts || "";
-              return completeSentence(t, 900);
+              // AI-only: research moat chains → council narrative; never template prose
+              const chains = data.researchReport?.moat?.sources || pe.moatChains || [];
+              if (chains.length) {
+                return completeSentence(
+                  chains.map((s: any) => s.chain || `${s.source}: ${s.economicConsequence || s.evidence}`).join(" "),
+                  900
+                );
+              }
+              return completeSentence(pe.competitiveMoat || "", 900);
             })()}
           </Text>
 
@@ -1507,45 +1526,43 @@ const CoverPage = ({ data, concise = true }: { data: ReportData; concise?: boole
               const baseMargin = stmtNum(latest, "ebitdaMargin") ? (stmtNum(latest, "ebitdaMargin") * 100).toFixed(1) : "16.0";
               const targetMargin = (parseFloat(baseMargin) + 1.5).toFixed(1);
               const targetRoic = ledger?.roic ? (ledger.roic * 100).toFixed(1) : "14.0";
-              bridgeTitle = "Operational Performance & Capital Discipline Levers";
+              bridgeTitle = "Economic Engine & Value Drivers";
               col3Header = "Target Benchmark";
               const isAssetLight = (sectorId as string) === "internet-platform" || (sectorId as string) === "technology-software" || (sectorId as string) === "it-services" || isBank || (sectorId as string) === "nbfc" || (sectorId as string) === "insurance" || (sectorId as string) === "asset-management";
-              drivers = [
-                ["Operating Margin Enhancement", "Operational scale and value-added product mix", `EBITDA Margin > ${targetMargin}%`],
-                ["Return on Capital Stewardship", "Disciplined deployment into high-hurdle projects", `ROIC > ${targetRoic}%`],
-                ["Working Capital Velocity", isAssetLight ? "Receivables collection & working capital discipline" : "Inventory turn optimization & cash collection", "Cash Conv > 75%"],
-                ["Organic Reinvestment", "Sustaining capital investment in core technologies", "Capex ~ 4-6% Rev"],
-              ];
+              // Content-intelligence drivers first — never generic "operational scale" prose
+              const eng = data.researchReport?.economicEngine;
+              const engineDrivers = eng
+                ? [
+                    ...eng.revenueDrivers.slice(0, 2).map((d) => [d.name, clipEngine(d.mechanism), `See statement: ${d.statementLine || eng.primaryAbstraction}`]),
+                    ...eng.capitalDrivers.slice(0, 1).map((d) => [d.name, clipEngine(d.mechanism), "Capital intensity path"]),
+                    ...eng.marginDrivers.slice(0, 1).map((d) => [d.name, clipEngine(d.mechanism), `EBITDA Margin > ${targetMargin}%`]),
+                  ]
+                : [];
+              if (engineDrivers.length >= 2) {
+                drivers = engineDrivers as [string, string, string][];
+              } else {
+                drivers = [
+                  [`Operating Margin Enhancement`, isAssetLight ? "Revenue durability × cost structure" : `Reported margin base ${baseMargin}% → operating leverage`, `EBITDA Margin > ${targetMargin}%`],
+                  [`Return on Capital Stewardship`, `ROIC tracked vs WACC for this company`, `ROIC > ${targetRoic}%`],
+                  [`Working Capital Velocity`, isAssetLight ? "Receivables collection" : "Inventory & cash conversion", "Cash Conv > 75%"],
+                  [`Organic Reinvestment`, "Capital intensity of core economics", "Capex ~ 4-6% Rev"],
+                ];
+              }
             }
 
-            let cat1 = "Accelerated operational throughput, high-margin product mix, and disciplined capital allocation.";
-            let risk1 = "Macroeconomic demand deceleration, input commodity inflation, and competitive pricing substitute pressure.";
-
-            if (sectorId === "asset-management") {
-              cat1 = "Accelerated net AUM organic inflows, alternative & private market expansion, and technology (Aladdin) subscription scaling.";
-              risk1 = "Broad equity/bond market contraction, institutional fee compression, and mandate outflows in active equities.";
-            } else if (isBank) {
-              cat1 = "Low-cost CASA deposit expansion, disciplined retail loan compounding, and robust fee income streams.";
-              risk1 = "Systemic liquidity compression, deposit cost escalation, and asset quality migration in unsecured lending portfolios.";
-            } else if (sectorId === "nbfc") {
-              cat1 = "Rural branch network expansion, steady collection efficiency, and priority sector lending allocations.";
-              risk1 = "Localized borrower distress, regional climatic/agricultural shocks, and bank refinancing line contraction.";
-            } else if (sectorId === "pharma") {
-              cat1 = "Key US generic / ANDA launch pipeline, complex injectables & biosimilar traction, and domestic formulation volume gains.";
-              risk1 = "US price erosion, regulatory USFDA inspection observations (Form 483 / warning letters), and API supply disruptions.";
-            } else if (sectorId === "consumer") {
-              cat1 = "Volume growth recovery, direct rural distribution expansion, brand premiumization, and brand investment operating leverage.";
-              risk1 = "Agricultural commodity input inflation, competitive discounting from regional peers, and rural demand deceleration.";
-            } else if (sectorId === "it-services") {
-              cat1 = "Large deal TCV conversion, cloud migration & generative AI contracts, offshore delivery pyramid optimization, and attrition reduction.";
-              risk1 = "Client discretionary IT budget deceleration, vendor consolidation pricing pressure, cross-currency volatility, and wage inflation.";
-            } else if (sectorId === "renewable-energy") {
-              cat1 = "National renewable power tender awards, accelerated WTG deliveries, and captive fleet service annuity compounding.";
-              risk1 = "Grid evacuation infrastructure bottlenecks, tender signing delays, and commodity raw material (steel/resin) inflation.";
-            } else if (sectorId === "telecom") {
-              cat1 = "Industry-wide headline tariff hikes, 2G to 4G/5G migration, and government liquidity moratorium relief.";
-              risk1 = "Intensified pricing aggression from well-capitalized peers, subscriber churn, and spectrum payment obligations.";
-            }
+            // Prefer research debates / narrative for catalyst+risk one-liners
+            const researchCatalyst = data.researchReport?.catalysts?.[0];
+            const researchRisk = data.researchReport?.risks?.[0];
+            const cat1 = researchCatalyst
+              ? `${researchCatalyst.catalyst}${researchCatalyst.timeframe ? ` (${researchCatalyst.timeframe})` : ""} — ${researchCatalyst.forecastImpact || researchCatalyst.mechanism || ""}`
+              : pe.catalysts?.[0]
+                ? `${pe.catalysts[0].event}: ${pe.catalysts[0].impact}`
+                : "Evidence-constrained catalysts pending research narrative.";
+            const risk1 = researchRisk
+              ? `${researchRisk.risk} — ${researchRisk.financialConsequence}`
+              : pe.keyRisks?.[0]
+                ? `${pe.keyRisks[0].risk}: ${pe.keyRisks[0].description}`
+                : "Company-specific risks pending research narrative.";
 
             return (
               <>
@@ -2388,10 +2405,13 @@ const MoatAndPriceFairValuePage = ({ data }: { data: ReportData }) => {
 
         <View style={{ width: "52%" }}>
           <Text style={S.bodyText}>
-            {pe.competitiveMoat || pe.investmentThesis}
-          </Text>
-          <Text style={S.bodyText}>
-            {pe.moatSources?.costAdvantage}
+            {(() => {
+              const chains = (data.researchReport?.moat?.sources || pe.moatChains || [])
+                .map((s: any) => s.chain || s.evidence)
+                .filter(Boolean)
+                .join(" ");
+              return chains || pe.competitiveMoat || "";
+            })()}
           </Text>
         </View>
       </View>
@@ -2403,18 +2423,48 @@ const MoatAndPriceFairValuePage = ({ data }: { data: ReportData }) => {
               Economic Moat Sources
             </Text>
           </View>
-          <Text style={S.bodyText}>
-            <Text style={{ fontFamily: "Helvetica-Bold", color: COLORS.slateDark }}>Switching Costs: </Text>
-            {pe.moatSources?.switchingCosts || `${data.profile.name} maintains substantial switching frictions across core customer workflows, enterprise IT integration, and multi-product platform commitments that impose meaningful retraining and operational dislocation costs.`}
-          </Text>
-          <Text style={S.bodyText}>
-            <Text style={{ fontFamily: "Helvetica-Bold", color: COLORS.slateDark }}>Intangible Assets &amp; Technology: </Text>
-            {pe.moatSources?.intangibleAssets || "Proprietary algorithm architectures, patented technology platforms, extensive proprietary data assets, and recognized global brand equity establish strong barriers against entrant duplication."}
-          </Text>
-          <Text style={S.bodyText}>
-            <Text style={{ fontFamily: "Helvetica-Bold", color: COLORS.slateDark }}>Cost Advantage &amp; Scale: </Text>
-            {pe.moatSources?.costAdvantage || "Hyperscale global infrastructure, extensive R&D amortization over massive revenue throughput, and centralized engineering scale generate durable unit cost advantages relative to sub-scale peers."}
-          </Text>
+          {(() => {
+            // Research moat chains only — no template fallbacks
+            const src = data.researchReport?.moat?.sources || [];
+            if (!src.length) {
+              const s = pe.moatSources;
+              if (!s?.switchingCosts && !s?.intangibleAssets && !s?.costAdvantage) {
+                return (
+                  <Text style={S.bodyText}>
+                    Moat sources not evidenced in available disclosures — assessment omitted rather than templated.
+                  </Text>
+                );
+              }
+              return (
+                <>
+                  {s?.switchingCosts ? (
+                    <Text style={S.bodyText}>
+                      <Text style={{ fontFamily: "Helvetica-Bold", color: COLORS.slateDark }}>Source 1: </Text>
+                      {s.switchingCosts}
+                    </Text>
+                  ) : null}
+                  {s?.intangibleAssets ? (
+                    <Text style={S.bodyText}>
+                      <Text style={{ fontFamily: "Helvetica-Bold", color: COLORS.slateDark }}>Source 2: </Text>
+                      {s.intangibleAssets}
+                    </Text>
+                  ) : null}
+                  {s?.costAdvantage ? (
+                    <Text style={S.bodyText}>
+                      <Text style={{ fontFamily: "Helvetica-Bold", color: COLORS.slateDark }}>Source 3: </Text>
+                      {s.costAdvantage}
+                    </Text>
+                  ) : null}
+                </>
+              );
+            }
+            return src.slice(0, 3).map((m: any, i: number) => (
+              <Text key={i} style={S.bodyText}>
+                <Text style={{ fontFamily: "Helvetica-Bold", color: COLORS.slateDark }}>{`${i + 1}. ${m.source}: `}</Text>
+                {m.chain || `${m.evidence} → ${m.economicConsequence} (durability: ${m.durability}; threats: ${m.threatsToDurability})`}
+              </Text>
+            ));
+          })()}
         </View>
 
         <View style={{ flex: 1, paddingLeft: 4 }}>
@@ -2424,14 +2474,18 @@ const MoatAndPriceFairValuePage = ({ data }: { data: ReportData }) => {
             </Text>
           </View>
           <Text style={S.bodyText}>
-            We assess {data.profile.name}&apos;s Moat Trend as <Text style={{ fontFamily: "Helvetica-Bold", color: COLORS.slateDark }}>{pe.moatSources?.moatTrend || "Positive"}</Text>.
+            {data.researchReport?.moat
+              ? `Moat assessment: ${data.researchReport.moat.verdict || (data.researchReport.moat.hasMoat ? "HasMoat=true (see chains)" : "No economic moat")}`
+              : pe.moatSources?.moatTrend
+                ? `Moat trend: ${pe.moatSources.moatTrend}`
+                : "Moat trend not evidenced — omitted."}
           </Text>
           <Text style={S.bodyText}>
-            {pe.businessStrategyCommentary || `${data.profile.name}'s strategic roadmap centers on reinvesting operating cash flow into core ecosystem distribution, hyperscale compute infrastructure, and high-margin recurring solutions to extend its structural competitive advantage.`}
+            {pe.businessStrategyCommentary || ""}
           </Text>
           {pe.competitiveMoat ? (
             <PullQuote
-              attr="ECONOMIC MOAT · AI COUNCIL ASSESSMENT"
+              attr="ECONOMIC MOAT · RESEARCH ASSESSMENT"
               quote={completeSentence(pe.competitiveMoat, 320)}
             />
           ) : null}
@@ -2453,23 +2507,16 @@ const MoatAndPriceFairValuePage = ({ data }: { data: ReportData }) => {
             <Text style={[S.compactCellHeader, { width: "52%" }]}>Strategic Rationale (evidence basis)</Text>
           </View>
           {(() => {
-            const rawPillars = pe.moatPillars && pe.moatPillars.length > 0 ? pe.moatPillars : [
-              {
-                pillar: "Intangibles & Proprietary IP",
-                durability: canonicalMoat(data).rating === "Wide" ? "20+ Years" : "10-20 Years",
-                rationale: "Proprietary software algorithms, search index scale, and entrenched brand equity.",
-              },
-              {
-                pillar: "Network Effects & Ecosystem",
-                durability: canonicalMoat(data).rating === "Wide" ? "20+ Years" : "10-20 Years",
-                rationale: "Self-reinforcing two-sided user engagement and advertiser bidding density.",
-              },
-              {
-                pillar: "Cost Advantage & Infra Scale",
-                durability: canonicalMoat(data).rating === "Wide" ? "20+ Years" : "10-20 Years",
-                rationale: "Hyperscale global data-center footprint and custom silicon amortizing fixed opex.",
-              },
-            ];
+            const rawPillars = pe.moatPillars && pe.moatPillars.length > 0 ? pe.moatPillars : [];
+            if (!rawPillars.length) {
+              return (
+                <View style={S.compactRowAlt}>
+                  <Text style={[S.compactCell, { width: "100%" }]}>
+                    Moat pillars not evidenced — assessment omitted (no template pillars substituted).
+                  </Text>
+                </View>
+              );
+            }
             return rawPillars.map((p, ri) => (
               <View key={ri} style={ri % 2 === 0 ? S.compactRow : S.compactRowAlt}>
                 <Text style={[S.compactCellBold, { width: "28%" }]}>{p.pillar}</Text>
@@ -2612,11 +2659,19 @@ const BullsSayBearsSayPage = ({ data }: { data: ReportData }) => {
           </View>
 
           {(() => {
-            const rawBulls = [
-              ["1. Revenue Durability & Scale", bulls[0] || `${data.profile.name} leverages entrenched global market positioning and secular demand traction to compound top-line revenue through macroeconomic cycles.`],
-              ["2. Margin Expansion & Cash Conversion", (bulls[3] || bulls[1]) || "Structural operating leverage and disciplined fixed-cost absorption support expanding operating margins and superior free cash flow generation."],
-              ["3. Balance-Sheet Flexibility", bulls[2] || "A fortress balance sheet with substantial liquid reserves provides downside resilience and optionality for strategic reinvestment and capital return."],
-            ];
+            // Prefer thesis bull/bear chains from content-intelligence; fall back to SWOT; omit generic prose
+            const rrBull = data.researchReport?.thesis?.bullCase || [];
+            const rrBear = data.researchReport?.thesis?.bearCase || [];
+            const rawBulls: [string, string][] = rrBull.length
+              ? rrBull.slice(0, 3).map((b, i) => [`Bull ${i + 1} (evidence chain)`, b])
+              : bulls.length
+                ? bulls.slice(0, 3).map((b, i) => [`Bull ${i + 1}`, b])
+                : [];
+            if (!rawBulls.length) {
+              return (
+                <Text style={S.bodyText}>No evidence-constrained bull case available — section omitted.</Text>
+              );
+            }
             return rawBulls.map(([title, desc], idx) => (
               <View key={idx} style={{ marginBottom: 5 }}>
                 <Text style={{ fontSize: 7.5, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2 }}>
@@ -2634,11 +2689,17 @@ const BullsSayBearsSayPage = ({ data }: { data: ReportData }) => {
           </View>
 
           {(() => {
-            const rawBears = [
-              ["1. Input-Cost & Margin Sensitivity", (bears[1] || bears[0]) || "Accelerating infrastructure investments and technical talent compensation could compress operating margins if top-line monetization decelerates."],
-              ["2. Execution & Reinvestment Intensity", bears[2] || "High capital expenditure intensity into next-generation technology cycles carries multi-year payback uncertainty and utilization risk."],
-              ["3. Competitive & Regulatory Scrutiny", bears[3] || "Intensifying regulatory and antitrust investigations alongside aggressive challenger platforms may pressure headline market share and pricing power."],
-            ];
+            const rrBear = data.researchReport?.thesis?.bearCase || [];
+            const rawBears: [string, string][] = rrBear.length
+              ? rrBear.slice(0, 3).map((b, i) => [`Bear ${i + 1} (evidence chain)`, b])
+              : bears.length
+                ? bears.slice(0, 3).map((b, i) => [`Bear ${i + 1}`, b])
+                : [];
+            if (!rawBears.length) {
+              return (
+                <Text style={S.bodyText}>No evidence-constrained bear case available — section omitted.</Text>
+              );
+            }
             return rawBears.map(([title, desc], idx) => (
               <View key={idx} style={{ marginBottom: 5 }}>
                 <Text style={{ fontSize: 7.5, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2 }}>
@@ -2673,32 +2734,37 @@ const BullsSayBearsSayPage = ({ data }: { data: ReportData }) => {
             <Text style={[S.compactCellHeader, { width: "32%" }]}>Estimated Valuation Sensitivity</Text>
           </View>
           {(() => {
-            const rawCats = pe.catalysts && pe.catalysts.length > 0 ? pe.catalysts : [
-              {
-                event: "Next Quarterly Earnings & Operating Margin Trajectory",
-                horizon: "0-3 Months",
-                probability: "High",
-                impact: "±5% to DCF Fair Value",
-              },
-              {
-                event: "Enterprise Cloud & AI Product Monetization Milestones",
-                horizon: "6-12 Months",
-                probability: "Moderate",
-                impact: "Expansion of terminal growth anchor",
-              },
-              {
-                event: "Capital Return Acceleration (Share Buybacks / Dividends)",
-                horizon: "Ongoing",
-                probability: "High",
-                impact: "EPS accretion & valuation floor support",
-              },
-            ];
+            // Content-intelligence catalysts first; legacy AI catalysts second; empty table if none (no template rows)
+            const rrCats = (data.researchReport?.catalysts || []).map((c) => ({
+              event: c.catalyst,
+              horizon: c.timeframe || "Unscheduled",
+              probability: c.quantitative ? "Evidence-backed" : "Qualitative",
+              impact: [c.observableKpi ? `KPI: ${c.observableKpi}` : "", c.forecastImpact, c.valuationImpact].filter(Boolean).join(" → ") || "See chain",
+              invalidation: c.invalidation,
+            }));
+            const peCats = (pe.catalysts || []).map((c) => ({
+              event: c.event,
+              horizon: c.horizon,
+              probability: c.probability,
+              impact: c.impact,
+              invalidation: (c as any).invalidation,
+            }));
+            const rawCats = rrCats.length ? rrCats : peCats;
+            if (!rawCats.length) {
+              return (
+                <View style={S.compactRowAlt}>
+                  <Text style={[S.compactCell, { width: "100%" }]}>
+                    No evidence-constrained catalysts available — table left empty rather than templated.
+                  </Text>
+                </View>
+              );
+            }
             return rawCats.map((c, ri) => (
               <View key={ri} style={ri % 2 === 0 ? S.compactRow : S.compactRowAlt}>
                 <Text style={[S.compactCellBold, { width: "36%" }]}>{c.event || "Unnamed catalyst"}</Text>
                 <Text style={[S.compactCell, { width: "16%" }]}>{c.horizon || "Unscheduled"}</Text>
                 <Text style={[S.compactCell, { width: "16%" }]}>{(c.probability || "Unquantified").replace(/\s*\(\d+%\)/, "")}</Text>
-                <Text style={[S.compactCell, { width: "32%" }]}>{c.impact || "Sensitivity not quantified"}</Text>
+                <Text style={[S.compactCell, { width: "32%" }]}>{c.impact || "Sensitivity not quantified"}{c.invalidation ? ` | Invalidate: ${c.invalidation}` : ""}</Text>
               </View>
             ));
           })()}
@@ -3773,28 +3839,9 @@ const ManagementAndOwnershipPage2 = ({ data }: { data: ReportData }) => {
             <Text style={[S.compactCellHeader, { width: "20%" }]}>Strategic Shareholder Outcome</Text>
           </View>
           {(() => {
-            const arch = ledger?.archetype || "MATURE_COMPOUNDER";
+            // Evidence-only capital stewardship from reported models — no archetype templates
+            // (DISTRESSED / EARLY_PLATFORM / spectrum / dark-store prose was cross-sector bleed).
             const cur = data.profile.currency === "INR" ? "Rs. " : "$";
-
-            if (arch === "DISTRESSED") {
-              return [
-                ["Essential Network Sustaining Capex", `${cur}${fmtNum(Math.abs(models[0].capex || 2500) * 5.0, 0)}M`, "78.4%", "Liquidity Constrained", "Essential spectrum & baseline maintenance only"],
-                ["Common Cash Dividends Paid", "Nil (Suspended)", "0.0%", "Statutory Moratorium", "Distribution halted under debt restructuring charter"],
-                ["Share Buyback Programs", "Nil (Suspended)", "0.0%", "Capital Preservation", "Zero equity repurchases permitted under lender covenants"],
-                ["Lender Debt Service & AGR Dues", `${cur}${fmtNum(Math.abs(models[0].operatingIncome || 5000) * 8.0, 0)}M`, "100.0%+", "High Distress Coverage", "Statutory dues and senior loan servicing obligations"],
-                ["Total Shareholder Distribution", "Nil / Suspended", "0.0%", "Capital Conservation", "Zero capital return; balance sheet deleveraging priority"],
-              ];
-            }
-            if (arch === "EARLY_PLATFORM_GROWTH") {
-              return [
-                ["Dark Store & Logistics Mesh Capex", `${cur}${fmtNum(Math.abs(models[0].capex || 1500) * 4.5, 0)}M`, "82.5%", "High-Growth Reinvestment", "Hyperlocal dark store expansion & tech automation"],
-                ["Common Cash Dividends Paid", "Nil (Reinvestment)", "0.0%", "Growth Reinvestment", "All operating proceeds retained to scale platform network"],
-                ["Share Repurchase Allocation", "Nil", "0.0%", "Early-Stage Growth", "Zero buybacks; equity retained for working capital runway"],
-                ["Strategic Tech M&A & Integration", `${cur}${fmtNum(Math.abs(models[0].capex || 1000) * 1.8, 0)}M`, "17.5%", "Category Expansion", "Acquiring localized delivery and merchant tooling assets"],
-                ["Total Shareholder Distribution", "Nil / 0.0%", "0.0%", "100% Retained Cash", "Zero distributions during category land-grab phase"],
-              ];
-            }
-            // Mature Compounder / Cyclical
             const cfo = Math.max(1, (models[0].operatingIncome || 10000) * 0.85);
             const hasDiv = (data.stockData.dividendYield || 0) > 0.001 || models.some(m => (m.dividendsPaid || 0) > 0);
             const divTot = hasDiv ? (models[0].dividendsPaid || 0) * 5.0 : 0;
@@ -3815,7 +3862,7 @@ const ManagementAndOwnershipPage2 = ({ data }: { data: ReportData }) => {
               : ["Total Shareholder Distribution", "Nil / 0.0%", "0.0%", "100% Retained Cash", "Entire operating cash flow reinvested into capex and balance sheet"];
 
             return [
-              ["Organic Reinvestment & Capex", `${cur}${fmtNum(capexTot, 0)}M`, `${Math.min(65, (capexTot / (cfo * 5)) * 100).toFixed(1)}%`, "ROIC Hurdle Discipline", "High-throughput automation & capability expansion"],
+              ["Organic Reinvestment & Capex", `${cur}${fmtNum(capexTot, 0)}M`, `${Math.min(65, (capexTot / (cfo * 5)) * 100).toFixed(1)}%`, "ROIC Hurdle Discipline", "Reinvestment sized to reported operating capacity"],
               divRow,
               repRow,
               ["Debt Retirement & Liquidity Float", `${cur}${fmtNum(cfo * 1.2, 0)}M`, "12.0%", "Balance Sheet Prudence", "Maintaining conservative net leverage across cycles"],
@@ -3840,67 +3887,37 @@ const ManagementAndOwnershipPage2 = ({ data }: { data: ReportData }) => {
         </Text>
         <View wrap={false} style={{ flexDirection: "row", gap: 10 }}>
           {(() => {
-            const arch = ledger?.archetype || "MATURE_COMPOUNDER";
-            if (arch === "DISTRESSED") {
-              return (
-                <>
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ fontSize: 7.2, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 1.5 }}>
-                      Debt Restructuring Over Shareholder Return
-                    </Text>
-                    <Text style={{ fontSize: 6.6, color: COLORS.textSecondary, lineHeight: 1.35 }}>
-                      Given severe debt obligations and substantial statutory dues, management directs 100% of available liquidity toward operational sustaining capex and senior liability coverage. Shareholder distributions remain appropriately suspended to maximize restructuring runway.
-                    </Text>
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ fontSize: 7.2, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 1.5 }}>
-                      Capital Conservation &amp; Liquidity Guardrails
-                    </Text>
-                    <Text style={{ fontSize: 6.6, color: COLORS.textSecondary, lineHeight: 1.35 }}>
-                      Our research desk rates capital stewardship as Constrained / Capital Conservation. Capital preservation and equity dilution risk management take precedence over equity buybacks until sustainable interest coverage is re-established.
-                    </Text>
-                  </View>
-                </>
-              );
-            }
-            if (arch === "EARLY_PLATFORM_GROWTH") {
-              return (
-                <>
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ fontSize: 7.2, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 1.5 }}>
-                      High-Reinvestment Runway Over Premature Yield
-                    </Text>
-                    <Text style={{ fontSize: 6.6, color: COLORS.textSecondary, lineHeight: 1.35 }}>
-                      Management prioritizes 100% organic reinvestment into dark store density, rider algorithmic tooling, and merchant onboarding. In an early-stage platform duopoly, retaining gross profit to capture network scale compounds enterprise value faster than premature dividend payments.
-                    </Text>
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ fontSize: 7.2, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 1.5 }}>
-                      Cash Runway &amp; Balance Sheet Flexibility
-                    </Text>
-                    <Text style={{ fontSize: 6.6, color: COLORS.textSecondary, lineHeight: 1.35 }}>
-                      Reinvestment-first allocation is consistent with a pre-profitability platform charter; it is not graded here — stewardship assessment follows reported ROIC-vs-WACC outcomes, not intent.
-                    </Text>
-                  </View>
-                </>
-              );
-            }
+            // Prefer research capitalAllocation / engine capital drivers — never archetype templates.
+            const researchCap = data.researchReport?.capitalAllocation || pe.capitalAllocationCommentary || "";
+            const capitalDrivers = data.researchReport?.economicEngine?.capitalDrivers || [];
+            const col1Title = researchCap
+              ? "Capital Allocation Framework (research)"
+              : "Reinvestment Hurdle Discipline";
+            const col1Body = researchCap
+              ? researchCap
+              : "Capital allocation follows reported ROIC-vs-WACC outcomes on the Financials pages — no charter or discipline is asserted without research evidence.";
+            const col2Title = capitalDrivers.length
+              ? "Capital Engines (economic architecture)"
+              : "Shareholder Return Basis";
+            const col2Body = capitalDrivers.length
+              ? capitalDrivers.slice(0, 3).map((d) => `${d.name}: ${d.mechanism}`).join(" | ")
+              : "Distribution sustainability follows from reported operating cash flow and declared policy only; self-funding under volatility is not assumed here.";
             return (
               <>
                 <View style={{ flex: 1 }}>
                   <Text style={{ fontSize: 7.2, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 1.5 }}>
-                    Organic Focus Over Value-Destructive Mega-M&amp;A
+                    {col1Title}
                   </Text>
                   <Text style={{ fontSize: 6.6, color: COLORS.textSecondary, lineHeight: 1.35 }}>
-                    Mega-merger activity, internal-expansion returns, and distribution sustainability are evaluated from reported deals, ROIC outcomes, and cash coverage on the Financials pages — no charter or discipline is asserted in this paragraph.
+                    {col1Body}
                   </Text>
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={{ fontSize: 7.2, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 1.5 }}>
-                    Shareholder Return Predictability &amp; Dividend Security
+                    {col2Title}
                   </Text>
                   <Text style={{ fontSize: 6.6, color: COLORS.textSecondary, lineHeight: 1.35 }}>
-                    Distribution sustainability follows from reported operating cash flow and declared policy only; self-funding under volatility is not assumed here.
+                    {col2Body}
                   </Text>
                 </View>
               </>
@@ -4497,14 +4514,19 @@ const CorporateDisclosuresAndCatalystsPage = ({ data }: { data: ReportData }) =>
             </Text>
             <Text style={{ fontSize: 5.4, color: COLORS.textSecondary, lineHeight: 1.3, textAlign: "justify" }}>
               {(() => {
-                const arch = ledger?.archetype || "MATURE_COMPOUNDER";
-                if (arch === "EARLY_PLATFORM_GROWTH") {
-                  return `While sell-side consensus focuses primarily on headline Gross Order Value (GOV) growth rates, our institutional framework models dark store unit economics, delivery density maturity, and contribution margin per order after rider payouts and marketing.`;
+                // Prefer research debate/thesis for divergence vs Street; omit archetype templates.
+                const central = data.researchReport?.debates?.find((d) =>
+                  data.researchReport?.thesis?.keyDebate && d.debate === data.researchReport.thesis.keyDebate
+                ) || data.researchReport?.debates?.[0];
+                if (central) {
+                  const fin = central.financialConsequence || "";
+                  const val = central.valuationConsequence || "";
+                  return `Our valuation is decided by a single falsifiable debate — "${central.debate}" — not consensus sentiment. Mechanism: ${central.mechanism}${fin ? ` Financial consequence: ${fin}` : ""}${val ? ` Valuation consequence: ${val}` : ""} Resolution signal: ${central.resolutionSignal || "see monitoring KPIs"}.`;
                 }
-                if (arch === "DISTRESSED") {
-                  return `While sell-side commentary debates speculative equity dilution relief, our institutional analysis rigorously models statutory AGR liabilities, ongoing spectrum capex, and operational debt coverage to establish intrinsic downside protection.`;
+                if (data.researchReport?.thesis?.whatMarketMayBeMissing) {
+                  return `Where we differ from Street consensus: ${data.researchReport.thesis.whatMarketMayBeMissing}`;
                 }
-                return `While sell-side consensus often reacts to quarterly cyclical earnings volatility, our fundamental valuation framework models long-term compounding from core operating franchises and disciplined capital allocation.`;
+                return "No evidence-constrained divergence commentary available — section omitted rather than templated.";
               })()}
             </Text>
           </View>
@@ -7597,6 +7619,130 @@ const QualityAssuranceChecksumPage = ({ data }: { data: ReportData }) => {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
+// RESEARCH DEBATES & EVIDENCE MAP — content-intelligence page
+// Renders ResearchReport.debates + evidenceMap when present; omits otherwise.
+// ─────────────────────────────────────────────────────────────────────────────
+const ResearchDebatesPage = ({ data }: { data: ReportData }) => {
+  const pe = getPEAnalysis(data);
+  const debates = pe.researchDebates || [];
+  const chains = pe.moatChains || [];
+  const landscape = pe.competitiveLandscape || [];
+  const conf = pe.evidenceMapConfidence;
+  const unsupported = pe.evidenceUnsupported || [];
+  if (!debates.length && !data.researchReport) return null;
+
+  return (
+    <Page size="A4" style={S.page}>
+      <InstitutionalMasthead data={data} sectionTitle="Research Debates &amp; Evidence Map" />
+
+      <View wrap={false} style={{ borderBottomWidth: 1, borderBottomColor: COLORS.hairline, paddingBottom: 2, marginBottom: 6 }}>
+        <Text style={{ fontSize: 9, fontFamily: "Helvetica-Bold", color: COLORS.slateDark }}>
+          Core Research Debates (evidence → mechanism → financial → valuation)
+        </Text>
+      </View>
+
+      {pe.whyThisCompany ? (
+        <Text style={[S.bodyText, { marginBottom: 4 }]}>
+          <Text style={{ fontFamily: "Helvetica-Bold" }}>Why this company: </Text>
+          {pe.whyThisCompany}
+        </Text>
+      ) : null}
+
+      {debates.length ? (
+        debates.map((d, i) => (
+          <View key={i} style={{ marginBottom: 5, padding: 4, borderWidth: 0.5, borderColor: COLORS.hairlineLight }}>
+            <Text style={{ fontSize: 7.5, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 1.5 }}>
+              {d.central ? "★ CENTRAL — " : ""}{i + 1}. {d.debate}
+            </Text>
+            <Text style={[S.bodyText, { fontSize: 6.4 }]}>
+              <Text style={{ fontFamily: "Helvetica-Bold" }}>FOR: </Text>{d.evidenceFor || "—"}
+            </Text>
+            <Text style={[S.bodyText, { fontSize: 6.4 }]}>
+              <Text style={{ fontFamily: "Helvetica-Bold" }}>AGAINST: </Text>{d.evidenceAgainst || "—"}
+            </Text>
+            {d.financialConsequence ? (
+              <Text style={[S.bodyText, { fontSize: 6.4 }]}>
+                <Text style={{ fontFamily: "Helvetica-Bold" }}>Financial: </Text>{d.financialConsequence}
+              </Text>
+            ) : null}
+            {d.valuationConsequence ? (
+              <Text style={[S.bodyText, { fontSize: 6.4 }]}>
+                <Text style={{ fontFamily: "Helvetica-Bold" }}>Valuation: </Text>{d.valuationConsequence}
+              </Text>
+            ) : null}
+            {d.resolutionSignal ? (
+              <Text style={[S.bodyText, { fontSize: 6.4 }]}>
+                <Text style={{ fontFamily: "Helvetica-Bold" }}>Resolve on: </Text>{d.resolutionSignal}
+              </Text>
+            ) : null}
+          </View>
+        ))
+      ) : (
+        <Text style={S.bodyText}>Debates not available for this run.</Text>
+      )}
+
+      <View wrap={false} style={{ flexDirection: "row", gap: 12, marginTop: 4 }}>
+        <View style={{ flex: 1 }}>
+          <Text style={{ fontSize: 8, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2 }}>
+            Evidence Map {conf !== undefined ? `(confidence ${conf.toFixed(2)})` : ""}
+          </Text>
+          <Text style={[S.bodyText, { fontSize: 6.4 }]}>
+            {data.researchReport?.evidenceMap?.items?.length
+              ? data.researchReport.evidenceMap.items.slice(0, 8).map((it) =>
+                  `[${it.direction}/T${it.tier}/c${it.confidence.toFixed(2)}] ${it.claim}: ${it.evidence.slice(0, 140)} ${it.factIds.join(" ")}`
+                ).join("\n")
+              : "Evidence map not attached for this run."}
+          </Text>
+          {unsupported.length ? (
+            <Text style={[S.bodyText, { fontSize: 6.2, fontStyle: "italic" }]}>
+              Unsupported claims (honest gaps): {unsupported.slice(0, 5).join("; ")}
+            </Text>
+          ) : null}
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={{ fontSize: 8, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2 }}>
+            Moat Economic Architecture Chains
+          </Text>
+          {chains.length ? chains.slice(0, 3).map((c, i) => (
+            <Text key={i} style={[S.bodyText, { fontSize: 6.4 }]}>
+              • {c.chain || c.source}: evidence {c.evidence} (durability {c.durability})
+            </Text>
+          )) : (
+            <Text style={[S.bodyText, { fontSize: 6.4 }]}>No moat chains recorded.</Text>
+          )}
+        </View>
+      </View>
+
+      {landscape.length ? (
+        <View wrap={false} style={{ marginTop: 6, borderTopWidth: 0.5, borderTopColor: COLORS.hairlineLight, paddingTop: 4 }}>
+          <Text style={{ fontSize: 8, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2 }}>
+            Competitive Landscape (real rivals on real drivers)
+          </Text>
+          <View style={S.compactTable} wrap={false}>
+            <View style={S.compactRowHeader}>
+              <Text style={[S.compactCellHeader, { width: "18%" }]}>Competitor</Text>
+              <Text style={[S.compactCellHeader, { width: "28%" }]}>Overlap</Text>
+              <Text style={[S.compactCellHeader, { width: "27%" }]}>Key difference</Text>
+              <Text style={[S.compactCellHeader, { width: "27%" }]}>Strength / weakness</Text>
+            </View>
+            {landscape.slice(0, 5).map((c, i) => (
+              <View key={i} style={i % 2 === 0 ? S.compactRow : S.compactRowAlt}>
+                <Text style={[S.compactCellBold, { width: "18%" }]}>{c.company}{c.segment ? ` (${c.segment})` : ""}</Text>
+                <Text style={[S.compactCell, { width: "28%" }]}>{c.overlap}</Text>
+                <Text style={[S.compactCell, { width: "27%" }]}>{c.difference}</Text>
+                <Text style={[S.compactCell, { width: "27%" }]}>{c.strengths} / {c.weaknesses}</Text>
+              </View>
+            ))}
+          </View>
+        </View>
+      ) : null}
+
+      <PageFooter companyName={data.profile.name} />
+    </Page>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
 // MAIN DOCUMENT EXPORT — concise (10 pages, default) or full (24 pages).
 // Concise keeps every load-bearing surface: thesis, DCF/scenarios/sensitivity,
 // moat + pillars, bulls/bears/risks, all three statements, comps, QA, statutory
@@ -7614,6 +7760,9 @@ export const ReportDocument = ({ data, concise = true }: { data: ReportData; con
   >
     {/* Page 1: 3-Column Institutional Cover Page with TOC */}
     <CoverPage data={data} concise={concise} />
+
+    {/* Content-intelligence: research debates + evidence map (omits when absent) */}
+    <ResearchDebatesPage data={data} />
 
     {/* Page 2: Fundamental & Valuation Analysis (Scenarios & Sensitivity Matrix) */}
     <FundamentalAnalysisPage data={data} />

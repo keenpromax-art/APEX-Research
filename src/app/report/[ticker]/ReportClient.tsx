@@ -16,6 +16,7 @@ import { capPillarsToRating, harmonizeMoatSources } from "@/lib/moat";
 import { buildEventPriceMovements } from "@/lib/event-price-engine";
 import ApiKeyModal, { loadSavedAiConfig, loadServerModelOverride } from "@/components/ApiKeyModal";
 import { SUPPORTED_PROVIDERS, type CustomKeyConfig } from "@/lib/ai-providers";
+import { enrichAIAnalysisFromResearchReport } from "@/lib/ai-first/enrich-report";
 import styles from "./report.module.css";
 
 const INITIAL_AGENT_CHECKPOINTS: AgentCheckpoint[] = [
@@ -728,7 +729,45 @@ export default function ReportClient({ ticker }: Props) {
         screenerCrosscheck: companyData.screenerCrosscheck ?? null,
         // Advisory only: EDGAR + Stooq vs Yahoo (non-India tickers).
         globalCrosscheck: (companyData as any).globalCrosscheck ?? null,
+        researchReport: null,
       };
+
+      // Phase 4 cutover: enrich with AI-first content-intelligence (economic
+      // engine, pre-forecast debates, evidence map). Failure keeps legacy AI.
+      try {
+        setState(s => ({
+          ...s,
+          step: "generating_ai",
+          progress: 97,
+          message: "Running content-intelligence research pipeline (economic engine → debates → evidence)…",
+        }));
+        const aiFirstHeaders: Record<string, string> = {
+          "Content-Type": "application/json",
+        };
+        if (activeConfig?.apiKey) {
+          aiFirstHeaders["x-custom-api-key"] = activeConfig.apiKey;
+          aiFirstHeaders["x-custom-api-provider"] = activeConfig.provider;
+          if (activeConfig.model) aiFirstHeaders["x-custom-api-model"] = activeConfig.model;
+        }
+        const aiFirstRes = await fetch("/api/analyze-ai-first", {
+          method: "POST",
+          headers: aiFirstHeaders,
+          body: JSON.stringify({
+            ticker,
+            customKeyConfig: activeConfig || undefined,
+          }),
+        });
+        if (aiFirstRes.ok) {
+          const aiFirstJson = await aiFirstRes.json();
+          const research = aiFirstJson?.report;
+          if (research?.thesis) {
+            report.researchReport = research;
+            report.aiAnalysis = enrichAIAnalysisFromResearchReport(report.aiAnalysis, research);
+          }
+        }
+      } catch (e) {
+        console.warn("[report] content-intelligence enrichment skipped:", e);
+      }
 
       const qaReport = validateReportIntegrity(report);
       report.qaReport = qaReport;
@@ -1300,6 +1339,39 @@ export default function ReportClient({ ticker }: Props) {
                               {reportData.aiAnalysis?.investmentThesis || reportData.aiAnalysis?.investmentConclusion}
                             </p>
                           </div>
+
+                          {(reportData.aiAnalysis?.researchDebates || []).length > 0 && (
+                            <div className={styles.subSection}>
+                              <div className={styles.subSectionLabel}>Research Debates (evidence → financial → valuation)</div>
+                              <div className={styles.swotList}>
+                                {(reportData.aiAnalysis!.researchDebates!).map((d, i) => (
+                                  <div key={i} className={styles.subSectionText} style={{ marginBottom: 8 }}>
+                                    <strong>{d.central ? "[CENTRAL] " : ""}{d.debate}</strong>
+                                    <div>FOR: {d.evidenceFor}</div>
+                                    <div>AGAINST: {d.evidenceAgainst}</div>
+                                    {d.financialConsequence && <div>Financial: {d.financialConsequence}</div>}
+                                    {d.valuationConsequence && <div>Valuation: {d.valuationConsequence}</div>}
+                                    {d.resolutionSignal && <div>Resolve on: {d.resolutionSignal}</div>}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {(reportData.aiAnalysis?.evidenceMapConfidence !== undefined ||
+                            (reportData.aiAnalysis?.evidenceUnsupported || []).length > 0) && (
+                            <div className={styles.subSection}>
+                              <div className={styles.subSectionLabel}>Evidence Map</div>
+                              <p className={styles.subSectionText}>
+                                {reportData.aiAnalysis?.evidenceMapConfidence !== undefined
+                                  ? `Overall confidence ${reportData.aiAnalysis.evidenceMapConfidence.toFixed(2)}. `
+                                  : ""}
+                                {(reportData.aiAnalysis?.evidenceUnsupported || []).length > 0
+                                  ? `Unsupported claims (honest gaps): ${(reportData.aiAnalysis!.evidenceUnsupported!).slice(0, 5).join("; ")}`
+                                  : "No unsupported major claims recorded."}
+                              </p>
+                            </div>
+                          )}
 
                           <div className={styles.subSection}>
                             <div className={styles.subSectionLabel}>Corporate Profile & Strategic Positioning</div>
