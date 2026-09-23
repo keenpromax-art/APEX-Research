@@ -428,7 +428,15 @@ export { buildResearchPlan, mechanicalResearchPlan, researchPlannerContext } fro
 
 // Debate engine — thesis from debates (evidence → mechanism → debate → conclusion)
 // (src/lib/ai-first/debate-engine.ts)
-export { buildDebates, mechanicalDebates, debateContext } from "./debate-engine";
+export { buildDebates, buildDebatesEarly, mechanicalDebates, debateContext, earlyDebateContext } from "./debate-engine";
+
+// Economic engine — statement bindings + value questions that seed debates/drivers
+// (src/lib/ai-first/economic-engine.ts)
+export { buildEconomicEngine, mechanicalEconomicEngine } from "./economic-engine";
+
+// Evidence mapper — claim → [F-...] evidence map with confidence + honest unsupported gaps
+// (src/lib/ai-first/evidence-mapper.ts)
+export { buildEvidenceMap, mechanicalEvidenceMap, renderEvidenceMap } from "./evidence-mapper";
 
 // Evidence graph + source hierarchy — claim → evidence tier validation
 // (src/lib/ai-first/evidence-graph.ts)

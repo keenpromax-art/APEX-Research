@@ -2,17 +2,21 @@
  * APEX RESEARCH — DEBATE ENGINE + THESIS ENGINE
  *
  * Thesis is NOT "generate a thesis". Thesis is built from debates.
- * Audit §10-12: Identify 3-5 most important debates, each with FOR/AGAINST,
+ * Audit §10-12: Identify 3-5 most important debates, each with FOR/AGAINST
+ * + financial consequence + valuation consequence + resolution signal,
  * then select central debate → build thesis around it → state what would
  * prove thesis wrong + monitoring KPI + invalidation condition.
  *
- * Also produces: What don't we know? What changed? What matters?
- * What contradicts? What is unusual? Key debate? Evidence FOR/AGAINST.
+ * Prefer pre-forecast path (buildDebatesEarly) so debates inform the driver
+ * forecast; post-brief path remains available for richer context.
  */
 
 import type { AnalystBrief } from "./analyst-brief";
-import type { FactPack } from "./types";
+import type { FactPack, CompanyUnderstanding, EconomicEngine, Debate, ThesisEngineOutput, DebateEvidence } from "./types";
 import { parseLlmJson } from "./llm";
+import { buildHistoricalAnalysisPack } from "./historical-analysis";
+
+export type { Debate, ThesisEngineOutput, DebateEvidence };
 
 export type DebateTransport = (opts: {
   system: string;
@@ -22,43 +26,19 @@ export type DebateTransport = (opts: {
   jsonMode?: boolean;
 }) => Promise<string>;
 
-export interface DebateEvidence {
-  evidence: string;
-  factIds: string[]; // [F-...]
-  tier: number;
-}
-
-export interface Debate {
-  debate: string; // "Is revenue growth sustainable?"
-  evidenceFor: DebateEvidence[];
-  evidenceAgainst: DebateEvidence[];
-  mechanism: string; // economic mechanism at stake
-  significance: string; // why this debate decides valuation
-}
-
-export interface ThesisEngineOutput {
-  debates: Debate[];
-  centralDebateIndex: number;
-  thesis: string;
-  thesisEvidence: string[];
-  thesisCounterEvidence: string[];
-  keyUncertainty: string;
-  invalidationCondition: string;
-  monitoringKpi: string;
-  confidence: number;
-}
-
 const SYSTEM_PROMPT = `You are a senior institutional equity research analyst (thesis engine).
 
-You receive the canonical Analyst Brief: company identity, business model, economic engine, derived historical trajectory (CAGR, margins, ROE, FCF, leverage), model/valuation/scenarios, contradictions, missing information, evidence table.
+You receive company identity, economic engine (statement bindings + value questions), derived historical trajectory, and [F-...] evidence. A canonical Analyst Brief may also include model/valuation when available.
 
-TASK 1 — Identify the 3-5 most important DEBATES about this company (not facts).
+TASK 1 — Identify 3-5 DEBATES about this company (not facts). Prefer the economic engine's valueQuestions as seeds. Example MSFT debate: "Can AI-driven Azure/productivity monetization outgrow AI-infrastructure capital intensity?"
 
-Each debate must be a falsifiable question:
-- Debate 1: Is revenue growth sustainable?
-- Evidence FOR: [...]
-- Evidence AGAINST: [...]
-- Mechanism / Significance: ...
+Each debate must be a falsifiable question with:
+- evidenceFor / evidenceAgainst (cite [F-...]; Tier6 alone = low confidence)
+- mechanism (economic mechanism at stake)
+- significance (why this decides valuation)
+- financialConsequence (which forecast row moves if FOR wins: revenue / EBIT / FCF / capex)
+- valuationConsequence (EV / equity / per-share impact if FOR wins)
+- resolutionSignal (observable KPI/event that would resolve the debate)
 
 TASK 2 — Select the CENTRAL debate and build the THESIS around it.
 State:
@@ -78,7 +58,16 @@ RULES:
 Respond with ONLY JSON:
 {
   "debates": [
-    { "debate": "string", "evidenceFor": [{ "evidence": "string", "factIds": ["[F-...]"], "tier": 4 }], "evidenceAgainst": [{ "evidence": "string", "factIds": ["[F-...]"], "tier": 4 }], "mechanism": "string", "significance": "string" }
+    {
+      "debate": "string",
+      "evidenceFor": [{ "evidence": "string", "factIds": ["[F-...]"], "tier": 4 }],
+      "evidenceAgainst": [{ "evidence": "string", "factIds": ["[F-...]"], "tier": 4 }],
+      "mechanism": "string",
+      "significance": "string",
+      "financialConsequence": "string",
+      "valuationConsequence": "string",
+      "resolutionSignal": "string"
+    }
   ],
   "centralDebateIndex": 0,
   "thesis": "string",
@@ -115,22 +104,72 @@ export function debateContext(brief: AnalystBrief): string {
   ].join("\n");
 }
 
-export async function buildDebates(
-  transport: DebateTransport,
-  brief: AnalystBrief
-): Promise<ThesisEngineOutput> {
-  const ctx = debateContext(brief);
-  const user = `RESEARCH CONTEXT\n================\n${ctx}\n\nTASK\n====\nIdentify debates and build the thesis for ${brief.ticker} now.\n\nOUTPUT\n======\nRespond with ONLY the JSON object.`;
-  const resp = await transport({ system: SYSTEM_PROMPT, user, temperature: 0.3, maxTokens: 3500, jsonMode: true });
-  const parsed = parseLlmJson<Record<string, any>>(resp);
-  if (!parsed || !Array.isArray(parsed.debates)) throw new Error(`Debate engine returned unparseable output for ${brief.ticker}`);
-  const debates: Debate[] = parsed.debates.map((d: any) => ({
-    debate: String(d?.debate || ""),
-    evidenceFor: Array.isArray(d?.evidenceFor) ? d.evidenceFor.map((e: any) => ({ evidence: String(e?.evidence || ""), factIds: Array.isArray(e?.factIds) ? e.factIds.map(String) : [], tier: typeof e?.tier === "number" ? e.tier : 4 })) : [],
-    evidenceAgainst: Array.isArray(d?.evidenceAgainst) ? d.evidenceAgainst.map((e: any) => ({ evidence: String(e?.evidence || ""), factIds: Array.isArray(e?.factIds) ? e.factIds.map(String) : [], tier: typeof e?.tier === "number" ? e.tier : 4 })) : [],
-    mechanism: String(d?.mechanism || ""),
-    significance: String(d?.significance || ""),
-  })).filter((d: Debate) => d.debate);
+/** Pre-forecast debate context: understanding + economic engine + historical only. */
+export function earlyDebateContext(
+  pack: FactPack,
+  understanding: CompanyUnderstanding,
+  engine: EconomicEngine
+): string {
+  const hist = (() => {
+    try {
+      return buildHistoricalAnalysisPack(pack).summaryLines.slice(0, 30).join("\n");
+    } catch {
+      return "(historical derived unavailable)";
+    }
+  })();
+  const evidence: string[] = [];
+  for (const sec of [pack.company, pack.market, pack.incomeStatement, pack.balanceSheet, pack.cashFlow]) {
+    for (const f of sec.facts.slice(0, 20)) {
+      if (f.value !== undefined || f.textValue) {
+        evidence.push(`[F-${f.metric}] ${f.label} (${f.period}): ${f.textValue ?? String(f.value)}`);
+      }
+    }
+  }
+  return [
+    `COMPANY: ${understanding.companyName} (${pack.ticker})`,
+    `What it does: ${understanding.whatItDoes.slice(0, 700)}`,
+    `How it makes money: ${understanding.howItMakesMoney.slice(0, 500)}`,
+    `Why this company: ${(understanding.whyThisCompany || "").slice(0, 400) || "(not stated)"}`,
+    `Primary abstraction: ${engine.primaryAbstraction}`,
+    `Revenue drivers: ${engine.revenueDrivers.map((d) => `${d.name}: ${d.mechanism}`).join(" | ")}`,
+    `Capital drivers: ${engine.capitalDrivers.map((d) => `${d.name}: ${d.mechanism}`).join(" | ") || "none"}`,
+    `KPIs: ${engine.keyKpis.map((k) => k.name).join(", ")}`,
+    `Value questions (seed debates): ${engine.valueQuestions.join(" | ") || "none"}`,
+    `Competitive advantages: ${(understanding.competitiveAdvantages || []).map((a) => a.advantage).join(" | ") || "none"}`,
+    `Competitive threats: ${(understanding.competitiveThreats || []).map((t) => t.threat).join(" | ") || "none"}`,
+    `Inflections: ${(understanding.currentInflections || []).join(" | ") || "none"}`,
+    "",
+    "HISTORICAL DERIVED:",
+    hist,
+    "",
+    "EVIDENCE TABLE (excerpt):",
+    evidence.slice(0, 40).join("\n"),
+    "",
+    "MODEL/VALUATION: (pending — debates must stand on company economics + evidence alone; flag valuation debate as forward-looking)",
+  ].join("\n");
+}
+
+function normalizeEvidence(e: any): DebateEvidence {
+  return {
+    evidence: String(e?.evidence || ""),
+    factIds: Array.isArray(e?.factIds) ? e.factIds.map(String) : [],
+    tier: typeof e?.tier === "number" ? e.tier : 4,
+  };
+}
+
+function parseDebates(parsed: Record<string, any>): ThesisEngineOutput {
+  const debates: Debate[] = (Array.isArray(parsed.debates) ? parsed.debates : [])
+    .map((d: any) => ({
+      debate: String(d?.debate || ""),
+      evidenceFor: Array.isArray(d?.evidenceFor) ? d.evidenceFor.map(normalizeEvidence) : [],
+      evidenceAgainst: Array.isArray(d?.evidenceAgainst) ? d.evidenceAgainst.map(normalizeEvidence) : [],
+      mechanism: String(d?.mechanism || ""),
+      significance: String(d?.significance || ""),
+      financialConsequence: typeof d?.financialConsequence === "string" ? d.financialConsequence : undefined,
+      valuationConsequence: typeof d?.valuationConsequence === "string" ? d.valuationConsequence : undefined,
+      resolutionSignal: typeof d?.resolutionSignal === "string" ? d.resolutionSignal : undefined,
+    }))
+    .filter((d: Debate) => d.debate);
   return {
     debates,
     centralDebateIndex: typeof parsed.centralDebateIndex === "number" ? parsed.centralDebateIndex : 0,
@@ -144,24 +183,61 @@ export async function buildDebates(
   };
 }
 
+/** Post-brief debates (model/valuation context available). */
+export async function buildDebates(
+  transport: DebateTransport,
+  brief: AnalystBrief
+): Promise<ThesisEngineOutput> {
+  const ctx = debateContext(brief);
+  const user = `RESEARCH CONTEXT\n================\n${ctx}\n\nTASK\n====\nIdentify debates and build the thesis for ${brief.ticker} now.\n\nOUTPUT\n======\nRespond with ONLY the JSON object.`;
+  const resp = await transport({ system: SYSTEM_PROMPT, user, temperature: 0.3, maxTokens: 3500, jsonMode: true });
+  const parsed = parseLlmJson<Record<string, any>>(resp);
+  if (!parsed || !Array.isArray(parsed.debates)) throw new Error(`Debate engine returned unparseable output for ${brief.ticker}`);
+  return parseDebates(parsed);
+}
+
+/** Pre-forecast debates from understanding + economic engine (informs driver forecast). */
+export async function buildDebatesEarly(
+  transport: DebateTransport,
+  pack: FactPack,
+  understanding: CompanyUnderstanding,
+  engine: EconomicEngine
+): Promise<ThesisEngineOutput> {
+  const ctx = earlyDebateContext(pack, understanding, engine);
+  const user = `RESEARCH CONTEXT\n================\n${ctx}\n\nTASK\n====\nIdentify debates and build the thesis for ${pack.ticker} now (model/valuation still pending — ground debates in company economics and [F-...] evidence).\n\nOUTPUT\n======\nRespond with ONLY the JSON object.`;
+  const resp = await transport({ system: SYSTEM_PROMPT, user, temperature: 0.3, maxTokens: 3500, jsonMode: true });
+  const parsed = parseLlmJson<Record<string, any>>(resp);
+  if (!parsed || !Array.isArray(parsed.debates)) throw new Error(`Early debate engine returned unparseable output for ${pack.ticker}`);
+  return parseDebates(parsed);
+}
+
 export function mechanicalDebates(brief: AnalystBrief, pack: FactPack): ThesisEngineOutput {
   const revTrend = brief.historical.derived.find((d) => d.label.includes("Revenue CAGR"));
   const marginLine = brief.historical.summaryLines.find((l) => l.includes("Net margin")) || "";
+  const revName = brief.economicEngine.revenueDrivers[0]?.name || "revenue drivers";
+  const marginName = brief.economicEngine.marginDrivers[0]?.name || "cost";
+  const revMech = brief.economicEngine.revenueDrivers[0]?.mechanism || `${brief.economicEngine.primaryAbstraction} growth`;
   return {
     debates: [
       {
-        debate: "Is revenue growth sustainable at historical CAGR?",
+        debate: `Is ${revName} sustainable at historical CAGR?`,
         evidenceFor: [{ evidence: `Historical revenue CAGR ${revTrend ? String(revTrend.value) : "N/A"}`, factIds: brief.factIds.slice(0, 2), tier: 4 }],
         evidenceAgainst: [{ evidence: `Limited yfinance history (${brief.historical.revenueSeries.length} periods); missing segment/regulatory evidence. ${marginLine.slice(0, 120)}`, factIds: [], tier: 6 }],
-        mechanism: `${brief.economicEngine.primaryAbstraction} growth depends on ${brief.economicEngine.revenueDrivers[0]?.name || "revenue drivers"}`,
+        mechanism: revMech,
         significance: "Determines forecast revenue path and DCF fair value — the model's most sensitive input.",
+        financialConsequence: "Revenue and EBIT rows move with growth sustainability.",
+        valuationConsequence: "DCF fair value / per-share via discounted revenue and terminal value.",
+        resolutionSignal: `Multi-period ${brief.economicEngine.keyKpis[0]?.name || "revenue"} trajectory vs historical CAGR`,
       },
       {
-        debate: `Can margins expand given ${brief.economicEngine.marginDrivers[0]?.name || "cost"} dynamics?`,
+        debate: `Can margins expand given ${marginName} dynamics?`,
         evidenceFor: [{ evidence: marginLine.slice(0, 180) || "Margin history present", factIds: brief.factIds.slice(0, 1), tier: 4 }],
         evidenceAgainst: [{ evidence: "Wage/commodity/credit cost pressures not isolatable from yfinance alone", factIds: [], tier: 6 }],
         mechanism: brief.economicEngine.marginDrivers[0]?.mechanism || "Operating leverage vs input costs",
         significance: "20-40% of valuation sensitivity comes via margin assumptions.",
+        financialConsequence: "EBIT / net margin rows in the driver forecast.",
+        valuationConsequence: "Higher terminal margins raise fair value per share.",
+        resolutionSignal: "Reported operating / net margin trend vs cost-driver KPIs",
       },
       {
         debate: "Is current valuation pricing in excessive growth vs history?",
@@ -169,6 +245,9 @@ export function mechanicalDebates(brief: AnalystBrief, pack: FactPack): ThesisEn
         evidenceAgainst: [{ evidence: `Market multiples and ROE not yet reconciled — see contradictions: ${brief.contradictions[0] || "none"}`, factIds: [], tier: 6 }],
         mechanism: "Market-implied growth vs historical CAGR and required ROE",
         significance: "Decides Buy/Hold/Sell and risk/reward skew.",
+        financialConsequence: "Required growth/return assumptions if market-implied path is held.",
+        valuationConsequence: "Reverse-DCF gap between fair value and current price.",
+        resolutionSignal: "Price vs executed fair value and reverse-DCF required growth",
       },
     ],
     centralDebateIndex: 0,
@@ -182,4 +261,4 @@ export function mechanicalDebates(brief: AnalystBrief, pack: FactPack): ThesisEn
   };
 }
 
-export default { buildDebates, mechanicalDebates, debateContext };
+export default { buildDebates, buildDebatesEarly, mechanicalDebates, debateContext, earlyDebateContext };

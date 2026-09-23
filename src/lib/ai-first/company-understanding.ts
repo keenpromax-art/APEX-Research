@@ -51,13 +51,18 @@ const SYSTEM_PROMPT = `You are an institutional equity research analyst. You rec
 Determine:
 - What does this company actually do? How does it make money?
 - Business segments and the economic units of the business.
-- What drives revenue, costs, margins, cash generation, balance-sheet requirements, and returns on capital?
+- What drives revenue, costs, margins, cash generation, balance-sheet requirements, capex/capital intensity (capitalEngines), and returns on capital?
 - The important KPIs (with availability: yfinance / modeled / unavailable).
 - Metrics that should NOT be used for this company (e.g. a commercial bank should not be analyzed with EBITDA or EV/EBITDA — deposits, advances, NIM, credit cost, ROA/ROE and book value are relevant; an ad platform's economics are query/monetization-driven, not inventory-driven).
 - Appropriate valuation methods with WHY.
 - Which financial statements matter most.
+- whyThisCompany: why THIS company is investable vs any peer — the core differentiator (NOT generic "leader with strong brand").
+- competitiveAdvantages: 2-4 structural advantages, each as an ECONOMIC ARCHITECTURE CHAIN (e.g., "Microsoft 365 → workflow integration → high switching costs → seat pricing power → recurring revenue durability"). Cite [F-...] evidence where possible.
+- competitiveThreats: real rivals/mechanisms that erode those advantages (e.g., AWS/GCP share shifts, open-source substitution, regulation).
+- currentInflections: what is CHANGING right now that matters to the investment case (AI capex cycle, mix shift, regulation, product cycle) — not generic "ongoing digital transformation".
+- managementPriorities: capital-allocation / strategic priorities ONLY if grounded in facts; otherwise "UNKNOWN — requires filings/calls".
 
-There is NO template. Determine everything from the actual company data.
+There is NO template. Determine everything from the actual company data. NO boilerplate ("operational scale", "high-margin mix", "disciplined capital deployment").
 
 EPISTEMIC RULES — CRITICAL:
 - Distinguish KNOWN (present in yfinance facts or Tier1 filing) vs INFERRED (you guessed from sector/description) vs UNKNOWN (not in yfinance; requires filings/calls/research).
@@ -79,11 +84,17 @@ Respond with ONLY JSON in this exact shape:
   "cashGenerationDrivers": [{ "name": "string", "mechanism": "string", "sourceFacts": ["string"], "statementLine": null }],
   "balanceSheetDrivers": [{ "name": "string", "mechanism": "string", "sourceFacts": ["string"], "statementLine": null }],
   "returnsDrivers": [{ "name": "string", "mechanism": "string", "sourceFacts": ["string"], "statementLine": null }],
+  "capitalEngines": [{ "name": "string", "mechanism": "string", "sourceFacts": ["string"], "statementLine": null }],
   "keyKpis": [{ "name": "string", "rationale": "string", "availability": "yfinance", "unit": null }],
   "metricsToAvoid": [{ "metric": "string", "reason": "string" }],
   "statementsThatMatterMost": ["string"],
   "industryContext": "string",
   "appropriateValuationMethods": [{ "method": "string", "why": "string" }],
+  "whyThisCompany": "string (company-specific investment differentiator)",
+  "competitiveAdvantages": [{ "advantage": "string", "mechanism": "string (economic chain)", "evidence": ["string citing [F-...] when possible"] }],
+  "competitiveThreats": [{ "threat": "string", "mechanism": "string", "evidence": ["string"] }],
+  "currentInflections": ["string (what changed and why it matters now)"],
+  "managementPriorities": ["string or UNKNOWN — requires filings/calls"],
   "confidence": { "overall": 0.5, "dataQuality": "string", "reasoning": "string" },
   "epistemic": { "knownFacts": ["string"], "inferences": ["string"], "unknowns": ["string"], "requiredResearch": ["string"] }
 }
@@ -123,6 +134,7 @@ export async function understandCompany(
     cashGenerationDrivers: arr(parsed.cashGenerationDrivers).map(normalizeDriver),
     balanceSheetDrivers: arr(parsed.balanceSheetDrivers).map(normalizeDriver),
     returnsDrivers: arr(parsed.returnsDrivers).map(normalizeDriver),
+    capitalEngines: arr(parsed.capitalEngines).map(normalizeDriver),
     keyKpis: arr(parsed.keyKpis).map(normalizeKpi),
     metricsToAvoid: arr(parsed.metricsToAvoid).map(normalizeMetricToAvoid),
     statementsThatMatterMost: arr(parsed.statementsThatMatterMost).map(String),
@@ -131,6 +143,31 @@ export async function understandCompany(
       method: String(m?.method || ""),
       why: String(m?.why || ""),
     })),
+    whyThisCompany: parsed.whyThisCompany ? String(parsed.whyThisCompany) : undefined,
+    competitiveAdvantages: arr(parsed.competitiveAdvantages)
+      .map((a: any) => ({
+        advantage: String(a?.advantage || ""),
+        mechanism: String(a?.mechanism || ""),
+        evidence: Array.isArray(a?.evidence) ? a.evidence.map(String) : [],
+      }))
+      .filter((a: { advantage: string }) => a.advantage),
+    competitiveThreats: arr(parsed.competitiveThreats)
+      .map((t: any) => ({
+        threat: String(t?.threat || ""),
+        mechanism: String(t?.mechanism || ""),
+        evidence: Array.isArray(t?.evidence) ? t.evidence.map(String) : [],
+      }))
+      .filter((t: { threat: string }) => t.threat),
+    currentInflections: arr(parsed.currentInflections).map(String).filter(Boolean),
+    managementPriorities: arr(parsed.managementPriorities).map(String).filter(Boolean),
+    epistemic: parsed.epistemic
+      ? {
+          knownFacts: arr(parsed.epistemic.knownFacts).map(String),
+          inferences: arr(parsed.epistemic.inferences).map(String),
+          unknowns: arr(parsed.epistemic.unknowns).map(String),
+          requiredResearch: arr(parsed.epistemic.requiredResearch).map(String),
+        }
+      : undefined,
     confidence: {
       overall: typeof parsed.confidence?.overall === "number" ? parsed.confidence.overall : 0.5,
       dataQuality: String(parsed.confidence?.dataQuality || ""),

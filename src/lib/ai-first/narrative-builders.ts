@@ -17,6 +17,9 @@ import type {
   Risk,
   CompetitorAnalysis,
   MoatAnalysis,
+  EconomicEngine,
+  ThesisEngineOutput,
+  EvidenceMap,
 } from "./types";
 import { parseLlmJson } from "./llm";
 import { buildAnalystBrief, renderAnalystBrief } from "./analyst-brief";
@@ -30,39 +33,51 @@ export type NarrativeTransport = (opts: {
   jsonMode?: boolean;
 }) => Promise<string>;
 
-const SYSTEM_PROMPT = `You are an institutional equity research analyst (Writer role). You receive the canonical Analyst Brief — company identity, economic engine, DERIVED historical trajectory (CAGR, margins, ROE, FCF, leverage — not raw rows), forecast assumptions from ONE canonicalForecast (cover/SCENARIO/DCF single object, no parallel model), valuation, scenarios, contradictions, missing information, and the full [F-...] evidence table plus filing segment registry when available.
+const SYSTEM_PROMPT = `You are an institutional equity research analyst (Writer role). You receive the canonical Analyst Brief — company identity, economic engine, DERIVED historical trajectory (CAGR, margins, ROE, FCF, leverage — not raw rows), forecast assumptions from ONE canonicalForecast (cover/SCENARIO/DCF single object, no parallel model), valuation, scenarios, contradictions, missing information, research debates with evidence maps, and the full [F-...] evidence table plus filing segment registry when available.
+
+YOU EXPLAIN RESEARCH. YOU DO NOT CREATE NEW QUANTITATIVE CLAIMS.
 
 RESEARCHER→WRITER: Before writing, think as Researcher:
 What do we know (Tier1 filing / Tier4 yfinance fact [F-...])? What don't we know (requires filings/calls)? What changed (trailing → Y1 gap)? What matters (driver that moves valuation)? What contradicts (e.g., Other Operating Expense disappearing, 62.5% vs 30% margin fork)? What is unusual? What is the key debate? What evidence supports vs challenges the thesis?
 
-THESIS CHAIN (mandatory for every thesis sentence):
-  EVIDENCE [F-...] or canonical forecast assumption → MECHANISM (how the business makes money, e.g., occupancy×ADR→RevPAR, subs×ARPU, units×ASP, NIM×advances) → AFFECTED KPI (one of the driver-native KPIs for THIS company, not generic revenue) → FINANCIAL CONSEQUENCE (DCF row: revenue/EBIT/FCF) → VALUATION CONSEQUENCE (EV/equity/per-share via canonical DCF). A thesis without this chain is generic and will be blocked by QA.
+THESIS (company-specific core debate, NOT generic):
+- Open with the CENTRAL research debate (e.g., MSFT: "Can AI-driven Azure/productivity monetization outgrow AI-infrastructure capital intensity?"), not a slogan.
+- THESIS CHAIN (mandatory): EVIDENCE [F-...] or canonical forecast assumption → MECHANISM (e.g., Azure consumption, M365 seats, Copilot adoption → workflow lock → pricing power) → AFFECTED KPI → FINANCIAL CONSEQUENCE (revenue/EBIT/FCF/capex) → VALUATION CONSEQUENCE (EV/equity/per-share).
+- Provide evidence FOR the bull reading, evidence AGAINST, financial consequence of each side, valuation consequence, and invalidation. Do NOT just list bull/bear bullets with no mechanism.
+
+CATALYSTS — structure for each:
+event / timing (timeframe) / observable KPI / direction (positive|negative|mixed) / forecast impact (canonical variable) / valuation impact / invalidation (what would delay or kill the catalyst).
+Generic "earnings beat / margin expansion" without a real event is blocked. If no quantitative chain, quantitative=false (QUALITATIVE ONLY). Do NOT invent % impacts.
+
+MOAT — economic architecture chains, not pillar labels:
+Each source must be a chain: asset → mechanism → KPI → financial → valuation.
+Examples of required form: "M365 → workflow integration → switching costs → seat pricing power → recurring revenue"; "Azure → workload migration → dependency → consumption"; "ecosystem → cross-sell → LTV".
+Evidence [F-...] or ROCE vs WACC / margin stability. If no durable advantage evidenced, hasMoat=false.
+
+COMPETITIVE — real rivals and real drivers only (for software: AWS, Google Cloud, not generic peers). Segment-level when filing registry holds segments. Compare on THIS company's drivers (Azure consumption, M365 seats, Copilot adoption), not brand adjectives. insufficient=true when evidence is thin.
 
 RULES:
-- Thesis is DEBATE-DRIVEN + CHAIN-DRIVEN: identify 1 central debate, build thesis around the chain above, state what would prove you WRONG + monitoring KPI + explicit Other Operating Expense classification if material historically (RECURRING/NON_RECURRING/RECLASSIFIED). Do NOT just list bull/bear.
-- Every quantitative statement must cite a yfinance fact ID [F-...] or the canonical forecast assumption/output (revenueGrowthRates/ebitMargins/caF etc from the single object). Tier6 inference alone = low confidence — never present as fact. Cover/Scenario/DCF numbers must match canonicalForecast verbatim (no parallel recomputation).
-- Evidence-constrained output: if you cannot support a catalyst/risk/competitor/moat pillar with evidence, OMIT it (do NOT force 3 catalysts / 5 risks / 5 moat pillars / 3 competitors). If generic, set insufficient=true and state why. A report with 20 generic warnings is BLOCKED, not READY_WITH_WARNINGS.
-- Risks: mechanism → affected KPI (must be company-native, e.g., RevPAR/ADR/Occupancy for hospitality, subs×ARPU for Jio, units×ASP for auto) → financial consequence → valuation consequence → monitoring indicator. Not generic "competition/macro" unless company-specific channel.
-- Catalysts: MUST be company-specific events, never generic "earnings/margin expansion". For each: trigger (regulatory order, product launch, store rollout, spectrum auction result, clinical read-out) → business mechanism → financial variable (from canonical forecast variables) → forecast impact (with segment when conglomerate) → valuation impact. Generic "earnings beat/margin improvement" without trigger is blocked by QA. If no quantitative chain, set "quantitative": false (QUALITATIVE ONLY). Do NOT invent % impacts.
-- Competitive analysis: SEGMENT-LEVEL when filing registry holds segments (e.g., RELIANCE: O2C vs Jio vs Retail vs E&P each need separate peer set with segment revenue/EBITDA overlap, economic similarity, key difference, strengths/weaknesses). When registry has no segments, build company-level peers dynamically from business model (use allowed concepts + peer-similarity score ≥30). If insufficient evidence for any segment, set "insufficient": true per segment and explain. Never compare a hospitality REIT to a bank loan-book or an auto OEM to a software SaaS churn model — ontology hard gate blocks it.
-- Moat: EVIDENCE-DRIVEN only: each source MUST have [F-...] or canonical forecast linkage (e.g., ROCE history vs WACC, gross margin stability, network effects proven by user/merchant scale). Structure: source → evidence (fact ID + period) → economic consequence (spread/margin) → durability (years, with historical variance) → threats. Select ONLY what applies from cost/brand/network/switching/distribution/scale/tech/regulatory/IP/data/relationships. Do NOT force pillars; if ROCE trails WACC and no durable advantage evidenced, hasMoat=false and verdict must state "No economic moat" (harmonized with canonical ROCE/WACC). Generic "strong moat / wide moat" without evidence is blocked.
-- Thesis must include counter-thesis, contradiction handling (explicitly address DISC-01 Other Opex disappearance and any 62.5% vs 30% margin fork if present), and monitoring KPI that would invalidate the chain.
+- Thesis is DEBATE-DRIVEN + CHAIN-DRIVEN: use the research debates provided when present; state what would prove you WRONG + monitoring KPI + explicit Other Operating Expense classification if material historically (RECURRING/NON_RECURRING/RECLASSIFIED).
+- Every quantitative statement must cite a yfinance fact ID [F-...] or the canonical forecast assumption/output. Tier6 inference alone = low confidence. Cover/Scenario/DCF numbers must match canonicalForecast verbatim.
+- Evidence-constrained output: if you cannot support a catalyst/risk/competitor/moat source with evidence, OMIT it. A report with 20 generic warnings is BLOCKED, not READY_WITH_WARNINGS.
+- Risks: mechanism → affected KPI (company-native) → financial consequence → valuation consequence → monitoring indicator.
+- Do not invent new numbers the forecast/valuation stages did not compute.
 
 Respond with ONLY JSON:
 {
   "thesis": {
-    "thesis": "string",
-    "bullCase": ["string"],
-    "bearCase": ["string"],
+    "thesis": "string (opens with central debate + chain)",
+    "bullCase": ["string (evidence→mechanism→KPI→financial→valuation)"],
+    "bearCase": ["string (evidence→mechanism→KPI→financial→valuation)"],
     "keyDebate": "string",
     "keyInflectionPoints": ["string"],
     "whatMarketMayBeMissing": "string",
     "whatCouldInvalidate": ["string"]
   },
-  "catalysts": [{ "catalyst": "string", "mechanism": "string", "financialVariable": "string", "forecastImpact": "string", "valuationImpact": "string", "quantitative": true, "timeframe": "string" }],
+  "catalysts": [{ "catalyst": "string", "mechanism": "string", "financialVariable": "string", "forecastImpact": "string", "valuationImpact": "string", "quantitative": true, "timeframe": "string", "observableKpi": "string", "direction": "positive", "invalidation": "string" }],
   "risks": [{ "risk": "string", "mechanism": "string", "affectedKpi": "string", "financialConsequence": "string", "valuationConsequence": "string", "monitoringIndicator": "string" }],
-  "competitiveAnalysis": { "competitors": [{ "company": "string", "businessOverlap": "string", "economicSimilarity": "string", "keyDifference": "string", "relativeStrengths": "string", "relativeWeaknesses": "string" }], "insufficient": false },
-  "moat": { "hasMoat": true, "sources": [{ "source": "string", "evidence": "string", "economicConsequence": "string", "durability": "string", "threatsToDurability": "string" }], "verdict": "string" }
+  "competitiveAnalysis": { "competitors": [{ "company": "string", "businessOverlap": "string", "economicSimilarity": "string", "keyDifference": "string", "relativeStrengths": "string", "relativeWeaknesses": "string", "segment": "string" }], "insufficient": false },
+  "moat": { "hasMoat": true, "sources": [{ "source": "string", "evidence": "string", "economicConsequence": "string", "durability": "string", "threatsToDurability": "string", "chain": "asset→mechanism→KPI→financial→valuation" }], "verdict": "string" }
 }`;
 
 /** Rich NARRATIVE_CONTEXT with filing segments, canonical basis, PP&E economics, and chain-ready KPIs. */
@@ -70,8 +85,16 @@ export function narrativeContext(
   pack: FactPack,
   understanding: CompanyUnderstanding,
   modelSpec: ForecastSpecification,
-  canonicalForecast?: any
+  canonicalForecast?: any,
+  extras?: {
+    engine?: EconomicEngine;
+    debates?: ThesisEngineOutput;
+    evidenceMap?: EvidenceMap;
+  }
 ): string {
+  const engine = extras?.engine;
+  const debates = extras?.debates;
+  const evidenceMap = extras?.evidenceMap;
   // Prefer canonical AnalystBrief — falls back to legacy compact if brief unavailable
   try {
     const brief = buildAnalystBrief({ pack, understanding, forecastSpec: modelSpec });
@@ -91,6 +114,30 @@ export function narrativeContext(
       brief.evidenceLines.push(`CANONICAL BASIS depreciation: ${b.depreciation ?? b.depreciation}`);
       if (b.otherOperatingExpense) brief.evidenceLines.push(`CANONICAL BASIS otherOperatingExpense: ${b.otherOperatingExpense}`);
       if (b.continuity) brief.evidenceLines.push(`CANONICAL BASIS continuity: ${b.continuity}`);
+    }
+    if (understanding.whyThisCompany) brief.evidenceLines.push(`WHY THIS COMPANY: ${understanding.whyThisCompany}`);
+    for (const a of understanding.competitiveAdvantages || []) {
+      brief.evidenceLines.push(`COMPETITIVE ADVANTAGE: ${a.advantage} — ${a.mechanism}`);
+    }
+    for (const t of understanding.competitiveThreats || []) {
+      brief.evidenceLines.push(`COMPETITIVE THREAT: ${t.threat} — ${t.mechanism}`);
+    }
+    if (engine?.valueQuestions?.length) brief.evidenceLines.push(`ENGINE VALUE QUESTIONS: ${engine.valueQuestions.join(" | ")}`);
+    if (debates?.debates?.length) {
+      brief.coreDebate = debates.debates[debates.centralDebateIndex]?.debate || brief.coreDebate;
+      for (const d of debates.debates) {
+        brief.evidenceLines.push(
+          `RESEARCH DEBATE: ${d.debate} | FOR: ${d.evidenceFor.map((e) => e.evidence).join("; ")} | AGAINST: ${d.evidenceAgainst.map((e) => e.evidence).join("; ")} | financial: ${d.financialConsequence || "n/a"} | valuation: ${d.valuationConsequence || "n/a"} | resolution: ${d.resolutionSignal || "n/a"}`
+        );
+      }
+      brief.evidenceLines.push(`CENTRAL THESIS (debate stage): ${debates.thesis}`);
+      brief.evidenceLines.push(`INVALIDATION: ${debates.invalidationCondition} | MONITOR: ${debates.monitoringKpi}`);
+    }
+    if (evidenceMap) {
+      brief.evidenceLines.push(`EVIDENCE MAP confidence: ${evidenceMap.overallConfidence.toFixed(2)}; unsupported claims: ${evidenceMap.unsupported.slice(0, 5).join(" | ") || "none"}`);
+      for (const item of evidenceMap.items.slice(0, 12)) {
+        brief.evidenceLines.push(`EVIDENCE [${item.direction}/T${item.tier}/c${item.confidence.toFixed(2)}]: ${item.claim} — ${item.evidence.slice(0, 160)} ${item.factIds.join(" ")}`);
+      }
     }
     return renderAnalystBrief(brief as any);
   } catch {}
@@ -125,14 +172,29 @@ export function narrativeContext(
         `continuity: ${canonicalForecast.basis.continuity ?? ""}\n`;
     }
   } catch {}
+  const debateBlock = debates?.debates?.length
+    ? [
+        "",
+        "RESEARCH DEBATES (drive thesis — explain, do not invent):",
+        ...debates.debates.map(
+          (d) =>
+            `- ${d.debate}\n  FOR: ${d.evidenceFor.map((e) => e.evidence).join("; ")}\n  AGAINST: ${d.evidenceAgainst.map((e) => e.evidence).join("; ")}\n  financial: ${d.financialConsequence || "n/a"} | valuation: ${d.valuationConsequence || "n/a"} | resolution: ${d.resolutionSignal || "n/a"}`
+        ),
+        `CENTRAL THESIS: ${debates.thesis}`,
+        `INVALIDATION: ${debates.invalidationCondition} | MONITOR: ${debates.monitoringKpi}`,
+      ]
+    : [];
   return [
     `COMPANY: ${understanding.companyName} (${pack.ticker})`,
     `What it does: ${clip(understanding.whatItDoes, 700)}`,
     `How it makes money: ${clip(understanding.howItMakesMoney, 500)}`,
     `Primary economic abstraction: ${understanding.primaryEconomicAbstraction}`,
+    `Why this company: ${clip(understanding.whyThisCompany || "", 400) || "(n/a)"}`,
     `Industry context: ${clip(understanding.industryContext, 500)}`,
+    ...(engine?.valueQuestions?.length ? [`Engine value questions: ${engine.valueQuestions.join(" | ")}`] : []),
     ...(segmentSection.length ? ["", ...segmentSection] : []),
     ...(canonicalBasisBlock ? ["", canonicalBasisBlock] : []),
+    ...debateBlock,
     "",
     "REVENUE DRIVERS:",
     ...understanding.revenueDrivers.map((d) => `- ${d.name}: ${d.mechanism}`),
@@ -140,6 +202,12 @@ export function narrativeContext(
     ...understanding.costDrivers.map((d) => `- ${d.name}: ${d.mechanism}`),
     "MARGIN DRIVERS:",
     ...understanding.marginDrivers.map((d) => `- ${d.name}: ${d.mechanism}`),
+    "COMPETITIVE ADVANTAGES:",
+    ...(understanding.competitiveAdvantages || []).map((a) => `- ${a.advantage}: ${a.mechanism}`),
+    "COMPETITIVE THREATS:",
+    ...(understanding.competitiveThreats || []).map((t) => `- ${t.threat}: ${t.mechanism}`),
+    "INFLECTIONS:",
+    ...(understanding.currentInflections || []).map((i) => `- ${i}`),
     "",
     "KEY KPIS:",
     ...understanding.keyKpis.map((k) => `- ${k.name} (${k.availability}): ${k.rationale}`),
@@ -156,6 +224,14 @@ export function narrativeContext(
     "",
     "HISTORICAL FACT ANCHORS (yfinance, up to 40 facts):",
     ...allAnchors,
+    ...(evidenceMap
+      ? [
+          "",
+          `EVIDENCE MAP (confidence ${evidenceMap.overallConfidence.toFixed(2)}):`,
+          ...evidenceMap.items.slice(0, 12).map((i) => `- [${i.direction}/T${i.tier}] ${i.claim}: ${i.evidence.slice(0, 140)} ${i.factIds.join(" ")}`),
+          ...(evidenceMap.unsupported.length ? [`UNSUPPORTED: ${evidenceMap.unsupported.join(" | ")}`] : []),
+        ]
+      : []),
   ].join("\n");
 }
 
@@ -173,16 +249,21 @@ export async function buildNarrative(
   pack: FactPack,
   understanding: CompanyUnderstanding,
   modelSpec: ForecastSpecification,
-  canonicalForecast?: any
+  canonicalForecast?: any,
+  extras?: {
+    engine?: EconomicEngine;
+    debates?: ThesisEngineOutput;
+    evidenceMap?: EvidenceMap;
+  }
 ): Promise<NarrativeOutput> {
-  const ctx = narrativeContext(pack, understanding, modelSpec, canonicalForecast);
+  const ctx = narrativeContext(pack, understanding, modelSpec, canonicalForecast, extras);
   const user = `RESEARCH CONTEXT
 ================
 ${ctx}
 
 TASK
 ====
-Write the research narrative (thesis, catalysts, risks, competitive analysis, moat) for ${understanding.companyName} now.
+Write the research narrative (thesis, catalysts, risks, competitive analysis, moat) for ${understanding.companyName} now. EXPLAIN the research debates and evidence — do not invent new claims.
 
 OUTPUT
 ======
@@ -213,6 +294,9 @@ Respond with ONLY the JSON object.`;
     valuationImpact: typeof c?.valuationImpact === "string" ? c.valuationImpact : undefined,
     quantitative: c?.quantitative === true,
     timeframe: typeof c?.timeframe === "string" ? c.timeframe : undefined,
+    observableKpi: typeof c?.observableKpi === "string" ? c.observableKpi : undefined,
+    direction: c?.direction === "negative" || c?.direction === "mixed" || c?.direction === "positive" ? c.direction : undefined,
+    invalidation: typeof c?.invalidation === "string" ? c.invalidation : undefined,
   }));
 
   const risks: Risk[] = (Array.isArray(parsed.risks) ? parsed.risks : []).map((r: any) => ({
@@ -233,6 +317,7 @@ Respond with ONLY the JSON object.`;
       keyDifference: String(c?.keyDifference || ""),
       relativeStrengths: String(c?.relativeStrengths || ""),
       relativeWeaknesses: String(c?.relativeWeaknesses || ""),
+      segment: typeof c?.segment === "string" && c.segment ? c.segment : undefined,
     })),
     insufficient: comp.insufficient === true,
     note: typeof comp.note === "string" ? comp.note : undefined,
@@ -247,6 +332,7 @@ Respond with ONLY the JSON object.`;
       economicConsequence: String(s?.economicConsequence || ""),
       durability: String(s?.durability || ""),
       threatsToDurability: String(s?.threatsToDurability || ""),
+      chain: typeof s?.chain === "string" && s.chain ? s.chain : undefined,
     })),
     verdict: String(mo.verdict || ""),
   };

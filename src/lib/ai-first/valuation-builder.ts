@@ -14,6 +14,9 @@ import type {
   ForecastSpecification,
   ValuationSpecification,
   Fact,
+  EconomicEngine,
+  ThesisEngineOutput,
+  EvidenceMap,
 } from "./types";
 import { parseLlmJson } from "./llm";
 import { buildHistoricalAnalysisPack } from "./historical-analysis";
@@ -30,6 +33,9 @@ export interface ValuationBuilderInput {
   pack: FactPack;
   understanding: CompanyUnderstanding;
   forecastSpec: ForecastSpecification;
+  engine?: EconomicEngine;
+  debates?: ThesisEngineOutput;
+  evidenceMap?: EvidenceMap;
 }
 
 const SYSTEM_PROMPT = `You are a valuation specialist on an institutional equity research desk. You receive the company understanding + forecast model design (from prior AI stages) and must SELECT the appropriate valuation methodology for this company.
@@ -59,7 +65,7 @@ Note: rates are DECIMALS (0.105 = 10.5%). The methodology MUST be executable by 
 
 /** Rich VALUATION_CONTEXT with historical derived + forecast anchors. */
 export function valuationContext(input: ValuationBuilderInput): string {
-  const { pack, understanding, forecastSpec } = input;
+  const { pack, understanding, forecastSpec, engine, debates, evidenceMap } = input;
   const price = pack.market.facts.find((f: Fact) => f.metric === "currentPrice")?.value;
   const currency = pack.market.facts.find((f: Fact) => f.metric === "currentPrice")?.currency || "";
   const bvps = pack.market.facts.find((f: Fact) => f.metric === "bookValuePerShare")?.value;
@@ -77,6 +83,28 @@ export function valuationContext(input: ValuationBuilderInput): string {
     price !== undefined ? `CURRENT PRICE: ${price} ${currency}` : "CURRENT PRICE: Not available from yfinance",
     `BOOK VALUE PER SHARE: ${bvps ?? "Not available from yfinance"}`,
     "",
+    ...(engine?.valueQuestions?.length
+      ? [`ECONOMIC ENGINE VALUE QUESTIONS: ${engine.valueQuestions.join(" | ")}`, ""]
+      : []),
+    ...(debates?.debates?.length
+      ? [
+          "RESEARCH DEBATES (select method that adjudicates the central debate):",
+          ...debates.debates.map(
+            (d) =>
+              `- ${d.debate} | financial: ${d.financialConsequence || "n/a"} | valuation: ${d.valuationConsequence || "n/a"} | resolution: ${d.resolutionSignal || "n/a"}`
+          ),
+          `Central: ${debates.debates[debates.centralDebateIndex]?.debate || debates.thesis.slice(0, 200)}`,
+          "",
+        ]
+      : []),
+    ...(evidenceMap?.items?.length
+      ? [
+          `EVIDENCE MAP confidence ${evidenceMap.overallConfidence.toFixed(2)}:`,
+          ...evidenceMap.items.slice(0, 8).map((i) => `- [${i.direction}/T${i.tier}] ${i.claim}: ${i.evidence.slice(0, 120)}`),
+          ...(evidenceMap.unsupported.length ? [`UNSUPPORTED: ${evidenceMap.unsupported.slice(0, 4).join(" | ")}`] : []),
+          "",
+        ]
+      : []),
     "HISTORICAL DERIVED (for valuation grounding):",
     derivedBlock,
     "",

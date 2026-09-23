@@ -14,6 +14,8 @@ import type {
   ForecastSpecification,
   BusinessDriver,
   KpiDefinition,
+  EconomicEngine,
+  ThesisEngineOutput,
 } from "./types";
 import { parseLlmJson } from "./llm";
 import { buildHistoricalAnalysisPack } from "./historical-analysis";
@@ -29,6 +31,10 @@ export type ModelTransport = (opts: {
 export interface ModelBuilderInput {
   pack: FactPack;
   understanding: CompanyUnderstanding;
+  /** Economic engine (statement bindings + value questions) when available. */
+  engine?: EconomicEngine;
+  /** Pre-forecast research debates that must inform driver paths. */
+  debates?: ThesisEngineOutput;
 }
 
 /** The complete per-company research model specification, generated dynamically by AI. */
@@ -47,14 +53,15 @@ export interface AIResearchModel {
   confidence: number; // 0..1 overall confidence in this model
 }
 
-const SYSTEM_PROMPT = `You are a financial modeling agent on an institutional equity research desk. You receive a company understanding (from a prior AI stage) plus the yfinance statement lines and deterministic historical derived metrics (CAGR, margins, ROE, FCF). Design the financial model DYNAMICALLY for this company.
+const SYSTEM_PROMPT = `You are a financial modeling agent on an institutional equity research desk. You receive a company understanding (from a prior AI stage), optional economic engine statement bindings, optional research debates (FOR/AGAINST with financial consequences), plus the yfinance statement lines and deterministic historical derived metrics (CAGR, margins, ROE, FCF). Design the financial model DYNAMICALLY for this company.
 
 ECONOMIC EQUATION DISCOVERY — DO NOT jump to formulas. First reason:
 
 Step A — What PHYSICALLY causes revenue/costs/margin/cash/capital for THIS company? (volume×ASP? NIM×advances? subs×ARPU? fee×AUM?)
 Step B — Which measurable variables drive those engines?
 Step C — Which variables are observable in yfinance (baseValue available), derived, or unavailable/estimated?
-Step D — Then build ONLY the formulas required by the discovered engine.
+Step D — If research debates are provided, forecast MUST encode their drivers (e.g., Azure consumption growth vs AI capex intensity must appear as variables/assumptions, not prose).
+Step E — Then build ONLY the formulas required by the discovered engine.
 
 RULES:
 - Derive formulas from the company's economics. No generic corporate/sector equations.
@@ -63,6 +70,7 @@ RULES:
 - Every variable maps to a yfinance statement line when one exists (baseValue = latest yfinance value) or is declared an AI-forecast input.
 - Never invent historical numbers. Never zero-fill missing data.
 - Generate ONLY economically required assumptions — NO minimum count. If the model needs 3 assumptions, output 3. Do not pad with generic categories (see assumptions.ts rule).
+- When debates are present, each central debate's financialConsequence must map to at least one formula output or input driverPath.
 
 Respond with ONLY JSON:
 {
@@ -76,7 +84,7 @@ Respond with ONLY JSON:
 Note: growth rates and ratio assumptions are DECIMALS (0.08 = 8%).`;
 /** Rich MODEL_CONTEXT with deterministic derived metrics (no longer compact-only). */
 export function modelContext(input: ModelBuilderInput): string {
-  const { pack, understanding } = input;
+  const { pack, understanding, engine, debates } = input;
   const lineNames = (sec: { facts: Array<{ metric: string }> }) =>
     [...new Set(sec.facts.map((f) => f.metric))].join(", ");
   const incomeLines = lineNames(pack.incomeStatement);
@@ -106,6 +114,7 @@ export function modelContext(input: ModelBuilderInput): string {
     `Primary economic abstraction: ${understanding.primaryEconomicAbstraction}`,
     `How it makes money: ${understanding.howItMakesMoney}`,
     `Industry: ${String(understanding.industryContext).slice(0, 500)}`,
+    `Why this company: ${(understanding.whyThisCompany || "").slice(0, 400) || "(n/a)"}`,
     "",
     "DRIVERS (from understanding stage):",
     ...understanding.revenueDrivers.map((d) => `- ${d.name}: ${d.mechanism}`),
@@ -114,8 +123,28 @@ export function modelContext(input: ModelBuilderInput): string {
     ...understanding.balanceSheetDrivers.map((d) => `- ${d.name}: ${d.mechanism} [BS]`),
     ...understanding.cashGenerationDrivers.map((d) => `- ${d.name}: ${d.mechanism} [cash]`),
     ...understanding.returnsDrivers.map((d) => `- ${d.name}: ${d.mechanism} [returns]`),
+    ...(understanding.capitalEngines || []).map((d) => `- ${d.name}: ${d.mechanism} [capital]`),
     ...understanding.metricsToAvoid.map((m) => `- AVOID: ${m.metric} — ${m.reason}`),
     "",
+    ...(engine
+      ? [
+          "ECONOMIC ENGINE STATEMENT BINDINGS (map drivers to forecast rows):",
+          ...engine.statementBindings.map((b) => `- ${b.statementLine} ← ${b.drivenBy}: ${b.mechanism}`),
+          `Value questions: ${engine.valueQuestions.join(" | ") || "none"}`,
+          "",
+        ]
+      : []),
+    ...(debates?.debates?.length
+      ? [
+          "RESEARCH DEBATES (forecast must encode their drivers — not prose):",
+          ...debates.debates.map(
+            (d) =>
+              `- ${d.debate} | FOR: ${d.evidenceFor[0]?.evidence.slice(0, 100) || "—"} | AGAINST: ${d.evidenceAgainst[0]?.evidence.slice(0, 100) || "—"} | financial: ${d.financialConsequence || "n/a"} | valuation: ${d.valuationConsequence || "n/a"}`
+          ),
+          `Central thesis: ${debates.thesis.slice(0, 300)}`,
+          "",
+        ]
+      : []),
     "KEY KPIS:",
     ...understanding.keyKpis.map((k) => `- ${k.name} (${k.availability}): ${k.rationale}`),
     "",

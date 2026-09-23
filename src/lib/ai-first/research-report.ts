@@ -31,6 +31,9 @@ import type {
   ScenarioSpecification,
   ReviewFinding,
   Fact,
+  EconomicEngine,
+  Debate,
+  EvidenceMap,
 } from "./types";
 
 /** Version string for the research report assembly. */
@@ -61,6 +64,10 @@ export interface ReportAssemblerInput {
   reviews: ReviewFinding[];
   reviewPassed: boolean;
   regenerationLog: string[];
+  /** Content-intelligence artifacts. */
+  economicEngine?: EconomicEngine;
+  debates?: Debate[];
+  evidenceMap?: EvidenceMap;
 }
 
 /**
@@ -92,6 +99,9 @@ export function assembleResearchReport(input: ReportAssemblerInput): ResearchRep
     reviews,
     reviewPassed,
     regenerationLog,
+    economicEngine,
+    debates,
+    evidenceMap,
   } = input;
 
   const researchRunId = `RUN-${factPack.ticker}-${new Date().toISOString().slice(0, 10)}-${String(Date.now()).slice(-6)}`;
@@ -147,6 +157,10 @@ export function assembleResearchReport(input: ReportAssemblerInput): ResearchRep
     sensitivity,
     reverseValuation,
     conclusion,
+
+    economicEngine,
+    debates,
+    evidenceMap,
 
     reviews,
     reviewPassed,

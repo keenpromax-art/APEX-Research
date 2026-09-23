@@ -7,13 +7,17 @@
  *    -> fetchQuoteSummary (yfinance, factual only)
  *    -> buildFactPack (provenance-tagged, no zero-fill)
  *    -> understandCompany (AI)
- *    -> buildModelSpec (AI formulas; code executes)
+ *    -> buildResearchPlan (what do we not know?)
+ *    -> buildEconomicEngine (AI: statement bindings + value questions)
+ *    -> buildDebatesEarly (AI: 3-5 value debates BEFORE forecast)
+ *    -> buildEvidenceMap (claims → [F-...] evidence + confidence)
+ *    -> buildModelSpec (AI formulas + debate-driven drivers; code executes)
  *    -> executeForecast (deterministic)
- *    -> buildValuationSpec (AI selects method; code executes)
+ *    -> buildValuationSpec (AI selects method with debates/evidence; code executes)
  *    -> executeValuation (deterministic)
  *    -> buildScenarios + flowScenarioThroughModel (AI deltas; code executes)
  *    -> chooseReverseVariable + solveRequiredValue (AI chooses; code solves)
- *    -> buildNarrative (AI thesis/risks/catalysts/competitive/moat)
+ *    -> buildNarrative (AI EXPLAINS thesis/risks/catalysts/competitive/moat from research)
  *    -> runQualityReview + adjudicateRegeneration (deterministic gates;
  *       LLM regeneration hooks when a transport is available)
  *    -> assembleResearchReport (versioned object; PDF renders this only)
@@ -25,9 +29,11 @@
 
 import { buildFactPack } from "./fact-pack";
 import { buildHistoricalAnalysisPack, renderHistoricalAnalysisPack } from "./historical-analysis";
-import { buildAnalystBrief, renderAnalystBrief } from "./analyst-brief";
+import { buildAnalystBrief } from "./analyst-brief";
 import { buildResearchPlan, mechanicalResearchPlan } from "./research-planner";
-import { buildDebates, mechanicalDebates } from "./debate-engine";
+import { buildDebatesEarly, mechanicalDebates } from "./debate-engine";
+import { buildEconomicEngine, mechanicalEconomicEngine } from "./economic-engine";
+import { buildEvidenceMap, mechanicalEvidenceMap } from "./evidence-mapper";
 import { understandCompany } from "./company-understanding";
 import { buildModelSpec } from "./model-builder";
 import { executeForecast } from "./forecast-engine";
@@ -58,6 +64,10 @@ import type {
   ResearchReport,
   ScenarioSpecification,
   Fact,
+  EconomicEngine,
+  ThesisEngineOutput,
+  EvidenceMap,
+  Debate,
 } from "./types";
 
 export type PipelineTransport = (opts: {
@@ -182,6 +192,7 @@ function mechanicalUnderstanding(pack: FactPack): CompanyUnderstanding {
     cashGenerationDrivers: [],
     balanceSheetDrivers: [],
     returnsDrivers: [],
+    capitalEngines: [],
     keyKpis: [
       {
         name: "Revenue",
@@ -434,23 +445,89 @@ export async function runAiFirstResearch(
     }
   }
 
-  // 4. Model spec
-  emit("model", "Building financial model specification");
+  // 3c. Economic Engine — what physically determines revenue/margins/cash/capital
+  emit("economic-engine", "Building economic engine + statement bindings");
+  let economicEngine: EconomicEngine;
+  if (aiUsed) {
+    try {
+      economicEngine = await buildEconomicEngine(transport!, factPack, understanding);
+    } catch (e) {
+      console.warn("[ai-first] economic engine failed, mechanical fallback:", e);
+      economicEngine = mechanicalEconomicEngine(factPack, understanding);
+    }
+  } else {
+    economicEngine = mechanicalEconomicEngine(factPack, understanding);
+  }
+
+  // 3d. Research debates BEFORE forecast — debates must inform driver paths
+  emit("debates", "Building debate-driven thesis (pre-forecast)");
+  let debateOutput: ThesisEngineOutput;
+  if (aiUsed) {
+    try {
+      debateOutput = await buildDebatesEarly(transport!, factPack, understanding, economicEngine);
+    } catch (e) {
+      console.warn("[ai-first] early debate engine failed, building partial brief for fallback:", e);
+      const partialBrief = buildAnalystBrief({ pack: factPack, understanding });
+      debateOutput = mechanicalDebates(partialBrief, factPack);
+    }
+  } else {
+    debateOutput = mechanicalDebates(buildAnalystBrief({ pack: factPack, understanding }), factPack);
+  }
+
+  // 3e. Evidence mapper — every major claim mapped to [F-...] or marked unsupported
+  emit("evidence-map", "Mapping debates/claims to [F-...] evidence");
+  let evidenceMap: EvidenceMap;
+  if (aiUsed) {
+    try {
+      evidenceMap = await buildEvidenceMap(transport!, {
+        pack: factPack,
+        understanding,
+        engine: economicEngine,
+        debates: debateOutput,
+      });
+    } catch (e) {
+      console.warn("[ai-first] evidence mapper failed, mechanical fallback:", e);
+      evidenceMap = mechanicalEvidenceMap({
+        pack: factPack,
+        understanding,
+        engine: economicEngine,
+        debates: debateOutput,
+      });
+    }
+  } else {
+    evidenceMap = mechanicalEvidenceMap({
+      pack: factPack,
+      understanding,
+      engine: economicEngine,
+      debates: debateOutput,
+    });
+  }
+
+  // 4. Model spec — receives economic engine + research debates so drivers encode the case
+  emit("model", "Building financial model specification (debate-driven drivers)");
   const forecastSpec: ForecastSpecification = aiUsed
-    ? await buildModelSpec(transport!, { pack: factPack, understanding })
+    ? await buildModelSpec(transport!, {
+        pack: factPack,
+        understanding,
+        engine: economicEngine,
+        debates: debateOutput,
+      })
     : mechanicalModelSpec(factPack);
 
   // 5. Deterministic forecast
   emit("forecast", "Executing forecast (deterministic arithmetic)");
   const forecastOut = executeForecast({ model: forecastSpec, factPack });
 
-  // 6. Valuation selection + execution
-  emit("valuation", "Selecting + executing valuation");
+  // 6. Valuation selection + execution — receives debates + evidence so method adjudicates central debate
+  emit("valuation", "Selecting + executing valuation (debate-informed)");
   const valuationSpec: ValuationSpecification = aiUsed
     ? await buildValuationSpec(transport!, {
         pack: factPack,
         understanding,
         forecastSpec,
+        engine: economicEngine,
+        debates: debateOutput,
+        evidenceMap,
       })
     : mechanicalValuationSpec();
   const valuation = executeValuation(
@@ -502,7 +579,7 @@ export async function runAiFirstResearch(
     }
   }
 
-  // 8b. Canonical AnalystBrief — single source of truth for narrative/debate stages
+  // 8b. Canonical AnalystBrief — single source of truth for narrative stages
   // Built deterministically from all prior outputs; eliminates context drift.
   emit("analyst-brief", "Assembling canonical Analyst Brief");
   const analystBrief = buildAnalystBrief({
@@ -514,54 +591,53 @@ export async function runAiFirstResearch(
     valuation,
     scenarios: finalScenarios,
   });
-  // Inject research-planner gaps into brief's missing info
+  // Inject research-planner gaps + research debates into brief
   try {
     const rpUnknowns = (researchPlan as any)?.unknowns as string[] | undefined;
     const rpRequired = (researchPlan as any)?.requiredResearch as string[] | undefined;
     if (rpUnknowns?.length) analystBrief.missingInformation = [...new Set([...analystBrief.missingInformation, ...rpUnknowns])];
     if (rpRequired?.length) analystBrief.contradictions = [...analystBrief.contradictions, `Required research per planner: ${rpRequired.slice(0, 3).join(", ")}`];
+    analystBrief.coreDebate =
+      debateOutput.debates[debateOutput.centralDebateIndex]?.debate ||
+      debateOutput.thesis.slice(0, 200) ||
+      analystBrief.coreDebate;
+    if (understanding.whyThisCompany) analystBrief.evidenceLines.push(`WHY THIS COMPANY: ${understanding.whyThisCompany}`);
+    if (economicEngine.valueQuestions?.length) {
+      analystBrief.evidenceLines.push(`ENGINE VALUE QUESTIONS: ${economicEngine.valueQuestions.join(" | ")}`);
+    }
+    for (const d of debateOutput.debates) {
+      analystBrief.evidenceLines.push(
+        `RESEARCH DEBATE: ${d.debate} | FOR: ${d.evidenceFor.map((e) => e.evidence).join("; ")} | AGAINST: ${d.evidenceAgainst.map((e) => e.evidence).join("; ")} | financial: ${d.financialConsequence || "n/a"} | valuation: ${d.valuationConsequence || "n/a"}`
+      );
+    }
+    analystBrief.evidenceLines.push(`CENTRAL THESIS (debate stage): ${debateOutput.thesis}`);
+    analystBrief.evidenceLines.push(`EVIDENCE MAP confidence: ${evidenceMap.overallConfidence.toFixed(2)}; unsupported: ${evidenceMap.unsupported.slice(0, 4).join(" | ") || "none"}`);
+    for (const item of evidenceMap.items.slice(0, 12)) {
+      analystBrief.evidenceLines.push(`EVIDENCE [${item.direction}/T${item.tier}/c${item.confidence.toFixed(2)}]: ${item.claim} — ${item.evidence.slice(0, 140)} ${item.factIds.join(" ")}`);
+    }
   } catch {}
 
-  // 8c. Debate engine — thesis from debates (evidence → mechanism → debate → conclusion)
-  // AI chooses central debate; mechanical fallback is honest low-confidence preview.
-  let debateOutput: Awaited<ReturnType<typeof buildDebates>> | ReturnType<typeof mechanicalDebates> | null = null;
-  if (aiUsed) {
-    emit("debates", "Building debate-driven thesis");
-    try {
-      debateOutput = await buildDebates(transport!, analystBrief);
-      analystBrief.coreDebate = debateOutput.debates[debateOutput.centralDebateIndex]?.debate || debateOutput.thesis.slice(0, 200);
-    } catch (e) {
-      console.warn("[ai-first] debate engine failed, mechanical fallback:", e);
-      debateOutput = mechanicalDebates(analystBrief, factPack);
-    }
-  } else {
-    debateOutput = mechanicalDebates(analystBrief, factPack);
-  }
-
-  // 9. Narratives — now debate-informed, AnalystBrief-grounded, segment-aware, chain-driven
-  emit("narrative", "Writing thesis / risks / catalysts / moat (debate-driven, evidence→mechanism→KPI→valuation, segment-level)");
+  // 9. Narratives — EXPLAIN debates/evidence (do not invent); chain-structured catalysts/moat
+  emit("narrative", "Writing thesis / risks / catalysts / moat (explains research debates)");
   let narrative;
   if (aiUsed) {
     try {
-      // Single canonical object: cover/Scenario/DCF must match verbatim — pass canonicalForecast basis to narrative context
-      // For legacy path, forecastOut.forecast is already canonical; for new path we pass forecastSpec + canonicalForecast
-      const canonicalBasis = (forecastOut as any).forecast?.id ? (forecastOut as any).forecast : (forecastOut.forecast as any);
-      // Retrieve canonicalForecast from the forecastOut if available (attached via earlier step), otherwise use forecastOut.forecast as proxy
       const cfForNarrative = (forecastOut as any).canonicalForecast ?? (forecastOut.forecast as any);
-      // Try to retrieve canonicalForecast built in calculations.ts — if not on forecastOut, build a minimal proxy from forecastSpec + forecast
       const narrativeCf = (typeof cfForNarrative === "object" && "basis" in cfForNarrative) ? cfForNarrative : undefined;
-      narrative = await buildNarrative(transport!, factPack, understanding, forecastSpec, narrativeCf);
-      // Override thesis with debate engine's central thesis when debate succeeded and narrative is generic
+      narrative = await buildNarrative(transport!, factPack, understanding, forecastSpec, narrativeCf, {
+        engine: economicEngine,
+        debates: debateOutput,
+        evidenceMap,
+      });
+      // Prefer debate-engine central thesis when narrative thesis is generic
       if (debateOutput && debateOutput.thesis && debateOutput.confidence > 0.5) {
         const debateThesis = debateOutput.thesis;
-        // Only override if narrative thesis is weak/generic or debate is higher confidence
         const isGenericNarrative = /mechanical preview|pending ai analysis/i.test(narrative.thesis.thesis) || narrative.thesis.thesis.length < 60;
         if (isGenericNarrative || debateOutput.confidence > 0.7) {
           narrative.thesis.thesis = debateThesis;
           if (debateOutput.keyUncertainty) narrative.thesis.keyDebate = debateOutput.debates[debateOutput.centralDebateIndex]?.debate || debateOutput.keyUncertainty;
           if (debateOutput.invalidationCondition) narrative.thesis.whatCouldInvalidate = [debateOutput.invalidationCondition, ...narrative.thesis.whatCouldInvalidate].slice(0, 5);
           if (debateOutput.monitoringKpi) {
-            // inject monitoring KPI into first risk if missing
             if (!narrative.risks.some((r) => r.monitoringIndicator.includes(debateOutput!.monitoringKpi))) {
               narrative.risks = narrative.risks.map((r, i) => i === 0 ? { ...r, monitoringIndicator: `${r.monitoringIndicator} | Debate monitor: ${debateOutput!.monitoringKpi}` } : r);
             }
@@ -616,6 +692,9 @@ export async function runAiFirstResearch(
     reviews: [],
     reviewPassed: false,
     regenerationLog: [aiUsed ? "live-AI run" : "mechanical-preview (no AI transport)"],
+    economicEngine,
+    debates: debateOutput.debates as Debate[],
+    evidenceMap,
   });
 
   // 12. Quality review (deterministic gates) + adjudication

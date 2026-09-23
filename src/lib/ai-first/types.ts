@@ -117,6 +117,8 @@ export interface CompanyUnderstanding {
   cashGenerationDrivers: BusinessDriver[];
   balanceSheetDrivers: BusinessDriver[];
   returnsDrivers: BusinessDriver[];
+  /** Capex / capital-intensity engines (AI infrastructure, PP&E build, working capital). */
+  capitalEngines?: BusinessDriver[];
   keyKpis: KpiDefinition[];
   /** Metrics the AI determined should NOT be used for this company. */
   metricsToAvoid: Array<{ metric: string; reason: string }>;
@@ -125,6 +127,16 @@ export interface CompanyUnderstanding {
   /** AI-determined appropriate valuation methods with rationale. */
   appropriateValuationMethods: Array<{ method: string; why: string }>;
   confidence: ConfidenceAssessment;
+  /** What is unique about this company vs any peer — the investment case differentiator. */
+  whyThisCompany?: string;
+  /** Competitive advantages that map to economic architecture chains. */
+  competitiveAdvantages?: Array<{ advantage: string; mechanism: string; evidence: string[] }>;
+  /** Competitive threats that can erode advantages. */
+  competitiveThreats?: Array<{ threat: string; mechanism: string; evidence: string[] }>;
+  /** Current inflection points (what changed and why it matters now). */
+  currentInflections?: string[];
+  /** Management priorities / capital allocation posture (UNKNOWN if not in facts). */
+  managementPriorities?: string[];
   /** Optional epistemic breakdown (known/inferred/unknown) — audit §14. */
   epistemic?: {
     knownFacts: string[];
@@ -132,6 +144,51 @@ export interface CompanyUnderstanding {
     unknowns: string[];
     requiredResearch: string[];
   };
+}
+
+/** Structured economic engine — what physically determines revenue/margins/cash/capital. */
+export interface EconomicEngine {
+  ticker: string;
+  primaryAbstraction: string;
+  revenueDrivers: BusinessDriver[];
+  costDrivers: BusinessDriver[];
+  marginDrivers: BusinessDriver[];
+  cashDrivers: BusinessDriver[];
+  balanceSheetDrivers: BusinessDriver[];
+  capitalDrivers: BusinessDriver[];
+  returnsDrivers: BusinessDriver[];
+  keyKpis: KpiDefinition[];
+  metricsToAvoid: Array<{ metric: string; reason: string }>;
+  /** How the engine maps to statement lines the forecast will execute. */
+  statementBindings: Array<{
+    statementLine: string;
+    drivenBy: string;
+    mechanism: string;
+    sourceFacts: string[];
+  }>;
+  /** 2-4 value-determining questions the engine raises (seed for debates). */
+  valueQuestions: string[];
+  confidence: number;
+}
+
+/** Evidence attached to a claim/debate with tier + confidence. */
+export interface EvidenceItem {
+  claim: string;
+  evidence: string;
+  factIds: string[];
+  tier: number;
+  direction: "for" | "against" | "mixed";
+  confidence: number;
+  period?: string;
+}
+
+/** Evidence map for the report — every major claim mapped to sources. */
+export interface EvidenceMap {
+  ticker: string;
+  items: EvidenceItem[];
+  /** Claims that could not be supported (honest unknowns). */
+  unsupported: string[];
+  overallConfidence: number;
 }
 
 export interface ConfidenceAssessment {
@@ -251,6 +308,38 @@ export interface ScenarioSpecification {
 // Narrative (AI-generated, model-linked)
 // ─────────────────────────────────────────────
 
+export interface DebateEvidence {
+  evidence: string;
+  factIds: string[]; // [F-...]
+  tier: number;
+}
+
+export interface Debate {
+  debate: string; // falsifiable value question, e.g. "Can AI capex earn acceptable returns?"
+  evidenceFor: DebateEvidence[];
+  evidenceAgainst: DebateEvidence[];
+  mechanism: string; // economic mechanism at stake
+  significance: string; // why this debate decides valuation
+  /** Financial consequence if FOR side wins (revenue/EBIT/FCF row). */
+  financialConsequence?: string;
+  /** Valuation consequence if FOR side wins (EV/equity/per-share). */
+  valuationConsequence?: string;
+  /** Observable condition that would resolve the debate one way. */
+  resolutionSignal?: string;
+}
+
+export interface ThesisEngineOutput {
+  debates: Debate[];
+  centralDebateIndex: number;
+  thesis: string;
+  thesisEvidence: string[];
+  thesisCounterEvidence: string[];
+  keyUncertainty: string;
+  invalidationCondition: string;
+  monitoringKpi: string;
+  confidence: number;
+}
+
 export interface ThesisSpecification {
   thesis: string;
   bullCase: string[];
@@ -270,6 +359,12 @@ export interface Catalyst {
   /** "QUALITATIVE ONLY" when no quantitative chain can be established. */
   quantitative: boolean;
   timeframe?: string;
+  /** Observable KPI that confirms the catalyst fired. */
+  observableKpi?: string;
+  /** Direction of impact when the catalyst fires. */
+  direction?: "positive" | "negative" | "mixed";
+  /** What would invalidate / delay the catalyst. */
+  invalidation?: string;
 }
 
 export interface Risk {
@@ -289,6 +384,8 @@ export interface CompetitorAnalysis {
     keyDifference: string;
     relativeStrengths: string;
     relativeWeaknesses: string;
+    /** Segment this competitor competes in (when filing segments exist). */
+    segment?: string;
   }>;
   /** Set when AI determines appropriate peers cannot be identified. */
   insufficient?: boolean;
@@ -297,13 +394,15 @@ export interface CompetitorAnalysis {
 
 export interface MoatAnalysis {
   hasMoat: boolean;
-  /** AI-selected sources — no fixed pillar list. */
+  /** AI-selected sources — no fixed pillar list. Each source is an economic architecture chain. */
   sources: Array<{
     source: string;
     evidence: string;
     economicConsequence: string;
     durability: string;
     threatsToDurability: string;
+    /** Explicit chain: asset → mechanism → KPI → financial → valuation. */
+    chain?: string;
   }>;
   verdict: string;
 }
@@ -352,6 +451,11 @@ export interface ResearchReport {
   sensitivity: Array<Record<string, number | string>>;
   reverseValuation: { variable: string; requiredValue: number; interpretation: string } | null;
   conclusion: string;
+
+  /** Content-intelligence artifacts (optional — populated when stages run). */
+  economicEngine?: EconomicEngine;
+  debates?: Debate[];
+  evidenceMap?: EvidenceMap;
 
   /** Quality control trail. */
   reviews: ReviewFinding[];
