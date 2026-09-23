@@ -28,6 +28,7 @@ import {
 } from "../src/lib/labeling-invariants";
 import { buildResearchOperatingModel } from "../src/lib/research-model/operating-model";
 import { validateReport as validateModelReport } from "../src/lib/research-model/model-validator";
+import { QA_GATES_ENABLED } from "../src/lib/qa-gates";
 
 let passes = 0;
 let failures = 0;
@@ -98,13 +99,25 @@ console.log("--- 3. publication gate ---");
   const warnOnly = evaluatePublicationGate(toGateFindings.qa([{ id: "MARGIN-01", status: "WARN", details: "step" }]));
   check("QA WARN → READY_WITH_WARNINGS", warnOnly.decision === "READY_WITH_WARNINGS");
   const failGate = evaluatePublicationGate(toGateFindings.qa([{ id: "XREF-01", status: "FAIL", details: "bridge" }]));
-  check("QA FAIL → BLOCKED", failGate.decision === "BLOCKED" && failGate.blockers.length === 1);
+  if (QA_GATES_ENABLED) {
+    check("QA FAIL → BLOCKED", failGate.decision === "BLOCKED" && failGate.blockers.length === 1);
+  } else {
+    check("QA FAIL (gates off) → advisory not BLOCKED", failGate.decision === "READY_WITH_WARNINGS");
+  }
   const reconBlock = evaluatePublicationGate(toGateFindings.recon([{ rule: "cash-roll-forward", pass: false, severity: "blocker", detail: "cash" }]));
-  check("RECON blocker → BLOCKED", reconBlock.decision === "BLOCKED");
+  if (QA_GATES_ENABLED) {
+    check("RECON blocker → BLOCKED", reconBlock.decision === "BLOCKED");
+  } else {
+    check("RECON blocker (gates off) → advisory not BLOCKED", reconBlock.decision === "READY_WITH_WARNINGS");
+  }
   const reconMat = evaluatePublicationGate(toGateFindings.recon([{ rule: "margin-continuity", pass: false, severity: "material", detail: "gap" }]));
   check("RECON material → READY_WITH_WARNINGS", reconMat.decision === "READY_WITH_WARNINGS");
   const labelBlock = evaluatePublicationGate(toGateFindings.label([{ invariant: "INV-01", pass: false, severity: "blocker", detail: "fcff on bank" }]));
-  check("LABEL blocker → BLOCKED", labelBlock.decision === "BLOCKED");
+  if (QA_GATES_ENABLED) {
+    check("LABEL blocker → BLOCKED", labelBlock.decision === "BLOCKED");
+  } else {
+    check("LABEL blocker (gates off) → advisory not BLOCKED", labelBlock.decision === "READY_WITH_WARNINGS");
+  }
   const mixed = evaluatePublicationGate([
     ...toGateFindings.qa([{ id: "A", status: "WARN", details: "w" }]),
     ...toGateFindings.recon([{ rule: "funding-liquidity", pass: false, severity: "material", detail: "gap" }]),
@@ -124,8 +137,13 @@ console.log("--- 4. discontinuity rules ---");
   const jump = [row("FY2022", 100), row("FY2023", 900)];
   const fJump = checkHistoricalDiscontinuities(jump);
   check("revenue +800% → DISC-01 blocker", fJump.some((f) => f.code === "DISC-01" && f.severity === "blocker")); 
-  check("DISC-01 feeds gate BLOCKED",
-    evaluatePublicationGate(toGateFindings.disc(fJump)).decision === "BLOCKED");
+  if (QA_GATES_ENABLED) {
+    check("DISC-01 feeds gate BLOCKED",
+      evaluatePublicationGate(toGateFindings.disc(fJump)).decision === "BLOCKED");
+  } else {
+    check("DISC-01 (gates off) → advisory not BLOCKED",
+      evaluatePublicationGate(toGateFindings.disc(fJump)).decision === "READY_WITH_WARNINGS");
+  }
   const cliff = [row("FY2022", 100, { grossMargin: 0.45 }), row("FY2023", 110, { grossMargin: 0.25 })];
   const fCliff = checkHistoricalDiscontinuities(cliff);
   check("gross-margin 20pp collapse → DISC-02 material", fCliff.some((f) => f.code === "DISC-02" && f.severity === "material"));

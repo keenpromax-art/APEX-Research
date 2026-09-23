@@ -1,6 +1,7 @@
 "use client";
 import React, { useState } from "react";
 import type { ReportData } from "@/types/report";
+import { QA_GATES_ENABLED } from "@/lib/qa-gates";
 import styles from "./report.module.css";
 
 interface Props {
@@ -19,9 +20,11 @@ export default function PDFDownloadButton({ data }: Props) {
   // Hard export lock: QA BLOCKED (any FAIL check) or final QA canPublish=false
   // disables export independently of the council audit. Detected numerical
   // failures must stop publication — a rendered BLOCK banner is not enough.
+  // Kill-switch: when QA_GATES_ENABLED is false, FAIL checks stay visible for
+  // content diagnostics but never lock the export button.
   const qaGateStatus = (data as any).qaReport?.gateStatus;
   const qaCanPublish = (data as any).finalQAResult?.canPublish;
-  const qaBlocked = qaGateStatus === "BLOCKED" || qaCanPublish === false;
+  const qaBlocked = QA_GATES_ENABLED && (qaGateStatus === "BLOCKED" || qaCanPublish === false);
   const qaFailCount = ((data as any).qaReport?.checks ?? []).filter((c: any) => c.status === "FAIL").length;
   const isBlocked = (!councilPassed && councilAudit !== undefined) || qaBlocked;
 

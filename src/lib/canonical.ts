@@ -9,6 +9,7 @@
  * reconciliation flips), so dual reads print two different numbers.
  */
 import type { ReportData } from "@/types/report";
+import { QA_GATES_ENABLED } from "./qa-gates";
 
 export interface CanonicalValuation {
   cmp: number;
@@ -109,6 +110,9 @@ export interface PublishGate {
  */
 export function canPublishReport(data: ReportData | null | undefined): PublishGate {
   if (!data) return { canPublish: false, reasons: ["No report data"] };
+  // Kill-switch: when QA_GATES_ENABLED is false, missing/blocked QA objects
+  // stay visible for content diagnostics but never lock publication.
+  if (!QA_GATES_ENABLED) return { canPublish: true, reasons: [] };
   const reasons: string[] = [];
   if (!data.qaReport) {
     reasons.push("Pre-publish QA has not run (qaReport missing)");

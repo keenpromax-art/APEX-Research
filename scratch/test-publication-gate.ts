@@ -6,6 +6,7 @@ import { sanitizeSectorBleed, sanitizeAIText } from "../src/lib/ai/sanitizer";
 import { generatePEFirmAnalysis } from "../src/lib/pe-analysis-engine";
 import { selectAndComputeValuation } from "../src/lib/valuation/selector";
 import { classifyArchetype } from "../src/lib/company-archetype";
+import { QA_GATES_ENABLED } from "../src/lib/qa-gates";
 import type { CompanyProfile, StockData, AnnualFinancials, ReportData } from "../src/types/report";
 
 console.log("=======================================================");
@@ -266,13 +267,21 @@ for (const company of testCompanies) {
       console.error(`  ❌ Phase A: scrubber should leave zero residual terms (BS-DETECTOR-04) on ${company.ticker}`);
       allPassed = false;
     }
-    if (qaReport.gateStatus !== "BLOCKED") {
-      console.error(`  ❌ Phase A: gate must BLOCK contaminated report for ${company.ticker}`);
-      allPassed = false;
-    }
-    if (finalQAResult.canPublish) {
-      console.error(`  ❌ Phase A: finalQAResult must refuse contaminated report for ${company.ticker}`);
-      allPassed = false;
+    if (QA_GATES_ENABLED) {
+      if (qaReport.gateStatus !== "BLOCKED") {
+        console.error(`  ❌ Phase A: gate must BLOCK contaminated report for ${company.ticker}`);
+        allPassed = false;
+      }
+      if (finalQAResult.canPublish) {
+        console.error(`  ❌ Phase A: finalQAResult must refuse contaminated report for ${company.ticker}`);
+        allPassed = false;
+      }
+    } else {
+      console.log(`  [A] QA_GATES_ENABLED=false → advisory mode (gate not required to BLOCK)`);
+      if (qaReport.gateStatus === "BLOCKED" || !finalQAResult.canPublish) {
+        console.error(`  ❌ Phase A: gates disabled but still blocking for ${company.ticker}`);
+        allPassed = false;
+      }
     }
   }
 

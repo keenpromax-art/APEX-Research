@@ -35,6 +35,7 @@
 //   recompute from primaries and block regardless of other passes.
 // ============================================================
 import type { AnnualFinancials, PeerData, ReportData, ReportQAResult, QACheckItem } from "@/types/report";
+import { QA_GATES_ENABLED } from "./qa-gates";
 import { stmtNum, isBankStatement, isInsuranceStatement, isReitStatement, isAssetLightStatement } from "@/types/report";
 import { getSectorProfile, classifySector } from "./sectors/index";
 import { identityIssues } from "./canonical";
@@ -3638,8 +3639,12 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
     appropriateness: appropriatenessPassed ? ("PASS" as const) : ("FAIL" as const),
   };
 
+  // Kill-switch: when QA_GATES_ENABLED is false, FAIL checks stay visible for
+  // content diagnostics but never set gateStatus=BLOCKED (export stays open).
   const gateStatus: "READY" | "READY_WITH_WARNINGS" | "BLOCKED" =
-    failCount > 0 ? "BLOCKED" : warnCount > 0 ? "READY_WITH_WARNINGS" : "READY";
+    !QA_GATES_ENABLED
+      ? (failCount > 0 || warnCount > 0 ? "READY_WITH_WARNINGS" : "READY")
+      : failCount > 0 ? "BLOCKED" : warnCount > 0 ? "READY_WITH_WARNINGS" : "READY";
 
   // ── Model Credit Auto-Downgrade ──────────────────────────────────────────
   // When P0 or P1 failures exist, the model-implied credit rating must be
@@ -3653,7 +3658,10 @@ export function validateReportIntegrity(data: ReportData): ReportQAResult {
   let adjustedCreditRating: string | undefined;
   const baseRating = creditRating || "NR";
 
-  if (p0FailCount > 0) {
+  if (!QA_GATES_ENABLED) {
+    // Gates off: keep archetype credit rating; QA failures are advisory only.
+    adjustedCreditRating = baseRating;
+  } else if (p0FailCount > 0) {
     adjustedCreditRating = "D";
   } else if (p1FailCount > 0) {
     // Degrade: AA/AAA → B; A-range → C; BBB or below stays unchanged

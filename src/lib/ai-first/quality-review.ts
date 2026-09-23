@@ -29,6 +29,7 @@ import type {
   ScenarioSpecification,
 } from "./types";
 import type { ProvenanceTier } from "./types";
+import { QA_GATES_ENABLED } from "../qa-gates";
 
 /** Reviewer severity levels */
 export type ReviewSeverity = "blocker" | "major" | "minor";
@@ -930,7 +931,9 @@ export function runQualityReview(
   }
 
   // Enforce 20-warning threshold: 20 substantive findings cannot be READY_WITH_WARNINGS
-  if (allFindings.length >= 20) {
+  // Kill-switch: when QA_GATES_ENABLED is false, findings stay diagnostic — no
+  // GATE-OVERFLOW blocker, passed is not forced false by blockers.
+  if (QA_GATES_ENABLED && allFindings.length >= 20) {
     const hasOverflowBlocker = allFindings.some((f) => f.finding.includes("GATE-OVERFLOW"));
     if (!hasOverflowBlocker) {
       allFindings.push({
@@ -949,7 +952,7 @@ export function runQualityReview(
 
   // Determine if report passed (no blockers overall, score above threshold)
   const hasAnyBlocker = allFindings.some((f: any) => f.severity === "blocker");
-  const passed = overallScore >= 60 && !hasAnyBlocker;
+  const passed = QA_GATES_ENABLED ? (overallScore >= 60 && !hasAnyBlocker) : true;
 
   // Determine regeneration candidates based on findings
   const regenerationCandidates: string[] = [];

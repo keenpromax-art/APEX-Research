@@ -30,6 +30,7 @@ import { maxSeverity, researchToGate } from "./severity";
 import { scoreFromSeverities, type ResearchIntegrityScore } from "./research-integrity-score";
 import type { EvidenceRegistry } from "./evidence-registry";
 import { sourceQualityScore } from "./evidence-registry";
+import { QA_GATES_ENABLED } from "./qa-gates";
 
 export type GateDecision = "READY" | "READY_WITH_WARNINGS" | "BLOCKED";
 
@@ -146,31 +147,34 @@ export function evaluatePublicationGate(findings: GateFinding[]): PublicationGat
   const preWarnings = findings.filter((f) => f.severity === "material" || f.severity === "warn");
   const substantiveCount = preWarnings.length;
 
-  // Enforce 20-warning threshold: escalate to BLOCKED with synthetic blocker.
+  // Kill-switch: when QA_GATES_ENABLED is false, findings stay as-is for
+  // diagnostics but no GATE-OVERFLOW / high-severity escalation, and decision
+  // never returns BLOCKED.
   let escalatedFindings = [...findings];
-  if (substantiveCount >= SUBSTANTIVE_WARNING_THRESHOLD) {
-    escalatedFindings.push({
-      source: "QA",
-      code: "GATE-OVERFLOW",
-      severity: "blocker",
-      priority: "P0",
-      detail: `Report carries ${substantiveCount} material/warn qualifications (threshold ${SUBSTANTIVE_WARNING_THRESHOLD}) — exceeds substantive-warning budget; publication requires remediation, not disclosure.`,
+  if (QA_GATES_ENABLED) {
+    if (substantiveCount >= SUBSTANTIVE_WARNING_THRESHOLD) {
+      escalatedFindings.push({
+        source: "QA",
+        code: "GATE-OVERFLOW",
+        severity: "blocker",
+        priority: "P0",
+        detail: `Report carries ${substantiveCount} material/warn qualifications (threshold ${SUBSTANTIVE_WARNING_THRESHOLD}) — exceeds substantive-warning budget; publication requires remediation, not disclosure.`,
+      });
+    }
+    escalatedFindings = escalatedFindings.map((f) => {
+      if ((f.severity === "material" || f.severity === "warn") && HIGH_SEVERITY_QA_BLOCKERS.has(f.code)) {
+        return { ...f, severity: "blocker" as ResearchSeverity, priority: "P0" as GatePriority };
+      }
+      return f;
     });
   }
-
-  // High-severity QA findings escalate from material/warn -> blocker.
-  escalatedFindings = escalatedFindings.map((f) => {
-    if ((f.severity === "material" || f.severity === "warn") && HIGH_SEVERITY_QA_BLOCKERS.has(f.code)) {
-      return { ...f, severity: "blocker" as ResearchSeverity, priority: "P0" as GatePriority };
-    }
-    return f;
-  });
 
   const severities = escalatedFindings.map((f) => f.severity);
   const top = escalatedFindings.length === 0 ? ("info" as ResearchSeverity) : maxSeverity(severities);
   const gateLevel = researchToGate(top);
-  const decision: GateDecision =
-    gateLevel === "BLOCKED" ? "BLOCKED" : gateLevel === "WARNING" ? "READY_WITH_WARNINGS" : "READY";
+  const decision: GateDecision = !QA_GATES_ENABLED
+    ? (gateLevel === "BLOCKED" || gateLevel === "WARNING" ? "READY_WITH_WARNINGS" : "READY")
+    : gateLevel === "BLOCKED" ? "BLOCKED" : gateLevel === "WARNING" ? "READY_WITH_WARNINGS" : "READY";
   const score = scoreFromSeverities(severities);
   const blockers = escalatedFindings.filter((f) => f.severity === "blocker");
   const warnings = escalatedFindings.filter((f) => f.severity === "material" || f.severity === "warn");

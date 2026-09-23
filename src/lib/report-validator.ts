@@ -16,6 +16,7 @@ import { validateScenarioSet } from "./scenarios";
 import { classifySector, validateSectorConcepts } from "./sectors/profiles";
 import type { MasterReportFacts } from "./report-facts";
 import type { ReportData } from "@/types/report";
+import { QA_GATES_ENABLED } from "./qa-gates";
 
 export type QASeverity = "CRITICAL_BLOCK" | "WARNING" | "INFO";
 
@@ -335,13 +336,17 @@ export function validateMasterReport(
 
   // Status & Score Calculation
   const hasCriticalErrors = errors.length > 0;
-  const status: "PASS" | "WARNING" | "BLOCKED" = hasCriticalErrors
+  // Kill-switch: when QA_GATES_ENABLED is false, critical errors stay visible
+  // for content diagnostics but never set canPublish=false / BLOCKED.
+  const status: "PASS" | "WARNING" | "BLOCKED" = !QA_GATES_ENABLED
+    ? (hasCriticalErrors || warnings.length > 0 ? "WARNING" : "PASS")
+    : hasCriticalErrors
     ? "BLOCKED"
     : warnings.length > 0
     ? "WARNING"
     : "PASS";
 
-  const canPublish = !hasCriticalErrors;
+  const canPublish = !QA_GATES_ENABLED || !hasCriticalErrors;
 
   // Base score 100, -25 per critical error, -5 per warning
   const score = Math.max(0, 100 - (errors.length * 25) - (warnings.length * 5));
