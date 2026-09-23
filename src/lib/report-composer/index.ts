@@ -10,3 +10,9 @@ export {
   composeReportFromData,
   moduleContextFromReportData,
 } from "./compose";
+export {
+  planComposedPdf,
+  composedPdfReportTitle,
+  type ComposedPdfPlan,
+  type ComposedPdfPagePlan,
+} from "./pdf-plan";

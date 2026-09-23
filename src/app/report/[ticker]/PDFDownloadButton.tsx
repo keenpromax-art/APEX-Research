@@ -28,6 +28,11 @@ export default function PDFDownloadButton({ data }: Props) {
   const qaBlocked = QA_GATES_ENABLED && (qaGateStatus === "BLOCKED" || qaCanPublish === false);
   const qaFailCount = ((data as any).qaReport?.checks ?? []).filter((c: any) => c.status === "FAIL").length;
   const isBlocked = (!councilPassed && councilAudit !== undefined) || qaBlocked;
+  // Per-report-type label: composed blueprint title, else institutional default.
+  const bpTitle =
+    (data.composedReport &&
+      getReportBlueprint(data.composedReport.blueprintId)?.title) ||
+    "Institutional Equity Research";
 
   const handleDownload = async () => {
     try {
@@ -50,10 +55,7 @@ export default function PDFDownloadButton({ data }: Props) {
       a.href = url;
       // Phase 9: filename follows the composed blueprint title (institutional
       // default stays "Institutional_Equity_Research" — same slug as before).
-      const bpTitle =
-        data.composedReport &&
-        getReportBlueprint(data.composedReport.blueprintId)?.title;
-      const fileLabel = (bpTitle ?? "Institutional Equity Research")
+      const fileLabel = bpTitle
         .replace(/[^a-zA-Z0-9]+/g, "_")
         .replace(/^_+|_+$/g, "");
       a.download = `${data.profile.ticker}_${fileLabel}.pdf`;
@@ -99,7 +101,7 @@ export default function PDFDownloadButton({ data }: Props) {
               <polyline points="7 10 12 15 17 10" />
               <line x1="12" y1="15" x2="12" y2="3" />
             </svg>
-            Download Institutional Report (PDF)
+            Download {bpTitle} (PDF)
           </>
         )}
       </button>

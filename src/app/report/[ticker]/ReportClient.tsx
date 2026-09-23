@@ -1224,7 +1224,8 @@ export default function ReportClient({
                       {getReportBlueprint(reportTypeId)?.title ?? "Institutional Equity Research"}
                     </div>
                     <div className={styles.exportSub}>
-                      Complete institutional research dossier: DCF forecast, 5-stage DuPont decomposition, event-based price impact, financial statements, and regulatory safe-harbor disclosures.
+                      {getReportBlueprint(reportTypeId)?.description ??
+                        "Complete institutional research dossier: DCF forecast, 5-stage DuPont decomposition, event-based price impact, financial statements, and regulatory safe-harbor disclosures."}
                     </div>
                   </div>
                 </div>

@@ -185,9 +185,11 @@ APEX
 | `src/lib/report-types/advanced-blueprints.ts` | 10 stable blueprints (industry, competitive, management, risk, sotp, bank, insurance, reit, special situation, portfolio) + `ADVANCED_BLUEPRINTS` |
 | `scratch/test-advanced-blueprints.ts` | Golden TOC/section order (concise+full), module wiring, purity, determinism, composer compatibility, regression of existing types |
 | `src/lib/report-types/selector.ts` | Phase 9 selector helpers — `selectableReportTypes` (stable only), fail-closed `parseReportTypeParam`/`parseDepthParam`, `buildReportQuery`, `reportTypeTitle` |
+| `src/lib/report-composer/pdf-plan.ts` | Pure `planComposedPdf(composed)` / `composedPdfReportTitle` — per-type PDF body plan (mapped pdfComponent sections vs generic pages, prepended cover + TOC for advanced blueprints) |
+| `src/components/PDFDocument/index.tsx` | `ComposedSectionPage` generic renderer (module-slice blocks, explicit N/A/gaps) + blueprint-aware CoverPage/masthead/footer/`docMeta`; institutional composed path unchanged |
 | `src/components/ProgressTracker/steps.ts` | Pure `buildProgressSteps(reportTitle)` — steps 03–05 + council header carry the selected blueprint title (per-report-type progress labels; steps 01–02 stay shared) |
 | `src/lib/ai-orchestration/live-progress.ts` | Phase B — pure `derivePlanProgressTasks(plan, { phase, agentCheckpoints, redTeam, committee })`: maps the deterministic ResearchTask graph + real pipeline events to display rows (authors follow council personas, checkers follow the verifier, blocked tasks stay blocked, red-team/committee rows carry their real results) |
-| `scratch/test-report-ui.ts` | Selector options, fail-closed query parsing, query round-trip, compose honouring type/depth (re-compose contract), institutional pdfComponent regression |
+| `scratch/test-report-ui.ts` | Selector options, fail-closed query parsing, query round-trip, compose honouring type/depth (re-compose contract), institutional pdfComponent regression, per-type PDF plan + export copy (90 assertions) |
 | `.eslintrc.json` | Phase 10 — `next/core-web-vitals` config (root cause of the previously hanging interactive `next lint` prompt); 0 errors after fixes |
 
 ### Design decisions
@@ -349,11 +351,24 @@ red-team/committee rows show their actual probe/flag results. The fixed
 7-agent roster remains the fallback whenever no plan exists. Selector
 semantics unchanged: the plan snapshots refs at generation start, exactly
 like compose-at-end.
-Limitation (documented, deliberate): non-institutional blueprints have no
-`pdfComponent` page mappings yet, so the PDF body keeps the legacy
-institutional page set for those types — the institutional composed path and
-golden TOC are untouched (regression-pinned in `test-report-ui.ts`). No
-financial numbers, no conclusions, no page caps added anywhere.
+
+**Per-type PDF body (DONE — lifts the Phase 9 limitation).** The export
+heading description and the PDF download label now come from the selected
+blueprint (`getReportBlueprint(...).description` / `title`), never from a
+hardcoded institutional string. `planComposedPdf(composed)` (pure,
+`report-composer/pdf-plan.ts`) builds the PDF body plan: sections that carry
+a `pdfComponent` map to the existing institutional pages; sections without
+one render via the new generic `ComposedSectionPage`, which prints only the
+section's referenced module slices (real pipeline objects, explicit N/A /
+unavailable notes, peer-gate suppression honoured) — no recomputation, no
+invented numbers, no page caps. Advanced blueprints (no CoverPage section)
+get a prepended `CoverPage` carrying their blueprint title + outline TOC;
+`docMeta` title/subject/creator follow the blueprint title. The
+institutional composed path is byte-identical: cover present in the
+blueprint, every section mapped, golden TOC unchanged (regression-pinned in
+`test-report-ui.ts`, now 90 assertions). Cover/masthead/footer copy
+displays the blueprint title (defaults preserve the institutional
+strings).
 
 **Phase 10 — hardening gates, all green.** The interactive-hang root cause
 was a missing ESLint config: `.eslintrc.json` (`next/core-web-vitals`) was

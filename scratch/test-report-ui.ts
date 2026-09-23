@@ -22,7 +22,7 @@ import {
   selectableReportTypes,
   type ReportTypeId,
 } from "../src/lib/report-types";
-import { composeReportFromData } from "../src/lib/report-composer";
+import { composeReportFromData, planComposedPdf, composedPdfReportTitle } from "../src/lib/report-composer";
 import {
   buildProgressSteps,
   STEP_ORDER,
@@ -411,6 +411,73 @@ console.log("\n--- 4. compose with selected type + depth ---");
     ) === JSON.stringify(
       composeReportFromData(report, { depth: "full", composedAt: AS_OF })?.toc.map((t) => t.title)
     )
+  );
+
+  // ── PDF body plan (per-type composed path; institutional regression) ──
+  const instPlan = planComposedPdf(defaultComposed!);
+  check(
+    "institutional plan: no prepended cover (blueprint carries CoverPage)",
+    instPlan.pages.every((p) => p.kind !== "cover")
+  );
+  check(
+    "institutional plan: every section mapped to a pdfComponent",
+    instPlan.pages.every((p) => p.kind === "section" && typeof p.pdfComponent === "string")
+  );
+  check(
+    "institutional plan reportTitle",
+    instPlan.reportTitle === "Institutional Equity Research" &&
+      composedPdfReportTitle(defaultComposed!) === "Institutional Equity Research"
+  );
+  check(
+    "institutional plan tocTitles match composed toc",
+    JSON.stringify(instPlan.tocTitles) === JSON.stringify(defaultComposed!.toc.map((t) => t.title))
+  );
+  check(
+    "institutional plan page section ids preserve outline order",
+    JSON.stringify(instPlan.pages.filter((p) => p.kind === "section").map((p) => (p.kind === "section" ? p.sectionId : ""))) ===
+      JSON.stringify(defaultComposed!.sections.map((s) => s.id))
+  );
+
+  const sotpPlanDoc = planComposedPdf(industryFull!);
+  check(
+    "advanced plan: prepended cover with type title + TOC",
+    sotpPlanDoc.pages[0]?.kind === "cover" &&
+      sotpPlanDoc.reportTitle === "Industry Research" &&
+      composedPdfReportTitle(industryFull!) === "Industry Research"
+  );
+  check(
+    "advanced plan: cover tocTitles from blueprint outline",
+    JSON.stringify(sotpPlanDoc.tocTitles) === JSON.stringify(industryFull!.toc.map((t) => t.title))
+  );
+  check(
+    "advanced plan: sections without pdfComponent → generic pages",
+    sotpPlanDoc.pages
+      .filter((p) => p.kind === "section")
+      .every((p) => p.kind === "section" && p.pdfComponent === undefined)
+  );
+  check(
+    "advanced plan: section order preserved after prepended cover",
+    JSON.stringify(sotpPlanDoc.pages.filter((p) => p.kind === "section").map((p) => (p.kind === "section" ? p.sectionId : ""))) ===
+      JSON.stringify(industryFull!.sections.map((s) => s.id))
+  );
+  const specialPlan = planComposedPdf(
+    composeReportFromData(report, { reportTypeId: "special_situation_v1", composedAt: AS_OF })!
+  );
+  check(
+    "special situation plan title",
+    specialPlan.reportTitle === "Special Situation Report" &&
+      specialPlan.pages[0]?.kind === "cover"
+  );
+  check(
+    "export description comes from blueprint (not hardcoded)",
+    (listReportBlueprints().find((b) => b.id === "special_situation_v1")?.description ?? "").includes(
+      "Situation thesis"
+    )
+  );
+  check(
+    "blueprint descriptions differ across report types",
+    (getReportBlueprint("institutional_equity_v1")?.description ?? "") !==
+      (getReportBlueprint("special_situation_v1")?.description ?? "")
   );
 }
 

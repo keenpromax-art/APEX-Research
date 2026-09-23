@@ -74,7 +74,20 @@ import {
   canonicalScenarios,
 } from "@/lib/canonical";
 import { capPillarsToRating } from "@/lib/moat";
-import type { ComposedReport } from "@/lib/report-composer";
+import { planComposedPdf } from "@/lib/report-composer";
+import type { ComposedReport, ComposedSection } from "@/lib/report-composer";
+import { getReportBlueprint } from "@/lib/report-types";
+import type {
+  BusinessModuleData,
+  StatementsModuleData,
+  ValuationModuleData,
+  PeersModuleData,
+  MoatModuleData,
+  RiskCatalystModuleData,
+  ManagementModuleData,
+  QualityModuleData,
+  ThesisModuleData,
+} from "@/lib/research-modules";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // HELPER FORMATTERS
@@ -438,8 +451,17 @@ const PageHeader = ({ ticker, sectionName }: { ticker: string; sectionName?: str
   </View>
 );
 
-const InstitutionalMasthead = ({ data, sectionTitle }: { data: ReportData; sectionTitle?: string }) => {
+const InstitutionalMasthead = ({
+  data,
+  sectionTitle,
+  reportTitle,
+}: {
+  data: ReportData;
+  sectionTitle?: string;
+  reportTitle?: string;
+}) => {
   const kpis = getInstitutionalKPIs(data);
+  const bpLabel = reportTitle ?? "Institutional Equity Research";
   return (
     <View style={{ marginBottom: 5 }}>
       <View
@@ -453,7 +475,7 @@ const InstitutionalMasthead = ({ data, sectionTitle }: { data: ReportData; secti
         }}
       >
         <Text style={{ fontSize: 7.5, color: COLORS.textSecondary, fontFamily: "Helvetica" }}>
-          {data.profile.name} · Institutional Equity Research
+          {data.profile.name} · {bpLabel}
         </Text>
         <View wrap={false} style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
           <InstitutionalDeskBadge ticker={data.profile.ticker} />
@@ -501,10 +523,16 @@ const InstitutionalMasthead = ({ data, sectionTitle }: { data: ReportData; secti
   );
 };
 
-const PageFooter = ({ companyName }: { companyName?: string }) => (
+const PageFooter = ({
+  companyName,
+  reportTitle,
+}: {
+  companyName?: string;
+  reportTitle?: string;
+}) => (
   <View style={S.footer} fixed>
     <Text style={S.footerText}>
-      Institutional Equity Research · {companyName || "Subject Company"}
+      {reportTitle ?? "Institutional Equity Research"} · {companyName || "Subject Company"}
     </Text>
     <Text
       style={S.footerPage}
@@ -1122,14 +1150,18 @@ const CoverPage = ({
   data,
   concise = true,
   tocTitles,
+  reportTitle,
 }: {
   data: ReportData;
   concise?: boolean;
   /** Titles from ComposedReport outline (Phase 5). Page numbers stay presentation-only. */
   tocTitles?: string[];
+  /** Blueprint title for masthead/headline; defaults to the institutional string. */
+  reportTitle?: string;
 }) => {
   const ledger = data.assumptionsLedger;
   const { currency } = data.profile;
+  const bpLabel = reportTitle ?? "Institutional Equity Research";
   const cmpSym =
     currency === "INR" ? "Rs. " : currency === "USD" ? "$" : currency === "GBP" ? "£" : currency === "EUR" ? "€" : "";
   const kpis = getInstitutionalKPIs(data);
@@ -1167,7 +1199,7 @@ const CoverPage = ({
         }}
       >
         <Text style={{ fontSize: 7.5, color: COLORS.textSecondary, fontFamily: "Helvetica" }}>
-          {data.profile.name} · Institutional Equity Research
+          {data.profile.name} · {bpLabel}
         </Text>
         <View wrap={false} style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
           <InstitutionalDeskBadge ticker={data.profile.ticker} />
@@ -1204,7 +1236,7 @@ const CoverPage = ({
 
       {/* ── Core Editorial Headline (AI-generated) ── */}
       <Text style={S.headlineBanner}>
-        {data.aiAnalysis?.summary || data.aiAnalysis?.companyOverview || `${data.profile.name} — Institutional Equity Research Dossier`}
+        {data.aiAnalysis?.summary || data.aiAnalysis?.companyOverview || `${data.profile.name} — ${bpLabel} Dossier`}
       </Text>
 
       {/* ── 3-Column Body Architecture ── */}
@@ -1215,7 +1247,11 @@ const CoverPage = ({
             <Text style={{ fontSize: 6.8, fontFamily: "Helvetica-Bold", color: COLORS.slateDark }}>
               {data.analystName || "AI Research Council"}
             </Text>
-            <Text style={{ fontSize: 6.0, color: COLORS.textMuted }}>Institutional Research Desk</Text>
+            <Text style={{ fontSize: 6.0, color: COLORS.textMuted }}>
+              {reportTitle && reportTitle !== "Institutional Equity Research"
+                ? `${reportTitle} Desk`
+                : "Institutional Research Desk"}
+            </Text>
           </View>
           <View style={{ height: 0.5, backgroundColor: COLORS.hairlineLight, marginBottom: 4 }} />
 
@@ -7854,17 +7890,23 @@ const ResearchDebatesPage = ({ data }: { data: ReportData }) => {
 // from the composed outline (presentation-only mapping via pdfComponent).
 // Without one, the legacy hardcoded structure below is unchanged.
 // ─────────────────────────────────────────────────────────────────────────────
-type PdfSectionProps = { data: ReportData; concise?: boolean; composed?: ComposedReport | null };
+type PdfSectionProps = {
+  data: ReportData;
+  concise?: boolean;
+  composed?: ComposedReport | null;
+  reportTitle?: string;
+};
 
 function renderPdfSection(pdfComponent: string, props: PdfSectionProps): React.ReactElement | null {
-  const { data, concise = true, composed } = props;
+  const { data, concise = true, composed, reportTitle } = props;
   switch (pdfComponent) {
     case "CoverPage":
       return (
         <CoverPage
           data={data}
           concise={concise}
-          tocTitles={composed?.blueprintId === "institutional_equity_v1" ? composed.toc.map((t) => t.title) : undefined}
+          reportTitle={reportTitle}
+          tocTitles={composed?.toc.map((t) => t.title)}
         />
       );
     case "ResearchDebatesPage":
@@ -7920,6 +7962,515 @@ function renderPdfSection(pdfComponent: string, props: PdfSectionProps): React.R
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Generic composed-section page (non-institutional blueprints).
+// Renders ONLY the section's referenced module slices — real pipeline objects,
+// never recomputed. Missing module data stays an explicit N/A / omitted block;
+// unavailableModules print as recorded gaps. Presentation-only (Phase 9 lift).
+// ─────────────────────────────────────────────────────────────────────────────
+const ModHeading = ({ children }: { children: React.ReactNode }) => (
+  <Text style={S.subsectionTitle}>{children}</Text>
+);
+
+const KeyValue = ({
+  label,
+  value,
+}: {
+  label: string;
+  value: string | number | null | undefined;
+}) => (
+  <Text style={S.bodyTextSmall}>
+    <Text style={{ fontFamily: "Helvetica-Bold", color: COLORS.slateDark }}>{label}: </Text>
+    {value === null || value === undefined || value === ""
+      ? "N/A"
+      : typeof value === "number"
+        ? fmtNum(value, Number.isInteger(value) ? 0 : 2)
+        : value}
+  </Text>
+);
+
+const ModuleUnavailable = ({ id }: { id: string }) => (
+  <Text style={[S.bodyTextSmall, { color: COLORS.textMuted, fontStyle: "italic" }]}>
+    {id}: module slice unavailable for this run — recorded as unknown (never filled with defaults).
+  </Text>
+);
+
+function renderBusinessBlock(d: BusinessModuleData | null | undefined) {
+  if (!d) return <ModuleUnavailable id="business" />;
+  return (
+    <>
+      <KeyValue label="Company" value={`${d.company.name} (${d.company.ticker}, ${d.company.exchange})`} />
+      <KeyValue label="Sector / Industry" value={`${d.company.sector} · ${d.company.industry}`} />
+      <KeyValue label="Architecture" value={`${d.architecture.sectorName} · ${d.architecture.financialArchetype} · statements ${d.architecture.statementArchitecture}`} />
+      <KeyValue label="Operating archetype" value={d.architecture.operatingArchetype} />
+      {d.architecture.segments.length > 0 && (
+        <KeyValue label="Segments" value={d.architecture.segments.join(", ")} />
+      )}
+      {d.industry.industryContext && (
+        <Text style={S.bodyText}>{d.industry.industryContext}</Text>
+      )}
+      {d.industry.revenueDrivers.length > 0 && (
+        <KeyValue label="Revenue drivers" value={d.industry.revenueDrivers.join("; ")} />
+      )}
+      {d.industry.costDrivers.length > 0 && (
+        <KeyValue label="Cost drivers" value={d.industry.costDrivers.join("; ")} />
+      )}
+    </>
+  );
+}
+
+function renderStatementsBlock(d: StatementsModuleData | null | undefined, currency: string) {
+  if (!d || d.annual.length === 0) return <ModuleUnavailable id="statements" />;
+  const rows = d.annual.slice(-5);
+  return (
+    <>
+      <View style={S.compactTable}>
+        <View style={S.compactRowHeader}>
+          <Text style={[S.compactCellHeader, { width: "16%" }]}>FY</Text>
+          <Text style={[S.compactCellHeaderRight, { width: "21%" }]}>Revenue ({currency})</Text>
+          <Text style={[S.compactCellHeaderRight, { width: "21%" }]}>Net Income ({currency})</Text>
+          <Text style={[S.compactCellHeaderRight, { width: "21%" }]}>Total Assets ({currency})</Text>
+          <Text style={[S.compactCellHeaderRight, { width: "21%" }]}>Total Debt ({currency})</Text>
+        </View>
+        {rows.map((f, i) => (
+          <View key={f.year} style={i % 2 === 0 ? S.compactRow : S.compactRowAlt}>
+            <Text style={[S.compactCellBold, { width: "16%" }]}>{f.year}</Text>
+            <Text style={[S.compactCellRight, { width: "21%" }]}>
+              {fmtBig(stmtNum(f, "revenue", Number.NaN), currency)}
+            </Text>
+            <Text style={[S.compactCellRight, { width: "21%" }]}>
+              {fmtBig(stmtNum(f, "netIncome", Number.NaN), currency)}
+            </Text>
+            <Text style={[S.compactCellRight, { width: "21%" }]}>
+              {fmtBig(stmtNum(f, "totalAssets", Number.NaN), currency)}
+            </Text>
+            <Text style={[S.compactCellRight, { width: "21%" }]}>
+              {fmtBig(stmtNum(f, "totalDebt", Number.NaN), currency)}
+            </Text>
+          </View>
+        ))}
+      </View>
+      {d.ratiosByYear && d.ratiosByYear.length > 0 && (
+        <KeyValue
+          label={`Latest ratios (${d.ratiosByYear[d.ratiosByYear.length - 1].year})`}
+          value={`ROE ${fmtPct(d.ratiosByYear[d.ratiosByYear.length - 1].roe)} · D/E ${fmtMult(d.ratiosByYear[d.ratiosByYear.length - 1].debtToEquity)} · Net margin ${fmtPct(d.ratiosByYear[d.ratiosByYear.length - 1].netMargin)}`}
+        />
+      )}
+      {!d.ratiosByYear && (
+        <Text style={[S.bodyTextSmall, { color: COLORS.textMuted, fontStyle: "italic" }]}>
+          ratiosByYear not provided to the module — recorded as unknown.
+        </Text>
+      )}
+    </>
+  );
+}
+
+function renderValuationBlock(d: ValuationModuleData | null | undefined, currency: string) {
+  if (!d) return <ModuleUnavailable id="valuation" />;
+  return (
+    <>
+      <KeyValue label="Rating" value={d.rating ?? "N/A"} />
+      <KeyValue label="Target price" value={d.targetPrice != null ? fmtBig(d.targetPrice, currency) : null} />
+      <KeyValue label="Current price" value={d.currentPrice != null ? fmtBig(d.currentPrice, currency) : null} />
+      <KeyValue label="Fair value" value={d.fairValue != null ? fmtBig(d.fairValue, currency) : null} />
+      <KeyValue
+        label="Upside / downside"
+        value={d.upsideDownsidePct != null ? fmtPct(d.upsideDownsidePct) : null}
+      />
+      <KeyValue label="Anchors from" value={d.anchorsFrom} />
+      <KeyValue label="Selected model" value={d.selectedModel} />
+      <KeyValue label="Valuation lens" value={d.valuationLens} />
+      {d.scenarios && (
+        <View style={[S.compactTable, { marginTop: 3 }]}>
+          <View style={S.compactRowHeader}>
+            <Text style={[S.compactCellHeader, { width: "25%" }]}>Scenario</Text>
+            <Text style={[S.compactCellHeaderRight, { width: "30%" }]}>Target</Text>
+            <Text style={[S.compactCellHeaderRight, { width: "45%" }]}>Implied return</Text>
+          </View>
+          {([d.scenarios.bull, d.scenarios.base, d.scenarios.bear] as const).map((sc, i) => (
+            <View key={sc.name} style={i % 2 === 0 ? S.compactRow : S.compactRowAlt}>
+              <Text style={[S.compactCellBold, { width: "25%" }]}>{sc.name.toUpperCase()}</Text>
+              <Text style={[S.compactCellRight, { width: "30%" }]}>
+                {fmtBig(sc.targetPrice, currency)}
+              </Text>
+              <Text style={[S.compactCellRight, { width: "45%" }]}>{fmtPct(sc.impliedReturn)}</Text>
+            </View>
+          ))}
+        </View>
+      )}
+      {!d.scenarios && (
+        <Text style={[S.bodyTextSmall, { color: COLORS.textMuted, fontStyle: "italic" }]}>
+          Scenario set unavailable — recorded as unknown.
+        </Text>
+      )}
+    </>
+  );
+}
+
+function renderPeersBlock(d: PeersModuleData | null | undefined) {
+  if (!d) return <ModuleUnavailable id="peers" />;
+  const { peerSet } = d;
+  if (peerSet.gate.suppress) {
+    return (
+      <Text style={S.bodyTextSmall}>
+        Peer set suppressed by gate: {peerSet.gate.reason} (qualifying avg{" "}
+        {peerSet.gate.avg != null ? fmtMult(peerSet.gate.avg) : "N/A"}). Comps omitted rather than
+        fabricated.
+      </Text>
+    );
+  }
+  if (!peerSet.available || peerSet.peers.length === 0) {
+    return <ModuleUnavailable id="peers" />;
+  }
+  return (
+    <View style={S.compactTable}>
+      <View style={S.compactRowHeader}>
+        <Text style={[S.compactCellHeader, { width: "34%" }]}>Peer</Text>
+        <Text style={[S.compactCellHeaderRight, { width: "16%" }]}>P/E</Text>
+        <Text style={[S.compactCellHeaderRight, { width: "16%" }]}>ROE</Text>
+        <Text style={[S.compactCellHeaderRight, { width: "17%" }]}>Rev growth</Text>
+        <Text style={[S.compactCellHeaderRight, { width: "17%" }]}>EV/EBITDA</Text>
+      </View>
+      {peerSet.peers.slice(0, 8).map((p, i) => (
+        <View key={p.ticker} style={i % 2 === 0 ? S.compactRow : S.compactRowAlt}>
+          <Text style={[S.compactCell, { width: "34%" }]}>
+            {p.ticker} — {p.name}
+          </Text>
+          <Text style={[S.compactCellRight, { width: "16%" }]}>
+            {p.pe != null ? fmtMult(p.pe) : "N/A"}
+          </Text>
+          <Text style={[S.compactCellRight, { width: "16%" }]}>
+            {p.roe != null ? fmtPct(p.roe) : "N/A"}
+          </Text>
+          <Text style={[S.compactCellRight, { width: "17%" }]}>
+            {p.revenueGrowth != null ? fmtPct(p.revenueGrowth) : "N/A"}
+          </Text>
+          <Text style={[S.compactCellRight, { width: "17%" }]}>
+            {p.evToEbitda != null ? fmtMult(p.evToEbitda) : "N/A"}
+          </Text>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+function renderMoatBlock(d: MoatModuleData | null | undefined) {
+  if (!d) return <ModuleUnavailable id="moat" />;
+  return (
+    <>
+      <KeyValue label="Moat rating" value={d.rating ?? "N/A"} />
+      <KeyValue label="Trend" value={d.trend ?? "N/A"} />
+      <KeyValue label="Bridge source" value={d.sourcesFrom} />
+      {d.bridge && <Text style={S.bodyText}>{d.bridge}</Text>}
+      {d.competition.moat && (
+        <>
+          <KeyValue label="Moat verdict" value={d.competition.moat.verdict} />
+          {d.competition.moat.sources.slice(0, 5).map((s) => (
+            <Text key={s.source} style={S.bodyTextSmall}>
+              <Text style={{ fontFamily: "Helvetica-Bold", color: COLORS.slateDark }}>
+                {s.source}:{" "}
+              </Text>
+              {s.chain ?? s.economicConsequence}
+            </Text>
+          ))}
+        </>
+      )}
+    </>
+  );
+}
+
+function renderRiskCatalystBlock(d: RiskCatalystModuleData | null | undefined) {
+  if (!d) return <ModuleUnavailable id="risk-catalyst" />;
+  return (
+    <>
+      {d.primaryRisks.length > 0 && (
+        <>
+          <ModHeading>Primary risks</ModHeading>
+          {d.primaryRisks.slice(0, 6).map((r, i) => (
+            <Text key={i} style={S.bodyTextSmall}>
+              {i + 1}. {r}
+            </Text>
+          ))}
+        </>
+      )}
+      {d.risks.available && d.risks.risks.length > 0 && (
+        <>
+          <ModHeading>Risk register</ModHeading>
+          {d.risks.risks.slice(0, 6).map((r, i) => (
+            <Text key={i} style={S.bodyTextSmall}>
+              <Text style={{ fontFamily: "Helvetica-Bold", color: COLORS.slateDark }}>
+                {r.risk}:{" "}
+              </Text>
+              {r.financialConsequence} Monitoring: {r.monitoringIndicator}.
+            </Text>
+          ))}
+        </>
+      )}
+      {d.catalysts.available && d.catalysts.catalysts.length > 0 && (
+        <>
+          <ModHeading>Catalysts</ModHeading>
+          {d.catalysts.catalysts.slice(0, 6).map((c, i) => (
+            <Text key={i} style={S.bodyTextSmall}>
+              <Text style={{ fontFamily: "Helvetica-Bold", color: COLORS.slateDark }}>
+                {c.catalyst}:{" "}
+              </Text>
+              {c.mechanism}
+              {c.timeframe ? ` (${c.timeframe})` : ""} —{" "}
+              {c.quantitative ? "quantitative chain" : "qualitative only"}.
+            </Text>
+          ))}
+        </>
+      )}
+      {d.uncertainty && (
+        <KeyValue
+          label="Uncertainty"
+          value={`${d.uncertainty.rating} (score ${d.uncertainty.score})`}
+        />
+      )}
+      {!d.risks.available && !d.catalysts.available && d.primaryRisks.length === 0 && (
+        <ModuleUnavailable id="risk-catalyst" />
+      )}
+    </>
+  );
+}
+
+function renderManagementBlock(d: ManagementModuleData | null | undefined) {
+  if (!d) return <ModuleUnavailable id="management" />;
+  return (
+    <>
+      {d.officers.length > 0 && (
+        <View style={S.compactTable}>
+          <View style={S.compactRowHeader}>
+            <Text style={[S.compactCellHeader, { width: "60%" }]}>Officer</Text>
+            <Text style={[S.compactCellHeader, { width: "40%" }]}>Title</Text>
+          </View>
+          {d.officers.slice(0, 10).map((o, i) => (
+            <View key={`${o.name}-${i}`} style={i % 2 === 0 ? S.compactRow : S.compactRowAlt}>
+              <Text style={[S.compactCell, { width: "60%" }]}>{o.name}</Text>
+              <Text style={[S.compactCell, { width: "40%" }]}>{o.title}</Text>
+            </View>
+          ))}
+        </View>
+      )}
+      {d.management.managementAnalysis && (
+        <Text style={S.bodyText}>{d.management.managementAnalysis}</Text>
+      )}
+      {d.management.governance && (
+        <>
+          <ModHeading>Governance</ModHeading>
+          <Text style={S.bodyText}>{d.management.governance}</Text>
+        </>
+      )}
+      {d.management.capitalAllocation && (
+        <>
+          <ModHeading>Capital allocation</ModHeading>
+          <Text style={S.bodyText}>{d.management.capitalAllocation}</Text>
+        </>
+      )}
+      {d.shareholding && (
+        <>
+          <KeyValue label="Insider ownership" value={fmtPct(d.shareholding.insiderOwnership)} />
+          <KeyValue label="Institutional ownership" value={fmtPct(d.shareholding.institutionalOwnership)} />
+          <KeyValue label="Public float" value={fmtPct(d.shareholding.publicFloat)} />
+        </>
+      )}
+      {!d.management.available && d.officers.length === 0 && (
+        <ModuleUnavailable id="management" />
+      )}
+    </>
+  );
+}
+
+function renderQualityBlock(d: QualityModuleData | null | undefined) {
+  if (!d) return <ModuleUnavailable id="quality" />;
+  const dq = d.dataQuality;
+  return (
+    <>
+      <KeyValue label="Data quality grade" value={dq.grade} />
+      <KeyValue
+        label="Availability"
+        value={Object.entries(dq.availability)
+          .filter(([, v]) => v)
+          .map(([k]) => k)
+          .join(", ") || "none"}
+      />
+      {dq.blockers.length > 0 && (
+        <KeyValue label="Blockers" value={dq.blockers.join(", ")} />
+      )}
+      {dq.missingCanonicalFields.length > 0 && (
+        <KeyValue label="Missing canonical fields" value={dq.missingCanonicalFields.join(", ")} />
+      )}
+      <KeyValue
+        label="Estimated fields"
+        value={`${dq.estimatedFieldCount} (${dq.estimatedFields.join(", ") || "none named"})`}
+      />
+      {d.qaReport && (
+        <KeyValue
+          label="QA gate"
+          value={`${d.qaReport.gateStatus} · score ${d.qaReport.score}`}
+        />
+      )}
+      {!d.qaReport && (
+        <Text style={[S.bodyTextSmall, { color: COLORS.textMuted, fontStyle: "italic" }]}>
+          QA report not attached to this run — recorded as unknown.
+        </Text>
+      )}
+    </>
+  );
+}
+
+function renderThesisBlock(d: ThesisModuleData | null | undefined, currency: string) {
+  if (!d) return <ModuleUnavailable id="thesis" />;
+  return (
+    <>
+      <KeyValue label="Rating" value={d.rating ?? "N/A"} />
+      <KeyValue label="Target price" value={d.targetPrice != null ? fmtBig(d.targetPrice, currency) : null} />
+      <KeyValue label="Current price" value={d.currentPrice != null ? fmtBig(d.currentPrice, currency) : null} />
+      <KeyValue
+        label="Upside / downside"
+        value={d.upsideDownsidePct != null ? fmtPct(d.upsideDownsidePct) : null}
+      />
+      <KeyValue label="Complexity" value={`${d.complexity.level} (${d.complexity.score}/100)`} />
+      {d.narrative && <Text style={S.bodyText}>{d.narrative}</Text>}
+      {d.confidence && (
+        <KeyValue
+          label="Confidence"
+          value={`${Math.round(d.confidence.overall * 100)}% — ${d.confidence.dataQuality}`}
+        />
+      )}
+      {d.researchQuestions.length > 0 && (
+        <>
+          <ModHeading>Open research questions</ModHeading>
+          {d.researchQuestions.slice(0, 6).map((q, i) => (
+            <Text key={i} style={S.bodyTextSmall}>
+              {i + 1}. {q.question} (needs: {q.evidenceNeeded})
+            </Text>
+          ))}
+        </>
+      )}
+      {d.unknowns.length > 0 && (
+        <>
+          <ModHeading>Recorded unknowns</ModHeading>
+          {d.unknowns.slice(0, 8).map((u, i) => (
+            <Text key={u.id || i} style={S.bodyTextSmall}>
+              — {u.statement} [{u.source}]
+            </Text>
+          ))}
+        </>
+      )}
+      {!d.narrative && (
+        <Text style={[S.bodyTextSmall, { color: COLORS.textMuted, fontStyle: "italic" }]}>
+          AI thesis narrative not available — section renders structured facts only.
+        </Text>
+      )}
+    </>
+  );
+}
+
+const ComposedSectionPage = ({
+  data,
+  section,
+  composed,
+  reportTitle,
+}: {
+  data: ReportData;
+  section: ComposedSection;
+  composed: ComposedReport;
+  reportTitle: string;
+}) => {
+  const currency = data.profile.currency;
+  const md = section.moduleData;
+  return (
+    <Page size="A4" style={S.page}>
+      <InstitutionalMasthead
+        data={data}
+        sectionTitle={section.title}
+        reportTitle={reportTitle}
+      />
+      <Text style={[S.footnote, { marginBottom: 6 }]}>
+        {reportTitle} · Section {section.index} of {composed.sections.length} · depth{" "}
+        {composed.depth} · blueprint {composed.blueprintId}
+      </Text>
+
+      {section.modules.includes("business") && (
+        <View style={{ marginBottom: 6 }}>
+          <ModHeading>Business &amp; Architecture</ModHeading>
+          {renderBusinessBlock(md.business)}
+        </View>
+      )}
+      {section.modules.includes("statements") && (
+        <View style={{ marginBottom: 6 }}>
+          <ModHeading>Financial Statements</ModHeading>
+          {renderStatementsBlock(md.statements, currency)}
+        </View>
+      )}
+      {section.modules.includes("valuation") && (
+        <View style={{ marginBottom: 6 }}>
+          <ModHeading>Valuation</ModHeading>
+          {renderValuationBlock(md.valuation, currency)}
+        </View>
+      )}
+      {section.modules.includes("peers") && (
+        <View style={{ marginBottom: 6 }}>
+          <ModHeading>Peer Set</ModHeading>
+          {renderPeersBlock(md.peers)}
+        </View>
+      )}
+      {section.modules.includes("moat") && (
+        <View style={{ marginBottom: 6 }}>
+          <ModHeading>Competitive Moat</ModHeading>
+          {renderMoatBlock(md.moat)}
+        </View>
+      )}
+      {section.modules.includes("risk-catalyst") && (
+        <View style={{ marginBottom: 6 }}>
+          <ModHeading>Risks &amp; Catalysts</ModHeading>
+          {renderRiskCatalystBlock(md["risk-catalyst"])}
+        </View>
+      )}
+      {section.modules.includes("management") && (
+        <View style={{ marginBottom: 6 }}>
+          <ModHeading>Management &amp; Ownership</ModHeading>
+          {renderManagementBlock(md.management)}
+        </View>
+      )}
+      {section.modules.includes("quality") && (
+        <View style={{ marginBottom: 6 }}>
+          <ModHeading>Data Quality</ModHeading>
+          {renderQualityBlock(md.quality)}
+        </View>
+      )}
+      {section.modules.includes("thesis") && (
+        <View style={{ marginBottom: 6 }}>
+          <ModHeading>Thesis</ModHeading>
+          {renderThesisBlock(md.thesis, currency)}
+        </View>
+      )}
+
+      {section.unavailableModules.length > 0 && (
+        <View
+          style={{
+            marginTop: 4,
+            padding: 6,
+            borderWidth: 0.5,
+            borderColor: COLORS.hairlineLight,
+            backgroundColor: COLORS.offWhite,
+          }}
+        >
+          <Text style={[S.bodyTextSmall, { color: COLORS.slateDark, fontFamily: "Helvetica-Bold" }]}>
+            Explicit gaps for this section
+          </Text>
+          {section.unavailableModules.map((id) => (
+            <ModuleUnavailable key={id} id={id} />
+          ))}
+        </View>
+      )}
+
+      <PageFooter companyName={data.profile.name} reportTitle={reportTitle} />
+    </Page>
+  );
+};
+
 export const ReportDocument = ({
   data,
   concise = true,
@@ -7932,32 +8483,63 @@ export const ReportDocument = ({
 }) => {
   const composed = composedProp ?? data.composedReport ?? null;
   const depthConcise = composed ? composed.depth === "concise" : concise;
+  const reportTitle =
+    (composed && getReportBlueprint(composed.blueprintId)?.title) ||
+    "Institutional Equity Research";
   const docMeta = {
-    title: `${data.profile.name} — Institutional Equity Research Report`,
+    title: `${data.profile.name} — ${reportTitle} Report`,
     author: data.analystName,
-    subject: `Institutional Equity Research: ${data.profile.ticker}`,
+    subject: `${reportTitle}: ${data.profile.ticker}`,
     keywords: `equity research, ${data.profile.ticker}, ${data.profile.name}, ${data.profile.sector}`,
-    creator: "Institutional Equity Research Desk",
-    producer: "Institutional Equity Research Desk",
+    creator: `${reportTitle} Desk`,
+    producer: `${reportTitle} Desk`,
   } as const;
 
-  // Composed path: every institutional section carries a pdfComponent mapping.
-  if (
-    composed &&
-    composed.sections.length > 0 &&
-    composed.sections.every((s) => typeof s.pdfComponent === "string" && s.pdfComponent.length > 0)
-  ) {
+  // Composed path (any blueprint): sections with a pdfComponent map to the
+  // existing institutional pages; the rest render via ComposedSectionPage.
+  // Institutional stays fully mapped → byte-identical golden output.
+  if (composed && composed.sections.length > 0) {
+    const plan = planComposedPdf(composed);
+    const byId = new Map(composed.sections.map((s) => [s.id, s]));
     return (
       <Document {...docMeta}>
-        {composed.sections.map((s) => (
-          <React.Fragment key={s.id}>
-            {renderPdfSection(s.pdfComponent as string, {
-              data,
-              concise: depthConcise,
-              composed,
-            })}
-          </React.Fragment>
-        ))}
+        {plan.pages.map((p) => {
+          if (p.kind === "cover") {
+            return (
+              <CoverPage
+                key="composed-cover"
+                data={data}
+                concise={depthConcise}
+                reportTitle={plan.reportTitle}
+                tocTitles={plan.tocTitles}
+              />
+            );
+          }
+          const section: ComposedSection | undefined = p.sectionId
+            ? byId.get(p.sectionId)
+            : undefined;
+          if (!section) return null;
+          const mapped = p.pdfComponent
+            ? renderPdfSection(p.pdfComponent, {
+                data,
+                concise: depthConcise,
+                composed,
+                reportTitle: plan.reportTitle,
+              })
+            : null;
+          return (
+            <React.Fragment key={section.id}>
+              {mapped ?? (
+                <ComposedSectionPage
+                  data={data}
+                  section={section}
+                  composed={composed}
+                  reportTitle={plan.reportTitle}
+                />
+              )}
+            </React.Fragment>
+          );
+        })}
       </Document>
     );
   }
