@@ -9,7 +9,8 @@
  *    -> understandCompany (AI)
  *    -> buildResearchPlan (what do we not know?)
  *    -> buildEconomicEngine (AI: statement bindings + value questions)
- *    -> buildDebatesEarly (AI: 3-5 value debates BEFORE forecast)
+ *    -> buildResearchDiscovery (identify gaps + collect evidence + seed writers)
+ *    -> buildDebatesEarly (AI: 3-5 value debates BEFORE forecast, seeded by discovery)
  *    -> buildEvidenceMap (claims → [F-...] evidence + confidence)
  *    -> buildModelSpec (AI formulas + debate-driven drivers; code executes)
  *    -> executeForecast (deterministic)
@@ -17,6 +18,7 @@
  *    -> executeValuation (deterministic)
  *    -> buildScenarios + flowScenarioThroughModel (AI deltas; code executes)
  *    -> chooseReverseVariable + solveRequiredValue (AI chooses; code solves)
+ *    -> enhanceResearchDiscovery (merge margin path / valuation / reverse gap)
  *    -> buildNarrative (AI EXPLAINS thesis/risks/catalysts/competitive/moat from research)
  *    -> runQualityReview + adjudicateRegeneration (deterministic gates;
  *       LLM regeneration hooks when a transport is available)
@@ -34,6 +36,13 @@ import { buildResearchPlan, mechanicalResearchPlan } from "./research-planner";
 import { buildDebatesEarly, mechanicalDebates } from "./debate-engine";
 import { buildEconomicEngine, mechanicalEconomicEngine } from "./economic-engine";
 import { buildEvidenceMap, mechanicalEvidenceMap } from "./evidence-mapper";
+import {
+  buildResearchDiscovery,
+  mechanicalResearchDiscovery,
+  enhanceResearchDiscovery,
+  applyDiscoverySeeds,
+  renderResearchDiscovery,
+} from "./research-discovery";
 import { understandCompany } from "./company-understanding";
 import { buildModelSpec } from "./model-builder";
 import { executeForecast } from "./forecast-engine";
@@ -68,6 +77,7 @@ import type {
   ThesisEngineOutput,
   EvidenceMap,
   Debate,
+  ResearchDiscoveryPack,
 } from "./types";
 
 export type PipelineTransport = (opts: {
@@ -459,12 +469,52 @@ export async function runAiFirstResearch(
     economicEngine = mechanicalEconomicEngine(factPack, understanding);
   }
 
+  // 3c2. Research Discovery — identify gaps NOW, collect evidence, seed writers
+  // (architecture per COLPAL audit: discovery before thesis/narrative writers)
+  emit("research-discovery", "Identifying research gaps + collecting evidence");
+  const discoveryBaseOpts = {
+    researchPlanUnknowns: (researchPlan as { unknowns?: string[] })?.unknowns,
+  };
+  let researchDiscovery: ResearchDiscoveryPack;
+  if (aiUsed) {
+    try {
+      researchDiscovery = await buildResearchDiscovery(
+        transport!,
+        factPack,
+        understanding,
+        economicEngine,
+        discoveryBaseOpts
+      );
+    } catch (e) {
+      console.warn("[ai-first] research discovery AI failed, mechanical fallback:", e);
+      researchDiscovery = mechanicalResearchDiscovery(
+        factPack,
+        understanding,
+        economicEngine,
+        discoveryBaseOpts
+      );
+    }
+  } else {
+    researchDiscovery = mechanicalResearchDiscovery(
+      factPack,
+      understanding,
+      economicEngine,
+      discoveryBaseOpts
+    );
+  }
+
   // 3d. Research debates BEFORE forecast — debates must inform driver paths
   emit("debates", "Building debate-driven thesis (pre-forecast)");
   let debateOutput: ThesisEngineOutput;
   if (aiUsed) {
     try {
-      debateOutput = await buildDebatesEarly(transport!, factPack, understanding, economicEngine);
+      debateOutput = await buildDebatesEarly(
+        transport!,
+        factPack,
+        understanding,
+        economicEngine,
+        researchDiscovery
+      );
     } catch (e) {
       console.warn("[ai-first] early debate engine failed, building partial brief for fallback:", e);
       const partialBrief = buildAnalystBrief({ pack: factPack, understanding });
@@ -579,7 +629,31 @@ export async function runAiFirstResearch(
     }
   }
 
-  // 8b. Canonical AnalystBrief — single source of truth for narrative stages
+  // 8b. Enhance discovery with model outputs (margin path, valuation, reverse gap)
+  // Deterministic merge — keeps AI enrichment, adds post-valuation evidence.
+  try {
+    const marginPathKey = Object.keys(forecastSpec.driverPaths).find((k) => /margin/i.test(k));
+    const forecastMarginPath = marginPathKey ? forecastSpec.driverPaths[marginPathKey] : undefined;
+    let reverseGapPct: number | undefined;
+    if (reverse && reverse.variable === "revenueCagr" && isFinite(reverse.requiredValue)) {
+      const modelG = forecastSpec.driverPaths["revenue"]?.[0];
+      if (typeof modelG === "number" && isFinite(modelG)) {
+        reverseGapPct = (reverse.requiredValue - modelG) * 100;
+      }
+    }
+    researchDiscovery = enhanceResearchDiscovery(researchDiscovery, factPack, understanding, economicEngine, {
+      forecastMarginPath,
+      reverseGapPct,
+      valuation: {
+        methodology: valuation.methodology,
+        fairValuePerShare: valuation.fairValuePerShare,
+      },
+    });
+  } catch (e) {
+    console.warn("[ai-first] discovery enhancement skipped:", e);
+  }
+
+  // 8c. Canonical AnalystBrief — single source of truth for narrative stages
   // Built deterministically from all prior outputs; eliminates context drift.
   emit("analyst-brief", "Assembling canonical Analyst Brief");
   const analystBrief = buildAnalystBrief({
@@ -615,6 +689,12 @@ export async function runAiFirstResearch(
     for (const item of evidenceMap.items.slice(0, 12)) {
       analystBrief.evidenceLines.push(`EVIDENCE [${item.direction}/T${item.tier}/c${item.confidence.toFixed(2)}]: ${item.claim} — ${item.evidence.slice(0, 140)} ${item.factIds.join(" ")}`);
     }
+    analystBrief.evidenceLines.push(renderResearchDiscovery(researchDiscovery).slice(0, 6000));
+    const discMissing = researchDiscovery.gaps.filter((g) => g.status === "missing");
+    for (const g of discMissing.slice(0, 6)) {
+      analystBrief.missingInformation.push(`${g.area}: ${g.question} (${g.why})`);
+    }
+    analystBrief.missingInformation = [...new Set(analystBrief.missingInformation)];
   } catch {}
 
   // 9. Narratives — EXPLAIN debates/evidence (do not invent); chain-structured catalysts/moat
@@ -628,6 +708,7 @@ export async function runAiFirstResearch(
         engine: economicEngine,
         debates: debateOutput,
         evidenceMap,
+        discovery: researchDiscovery,
       });
       // Prefer debate-engine central thesis when narrative thesis is generic
       if (debateOutput && debateOutput.thesis && debateOutput.confidence > 0.5) {
@@ -652,6 +733,10 @@ export async function runAiFirstResearch(
   } else {
     narrative = mechanicalNarrative(factPack, valuation);
   }
+
+  // 9b. Guarantee non-empty writer sections from discovery seeds (COLPAL fix:
+  // no blank catalysts/risks/moat/thesis when evidence seeds exist)
+  narrative = applyDiscoverySeeds(narrative, researchDiscovery);
 
   // 10. Sensitivity (deterministic grid around the executed valuation)
   const sensitivity = buildSensitivity(valuationSpec, forecastOut.forecast, factPack);
@@ -695,6 +780,7 @@ export async function runAiFirstResearch(
     economicEngine,
     debates: debateOutput.debates as Debate[],
     evidenceMap,
+    researchDiscovery,
   });
 
   // 12. Quality review (deterministic gates) + adjudication

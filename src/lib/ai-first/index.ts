@@ -21,6 +21,7 @@
  *   TICKER
  *     -> YFINANCE FACT PACK            (fact-pack.ts)
  *     -> AI COMPANY UNDERSTANDING      (company-understanding.ts)
+ *     -> RESEARCH DISCOVERY            (research-discovery.ts — gaps + evidence + seeds)
  *     -> AI MODEL SPECIFICATION        (model-builder.ts)
  *     -> AI ASSUMPTIONS                (assumptions.ts)
  *     -> DETERMINISTIC FORECAST ENGINE (forecast-engine.ts + statement-identities.ts)
@@ -437,6 +438,17 @@ export { buildEconomicEngine, mechanicalEconomicEngine } from "./economic-engine
 // Evidence mapper — claim → [F-...] evidence map with confidence + honest unsupported gaps
 // (src/lib/ai-first/evidence-mapper.ts)
 export { buildEvidenceMap, mechanicalEvidenceMap, renderEvidenceMap } from "./evidence-mapper";
+
+// Research discovery — identify gaps, collect evidence, seed thesis/moat/catalyst/risk writers
+// (src/lib/ai-first/research-discovery.ts)
+export {
+  buildResearchDiscovery,
+  mechanicalResearchDiscovery,
+  enhanceResearchDiscovery,
+  applyDiscoverySeeds,
+  renderResearchDiscovery,
+} from "./research-discovery";
+export type { DiscoveryTransport } from "./research-discovery";
 
 // Bridge: ResearchReport → AIAnalysis content fields for UI/PDF
 // (src/lib/ai-first/enrich-report.ts)

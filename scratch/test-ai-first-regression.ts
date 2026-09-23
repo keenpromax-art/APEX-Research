@@ -282,6 +282,30 @@ async function runMechanicalChecks(): Promise<void> {
   const leaks = ["search index", "advertiser bidding", "custom silicon", "hyperscale infrastructure", "same-store sales", "foot traffic"].filter((s) => blob.includes(s));
   check("mechanical report has no cross-sector contamination", leaks.length === 0, leaks.join(", "));
   check("sensitivity grid populated", pipe.report.sensitivity.length === 9);
+
+  // Research discovery (COLPAL fix — gaps identified, evidence collected, writers seeded)
+  const disc = pipe.report.researchDiscovery;
+  check("researchDiscovery attached to report", !!disc);
+  if (disc) {
+    check("discovery covers all 15 areas", disc.gaps.length === 15, `got ${disc.gaps.length}`);
+    const { filled, partial, missing, total } = disc.coverage;
+    check("coverage counts add up", filled + partial + missing === total && total === 15);
+    check("discovery summary present", !!disc.summary && /coverage/i.test(disc.summary));
+    check("economic insights non-empty", disc.economicInsights.length > 0);
+    check("target-price methodology note present", !!disc.targetPriceMethodology && /intrinsic|12/i.test(disc.targetPriceMethodology));
+    check("moat seeds collected", disc.moatSeeds.length > 0, `${disc.moatSeeds.length}`);
+    check("catalyst seeds collected", disc.catalystSeeds.length > 0, `${disc.catalystSeeds.length}`);
+    check("risk seeds collected", disc.riskSeeds.length > 0, `${disc.riskSeeds.length}`);
+    check("seeds never invented market share (missing stays missing)",
+      disc.gaps.find((g) => g.area === "marketShare")?.status === "missing");
+  }
+  // Non-empty writer sections after applyDiscoverySeeds
+  check("catalysts never blank when seeds exist", pipe.report.catalysts.length > 0, `${pipe.report.catalysts.length}`);
+  check("risks never blank when seeds exist", pipe.report.risks.length > 0, `${pipe.report.risks.length}`);
+  check("moat sources never blank when seeds exist", pipe.report.moat.sources.length > 0, `${pipe.report.moat.sources.length}`);
+  check("thesis non-generic after seed backfill",
+    !!pipe.report.thesis.thesis && pipe.report.thesis.thesis.length > 60 && !/mechanical preview/i.test(pipe.report.thesis.thesis));
+  check("key debate filled", !!pipe.report.thesis.keyDebate);
 }
 
 runMechanicalChecks().then(() => {

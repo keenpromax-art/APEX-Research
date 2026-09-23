@@ -129,6 +129,20 @@ function mapDebates(research: ResearchReport): NonNullable<AIAnalysis["researchD
   }));
 }
 
+function mapDiscovery(research: ResearchReport): AIAnalysis["researchDiscovery"] {
+  const d = research.researchDiscovery;
+  if (!d) return undefined;
+  return {
+    summary: d.summary,
+    coverage: d.coverage,
+    economicInsights: d.economicInsights,
+    workingCapitalChain: d.workingCapitalChain,
+    roicInterpretation: d.roicInterpretation,
+    targetPriceMethodology: d.targetPriceMethodology,
+    gaps: d.gaps.map((g) => ({ area: g.area, status: g.status, question: g.question })),
+  };
+}
+
 /** Merge ai-first ResearchReport content into the report AIAnalysis (non-destructive for council fields). */
 export function enrichAIAnalysisFromResearchReport(
   aiAnalysis: AIAnalysis,
@@ -165,6 +179,7 @@ export function enrichAIAnalysisFromResearchReport(
     keyRisks: research.risks?.length ? mapRisks(research.risks) : aiAnalysis.keyRisks,
     evidenceMapConfidence: research.evidenceMap?.overallConfidence,
     evidenceUnsupported: research.evidenceMap?.unsupported,
+    researchDiscovery: mapDiscovery(research) || aiAnalysis.researchDiscovery,
     industryDynamicsCommentary:
       research.companyUnderstanding?.industryContext || aiAnalysis.industryDynamicsCommentary,
     managementCommentary:

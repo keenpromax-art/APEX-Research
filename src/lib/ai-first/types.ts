@@ -191,6 +191,107 @@ export interface EvidenceMap {
   overallConfidence: number;
 }
 
+// ─────────────────────────────────────────────
+// Research Discovery — identify gaps, collect evidence, seed writers
+// ─────────────────────────────────────────────
+
+export type DiscoveryArea =
+  | "revenueDrivers"
+  | "marketShare"
+  | "competitiveLandscape"
+  | "brandStrength"
+  | "pricing"
+  | "volume"
+  | "managementCommentary"
+  | "industryGrowth"
+  | "risks"
+  | "catalysts"
+  | "moat"
+  | "thesis"
+  | "workingCapital"
+  | "marginMechanism"
+  | "valuationExpectations";
+
+export interface DiscoveryGap {
+  area: DiscoveryArea;
+  question: string;
+  why: string;
+  status: "filled" | "partial" | "missing";
+  evidenceItems: EvidenceItem[];
+  /** Highest source tier available (1=filing … 6=inference). */
+  sourceTier: number;
+}
+
+export interface MoatSeed {
+  source: string;
+  chain: string;
+  evidence: string;
+  durability: string;
+  threatsToDurability: string;
+  factIds: string[];
+  confidence: number;
+}
+
+export interface CatalystSeed {
+  catalyst: string;
+  mechanism: string;
+  timeframe?: string;
+  observableKpi?: string;
+  direction?: "positive" | "negative" | "mixed";
+  forecastImpact?: string;
+  valuationImpact?: string;
+  invalidation?: string;
+  quantitative: boolean;
+  factIds: string[];
+}
+
+export interface RiskSeed {
+  risk: string;
+  mechanism: string;
+  affectedKpi: string;
+  financialConsequence: string;
+  valuationConsequence: string;
+  monitoringIndicator: string;
+  factIds: string[];
+}
+
+export interface CompetitiveSeed {
+  company: string;
+  businessOverlap: string;
+  economicSimilarity: string;
+  keyDifference: string;
+  relativeStrengths: string;
+  relativeWeaknesses: string;
+  segment?: string;
+  /** "operating" = real product rival; "valuation" = peer multiple comp only. */
+  relationship: "operating" | "valuation" | "both";
+}
+
+export interface ResearchDiscoveryPack {
+  ticker: string;
+  generatedAt: string;
+  gaps: DiscoveryGap[];
+  evidenceItems: EvidenceItem[];
+  /** Deterministic economic insights (CCC chain, margin trajectory, ROIC interpretation). */
+  economicInsights: string[];
+  moatSeeds: MoatSeed[];
+  catalystSeeds: CatalystSeed[];
+  riskSeeds: RiskSeed[];
+  competitiveSeeds: CompetitiveSeed[];
+  /** How forecast margin path is supposed to move (e.g. gross recovery + pricing − brand spend). */
+  marginMechanism?: string;
+  /** Supplier financing → negative CCC → FCF conversion → capital returns chain. */
+  workingCapitalChain?: string;
+  /** Why ROIC may be extreme (low invested capital, negative WC, cash-heavy BS). */
+  roicInterpretation?: string;
+  /** 5-year intrinsic DCF vs 12-month target framing. */
+  targetPriceMethodology?: string;
+  coverage: { filled: number; partial: number; missing: number; total: number };
+  summary: string;
+  /** True when AI (not just mechanical collection) ran. */
+  aiUsed: boolean;
+}
+
 export interface ConfidenceAssessment {
   overall: number; // 0..1
   dataQuality: string;
@@ -456,6 +557,8 @@ export interface ResearchReport {
   economicEngine?: EconomicEngine;
   debates?: Debate[];
   evidenceMap?: EvidenceMap;
+  /** Research-discovery pack: gaps identified + evidence collected + seeds for writers. */
+  researchDiscovery?: ResearchDiscoveryPack;
 
   /** Quality control trail. */
   reviews: ReviewFinding[];

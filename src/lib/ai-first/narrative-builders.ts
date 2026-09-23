@@ -20,10 +20,12 @@ import type {
   EconomicEngine,
   ThesisEngineOutput,
   EvidenceMap,
+  ResearchDiscoveryPack,
 } from "./types";
 import { parseLlmJson } from "./llm";
 import { buildAnalystBrief, renderAnalystBrief } from "./analyst-brief";
 import { buildHistoricalAnalysisPack, renderHistoricalAnalysisPack } from "./historical-analysis";
+import { renderResearchDiscovery } from "./research-discovery";
 
 export type NarrativeTransport = (opts: {
   system: string;
@@ -62,6 +64,7 @@ RULES:
 - Evidence-constrained output: if you cannot support a catalyst/risk/competitor/moat source with evidence, OMIT it. A report with 20 generic warnings is BLOCKED, not READY_WITH_WARNINGS.
 - Risks: mechanism → affected KPI (company-native) → financial consequence → valuation consequence → monitoring indicator.
 - Do not invent new numbers the forecast/valuation stages did not compute.
+- RESEARCH DISCOVERY SEEDS: context may include a discovery pack (coverage + moat/catalyst/risk/competitive seeds + economic insights like margin mechanism, working-capital chain, ROIC interpretation, target-price methodology). EXPLAIN those seeds as chains — never leave thesis/catalyst/risk/moat/competitive blank while usable seeds exist. If coverage marks an area "missing", state the gap honestly instead of inventing. Seeds tagged Tier-6 stay inference.
 
 Respond with ONLY JSON:
 {
@@ -90,11 +93,13 @@ export function narrativeContext(
     engine?: EconomicEngine;
     debates?: ThesisEngineOutput;
     evidenceMap?: EvidenceMap;
+    discovery?: ResearchDiscoveryPack;
   }
 ): string {
   const engine = extras?.engine;
   const debates = extras?.debates;
   const evidenceMap = extras?.evidenceMap;
+  const discovery = extras?.discovery;
   // Prefer canonical AnalystBrief — falls back to legacy compact if brief unavailable
   try {
     const brief = buildAnalystBrief({ pack, understanding, forecastSpec: modelSpec });
@@ -138,6 +143,14 @@ export function narrativeContext(
       for (const item of evidenceMap.items.slice(0, 12)) {
         brief.evidenceLines.push(`EVIDENCE [${item.direction}/T${item.tier}/c${item.confidence.toFixed(2)}]: ${item.claim} — ${item.evidence.slice(0, 160)} ${item.factIds.join(" ")}`);
       }
+    }
+    if (discovery) {
+      brief.evidenceLines.push(renderResearchDiscovery(discovery).slice(0, 6000));
+      const missing = discovery.gaps.filter((g) => g.status === "missing");
+      for (const g of missing.slice(0, 6)) {
+        brief.missingInformation.push(`${g.area}: ${g.question} (${g.why})`);
+      }
+      brief.missingInformation = [...new Set(brief.missingInformation)];
     }
     return renderAnalystBrief(brief as any);
   } catch {}
@@ -184,6 +197,9 @@ export function narrativeContext(
         `INVALIDATION: ${debates.invalidationCondition} | MONITOR: ${debates.monitoringKpi}`,
       ]
     : [];
+  const discoveryBlock = discovery
+    ? ["", "RESEARCH DISCOVERY SEEDS (explain — do not invent beyond seeds):", renderResearchDiscovery(discovery).slice(0, 6000)]
+    : [];
   return [
     `COMPANY: ${understanding.companyName} (${pack.ticker})`,
     `What it does: ${clip(understanding.whatItDoes, 700)}`,
@@ -195,6 +211,7 @@ export function narrativeContext(
     ...(segmentSection.length ? ["", ...segmentSection] : []),
     ...(canonicalBasisBlock ? ["", canonicalBasisBlock] : []),
     ...debateBlock,
+    ...discoveryBlock,
     "",
     "REVENUE DRIVERS:",
     ...understanding.revenueDrivers.map((d) => `- ${d.name}: ${d.mechanism}`),
@@ -254,6 +271,7 @@ export async function buildNarrative(
     engine?: EconomicEngine;
     debates?: ThesisEngineOutput;
     evidenceMap?: EvidenceMap;
+    discovery?: ResearchDiscoveryPack;
   }
 ): Promise<NarrativeOutput> {
   const ctx = narrativeContext(pack, understanding, modelSpec, canonicalForecast, extras);

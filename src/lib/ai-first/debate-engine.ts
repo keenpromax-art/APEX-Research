@@ -12,9 +12,10 @@
  */
 
 import type { AnalystBrief } from "./analyst-brief";
-import type { FactPack, CompanyUnderstanding, EconomicEngine, Debate, ThesisEngineOutput, DebateEvidence } from "./types";
+import type { FactPack, CompanyUnderstanding, EconomicEngine, Debate, ThesisEngineOutput, DebateEvidence, ResearchDiscoveryPack } from "./types";
 import { parseLlmJson } from "./llm";
 import { buildHistoricalAnalysisPack } from "./historical-analysis";
+import { renderResearchDiscovery } from "./research-discovery";
 
 export type { Debate, ThesisEngineOutput, DebateEvidence };
 
@@ -104,11 +105,12 @@ export function debateContext(brief: AnalystBrief): string {
   ].join("\n");
 }
 
-/** Pre-forecast debate context: understanding + economic engine + historical only. */
+/** Pre-forecast debate context: understanding + economic engine + historical + discovery seeds. */
 export function earlyDebateContext(
   pack: FactPack,
   understanding: CompanyUnderstanding,
-  engine: EconomicEngine
+  engine: EconomicEngine,
+  discovery?: ResearchDiscoveryPack
 ): string {
   const hist = (() => {
     try {
@@ -144,6 +146,10 @@ export function earlyDebateContext(
     "",
     "EVIDENCE TABLE (excerpt):",
     evidence.slice(0, 40).join("\n"),
+    "",
+    discovery
+      ? `RESEARCH DISCOVERY SEEDS (use gap questions/economic insights as debate seeds — explain, do not invent):\n${renderResearchDiscovery(discovery)}`
+      : "RESEARCH DISCOVERY: (unavailable)",
     "",
     "MODEL/VALUATION: (pending — debates must stand on company economics + evidence alone; flag valuation debate as forward-looking)",
   ].join("\n");
@@ -201,9 +207,10 @@ export async function buildDebatesEarly(
   transport: DebateTransport,
   pack: FactPack,
   understanding: CompanyUnderstanding,
-  engine: EconomicEngine
+  engine: EconomicEngine,
+  discovery?: ResearchDiscoveryPack
 ): Promise<ThesisEngineOutput> {
-  const ctx = earlyDebateContext(pack, understanding, engine);
+  const ctx = earlyDebateContext(pack, understanding, engine, discovery);
   const user = `RESEARCH CONTEXT\n================\n${ctx}\n\nTASK\n====\nIdentify debates and build the thesis for ${pack.ticker} now (model/valuation still pending — ground debates in company economics and [F-...] evidence).\n\nOUTPUT\n======\nRespond with ONLY the JSON object.`;
   const resp = await transport({ system: SYSTEM_PROMPT, user, temperature: 0.3, maxTokens: 3500, jsonMode: true });
   const parsed = parseLlmJson<Record<string, any>>(resp);

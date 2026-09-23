@@ -1373,6 +1373,37 @@ export default function ReportClient({ ticker }: Props) {
                             </div>
                           )}
 
+                          {reportData.aiAnalysis?.researchDiscovery && (
+                            <div className={styles.subSection}>
+                              <div className={styles.subSectionLabel}>
+                                Research Discovery (gaps identified → evidence collected → writers seeded)
+                              </div>
+                              <p className={styles.subSectionText}>
+                                {reportData.aiAnalysis.researchDiscovery.summary}{" "}
+                                {reportData.aiAnalysis.researchDiscovery.coverage.missing > 0
+                                  ? `Missing areas are stated honestly in the report rather than invented: ${reportData.aiAnalysis.researchDiscovery.gaps
+                                      .filter((g) => g.status === "missing")
+                                      .map((g) => g.area)
+                                      .slice(0, 6)
+                                      .join(", ")}.`
+                                  : ""}
+                              </p>
+                              {reportData.aiAnalysis.researchDiscovery.economicInsights.length > 0 && (
+                                <div className={styles.swotList} style={{ marginTop: 6 }}>
+                                  {reportData.aiAnalysis.researchDiscovery.economicInsights.slice(0, 4).map((ins, i) => (
+                                    <div key={i} className={styles.subSectionText}>• {ins}</div>
+                                  ))}
+                                </div>
+                              )}
+                              <p className={styles.subSectionText} style={{ marginTop: 6 }}>
+                                Area coverage:{" "}
+                                {reportData.aiAnalysis.researchDiscovery.gaps
+                                  .map((g) => `${g.area} (${g.status})`)
+                                  .join(" · ")}
+                              </p>
+                            </div>
+                          )}
+
                           <div className={styles.subSection}>
                             <div className={styles.subSectionLabel}>Corporate Profile & Strategic Positioning</div>
                             <p className={styles.subSectionText}>

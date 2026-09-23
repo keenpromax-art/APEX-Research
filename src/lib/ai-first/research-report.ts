@@ -34,6 +34,7 @@ import type {
   EconomicEngine,
   Debate,
   EvidenceMap,
+  ResearchDiscoveryPack,
 } from "./types";
 
 /** Version string for the research report assembly. */
@@ -68,6 +69,7 @@ export interface ReportAssemblerInput {
   economicEngine?: EconomicEngine;
   debates?: Debate[];
   evidenceMap?: EvidenceMap;
+  researchDiscovery?: ResearchDiscoveryPack;
 }
 
 /**
@@ -102,6 +104,7 @@ export function assembleResearchReport(input: ReportAssemblerInput): ResearchRep
     economicEngine,
     debates,
     evidenceMap,
+    researchDiscovery,
   } = input;
 
   const researchRunId = `RUN-${factPack.ticker}-${new Date().toISOString().slice(0, 10)}-${String(Date.now()).slice(-6)}`;
@@ -161,6 +164,7 @@ export function assembleResearchReport(input: ReportAssemblerInput): ResearchRep
     economicEngine,
     debates,
     evidenceMap,
+    researchDiscovery,
 
     reviews,
     reviewPassed,

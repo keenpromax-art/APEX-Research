@@ -365,7 +365,7 @@ const InstitutionalKPIStrip = ({ data }: { data: ReportData }) => {
   const kpis = getInstitutionalKPIs(data);
   const cols = [
     { label: "Last Close", val: kpis.lastPrice, bold: true },
-    { label: "12M Target", val: kpis.fairValue, bold: true },
+    { label: "Intrinsic Target", val: kpis.fairValue, bold: true },
     { label: "Downside Floor", val: kpis.downsideFloor },
     { label: "Bull Target", val: kpis.bullTarget },
     { label: "Uncertainty", val: kpis.uncertainty },
@@ -2030,6 +2030,11 @@ const FundamentalAnalysisPage = ({ data }: { data: ReportData }) => {
             Scenario Probability-Weighted Value: {sym}{fmtNum(ledger?.probabilityWeightedValue || (ledger?.scenarios?.bull.targetPrice ? ledger.scenarios.bull.targetPrice * 0.25 + fv * 0.60 + ledger.scenarios.bear.targetPrice * 0.15 : fv * 1.025), 2)} (Weights: 60% Base / 25% Bull / 15% Bear)
           </Text>
           <Text style={{ fontSize: 5.0, color: COLORS.textMuted }}>
+            {data.researchReport?.researchDiscovery?.targetPriceMethodology ||
+              data.aiAnalysis?.researchDiscovery?.targetPriceMethodology ||
+              "Methodology note: the printed target is the multi-year intrinsic (DCF) fair value, not a broker-style 12-month trading target — read it as value to be realized over a full earnings/FCF cycle, and do not compare directly to street 12M targets without adjusting for horizon."}
+          </Text>
+          <Text style={{ fontSize: 5.0, color: COLORS.textMuted }}>
             Weights are judgmental priors emphasizing the base case, not fitted probabilities; each case carries distinct revenue/margin operating assumptions per the matrix above, and the weighted value is independently recomputed in QA (PROB-01).
           </Text>
         </View>
@@ -2424,11 +2429,20 @@ const MoatAndPriceFairValuePage = ({ data }: { data: ReportData }) => {
             </Text>
           </View>
           {(() => {
-            // Research moat chains only — no template fallbacks
+            // Research moat chains → discovery moat seeds → legacy fields; no template fallbacks
             const src = data.researchReport?.moat?.sources || [];
             if (!src.length) {
               const s = pe.moatSources;
               if (!s?.switchingCosts && !s?.intangibleAssets && !s?.costAdvantage) {
+                const seedChains = data.researchReport?.researchDiscovery?.moatSeeds || [];
+                if (seedChains.length) {
+                  return seedChains.slice(0, 3).map((m, i) => (
+                    <Text key={`seed-${i}`} style={S.bodyText}>
+                      <Text style={{ fontFamily: "Helvetica-Bold", color: COLORS.slateDark }}>{`${i + 1}. ${m.source} (discovery seed, conf ${m.confidence.toFixed(2)}): `}</Text>
+                      {m.chain}{m.evidence ? ` — ${m.evidence}` : ""}
+                    </Text>
+                  ));
+                }
                 return (
                   <Text style={S.bodyText}>
                     Moat sources not evidenced in available disclosures — assessment omitted rather than templated.
@@ -2509,6 +2523,16 @@ const MoatAndPriceFairValuePage = ({ data }: { data: ReportData }) => {
           {(() => {
             const rawPillars = pe.moatPillars && pe.moatPillars.length > 0 ? pe.moatPillars : [];
             if (!rawPillars.length) {
+              const seeds = data.researchReport?.researchDiscovery?.moatSeeds || [];
+              if (seeds.length) {
+                return seeds.slice(0, 4).map((m, ri) => (
+                  <View key={`seed-${ri}`} style={ri % 2 === 0 ? S.compactRow : S.compactRowAlt}>
+                    <Text style={[S.compactCellBold, { width: "28%" }]}>{m.source}</Text>
+                    <Text style={[S.compactCell, { width: "20%" }]}>{m.durability || "Assess from margin stability + ROIC spread"}</Text>
+                    <Text style={[S.compactCell, { width: "52%" }]}>{m.chain}{m.evidence ? ` — ${m.evidence}` : ""}</Text>
+                  </View>
+                ));
+              }
               return (
                 <View style={S.compactRowAlt}>
                   <Text style={[S.compactCell, { width: "100%" }]}>
@@ -2659,14 +2683,18 @@ const BullsSayBearsSayPage = ({ data }: { data: ReportData }) => {
           </View>
 
           {(() => {
-            // Prefer thesis bull/bear chains from content-intelligence; fall back to SWOT; omit generic prose
+            // Prefer thesis bull/bear chains from content-intelligence; fall back to SWOT; then discovery seeds; omit generic prose
             const rrBull = data.researchReport?.thesis?.bullCase || [];
             const rrBear = data.researchReport?.thesis?.bearCase || [];
+            const seedBulls = (data.researchReport?.researchDiscovery?.moatSeeds || [])
+              .map((m) => `${m.source}: ${m.chain}`);
             const rawBulls: [string, string][] = rrBull.length
               ? rrBull.slice(0, 3).map((b, i) => [`Bull ${i + 1} (evidence chain)`, b])
               : bulls.length
                 ? bulls.slice(0, 3).map((b, i) => [`Bull ${i + 1}`, b])
-                : [];
+                : seedBulls.length
+                  ? seedBulls.slice(0, 3).map((b, i) => [`Bull ${i + 1} (discovery seed)`, b])
+                  : [];
             if (!rawBulls.length) {
               return (
                 <Text style={S.bodyText}>No evidence-constrained bull case available — section omitted.</Text>
@@ -2690,11 +2718,15 @@ const BullsSayBearsSayPage = ({ data }: { data: ReportData }) => {
 
           {(() => {
             const rrBear = data.researchReport?.thesis?.bearCase || [];
+            const seedBears = (data.researchReport?.researchDiscovery?.riskSeeds || [])
+              .map((r) => `${r.risk} — ${r.mechanism} → ${r.financialConsequence}`);
             const rawBears: [string, string][] = rrBear.length
               ? rrBear.slice(0, 3).map((b, i) => [`Bear ${i + 1} (evidence chain)`, b])
               : bears.length
                 ? bears.slice(0, 3).map((b, i) => [`Bear ${i + 1}`, b])
-                : [];
+                : seedBears.length
+                  ? seedBears.slice(0, 3).map((b, i) => [`Bear ${i + 1} (discovery seed)`, b])
+                  : [];
             if (!rawBears.length) {
               return (
                 <Text style={S.bodyText}>No evidence-constrained bear case available — section omitted.</Text>
@@ -2749,7 +2781,14 @@ const BullsSayBearsSayPage = ({ data }: { data: ReportData }) => {
               impact: c.impact,
               invalidation: (c as any).invalidation,
             }));
-            const rawCats = rrCats.length ? rrCats : peCats;
+            const seedCats = (data.researchReport?.researchDiscovery?.catalystSeeds || []).map((c) => ({
+              event: c.catalyst,
+              horizon: c.timeframe || "Unscheduled",
+              probability: c.quantitative ? "Evidence-backed" : "Qualitative",
+              impact: [c.observableKpi ? `KPI: ${c.observableKpi}` : "", c.forecastImpact, c.valuationImpact].filter(Boolean).join(" → ") || "See chain",
+              invalidation: c.invalidation,
+            }));
+            const rawCats = rrCats.length ? rrCats : peCats.length ? peCats : seedCats;
             if (!rawCats.length) {
               return (
                 <View style={S.compactRowAlt}>
@@ -3823,6 +3862,31 @@ const ManagementAndOwnershipPage2 = ({ data }: { data: ReportData }) => {
         <Text style={{ fontSize: 5.0, color: COLORS.textMuted, marginTop: 1 }}>
           Capital-base methodology: NOPAT = EBIT × (1 − 25% tax); invested capital = book equity + interest-bearing debt − cash. No operating-lease capitalization, goodwill, or excess-cash adjustments are made — stated so return comparisons stay on the same basis.
         </Text>
+        {(() => {
+          const roicNote =
+            data.researchReport?.researchDiscovery?.roicInterpretation ||
+            data.aiAnalysis?.researchDiscovery?.roicInterpretation;
+          if (roicNote) {
+            return (
+              <Text style={{ fontSize: 5.0, color: COLORS.textMuted, marginTop: 1 }}>
+                {roicNote}
+              </Text>
+            );
+          }
+          const roicVals = models.map((m) => {
+            const ic = Math.max(1, m.totalEquity + m.longDebt + m.shortDebt - m.cash);
+            return (m.operatingIncome * 0.75) / ic;
+          });
+          const extreme = roicVals.find((r) => r > 1);
+          if (extreme !== undefined) {
+            return (
+              <Text style={{ fontSize: 5.0, color: COLORS.textMuted, marginTop: 1 }}>
+                Interpretation note: ROIC prints above 100% because invested capital (equity + debt − cash) is a very small or negative base — classic asset-light / negative-working-capital economics. Read it as low capital intensity alongside FCF conversion, not as infinite operating returns.
+              </Text>
+            );
+          }
+          return null;
+        })()}
       </View>
 
       {/* Table 3: 10-Year Cumulative Capital Stewardship & Distribution Matrix */}
@@ -4525,6 +4589,16 @@ const CorporateDisclosuresAndCatalystsPage = ({ data }: { data: ReportData }) =>
                 }
                 if (data.researchReport?.thesis?.whatMarketMayBeMissing) {
                   return `Where we differ from Street consensus: ${data.researchReport.thesis.whatMarketMayBeMissing}`;
+                }
+                const disc = data.researchReport?.researchDiscovery || data.aiAnalysis?.researchDiscovery;
+                if (disc?.targetPriceMethodology) {
+                  return `Where our valuation differs in framing: ${disc.targetPriceMethodology}`;
+                }
+                if (disc?.economicInsights?.length) {
+                  return `Where we differ from Street consensus: ${disc.economicInsights[0]}`;
+                }
+                if (disc?.summary) {
+                  return `Research posture vs consensus: ${disc.summary}`;
                 }
                 return "No evidence-constrained divergence commentary available — section omitted rather than templated.";
               })()}
@@ -5439,7 +5513,15 @@ const BalanceSheetDetailedPage = ({ data }: { data: ReportData }) => {
               Working Capital Efficiency &amp; Trade Float
             </Text>
             <Text style={{ fontSize: 6.6, color: COLORS.textSecondary, lineHeight: 1.35, textAlign: "justify" }}>
-              {pe.balanceSheetCommentary} Working capital management remains tightly managed across receivables and inventory cycles. Negative or lean working capital attributes across key divisions generate structural operating cash float, minimizing reliance on external revolving credit lines.
+              {(() => {
+                const wcChain =
+                  data.researchReport?.researchDiscovery?.workingCapitalChain ||
+                  data.aiAnalysis?.researchDiscovery?.workingCapitalChain;
+                if (wcChain) {
+                  return `${pe.balanceSheetCommentary ? pe.balanceSheetCommentary + " " : ""}${wcChain}`;
+                }
+                return `${pe.balanceSheetCommentary} Working capital management remains tightly managed across receivables and inventory cycles. Negative or lean working capital attributes across key divisions generate structural operating cash float, minimizing reliance on external revolving credit lines.`;
+              })()}
             </Text>
           </View>
           <View style={{ flex: 1 }}>

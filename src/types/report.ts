@@ -940,6 +940,16 @@ export interface AIAnalysis {
   }[];
   evidenceMapConfidence?: number;
   evidenceUnsupported?: string[];
+  /** Research-discovery pack: coverage + economic insights + seeds rendered for UI/PDF. */
+  researchDiscovery?: {
+    summary: string;
+    coverage: { filled: number; partial: number; missing: number; total: number };
+    economicInsights: string[];
+    workingCapitalChain?: string;
+    roicInterpretation?: string;
+    targetPriceMethodology?: string;
+    gaps: { area: string; status: "filled" | "partial" | "missing"; question: string }[];
+  };
 
   // Council Quality & Audit Verification Agent (Agent 7)
   councilVerification?: CouncilVerificationAudit;
