@@ -185,6 +185,8 @@ APEX
 | `src/lib/report-types/advanced-blueprints.ts` | 10 stable blueprints (industry, competitive, management, risk, sotp, bank, insurance, reit, special situation, portfolio) + `ADVANCED_BLUEPRINTS` |
 | `scratch/test-advanced-blueprints.ts` | Golden TOC/section order (concise+full), module wiring, purity, determinism, composer compatibility, regression of existing types |
 | `src/lib/report-types/selector.ts` | Phase 9 selector helpers — `selectableReportTypes` (stable only), fail-closed `parseReportTypeParam`/`parseDepthParam`, `buildReportQuery`, `reportTypeTitle` |
+| `src/components/ProgressTracker/steps.ts` | Pure `buildProgressSteps(reportTitle)` — steps 03–05 + council header carry the selected blueprint title (per-report-type progress labels; steps 01–02 stay shared) |
+| `src/lib/ai-orchestration/live-progress.ts` | Phase B — pure `derivePlanProgressTasks(plan, { phase, agentCheckpoints, redTeam, committee })`: maps the deterministic ResearchTask graph + real pipeline events to display rows (authors follow council personas, checkers follow the verifier, blocked tasks stay blocked, red-team/committee rows carry their real results) |
 | `scratch/test-report-ui.ts` | Selector options, fail-closed query parsing, query round-trip, compose honouring type/depth (re-compose contract), institutional pdfComponent regression |
 | `.eslintrc.json` | Phase 10 — `next/core-web-vitals` config (root cause of the previously hanging interactive `next lint` prompt); 0 errors after fixes |
 
@@ -328,6 +330,25 @@ tab renders the composed TOC + sections + modules + unknowns (the visible
 effect of both selectors); the export heading and the staged ProgressTracker
 context line show the selected type/depth; the PDF filename follows the
 blueprint title. Depth reaches the PDF through `composed.depth` as before.
+Post-Phase-10 addendum: the staged ProgressTracker is no longer
+report-type-invariant — `buildProgressSteps(title)` labels steps 03–05
+(`Structuring <Title>`, `Assembling <Title> Dossier`, `<Title> Ready`) and
+the council sub-header prints `AI ANALYST COUNCIL · <TITLE>`; steps 01–02
+(data fetch, ratios/DCF) stay shared because that work genuinely is.
+**Phase B — live planner wiring (DONE).** ReportClient now snapshots the
+selected type/depth at generation start, resolves the blueprint outline, and
+builds the Phase 6 `buildResearchTasks` graph over the returned
+ResearchCase; the deterministic `runRedTeam` probes run for real over
+plan + case, and after the council audit resolves `runCommitteeReview`
+folds the audit + red-team findings into a decision. The council
+sub-progress renders `derivePlanProgressTasks` rows (per-section
+author/checker + red-team + committee) instead of the fixed 7-agent roster:
+authors track their assigned council persona's live status, checker seats
+track the verifier, fail-closed blockers stay `BLOCKED ⚠`, and the
+red-team/committee rows show their actual probe/flag results. The fixed
+7-agent roster remains the fallback whenever no plan exists. Selector
+semantics unchanged: the plan snapshots refs at generation start, exactly
+like compose-at-end.
 Limitation (documented, deliberate): non-institutional blueprints have no
 `pdfComponent` page mappings yet, so the PDF body keeps the legacy
 institutional page set for those types — the institutional composed path and
@@ -384,7 +405,7 @@ evidence density* — never a hardcoded `maxPages`.
 | **6 — AI orchestration** | Existing 6 personas → reusable roles; `ResearchTask`, planner, committee, red-team; keep provider failover | DONE — provider interchangeability preserved (injected `OrchestrationTransport` only; no fetch / no provider branch); `npm run test:ai-orchestration` green |
 | **7 — Evidence graph** | Source → Evidence → Claim → Analysis → Conclusion → Section | DONE — material claims traceable (registry + claim-validator reused; `materialClaimsTraceable` exit); `npm run test:evidence-graph` green |
 | **8 — Advanced report types** | Industry, competitive, management, risk, SOTP, bank, insurance, REIT, special situation, portfolio | DONE — 10 stable blueprints over the same module catalog (4 concise + ≥1 full-only section each; `requiredModules` covers all section modules); `npm run test:advanced-blueprints` green (211 assertions) |
-| **9 — UI** | Report type + research depth selectors; staged progress | DONE — home + report-page selectors (`?type=…&depth=…`, fail-closed), in-place re-compose, Report Outline tab, progress context line; `npm run test:report-ui` green (48 assertions) + Manual QA |
+| **9 — UI** | Report type + research depth selectors; staged progress | DONE — home + report-page selectors (`?type=…&depth=…`, fail-closed), in-place re-compose, Report Outline tab, progress context line + per-report-type step labels/council header + Phase B live task-plan derivation; `npm run test:report-ui` green (78 assertions) + Manual QA |
 | **10 — Hardening** | `npm run lint`, `npx tsc --noEmit`, `npm test`, `npm run test:golden`, `npm run build` + full golden ticker matrix | DONE — all five gates EXIT=0 (lint 0 errors after `.eslintrc.json` + 6 fixes; golden 85/85; build 9/9 pages); migration Phases 1–10 complete |
 
 ### Golden-case matrix (from Phase 4 onward)

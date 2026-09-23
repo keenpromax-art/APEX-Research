@@ -23,6 +23,7 @@ import { computeDCF } from "../src/lib/calculations";
 import { createAssumptionsLedger } from "../src/lib/assumptions-ledger";
 import { selectAndComputeValuation } from "../src/lib/valuation/selector";
 import { validateReportIntegrity } from "../src/lib/report-qa";
+import { QA_GATES_ENABLED } from "../src/lib/qa-gates";
 import { reconcileAll } from "../src/lib/source-reconciliation";
 
 let passed = 0;
@@ -233,7 +234,11 @@ console.log("\n5-7. QA INTEGRATION (FCF-NARR, SRC, NARRATIVE, SEM-COMP, gate)");
     investmentThesis: "Advertiser bidding and search index monetization on custom silicon give a hyperscale data-centre moat.",
   }));
   check("platform contamination BLOCKS (SEM-COMP-01 FAIL)", dirty.checks.find((c: any) => c.id === "SEM-COMP-01")?.status === "FAIL");
-  check("contaminated gate is BLOCKED", dirty.gateStatus === "BLOCKED", dirty.gateStatus);
+  if (QA_GATES_ENABLED) {
+    check("contaminated gate is BLOCKED", dirty.gateStatus === "BLOCKED", dirty.gateStatus);
+  } else {
+    check("contaminated gate (gates off) → advisory not BLOCKED", dirty.gateStatus !== "BLOCKED", dirty.gateStatus);
+  }
 
   const keyword = validateReportIntegrity(buildReport({ ...cleanAi, investmentThesis: "Refining faces saas churn headwinds." }));
   check("sector keyword leakage FAILS NARRATIVE-01 (WARN->BLOCK)", keyword.checks.find((c: any) => c.id === "NARRATIVE-01")?.status === "FAIL");

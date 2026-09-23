@@ -4,7 +4,9 @@
  * Selector helpers (stable-only options, fail-closed query parsing, query
  * building) + composition honouring the selected report type / depth
  * (re-compose contract used by ReportClient) + institutional regression
- * (pdfComponent gate unchanged for the golden type).
+ * (pdfComponent gate unchanged for the golden type) + per-report-type
+ * progress step labels (buildProgressSteps) + Phase B live plan derivation
+ * (derivePlanProgressTasks over per-report ResearchTask graphs).
  *
  * Run: npx tsx scratch/test-report-ui.ts (exit 1 on failure)
  */
@@ -21,6 +23,19 @@ import {
   type ReportTypeId,
 } from "../src/lib/report-types";
 import { composeReportFromData } from "../src/lib/report-composer";
+import {
+  buildProgressSteps,
+  STEP_ORDER,
+  DEFAULT_PROGRESS_TITLE,
+} from "../src/components/ProgressTracker/steps";
+import {
+  buildResearchTasks,
+  derivePlanProgressTasks,
+  type CommitteeDecision,
+  type RedTeamResult,
+} from "../src/lib/ai-orchestration";
+import { resolveReportOutline } from "../src/lib/report-types";
+import type { AgentCheckpoint } from "../src/types/report";
 import { buildResearchCase, type BuildResearchCaseParams } from "../src/lib/research-case";
 import { createAssumptionsLedger } from "../src/lib/assumptions-ledger";
 import type {
@@ -409,6 +424,283 @@ console.log("\n--- 5. purity ---");
   check(
     "buildReportQuery has no side-effect fields",
     !buildReportQuery("industry_v1", "full").match(/maxPages|pageCount/)
+  );
+}
+
+// ── 6. Progress steps vary by report type ──────────────────────────────
+console.log("\n--- 6. progress step labels per report type ---");
+{
+  const inst = buildProgressSteps("Institutional Equity Research");
+  const sotp = buildProgressSteps("Sum-of-the-Parts Valuation");
+  const industry = buildProgressSteps("Industry Research");
+  const fallback = buildProgressSteps();
+  const blank = buildProgressSteps("   ");
+
+  check("5 steps in canonical order", inst.length === 5 && inst.every((s, i) => s.key === STEP_ORDER[i]));
+  check("indices 01..05", inst.map((s) => s.index).join(",") === "01,02,03,04,05");
+  check(
+    "step 03 carries report title",
+    sotp[2].label === "Structuring Sum-of-the-Parts Valuation" &&
+      industry[2].label === "Structuring Industry Research"
+  );
+  check(
+    "step 03 differs across report types",
+    sotp[2].label !== industry[2].label && inst[2].label !== sotp[2].label
+  );
+  check(
+    "step 04 carries report title",
+    sotp[3].label === "Assembling Sum-of-the-Parts Valuation Dossier"
+  );
+  check(
+    "step 05 carries report title",
+    industry[4].label === "Industry Research Ready"
+  );
+  check(
+    "shared steps 01-02 unchanged",
+    inst[0].label === "Querying Yahoo Finance Market Data" &&
+      inst[1].label === "Computing Financial Ratios & DCF Model"
+  );
+  check(
+    "undefined title falls back to institutional",
+    fallback[2].label === `Structuring ${DEFAULT_PROGRESS_TITLE}`
+  );
+  check("blank title falls back", blank[2].label === `Structuring ${DEFAULT_PROGRESS_TITLE}`);
+  check(
+    "no report-type copy leaks into shared step 01",
+    sotp[0].label === inst[0].label
+  );
+}
+
+// ── 7. Live plan display (Phase B: planner wiring) ─────────────────────
+console.log("\n--- 7. live research task plan derivation ---");
+{
+  const params = baseParams();
+  const researchCase = buildResearchCase(params);
+
+  const instOutline = resolveReportOutline(getReportBlueprint("institutional_equity_v1")!, {
+    depth: "concise",
+  });
+  const sotpOutline = resolveReportOutline(getReportBlueprint("sotp_v1")!, { depth: "full" });
+  const instPlan = buildResearchTasks({
+    researchCase,
+    sections: instOutline.sections,
+    reportTypeId: "institutional_equity_v1",
+    depth: "concise",
+  });
+  const sotpPlan = buildResearchTasks({
+    researchCase,
+    sections: sotpOutline.sections,
+    reportTypeId: "sotp_v1",
+    depth: "full",
+  });
+
+  check(
+    "task count = 1 plan + 2×sections + red-team + committee",
+    instPlan.tasks.length === 1 + instOutline.sections.length * 2 + 2 &&
+      sotpPlan.tasks.length === 1 + sotpOutline.sections.length * 2 + 2,
+    `inst=${instPlan.tasks.length} sotp=${sotpPlan.tasks.length}`
+  );
+
+  const agentsPending: AgentCheckpoint[] = [
+    { id: "strategist", name: "s", role: "r", status: "pending" },
+    { id: "news", name: "n", role: "r", status: "pending" },
+    { id: "moat", name: "m", role: "r", status: "pending" },
+    { id: "forensic", name: "f", role: "r", status: "pending" },
+    { id: "credit", name: "c", role: "r", status: "pending" },
+    { id: "governance", name: "g", role: "r", status: "pending" },
+    { id: "verifier", name: "v", role: "r", status: "pending" },
+  ];
+  const fakeRedTeam: RedTeamResult = {
+    version: "research-orchestration-v1",
+    findings: [],
+    probesRun: [
+      "blockers-propagate",
+      "peers-suppressed",
+      "missing-valuation",
+      "task-graph-closure",
+      "author-needs-checker",
+      "debates-gate",
+      "unknowns-not-invented",
+    ],
+    passed: true,
+    llmUsed: false,
+  };
+  const fakeCommitteePassed: CommitteeDecision = {
+    version: "research-orchestration-v1",
+    seats: [],
+    qualityReview: null,
+    adjudication: null,
+    councilAudit: null,
+    redTeamFindings: [],
+    passed: true,
+    blockers: [],
+    regenerate: [],
+    decidedAt: AS_OF,
+  };
+  const fakeCommitteeFlagged: CommitteeDecision = {
+    ...fakeCommitteePassed,
+    passed: false,
+    blockers: ["COUNCIL_STATUS_FLAGGED: sample"],
+  };
+
+  // Per-report-type structure differs (the core Phase B property).
+  const sotpRows = derivePlanProgressTasks(sotpPlan, { phase: "generating", agentCheckpoints: agentsPending });
+  const instRows = derivePlanProgressTasks(instPlan, { phase: "generating", agentCheckpoints: agentsPending });
+  check(
+    "sotp plan carries Segment Map author",
+    sotpRows.some((t) => t.kind === "author" && t.name === "Author: Segment Map")
+  );
+  check(
+    "institutional plan does NOT carry Segment Map",
+    !instRows.some((t) => t.name.includes("Segment Map"))
+  );
+  check(
+    "institutional plan carries Fundamental & Valuation author",
+    instRows.some((t) => t.kind === "author" && t.name === "Author: Fundamental & Valuation Analysis")
+  );
+  check(
+    "task id sets differ across report types",
+    JSON.stringify(sotpRows.map((t) => t.id)) !== JSON.stringify(instRows.map((t) => t.id))
+  );
+  check(
+    "every row has non-empty name + role",
+    sotpRows.every((t) => t.name.length > 0 && t.role.length > 0)
+  );
+  check(
+    "author rows tagged with kind",
+    sotpRows.filter((t) => t.kind === "author").every((t) => t.role.endsWith("· author"))
+  );
+
+  // Planning phase: everything queued except nothing (red-team runs after build).
+  const planningRows = derivePlanProgressTasks(instPlan, {
+    phase: "planning",
+    agentCheckpoints: agentsPending,
+  });
+  check(
+    "planning: plan task pending",
+    planningRows.find((t) => t.kind === "plan")?.status === "pending"
+  );
+  check(
+    "planning: authors queued (pending, or blocked fail-closed)",
+    planningRows
+      .filter((t) => t.kind === "author")
+      .every((t) => t.status === "pending" || t.status === "blocked")
+  );
+
+  // Generating: plan done; authors follow personas; checkers follow verifier.
+  const genRows = derivePlanProgressTasks(instPlan, {
+    phase: "generating",
+    agentCheckpoints: agentsPending,
+  });
+  check(
+    "generating: plan task complete with type note",
+    genRows.find((t) => t.kind === "plan")?.status === "complete" &&
+      (genRows.find((t) => t.kind === "plan")?.note ?? "").includes("institutional_equity_v1")
+  );
+  check(
+    "generating: unblocked authors pending while agents pending",
+    genRows
+      .filter((t) => t.kind === "author" && t.status !== "blocked")
+      .every((t) => t.status === "pending") &&
+      genRows.some((t) => t.kind === "author" && t.status === "pending")
+  );
+
+  const strategistDone = agentsPending.map((a) =>
+    a.id === "strategist" ? { ...a, status: "complete" as const } : a
+  );
+  const halfRows = derivePlanProgressTasks(instPlan, {
+    phase: "generating",
+    agentCheckpoints: strategistDone,
+  });
+  const strategistAuthors = halfRows.filter(
+    (t) => t.kind === "author" && instPlan.tasks.find((p) => p.id === t.id)?.roleId === "council-strategist"
+  );
+  check(
+    "strategist agent complete → strategist-authored sections done",
+    strategistAuthors.length > 0 && strategistAuthors.every((t) => t.status === "complete")
+  );
+  check(
+    "other personas still queued after strategist alone (pending/blocked, never complete)",
+    halfRows
+      .filter((t) => t.kind === "author")
+      .filter((t) => !strategistAuthors.some((s) => s.id === t.id))
+      .every((t) => t.status === "pending" || t.status === "blocked")
+  );
+  check(
+    "checkers queued while verifier pending (pending/blocked, never complete)",
+    halfRows
+      .filter((t) => t.kind === "checker")
+      .every((t) => t.status === "pending" || t.status === "blocked") &&
+      halfRows.some((t) => t.kind === "checker" && t.status === "pending")
+  );
+
+  const verifierDone = agentsPending.map((a) =>
+    a.id === "verifier" ? { ...a, status: "complete" as const } : a
+  );
+  const checkedRows = derivePlanProgressTasks(instPlan, {
+    phase: "generating",
+    agentCheckpoints: verifierDone,
+    redTeam: fakeRedTeam,
+    committee: fakeCommitteePassed,
+  });
+  check(
+    "verifier complete → unblocked checker seats complete (blocked stay blocked)",
+    checkedRows
+      .filter((t) => t.kind === "checker" && t.status !== "blocked")
+      .every((t) => t.status === "complete") &&
+      checkedRows.some((t) => t.kind === "checker" && t.status === "complete")
+  );
+  check(
+    "red-team result → red-team row complete with probes note",
+    (() => {
+      const rt = checkedRows.find((t) => t.kind === "red-team");
+      return rt?.status === "complete" && (rt.note ?? "").includes("7 probes") && (rt.note ?? "").includes("no blockers");
+    })()
+  );
+  check(
+    "committee PASSED → committee row complete",
+    checkedRows.find((t) => t.kind === "committee")?.status === "complete" &&
+      checkedRows.find((t) => t.kind === "committee")?.note === "Committee PASSED"
+  );
+
+  const flaggedRows = derivePlanProgressTasks(instPlan, {
+    phase: "generating",
+    agentCheckpoints: verifierDone,
+    redTeam: fakeRedTeam,
+    committee: fakeCommitteeFlagged,
+  });
+  check(
+    "committee flags → note carries flag count",
+    flaggedRows.find((t) => t.kind === "committee")?.note === "Committee: 1 flag"
+  );
+
+  // Blocked authors stay blocked regardless of agent completion (fail-closed).
+  const noCasePlan = buildResearchTasks({
+    researchCase: null,
+    sections: instOutline.sections,
+    reportTypeId: "institutional_equity_v1",
+    depth: "concise",
+  });
+  const allDone = agentsPending.map((a) => ({ ...a, status: "complete" as const }));
+  const blockedRows = derivePlanProgressTasks(noCasePlan, {
+    phase: "generating",
+    agentCheckpoints: allDone,
+  });
+  const valuationBlocked = blockedRows.filter(
+    (t) => t.kind === "author" && (t.note ?? "").includes("NO_VALUATION")
+  );
+  check(
+    "blocked valuation author stays blocked when agents complete",
+    valuationBlocked.length > 0 && valuationBlocked.every((t) => t.status === "blocked")
+  );
+  check(
+    "verifier running → committee row verifying (gate not yet folded)",
+    derivePlanProgressTasks(instPlan, {
+      phase: "generating",
+      agentCheckpoints: agentsPending.map((a) =>
+        a.id === "verifier" ? { ...a, status: "running" as const } : a
+      ),
+    }).find((t) => t.kind === "committee")?.status === "verifying"
   );
 }
 

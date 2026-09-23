@@ -1,5 +1,5 @@
 "use client";
-import React, { useEffect, useState, useCallback, useRef } from "react";
+import React, { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import ProgressTracker from "@/components/ProgressTracker";
 import type { ReportData, GenerationState, AgentCheckpoint } from "@/types/report";
@@ -21,9 +21,19 @@ import { composeReportFromData } from "@/lib/report-composer";
 import {
   getReportBlueprint,
   selectableReportTypes,
+  resolveReportOutline,
   type ReportTypeId,
   type ResearchDepth,
 } from "@/lib/report-types";
+import {
+  buildResearchTasks,
+  derivePlanProgressTasks,
+  runCommitteeReview,
+  runRedTeam,
+  type CommitteeDecision,
+  type RedTeamResult,
+  type ResearchTaskPlan,
+} from "@/lib/ai-orchestration";
 import styles from "./report.module.css";
 
 const INITIAL_AGENT_CHECKPOINTS: AgentCheckpoint[] = [
@@ -80,6 +90,11 @@ export default function ReportClient({
   });
   const composedForRef = useRef<{ type: ReportTypeId; depth: ResearchDepth } | null>(null);
   selectorRef.current = { type: reportTypeId, depth };
+  // Phase B: live research task plan (per-report author/checker graph) +
+  // deterministic red-team / committee results that feed the progress view.
+  const [taskPlan, setTaskPlan] = useState<ResearchTaskPlan | null>(null);
+  const [redTeamResult, setRedTeamResult] = useState<RedTeamResult | null>(null);
+  const [committeeDecision, setCommitteeDecision] = useState<CommitteeDecision | null>(null);
 
   const [customKeyConfig, setCustomKeyConfig] = useState<CustomKeyConfig | null>(null);
   const [isApiKeyModalOpen, setIsApiKeyModalOpen] = useState(false);
@@ -234,6 +249,47 @@ export default function ReportClient({
         }
         companyData = parsed;
         companyDataRef.current = companyData;
+      }
+
+      // Phase B: snapshot the selected type/depth at generation start (same
+      // ref semantics as compose-at-end), resolve the blueprint outline, and
+      // build the deterministic Phase 6 task plan. The red-team probes run
+      // for real (pure — no LLM without a transport) over plan + ResearchCase.
+      let taskPlanLocal: ResearchTaskPlan | null = null;
+      let redTeamLocal: RedTeamResult | null = null;
+      setTaskPlan(null);
+      setRedTeamResult(null);
+      setCommitteeDecision(null);
+      try {
+        const genType = selectorRef.current.type;
+        const genDepth = selectorRef.current.depth;
+        const genBlueprint = getReportBlueprint(genType);
+        const researchCase = companyData?.researchCase ?? null;
+        if (genBlueprint && researchCase) {
+          const outline = resolveReportOutline(genBlueprint, {
+            depth: genDepth,
+            researchCaseHasResearch:
+              researchCase.confidence != null ||
+              (researchCase.researchQuestions?.length ?? 0) > 0,
+          });
+          taskPlanLocal = buildResearchTasks({
+            researchCase,
+            sections: outline.sections,
+            reportTypeId: genType,
+            depth: genDepth,
+          });
+          redTeamLocal = await runRedTeam({
+            plan: taskPlanLocal,
+            researchCase,
+            companyName: companyData?.profile?.name ?? null,
+          });
+          setTaskPlan(taskPlanLocal);
+          setRedTeamResult(redTeamLocal);
+        }
+      } catch (e) {
+        console.warn("[report] research task plan skipped:", e);
+        taskPlanLocal = null;
+        redTeamLocal = null;
       }
 
       // Canonical ledger FIRST (pure, cheap): AI personas and the deterministic PE
@@ -655,6 +711,20 @@ export default function ReportClient({
         }));
       }
 
+      // Phase B: fold the real council audit + red-team findings into the
+      // committee gate (deterministic — display decision, never blocks run).
+      try {
+        const councilAudit = (aiAnalysis as any)?.councilVerification ?? null;
+        setCommitteeDecision(
+          runCommitteeReview({
+            councilAudit,
+            redTeamFindings: redTeamLocal?.findings ?? [],
+          })
+        );
+      } catch (e) {
+        console.warn("[report] committee fold skipped:", e);
+      }
+
       await new Promise(r => setTimeout(r, 200));
 
       // Step 3: Assemble report data
@@ -828,10 +898,33 @@ export default function ReportClient({
     }
   }, [ticker, customKeyConfig]);
 
+  // Phase B: derive display rows from the task plan + live agent checkpoints.
+  // Pure mapping — re-renders whenever agents advance or red-team/committee
+  // results land. Falls back to the fixed council roster when no plan exists
+  // (e.g. plan build skipped, old checkpoint, or generation errored early).
+  const planTasks = useMemo(() => {
+    if (!taskPlan) return undefined;
+    const phase =
+      state.step === "fetching_data" || state.step === "calculating" || state.step === "searching" || state.step === "idle"
+        ? "planning"
+        : state.step === "generating_ai"
+          ? "generating"
+          : state.step === "building_pdf"
+            ? "assembling"
+            : state.step === "done"
+              ? "done"
+              : "planning";
+    return derivePlanProgressTasks(taskPlan, {
+      phase,
+      agentCheckpoints: state.agentCheckpoints,
+      redTeam: redTeamResult,
+      committee: committeeDecision,
+    });
+  }, [taskPlan, state.step, state.agentCheckpoints, redTeamResult, committeeDecision]);
+
   useEffect(() => {
     generateReport();
   }, [generateReport]);
-
   // Phase 9: selector change after generation → re-compose in place
   // (deterministic, no LLM, no pipeline re-run). Skips when the current
   // composed report already matches the selection.
@@ -993,6 +1086,8 @@ export default function ReportClient({
               agentCheckpoints={state.agentCheckpoints}
               supervisorCheckpoints={state.supervisorCheckpoints}
               reportContext={`${getReportBlueprint(reportTypeId)?.title ?? "Institutional Equity Research"} · ${depth === "full" ? "Full" : "Concise"} depth`}
+              reportTitle={getReportBlueprint(reportTypeId)?.title ?? "Institutional Equity Research"}
+              planTasks={planTasks}
             />
           </div>
         )}

@@ -24,6 +24,13 @@ export {
 export type { OrchestrationCall, OrchestrationTransport } from "./transport";
 export { buildResearchTasks } from "./planner";
 export type { BuildResearchTasksInput } from "./planner";
+export { derivePlanProgressTasks } from "./live-progress";
+export type {
+  DerivePlanTasksInput,
+  PlanPhase,
+  PlanProgressTask,
+  PlanTaskDisplayStatus,
+} from "./live-progress";
 export { runCommitteeReview } from "./committee";
 export type { RunCommitteeReviewInput } from "./committee";
 export { runRedTeam } from "./red-team";

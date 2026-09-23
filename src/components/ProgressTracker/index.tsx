@@ -2,16 +2,8 @@
 import React from "react";
 import styles from "./ProgressTracker.module.css";
 import type { GenerationStep, AgentCheckpoint } from "@/types/report";
-
-const STEPS: { key: GenerationStep; label: string; index: string }[] = [
-  { key: "fetching_data", label: "Querying Yahoo Finance Market Data", index: "01" },
-  { key: "calculating", label: "Computing Financial Ratios & DCF Model", index: "02" },
-  { key: "generating_ai", label: "Structuring Institutional Equity Thesis", index: "03" },
-  { key: "building_pdf", label: "Assembling Publication Dossier", index: "04" },
-  { key: "done", label: "Research Model Active", index: "05" },
-];
-
-const STEP_ORDER: GenerationStep[] = ["fetching_data", "calculating", "generating_ai", "building_pdf", "done"];
+import { buildProgressSteps, STEP_ORDER, DEFAULT_PROGRESS_TITLE } from "./steps";
+import type { PlanProgressTask } from "@/lib/ai-orchestration";
 
 interface ProgressTrackerProps {
   step: GenerationStep;
@@ -21,6 +13,24 @@ interface ProgressTrackerProps {
   supervisorCheckpoints?: AgentCheckpoint[];
   /** Phase 9: selected report type + depth shown beside staged progress. */
   reportContext?: string;
+  /** Selected blueprint title — labels steps 03–05 per report type. */
+  reportTitle?: string;
+  /**
+   * Phase B: per-report research task plan (author/checker/red-team/committee
+   * from the blueprint outline). When present, the council sub-progress shows
+   * these instead of the fixed 7-agent roster.
+   */
+  planTasks?: PlanProgressTask[];
+}
+
+function planTag(task: PlanProgressTask): { cls: string; text: string } | null {
+  if (task.status === "complete") return { cls: styles.subTagDone, text: task.kind === "committee" || task.kind === "red-team" ? "REVIEWED ✓" : "COMPLETE ✓" };
+  if (task.status === "verifying") return { cls: styles.subTagVerifying, text: task.kind === "checker" || task.kind === "committee" ? "CHECKING..." : "AUDITING..." };
+  if (task.status === "retrying") return { cls: styles.subTagRetrying, text: "RETRYING..." };
+  if (task.status === "running") return { cls: styles.subTagRunning, text: task.kind === "author" ? "AUTHORING" : task.kind === "red-team" ? "PROBING" : "WORKING" };
+  if (task.status === "blocked") return { cls: styles.subTagRetrying, text: "BLOCKED ⚠" };
+  if (task.status === "error") return { cls: styles.subTagRetrying, text: "ERROR ⚠" };
+  return { cls: styles.subTagPending, text: "QUEUED" };
 }
 
 export default function ProgressTracker({
@@ -30,8 +40,12 @@ export default function ProgressTracker({
   agentCheckpoints,
   supervisorCheckpoints,
   reportContext,
+  reportTitle = DEFAULT_PROGRESS_TITLE,
+  planTasks,
 }: ProgressTrackerProps) {
   const currentIndex = STEP_ORDER.indexOf(step);
+  const STEPS = buildProgressSteps(reportTitle);
+  const showPlan = !!planTasks && planTasks.length > 0;
 
   return (
     <div className={styles.container}>
@@ -66,20 +80,66 @@ export default function ProgressTracker({
                 {isDone && <span className={styles.doneTag}>COMPLETE</span>}
               </div>
 
-              {s.key === "generating_ai" && agentCheckpoints && agentCheckpoints.length > 0 && (isActive || isDone) && (
+              {s.key === "generating_ai" &&
+                (showPlan || (agentCheckpoints && agentCheckpoints.length > 0)) &&
+                (isActive || isDone) && (
                 <div className={styles.subProgressContainer}>
                   <div className={styles.subProgressHeader}>
                     <div className={styles.subProgressHeaderLeft}>
                       <span className={styles.subProgressPulse} />
-                      <span className={styles.subProgressTitle}>AI ANALYST COUNCIL CHECKPOINTS</span>
+                      <span className={styles.subProgressTitle}>
+                        {showPlan
+                          ? `RESEARCH TASK PLAN · ${reportTitle.toUpperCase()}`
+                          : `AI ANALYST COUNCIL · ${reportTitle.toUpperCase()}`}
+                      </span>
                     </div>
                     <span className={styles.subProgressBadge}>
-                      {agentCheckpoints.filter((c) => c.status === "complete").length} / {agentCheckpoints.length} READY
+                      {showPlan
+                        ? `${planTasks!.filter((t) => t.status === "complete").length} / ${planTasks!.length} READY`
+                        : `${agentCheckpoints!.filter((c) => c.status === "complete").length} / ${agentCheckpoints!.length} READY`}
                     </span>
                   </div>
 
                   <div className={styles.subSteps}>
-                    {agentCheckpoints.map((agent, agentIdx) => {
+                    {showPlan
+                      ? planTasks!.map((task, taskIdx) => {
+                          const tag = planTag(task);
+                          const isActiveTask =
+                            task.status === "running" ||
+                            task.status === "verifying" ||
+                            task.status === "retrying";
+                          return (
+                            <div
+                              key={task.id}
+                              className={`${styles.subStep} ${task.status === "complete" ? styles.subStepDone : ""} ${isActiveTask ? styles.subStepActive : ""} ${task.status === "pending" ? styles.subStepPending : ""} ${task.status === "blocked" ? styles.subStepRetrying : ""}`}
+                            >
+                              <div className={styles.subStepLeft}>
+                                <div className={styles.subStepIndex}>
+                                  {task.status === "complete" ? (
+                                    <span className={styles.subCheck}>✓</span>
+                                  ) : isActiveTask ? (
+                                    <span className={styles.subSpinner}>⟳</span>
+                                  ) : (
+                                    String(taskIdx + 1).padStart(2, "0")
+                                  )}
+                                </div>
+                                <div className={styles.subStepText}>
+                                  <span className={styles.subStepName}>{task.name}</span>
+                                  <span className={styles.subStepRole}>{task.role}</span>
+                                  {task.note && (
+                                    <span className={styles.subStepAuditNote}>{task.note}</span>
+                                  )}
+                                </div>
+                              </div>
+                              <div className={styles.subStepStatus}>
+                                {tag && (
+                                  <span className={`${styles.subStepTag} ${tag.cls}`}>{tag.text}</span>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })
+                      : agentCheckpoints!.map((agent, agentIdx) => {
                       const isAgentDone = agent.status === "complete";
                       const isAgentVerifying = agent.status === "verifying";
                       const isAgentRunning = agent.status === "running";

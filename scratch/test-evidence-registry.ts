@@ -7,7 +7,8 @@
  *  4. buildEvidenceRegistryFromInputs: evidence IDs present with right tiers.
  *  5. Claim validator: supported→info, fabricated material→BLOCKER,
  *     multiples→warn, multi-claim coverage + set-level BLOCKER.
- *  6. Gate integration: claim blockers → publication BLOCKED.
+ *  6. Gate integration: claim blockers → publication BLOCKED (gates on) /
+ *     advisory (gates off via QA_GATES_ENABLED kill-switch).
  *  7. End-to-end: extractClaims → validateClaimSet against registry.
  *
  * Run: npx tsx scratch/test-evidence-registry.ts (exit 1 on failure)
@@ -19,6 +20,7 @@ import {
 import { validateClaim, validateClaimSet } from "../src/lib/claim-validator";
 import { extractClaims, type Claim } from "../src/lib/claims";
 import { evaluatePublicationGate, toGateFindings } from "../src/lib/publication-gate";
+import { QA_GATES_ENABLED } from "../src/lib/qa-gates";
 
 let passes = 0;
 let failures = 0;
@@ -136,7 +138,11 @@ console.log("--- 6. gate integration ---");
       source: "QA" as const, code: "CLAIM", severity: v.severity, detail: v.detail,
     })),
   ]);
-  check("claim + recon blockers → BLOCKED", gateBlock.decision === "BLOCKED" && gateBlock.blockers.length === 2);
+  if (QA_GATES_ENABLED) {
+    check("claim + recon blockers → BLOCKED", gateBlock.decision === "BLOCKED" && gateBlock.blockers.length === 2);
+  } else {
+    check("claim + recon blockers (gates off) → advisory not BLOCKED", gateBlock.decision !== "BLOCKED");
+  }
   void toGateFindings;
 }
 
