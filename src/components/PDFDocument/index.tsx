@@ -74,6 +74,7 @@ import {
   canonicalScenarios,
 } from "@/lib/canonical";
 import { capPillarsToRating } from "@/lib/moat";
+import type { ComposedReport } from "@/lib/report-composer";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // HELPER FORMATTERS
@@ -1117,7 +1118,16 @@ const buildFiveYearStatementModel = (data: ReportData): StatementColumn[] => {
 // 3-Column Institutional Architecture with Table of Contents (concise-aware:
 // 10 pages by default, 24 in full mode)
 // ─────────────────────────────────────────────────────────────────────────────
-const CoverPage = ({ data, concise = true }: { data: ReportData; concise?: boolean }) => {
+const CoverPage = ({
+  data,
+  concise = true,
+  tocTitles,
+}: {
+  data: ReportData;
+  concise?: boolean;
+  /** Titles from ComposedReport outline (Phase 5). Page numbers stay presentation-only. */
+  tocTitles?: string[];
+}) => {
   const ledger = data.assumptionsLedger;
   const { currency } = data.profile;
   const cmpSym =
@@ -1228,32 +1238,41 @@ const CoverPage = ({ data, concise = true }: { data: ReportData; concise?: boole
           <Text style={{ fontSize: 6.5, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2.0 }}>
             Report Contents
           </Text>
-          {(concise
-            ? [
-                ["Executive Summary & Thesis", "1"],
-                ["Valuation: DCF, Scenarios & Sensitivity", "2"],
-                ["Moat & Price / Fair Value", "3"],
-                ["Bulls / Bears, Risks & Catalysts", "4"],
-                ["Multi-Year Statement Models", "5–7"],
-                ["Comparable Company Comps", "8"],
-                ["QA Checksum & Disclosures", "9–10"],
-              ]
-            : [
-                ["Executive Summary & Thesis", "1–5"],
-                ["Credit & Solvency Analysis", "6–7"],
-                ["Management & Governance", "8–9"],
-                ["Catalysts & Market Reaction", "10–12"],
-                ["Multi-Year Statement Models", "13–15"],
-                ["Comparable Company Comps", "16–17"],
-                ["Valuation & Credit Models", "18–21"],
-                ["Statutory Disclosures & QA", "22–24"],
-              ]
-          ).map(([section, pageNum], idx) => (
-            <View key={idx} style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 1.8 }}>
-              <Text style={{ fontSize: 5.8, color: COLORS.textSecondary, maxWidth: "78%" }}>{section}</Text>
-              <Text style={{ fontSize: 5.8, fontFamily: "Helvetica-Bold", color: COLORS.slateDark }}>{pageNum}</Text>
-            </View>
-          ))}
+          {(() => {
+            // Titles may come from the composed outline; page ranges are presentation-only.
+            const defaultRows: Array<[string, string]> = concise
+              ? [
+                  ["Executive Summary & Thesis", "1"],
+                  ["Valuation: DCF, Scenarios & Sensitivity", "2"],
+                  ["Moat & Price / Fair Value", "3"],
+                  ["Bulls / Bears, Risks & Catalysts", "4"],
+                  ["Multi-Year Statement Models", "5–7"],
+                  ["Comparable Company Comps", "8"],
+                  ["QA Checksum & Disclosures", "9–10"],
+                ]
+              : [
+                  ["Executive Summary & Thesis", "1–5"],
+                  ["Credit & Solvency Analysis", "6–7"],
+                  ["Management & Governance", "8–9"],
+                  ["Catalysts & Market Reaction", "10–12"],
+                  ["Multi-Year Statement Models", "13–15"],
+                  ["Comparable Company Comps", "16–17"],
+                  ["Valuation & Credit Models", "18–21"],
+                  ["Statutory Disclosures & QA", "22–24"],
+                ];
+            const rows: Array<[string, string]> =
+              tocTitles && tocTitles.length > 0
+                ? tocTitles.map(
+                    (title, i): [string, string] => [title, defaultRows[i]?.[1] ?? ""]
+                  )
+                : defaultRows;
+            return rows.map(([section, pageNum], idx) => (
+              <View key={idx} style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 1.8 }}>
+                <Text style={{ fontSize: 5.8, color: COLORS.textSecondary, maxWidth: "78%" }}>{section}</Text>
+                <Text style={{ fontSize: 5.8, fontFamily: "Helvetica-Bold", color: COLORS.slateDark }}>{pageNum}</Text>
+              </View>
+            ));
+          })()}
 
           <View style={{ height: 0.5, backgroundColor: COLORS.hairlineLight, marginVertical: 3 }} />
 
@@ -6600,7 +6619,7 @@ const ResearchMethodologyValuationPage2 = ({ data }: { data: ReportData }) => {
           Valuation Uncertainty &amp; Margin of Safety Framework
         </Text>
         <Text style={{ fontSize: 5.4, color: COLORS.textMuted, marginTop: 2 }}>
-          Reference only — this report's applied uncertainty rating and scenario weights appear in the Assumptions Ledger and QA checksum sections.
+          Reference only — this report&apos;s applied uncertainty rating and scenario weights appear in the Assumptions Ledger and QA checksum sections.
         </Text>
       </View>
 
@@ -7830,107 +7849,214 @@ const ResearchDebatesPage = ({ data }: { data: ReportData }) => {
 // moat + pillars, bulls/bears/risks, all three statements, comps, QA, statutory
 // disclaimer. Full adds reference/boilerplate depth (five-forces, credit
 // scorecards, governance, event study, methodology, AI disclosure).
+//
+// Phase 5: when a ComposedReport is present, section order / TOC titles come
+// from the composed outline (presentation-only mapping via pdfComponent).
+// Without one, the legacy hardcoded structure below is unchanged.
 // ─────────────────────────────────────────────────────────────────────────────
-export const ReportDocument = ({ data, concise = true }: { data: ReportData; concise?: boolean }) => (
-  <Document
-    title={`${data.profile.name} — Institutional Equity Research Report`}
-    author={data.analystName}
-    subject={`Institutional Equity Research: ${data.profile.ticker}`}
-    keywords={`equity research, ${data.profile.ticker}, ${data.profile.name}, ${data.profile.sector}`}
-    creator="Institutional Equity Research Desk"
-    producer="Institutional Equity Research Desk"
-  >
-    {/* Page 1: 3-Column Institutional Cover Page with TOC */}
-    <CoverPage data={data} concise={concise} />
+type PdfSectionProps = { data: ReportData; concise?: boolean; composed?: ComposedReport | null };
 
-    {/* Content-intelligence: research debates + evidence map (omits when absent) */}
-    <ResearchDebatesPage data={data} />
+function renderPdfSection(pdfComponent: string, props: PdfSectionProps): React.ReactElement | null {
+  const { data, concise = true, composed } = props;
+  switch (pdfComponent) {
+    case "CoverPage":
+      return (
+        <CoverPage
+          data={data}
+          concise={concise}
+          tocTitles={composed?.blueprintId === "institutional_equity_v1" ? composed.toc.map((t) => t.title) : undefined}
+        />
+      );
+    case "ResearchDebatesPage":
+      return <ResearchDebatesPage data={data} />;
+    case "FundamentalAnalysisPage":
+      return <FundamentalAnalysisPage data={data} />;
+    case "MoatAndPriceFairValuePage":
+      return <MoatAndPriceFairValuePage data={data} />;
+    case "MoatSourcesPage":
+      return <MoatSourcesPage data={data} />;
+    case "BullsSayBearsSayPage":
+      return <BullsSayBearsSayPage data={data} />;
+    case "CreditAnalysisPage1":
+      return <CreditAnalysisPage1 data={data} />;
+    case "CreditAnalysisPage2":
+      return <CreditAnalysisPage2 data={data} />;
+    case "ManagementAndOwnershipPage1":
+      return <ManagementAndOwnershipPage1 data={data} />;
+    case "ManagementAndOwnershipPage2":
+      return <ManagementAndOwnershipPage2 data={data} />;
+    case "EventBasedPriceMovementPage":
+      return <EventBasedPriceMovementPage data={data} />;
+    case "CorporateDisclosuresAndCatalystsPage":
+      return <CorporateDisclosuresAndCatalystsPage data={data} />;
+    case "AnalystForecastsSummaryPage":
+      return <AnalystForecastsSummaryPage data={data} />;
+    case "IncomeStatementDetailedPage":
+      return <IncomeStatementDetailedPage data={data} concise={concise} />;
+    case "BalanceSheetDetailedPage":
+      return <BalanceSheetDetailedPage data={data} />;
+    case "CashFlowDetailedPage":
+      return <CashFlowDetailedPage data={data} />;
+    case "ComparableCompanyAnalysisPage1":
+      return <ComparableCompanyAnalysisPage1 data={data} concise={concise} />;
+    case "ComparableCompanyAnalysisPage2":
+      return <ComparableCompanyAnalysisPage2 data={data} />;
+    case "ResearchMethodologyValuationPage1":
+      return <ResearchMethodologyValuationPage1 data={data} />;
+    case "ResearchMethodologyValuationPage2":
+      return <ResearchMethodologyValuationPage2 data={data} />;
+    case "CreditRatingApproachPage1":
+      return <CreditRatingApproachPage1 data={data} />;
+    case "CreditRatingApproachPage2":
+      return <CreditRatingApproachPage2 data={data} />;
+    case "InstitutionalDisclaimerPage":
+      return <InstitutionalDisclaimerPage data={data} />;
+    case "AnalystAIDisclosurePage":
+      return <AnalystAIDisclosurePage data={data} />;
+    case "QualityAssuranceChecksumPage":
+      return <QualityAssuranceChecksumPage data={data} />;
+    default:
+      return null;
+  }
+}
 
-    {/* Page 2: Fundamental & Valuation Analysis (Scenarios & Sensitivity Matrix) */}
-    <FundamentalAnalysisPage data={data} />
+export const ReportDocument = ({
+  data,
+  concise = true,
+  composed: composedProp,
+}: {
+  data: ReportData;
+  concise?: boolean;
+  /** Explicit composed outline; defaults to `data.composedReport`. */
+  composed?: ComposedReport | null;
+}) => {
+  const composed = composedProp ?? data.composedReport ?? null;
+  const depthConcise = composed ? composed.depth === "concise" : concise;
+  const docMeta = {
+    title: `${data.profile.name} — Institutional Equity Research Report`,
+    author: data.analystName,
+    subject: `Institutional Equity Research: ${data.profile.ticker}`,
+    keywords: `equity research, ${data.profile.ticker}, ${data.profile.name}, ${data.profile.sector}`,
+    creator: "Institutional Equity Research Desk",
+    producer: "Institutional Equity Research Desk",
+  } as const;
 
-    {/* Page 3: Competitive Moat & Price/Fair Value (Stepped Chart & Moat Matrix) */}
-    <MoatAndPriceFairValuePage data={data} />
+  // Composed path: every institutional section carries a pdfComponent mapping.
+  if (
+    composed &&
+    composed.sections.length > 0 &&
+    composed.sections.every((s) => typeof s.pdfComponent === "string" && s.pdfComponent.length > 0)
+  ) {
+    return (
+      <Document {...docMeta}>
+        {composed.sections.map((s) => (
+          <React.Fragment key={s.id}>
+            {renderPdfSection(s.pdfComponent as string, {
+              data,
+              concise: depthConcise,
+              composed,
+            })}
+          </React.Fragment>
+        ))}
+      </Document>
+    );
+  }
 
-    {!concise && (
-      <>
-        {/* Page 4: Moat Sources & Scale Advantages (Five Forces Matrix) */}
-        <MoatSourcesPage data={data} />
-      </>
-    )}
+  // Legacy path (no composed report): identical hardcoded structure.
+  return (
+    <Document {...docMeta}>
+      {/* Page 1: 3-Column Institutional Cover Page with TOC */}
+      <CoverPage data={data} concise={depthConcise} />
 
-    {/* Page 4/5: Bulls Say / Bears Say & Stewardship (Catalysts & Risks Table) */}
-    <BullsSayBearsSayPage data={data} />
+      {/* Content-intelligence: research debates + evidence map (omits when absent) */}
+      <ResearchDebatesPage data={data} />
 
-    {!concise && (
-      <>
-        {/* Page 6: Institutional Credit Analysis (Cash Flow, Cushion Chart & Ratios) */}
-        <CreditAnalysisPage1 data={data} />
+      {/* Page 2: Fundamental & Valuation Analysis (Scenarios & Sensitivity Matrix) */}
+      <FundamentalAnalysisPage data={data} />
 
-        {/* Page 7: Capital Structure & Enterprise Risk (Risk Mitigation Matrix) */}
-        <CreditAnalysisPage2 data={data} />
+      {/* Page 3: Competitive Moat & Price/Fair Value (Stepped Chart & Moat Matrix) */}
+      <MoatAndPriceFairValuePage data={data} />
 
-        {/* Page 8: Management & Governance (Activity, Funds & Governance Scorecard) */}
-        <ManagementAndOwnershipPage1 data={data} />
+      {!depthConcise && (
+        <>
+          {/* Page 4: Moat Sources & Scale Advantages (Five Forces Matrix) */}
+          <MoatSourcesPage data={data} />
+        </>
+      )}
 
-        {/* Page 9: Capital Allocation & Corporate Strategy (Deployment Table) */}
-        <ManagementAndOwnershipPage2 data={data} />
+      {/* Page 4/5: Bulls Say / Bears Say & Stewardship (Catalysts & Risks Table) */}
+      <BullsSayBearsSayPage data={data} />
 
-        {/* Page 10: Event-Based Price Movement & Market Reaction Analysis */}
-        <EventBasedPriceMovementPage data={data} />
+      {!depthConcise && (
+        <>
+          {/* Page 6: Institutional Credit Analysis (Cash Flow, Cushion Chart & Ratios) */}
+          <CreditAnalysisPage1 data={data} />
 
-        {/* Page 11: Corporate Disclosures & Catalyst Transmission */}
-        <CorporateDisclosuresAndCatalystsPage data={data} />
+          {/* Page 7: Capital Structure & Enterprise Risk (Risk Mitigation Matrix) */}
+          <CreditAnalysisPage2 data={data} />
 
-        {/* Page 12: Analyst Forecasts & Financial Summary (6 Comprehensive Tables) */}
-        <AnalystForecastsSummaryPage data={data} />
-      </>
-    )}
+          {/* Page 8: Management & Governance (Activity, Funds & Governance Scorecard) */}
+          <ManagementAndOwnershipPage1 data={data} />
 
-    {/* Page 5–7/13–15: Income Statement Multi-Year Model (24 line items in Millions) */}
-    <IncomeStatementDetailedPage data={data} concise={concise} />
+          {/* Page 9: Capital Allocation & Corporate Strategy (Deployment Table) */}
+          <ManagementAndOwnershipPage2 data={data} />
 
-    {/* Balance Sheet Multi-Year Model (23 line items in Millions) */}
-    <BalanceSheetDetailedPage data={data} />
+          {/* Page 10: Event-Based Price Movement & Market Reaction Analysis */}
+          <EventBasedPriceMovementPage data={data} />
 
-    {/* Cash Flow Multi-Year Model (21 line items in Millions) */}
-    <CashFlowDetailedPage data={data} />
+          {/* Page 11: Corporate Disclosures & Catalyst Transmission */}
+          <CorporateDisclosuresAndCatalystsPage data={data} />
 
-    {/* Page 8/16: Comparable Company Analysis (Valuation, Returns & Growth) */}
-    <ComparableCompanyAnalysisPage1 data={data} concise={concise} />
+          {/* Page 12: Analyst Forecasts & Financial Summary (6 Comprehensive Tables) */}
+          <AnalystForecastsSummaryPage data={data} />
+        </>
+      )}
 
-    {!concise && (
-      <>
-        {/* Page 17: Comparable Company Analysis (Profitability, Leverage & Liquidity) */}
-        <ComparableCompanyAnalysisPage2 data={data} />
+      {/* Page 5–7/13–15: Income Statement Multi-Year Model (24 line items in Millions) */}
+      <IncomeStatementDetailedPage data={data} concise={depthConcise} />
 
-        {/* Page 18: Institutional Research Methodology (5-Stage Valuation Process) */}
-        <ResearchMethodologyValuationPage1 data={data} />
+      {/* Balance Sheet Multi-Year Model (23 line items in Millions) */}
+      <BalanceSheetDetailedPage data={data} />
 
-        {/* Page 19: Valuation Uncertainty & Margin of Safety Framework (Star Bands) */}
-        <ResearchMethodologyValuationPage2 data={data} />
+      {/* Cash Flow Multi-Year Model (21 line items in Millions) */}
+      <CashFlowDetailedPage data={data} />
 
-        {/* Page 20: Corporate Credit Rating Framework (5-Stage Credit Pipeline) */}
-        <CreditRatingApproachPage1 data={data} />
+      {/* Page 8/16: Comparable Company Analysis (Valuation, Returns & Growth) */}
+      <ComparableCompanyAnalysisPage1 data={data} concise={depthConcise} />
 
-        {/* Page 21: Corporate Credit Assessment & Solvency Scorecard */}
-        <CreditRatingApproachPage2 data={data} />
-      </>
-    )}
+      {!depthConcise && (
+        <>
+          {/* Page 17: Comparable Company Analysis (Profitability, Leverage & Liquidity) */}
+          <ComparableCompanyAnalysisPage2 data={data} />
 
-    {/* Page 9–10/22–24: Statutory Disclosures & Limitation of Liability */}
-    <InstitutionalDisclaimerPage data={data} />
+          {/* Page 18: Institutional Research Methodology (5-Stage Valuation Process) */}
+          <ResearchMethodologyValuationPage1 data={data} />
 
-    {!concise && (
-      <>
-        {/* Page 23: Analyst Certifications & Mandatory AI Safe Harbor */}
-        <AnalystAIDisclosurePage data={data} />
-      </>
-    )}
+          {/* Page 19: Valuation Uncertainty & Margin of Safety Framework (Star Bands) */}
+          <ResearchMethodologyValuationPage2 data={data} />
 
-    {/* Pre-Publish QA & Valuation Consistency Checksum */}
-    <QualityAssuranceChecksumPage data={data} />
-  </Document>
-);
+          {/* Page 20: Corporate Credit Rating Framework (5-Stage Credit Pipeline) */}
+          <CreditRatingApproachPage1 data={data} />
+
+          {/* Page 21: Corporate Credit Assessment & Solvency Scorecard */}
+          <CreditRatingApproachPage2 data={data} />
+        </>
+      )}
+
+      {/* Page 9–10/22–24: Statutory Disclosures & Limitation of Liability */}
+      <InstitutionalDisclaimerPage data={data} />
+
+      {!depthConcise && (
+        <>
+          {/* Page 23: Analyst Certifications & Mandatory AI Safe Harbor */}
+          <AnalystAIDisclosurePage data={data} />
+        </>
+      )}
+
+      {/* Pre-Publish QA & Valuation Consistency Checksum */}
+      <QualityAssuranceChecksumPage data={data} />
+    </Document>
+  );
+};
 
 export default ReportDocument;

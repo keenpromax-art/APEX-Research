@@ -24,6 +24,7 @@ import { runFinancialSupervisor } from "@/lib/financial-supervisor";
 import { auditValuation } from "@/lib/valuation-audit";
 import { buildBaselineReconciliation } from "@/lib/guidance-reconciliation";
 import { assessDataConfidence } from "@/lib/data-confidence";
+import { buildResearchCase, type ResearchCase } from "@/lib/research-case";
 import { fetchScreenerSnapshot, type ScreenerCrosscheck } from "@/lib/screener-crosscheck";
 import { fetchEdgarSnapshot, type EdgarCrosscheck } from "@/lib/edgar-crosscheck";
 import { fetchNasdaqCheck, type NasdaqCheck } from "@/lib/nasdaq-crosscheck";
@@ -671,6 +672,30 @@ export async function GET(request: NextRequest) {
       console.warn("[company] Audit annex build failed (non-blocking):", e instanceof Error ? e.message : e);
     }
 
+    const eventPriceMovements = buildEventPriceMovements(tickerNews, stockData, companyProfile, eventPriceLookup);
+
+    // ResearchCase (Phase 2): additive, non-blocking — same contract as the
+    // audit annex. Report renderers ignore absence; failure never sinks the
+    // response. Built by reference from objects this pipeline already sealed.
+    let researchCase: ResearchCase | null = null;
+    try {
+      researchCase = buildResearchCase({
+        profile: companyProfile,
+        stockData,
+        annualFinancials,
+        quarterlyFinancials,
+        ontology,
+        canonicalFacts,
+        valuation: dcf,
+        peers: peers as never[],
+        evidence: evidenceRegistry,
+        dataConfidence,
+        eventPriceMovements,
+      });
+    } catch (e) {
+      console.warn("[company] ResearchCase build failed (non-blocking):", e instanceof Error ? e.message : e);
+    }
+
     return NextResponse.json({
       pipeline: lifecycle.history_(),
       profile: companyProfile,
@@ -689,7 +714,7 @@ export async function GET(request: NextRequest) {
       shareholding,
       peers,
       news: tickerNews,
-      eventPriceMovements: buildEventPriceMovements(tickerNews, stockData, companyProfile, eventPriceLookup),
+      eventPriceMovements,
       masterReportFacts,
       calibration: valuationCalibration,
       canonicalFacts,
@@ -707,6 +732,9 @@ export async function GET(request: NextRequest) {
       valuationAudit,
       baselineReconciliation,
       dataConfidence,
+      // ResearchCase (Phase 2): report-agnostic research container for later
+      // blueprints/composer. Optional for legacy consumers — absence = not built.
+      researchCase,
       // Advisory cross-check annex: Screener.in vs Yahoo (India-only).
       // Priced figures everywhere remain Yahoo-only; this elaborates gaps.
       screenerCrosscheck,

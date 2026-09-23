@@ -41,6 +41,21 @@
   letter-spacing: 0.02em;
 }
 
+/* Phase 9: selected report type + research depth beside staged progress. */
+.progressContext {
+  color: var(--ink-subtle);
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 45%;
+  text-align: center;
+}
+
 .progressPercent {
   font-family: var(--font-mono);
   font-weight: 600;

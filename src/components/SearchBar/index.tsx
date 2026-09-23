@@ -150,7 +150,7 @@ export default function SearchBar({ onSelect, loading }: SearchBarProps) {
 
       {open && results.length === 0 && !searching && query.length > 1 && (
         <div className={styles.dropdown}>
-          <div className={styles.noResults}>No results found for "{query}"</div>
+          <div className={styles.noResults}>No results found for &quot;{query}&quot;</div>
         </div>
       )}
     </div>

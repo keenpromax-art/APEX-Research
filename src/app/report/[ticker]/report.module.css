@@ -450,6 +450,125 @@
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
 
+/* ── Phase 9: Report Type + Research Depth selector bar ── */
+.selectorBar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 10px 12px;
+  margin-top: 12px;
+  background: var(--surface-1);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-md);
+}
+
+.selectorLabel {
+  font-size: 11px;
+  color: var(--ink-subtle);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.selectorSelect {
+  background: var(--surface-2);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-xs);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  font-weight: 500;
+  padding: 5px 9px;
+  cursor: pointer;
+  transition: border-color 0.12s ease;
+}
+
+.selectorSelect:hover,
+.selectorSelect:focus {
+  border-color: var(--hairline-strong);
+  outline: none;
+}
+
+.depthToggle {
+  display: inline-flex;
+  gap: 3px;
+  background: var(--surface-2);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-xs);
+  padding: 2px;
+}
+
+.depthBtn {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--ink-muted);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 500;
+  padding: 4px 12px;
+  border-radius: calc(var(--radius-xs) - 1px);
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.depthBtn:hover {
+  color: var(--ink);
+  background: var(--surface-hover);
+}
+
+.depthBtnActive {
+  color: var(--ink);
+  background: var(--surface-2);
+  border-color: var(--hairline-strong);
+  font-weight: 600;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.selectorHint {
+  font-size: 11px;
+  color: var(--ink-subtle);
+  font-style: italic;
+  margin-left: auto;
+}
+
+/* ── Phase 9: Report Outline tab ── */
+.outlineHeaderRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.outlineBadges {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.outlineBadge {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  padding: 3px 9px;
+  border-radius: var(--radius-xs);
+  border: 1px solid var(--hairline-strong);
+  color: var(--ink-secondary);
+  background: var(--surface-2);
+  text-transform: uppercase;
+}
+
+.outlineBadgeFull {
+  color: var(--bullish);
+  background: var(--bullish-bg);
+  border-color: var(--bullish-border);
+}
+
+.outlineBadgeConcise {
+  color: var(--primary-light);
+  background: var(--surface-2);
+}
+
 /* ── Tab Content Sections ── */
 .tabContent {
   display: flex;

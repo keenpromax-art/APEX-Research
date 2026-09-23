@@ -1313,7 +1313,6 @@ export function computeDCF(
   });
 
   // Read-out (verbatim — the assumption vectors below ARE the forecast's):
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const driver = {
     revenueGrowthRates: canonicalForecast.revenueGrowthRates,
     ebitMargins: canonicalForecast.ebitMargins,

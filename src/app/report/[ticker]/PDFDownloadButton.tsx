@@ -2,6 +2,7 @@
 import React, { useState } from "react";
 import type { ReportData } from "@/types/report";
 import { QA_GATES_ENABLED } from "@/lib/qa-gates";
+import { getReportBlueprint } from "@/lib/report-types";
 import styles from "./report.module.css";
 
 interface Props {
@@ -41,13 +42,21 @@ export default function PDFDownloadButton({ data }: Props) {
       ]);
 
       setStatusText("Compiling PDF Report...");
-      const blob = await pdf(<ReportDocument data={data} />).toBlob();
+      const blob = await pdf(<ReportDocument data={data} composed={data.composedReport ?? null} />).toBlob();
 
       setStatusText("Starting Download...");
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `${data.profile.ticker}_Institutional_Equity_Research.pdf`;
+      // Phase 9: filename follows the composed blueprint title (institutional
+      // default stays "Institutional_Equity_Research" — same slug as before).
+      const bpTitle =
+        data.composedReport &&
+        getReportBlueprint(data.composedReport.blueprintId)?.title;
+      const fileLabel = (bpTitle ?? "Institutional Equity Research")
+        .replace(/[^a-zA-Z0-9]+/g, "_")
+        .replace(/^_+|_+$/g, "");
+      a.download = `${data.profile.ticker}_${fileLabel}.pdf`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);

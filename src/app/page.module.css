@@ -168,6 +168,100 @@
   width: 100%;
 }
 
+/* ── Phase 9: Report Type + Research Depth selectors ── */
+.reportOptions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.optionGroup {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.optionLabel {
+  font-size: 11px;
+  color: var(--ink-subtle);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.reportTypeSelect {
+  background: var(--surface-1);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-xs);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  font-weight: 500;
+  padding: 5px 9px;
+  cursor: pointer;
+  transition: border-color 0.12s ease;
+}
+
+.reportTypeSelect:hover,
+.reportTypeSelect:focus {
+  border-color: var(--hairline-strong);
+  outline: none;
+}
+
+.reportTypeSelect:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.depthToggle {
+  display: inline-flex;
+  gap: 3px;
+  background: var(--surface-1);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-xs);
+  padding: 2px;
+}
+
+.depthBtn {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--ink-muted);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 500;
+  padding: 4px 12px;
+  border-radius: calc(var(--radius-xs) - 1px);
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.depthBtn:hover:not(:disabled) {
+  color: var(--ink);
+  background: var(--surface-hover);
+}
+
+.depthBtnActive {
+  color: var(--ink);
+  background: var(--surface-2);
+  border-color: var(--hairline-strong);
+  font-weight: 600;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.depthBtn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.optionHint {
+  font-size: 11px;
+  color: var(--ink-subtle);
+  font-style: italic;
+}
+
 .quickTickers {
   display: flex;
   align-items: center;

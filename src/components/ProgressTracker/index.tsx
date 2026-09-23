@@ -19,6 +19,8 @@ interface ProgressTrackerProps {
   progress: number;
   agentCheckpoints?: AgentCheckpoint[];
   supervisorCheckpoints?: AgentCheckpoint[];
+  /** Phase 9: selected report type + depth shown beside staged progress. */
+  reportContext?: string;
 }
 
 export default function ProgressTracker({
@@ -27,6 +29,7 @@ export default function ProgressTracker({
   progress,
   agentCheckpoints,
   supervisorCheckpoints,
+  reportContext,
 }: ProgressTrackerProps) {
   const currentIndex = STEP_ORDER.indexOf(step);
 
@@ -37,6 +40,7 @@ export default function ProgressTracker({
       </div>
       <div className={styles.progressHeader}>
         <span className={styles.progressStatus}>{message || "Processing..."}</span>
+        {reportContext && <span className={styles.progressContext}>{reportContext}</span>}
         <span className={styles.progressPercent}>{Math.round(progress)}%</span>
       </div>
 

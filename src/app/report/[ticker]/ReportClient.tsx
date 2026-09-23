@@ -17,6 +17,13 @@ import { buildEventPriceMovements } from "@/lib/event-price-engine";
 import ApiKeyModal, { loadSavedAiConfig, loadServerModelOverride } from "@/components/ApiKeyModal";
 import { SUPPORTED_PROVIDERS, type CustomKeyConfig } from "@/lib/ai-providers";
 import { enrichAIAnalysisFromResearchReport } from "@/lib/ai-first/enrich-report";
+import { composeReportFromData } from "@/lib/report-composer";
+import {
+  getReportBlueprint,
+  selectableReportTypes,
+  type ReportTypeId,
+  type ResearchDepth,
+} from "@/lib/report-types";
 import styles from "./report.module.css";
 
 const INITIAL_AGENT_CHECKPOINTS: AgentCheckpoint[] = [
@@ -39,11 +46,19 @@ import PDFDownloadButton from "./PDFDownloadButton";
 
 interface Props {
   ticker: string;
+  /** Phase 9: validated report type from ?type= (server-side, fail-closed). */
+  initialReportType?: ReportTypeId;
+  /** Phase 9: validated research depth from ?depth=. */
+  initialDepth?: ResearchDepth;
 }
 
-type TabKey = "overview" | "council" | "dcf" | "financials" | "dupont" | "peers" | "risks";
+type TabKey = "overview" | "council" | "dcf" | "financials" | "dupont" | "peers" | "risks" | "outline";
 
-export default function ReportClient({ ticker }: Props) {
+export default function ReportClient({
+  ticker,
+  initialReportType = "institutional_equity_v1",
+  initialDepth = "concise",
+}: Props) {
   const router = useRouter();
   const [state, setState] = useState<GenerationState>({
     step: "idle",
@@ -55,6 +70,16 @@ export default function ReportClient({ ticker }: Props) {
   const [reportData, setReportData] = useState<ReportData | null>(null);
   const [activeTab, setActiveTab] = useState<TabKey>("overview");
   const [selectedAgentFilter, setSelectedAgentFilter] = useState<string>("all");
+  // Phase 9: selectors — never in generateReport deps (changing them
+  // re-composes the outline, it never restarts the generation pipeline).
+  const [reportTypeId, setReportTypeId] = useState<ReportTypeId>(initialReportType);
+  const [depth, setDepth] = useState<ResearchDepth>(initialDepth);
+  const selectorRef = useRef<{ type: ReportTypeId; depth: ResearchDepth }>({
+    type: initialReportType,
+    depth: initialDepth,
+  });
+  const composedForRef = useRef<{ type: ReportTypeId; depth: ResearchDepth } | null>(null);
+  selectorRef.current = { type: reportTypeId, depth };
 
   const [customKeyConfig, setCustomKeyConfig] = useState<CustomKeyConfig | null>(null);
   const [isApiKeyModalOpen, setIsApiKeyModalOpen] = useState(false);
@@ -711,6 +736,7 @@ export default function ReportClient({ ticker }: Props) {
         valuationAudit: companyData.valuationAudit ?? null,
         baselineReconciliation: companyData.baselineReconciliation ?? null,
         dataConfidence: companyData.dataConfidence ?? null,
+        researchCase: companyData.researchCase ?? null,
         canonicalForecast: companyData.canonicalForecast ?? (dcf as any)?.canonicalForecast ?? null,
         shareholding: companyData.shareholding,
         peers: companyData.peers || [],
@@ -775,6 +801,21 @@ export default function ReportClient({ ticker }: Props) {
       const finalQAResult = validateMasterReport(masterReportFacts, report);
       report.finalQAResult = finalQAResult;
 
+      // Phase 5: research → ComposedReport (outline + modules). Non-blocking;
+      // on failure the PDF keeps its legacy structure. Phase 9: composition
+      // honours the selected report type + research depth (selector refs —
+      // not state deps, so a selector change never restarts generation).
+      try {
+        report.composedReport = composeReportFromData(report, {
+          reportTypeId: selectorRef.current.type,
+          depth: selectorRef.current.depth,
+        });
+        composedForRef.current = { ...selectorRef.current };
+      } catch (e) {
+        console.warn("[report] composeReport skipped:", e);
+        report.composedReport = null;
+      }
+
       setReportData(report);
       setState({ step: "done", progress: 100, message: "Research model active" });
     } catch (err) {
@@ -790,6 +831,22 @@ export default function ReportClient({ ticker }: Props) {
   useEffect(() => {
     generateReport();
   }, [generateReport]);
+
+  // Phase 9: selector change after generation → re-compose in place
+  // (deterministic, no LLM, no pipeline re-run). Skips when the current
+  // composed report already matches the selection.
+  useEffect(() => {
+    if (!reportData) return;
+    const cur = composedForRef.current;
+    if (cur && cur.type === reportTypeId && cur.depth === depth) return;
+    try {
+      const composed = composeReportFromData(reportData, { reportTypeId, depth });
+      composedForRef.current = { type: reportTypeId, depth };
+      setReportData({ ...reportData, composedReport: composed });
+    } catch (e) {
+      console.warn("[report] recomposeReport skipped:", e);
+    }
+  }, [reportData, reportTypeId, depth]);
 
   const handleKeyModalSave = (newConfig: CustomKeyConfig | null, shouldRetry = false) => {
     setCustomKeyConfig(newConfig);
@@ -935,6 +992,7 @@ export default function ReportClient({ ticker }: Props) {
               progress={state.progress}
               agentCheckpoints={state.agentCheckpoints}
               supervisorCheckpoints={state.supervisorCheckpoints}
+              reportContext={`${getReportBlueprint(reportTypeId)?.title ?? "Institutional Equity Research"} · ${depth === "full" ? "Full" : "Concise"} depth`}
             />
           </div>
         )}
@@ -1067,7 +1125,9 @@ export default function ReportClient({ ticker }: Props) {
                 <div className={styles.exportLeft}>
                   <div className={styles.exportIconBadge}>📄</div>
                   <div>
-                    <div className={styles.exportHeading}>Institutional Research Report</div>
+                    <div className={styles.exportHeading}>
+                      {getReportBlueprint(reportTypeId)?.title ?? "Institutional Equity Research"}
+                    </div>
                     <div className={styles.exportSub}>
                       Complete institutional research dossier: DCF forecast, 5-stage DuPont decomposition, event-based price impact, financial statements, and regulatory safe-harbor disclosures.
                     </div>
@@ -1095,6 +1155,39 @@ export default function ReportClient({ ticker }: Props) {
                 </div>
               </div>
 
+              {/* ── Phase 9: Report Type + Research Depth selectors (re-compose in place) ── */}
+              <div className={styles.selectorBar}>
+                <span className={styles.selectorLabel}>Report Type</span>
+                <select
+                  className={styles.selectorSelect}
+                  value={reportTypeId}
+                  onChange={(e) => setReportTypeId(e.target.value as ReportTypeId)}
+                  title="Switch report type — outline re-composes, generation does not re-run"
+                >
+                  {selectableReportTypes().map((opt) => (
+                    <option key={opt.id} value={opt.id}>
+                      {opt.title}
+                    </option>
+                  ))}
+                </select>
+                <span className={styles.selectorLabel}>Depth</span>
+                <div className={styles.depthToggle} role="group" aria-label="Research depth">
+                  {(["concise", "full"] as const).map((d) => (
+                    <button
+                      key={d}
+                      type="button"
+                      className={`${styles.depthBtn} ${depth === d ? styles.depthBtnActive : ""}`}
+                      onClick={() => setDepth(d)}
+                    >
+                      {d === "concise" ? "Concise" : "Full"}
+                    </button>
+                  ))}
+                </div>
+                <span className={styles.selectorHint}>
+                  Outline re-composes live · PDF depth follows · no pipeline re-run
+                </span>
+              </div>
+
               {/* ── Interactive Navigation Tabs ── */}
               <div className={styles.tabBar}>
                 {[
@@ -1105,6 +1198,7 @@ export default function ReportClient({ ticker }: Props) {
                   { key: "dupont", label: "DuPont & Ratios" },
                   { key: "peers", label: "Peer Cohort" },
                   { key: "risks", label: "SWOT & Risk Matrix" },
+                  { key: "outline", label: "Report Outline" },
                 ].map(t => (
                   <button
                     key={t.key}
@@ -1595,7 +1689,7 @@ export default function ReportClient({ ticker }: Props) {
                             <div className={styles.personaAvatar}>🛡️</div>
                             <div>
                               <div className={styles.personaTitle}>Economic Moat & Strategy</div>
-                              <div className={styles.personaRole}>Porter's Five Forces & Defensibility</div>
+                              <div className={styles.personaRole}>Porter&apos;s Five Forces &amp; Defensibility</div>
                             </div>
                           </div>
                           <div className={styles.personaMetaRight}>
@@ -1650,7 +1744,7 @@ export default function ReportClient({ ticker }: Props) {
                           {/* Porter's Five Forces Table */}
                           {(reportData.aiAnalysis?.fiveForces || []).length > 0 && (
                             <div className={styles.subSection}>
-                              <div className={styles.subSectionLabel}>Porter's Five Forces Competitive Analysis</div>
+                              <div className={styles.subSectionLabel}>Porter&apos;s Five Forces Competitive Analysis</div>
                               <div className="fin-table-container">
                                 <table className="fin-table">
                                   <thead>
@@ -2675,6 +2769,134 @@ export default function ReportClient({ ticker }: Props) {
                         </table>
                       </div>
                     </div>
+                  </>
+                )}
+
+                {/* ── TAB 8: REPORT OUTLINE (Phase 9 — composed structure) ── */}
+                {activeTab === "outline" && (
+                  <>
+                    {reportData.composedReport ? (
+                      <>
+                        <div className={styles.outlineHeaderRow}>
+                          <div className={styles.cardSectionHeader}>Composed Report Outline</div>
+                          <div className={styles.outlineBadges}>
+                            <span className={styles.outlineBadge}>
+                              {getReportBlueprint(reportData.composedReport.blueprintId)?.title ??
+                                reportData.composedReport.blueprintId}
+                            </span>
+                            <span
+                              className={`${styles.outlineBadge} ${
+                                reportData.composedReport.depth === "full"
+                                  ? styles.outlineBadgeFull
+                                  : styles.outlineBadgeConcise
+                              }`}
+                            >
+                              {reportData.composedReport.depth === "full" ? "FULL DEPTH" : "CONCISE"}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className={styles.editorialCard}>
+                          <div className={styles.cardSectionHeader}>Cover TOC</div>
+                          <div className="fin-table-container">
+                            <table className="fin-table">
+                              <thead>
+                                <tr>
+                                  <th style={{ width: "8%" }}>#</th>
+                                  <th style={{ width: "62%" }}>Title</th>
+                                  <th>Depth</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {reportData.composedReport.toc.map((t) => (
+                                  <tr key={`${t.index}-${t.title}`}>
+                                    <td className="row-header">{t.index}</td>
+                                    <td style={{ fontFamily: "var(--font-sans)" }}>{t.title}</td>
+                                    <td>
+                                      <span className="badge-solid badge-hold">
+                                        {t.depth === "both" ? "Both" : t.depth === "full" ? "Full only" : "Concise only"}
+                                      </span>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+
+                        <div className={styles.editorialCard}>
+                          <div className={styles.cardSectionHeader}>
+                            Sections in Render Order ({reportData.composedReport.sections.length})
+                          </div>
+                          <div className="fin-table-container">
+                            <table className="fin-table">
+                              <thead>
+                                <tr>
+                                  <th style={{ width: "6%" }}>#</th>
+                                  <th style={{ width: "34%" }}>Section</th>
+                                  <th style={{ width: "14%" }}>Depth</th>
+                                  <th>Research Modules</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {reportData.composedReport.sections.map((s) => (
+                                  <tr key={s.id}>
+                                    <td className="row-header">{s.index}</td>
+                                    <td style={{ fontFamily: "var(--font-sans)" }}>{s.title}</td>
+                                    <td>
+                                      <span
+                                        className={`badge-solid ${
+                                          s.depth === "full" ? "badge-buy" : "badge-hold"
+                                        }`}
+                                      >
+                                        {s.depth === null ? "Both" : s.depth === "full" ? "Full only" : "Concise only"}
+                                      </span>
+                                    </td>
+                                    <td style={{ fontFamily: "var(--font-mono)", fontSize: 11 }}>
+                                      {s.modules.join(", ")}
+                                      {s.unavailableModules.length > 0 && (
+                                        <span style={{ color: "var(--bearish)" }}>
+                                          {" "}
+                                          · unavailable: {s.unavailableModules.join(", ")}
+                                        </span>
+                                      )}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+
+                        <div className={styles.editorialCard}>
+                          <div className={styles.cardSectionHeader}>
+                            Composition Unknowns ({reportData.composedReport.unknowns.length})
+                          </div>
+                          {reportData.composedReport.unknowns.length === 0 ? (
+                            <p style={{ fontFamily: "var(--font-sans)", fontSize: 13, color: "var(--ink-muted)" }}>
+                              None — every selected module produced a usable slice.
+                            </p>
+                          ) : (
+                            <ul className={styles.swotList}>
+                              {reportData.composedReport.unknowns.map((u, i) => (
+                                <li key={i} className={styles.swotItem}>
+                                  <span className={styles.swotBullet}>•</span>
+                                  <span>{u}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </div>
+                      </>
+                    ) : (
+                      <div className={styles.editorialCard}>
+                        <div className={styles.cardSectionHeader}>Composed Report Outline</div>
+                        <p style={{ fontFamily: "var(--font-sans)", fontSize: 13, color: "var(--ink-muted)" }}>
+                          Outline unavailable — no ComposedReport was produced for this run (missing ResearchCase
+                          or composition failed). The PDF keeps its legacy structure.
+                        </p>
+                      </div>
+                    )}
                   </>
                 )}
 

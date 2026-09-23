@@ -4,6 +4,14 @@ import { useRouter } from "next/navigation";
 import SearchBar from "@/components/SearchBar";
 import ApiKeyModal, { loadSavedAiConfig } from "@/components/ApiKeyModal";
 import { SUPPORTED_PROVIDERS, type CustomKeyConfig } from "@/lib/ai-providers";
+import {
+  DEFAULT_RESEARCH_DEPTH,
+  DEFAULT_REPORT_TYPE,
+  buildReportQuery,
+  selectableReportTypes,
+  type ReportTypeId,
+  type ResearchDepth,
+} from "@/lib/report-types";
 import type { SearchResult } from "@/types/report";
 import styles from "./page.module.css";
 
@@ -61,20 +69,27 @@ export default function HomePage() {
   const [loading, setLoading] = useState(false);
   const [customKeyConfig, setCustomKeyConfig] = useState<CustomKeyConfig | null>(null);
   const [isApiKeyModalOpen, setIsApiKeyModalOpen] = useState(false);
+  // Phase 9: report type + research depth chosen before navigation; carried
+  // to the report page as ?type=…&depth=… (validated there, fail-closed).
+  const [reportTypeId, setReportTypeId] = useState<ReportTypeId>(DEFAULT_REPORT_TYPE);
+  const [depth, setDepth] = useState<ResearchDepth>(DEFAULT_RESEARCH_DEPTH);
 
   React.useEffect(() => {
     const saved = loadSavedAiConfig();
     if (saved) setCustomKeyConfig(saved);
   }, []);
 
+  const reportHref = (symbol: string) =>
+    `/report/${encodeURIComponent(symbol)}${buildReportQuery(reportTypeId, depth)}`;
+
   const handleSelect = (result: SearchResult) => {
     setLoading(true);
-    router.push(`/report/${encodeURIComponent(result.symbol)}`);
+    router.push(reportHref(result.symbol));
   };
 
   const handleTickerClick = (ticker: string) => {
     setLoading(true);
-    router.push(`/report/${encodeURIComponent(ticker)}`);
+    router.push(reportHref(ticker));
   };
 
   return (
@@ -141,7 +156,48 @@ export default function HomePage() {
           {/* ── Command Bar Search ── */}
           <div className={styles.searchSection}>
             <SearchBar onSelect={handleSelect} loading={loading} />
-            
+
+            {/* ── Phase 9: Report Type + Research Depth selectors ── */}
+            <div className={styles.reportOptions}>
+              <div className={styles.optionGroup}>
+                <label className={styles.optionLabel} htmlFor="report-type-select">
+                  Report Type
+                </label>
+                <select
+                  id="report-type-select"
+                  className={styles.reportTypeSelect}
+                  value={reportTypeId}
+                  disabled={loading}
+                  onChange={(e) => setReportTypeId(e.target.value as ReportTypeId)}
+                >
+                  {selectableReportTypes().map((opt) => (
+                    <option key={opt.id} value={opt.id}>
+                      {opt.title}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className={styles.optionGroup}>
+                <span className={styles.optionLabel}>Research Depth</span>
+                <div className={styles.depthToggle} role="group" aria-label="Research depth">
+                  {(["concise", "full"] as const).map((d) => (
+                    <button
+                      key={d}
+                      type="button"
+                      className={`${styles.depthBtn} ${depth === d ? styles.depthBtnActive : ""}`}
+                      onClick={() => setDepth(d)}
+                      disabled={loading}
+                    >
+                      {d === "concise" ? "Concise" : "Full"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <span className={styles.optionHint}>
+                Structure &amp; depth set the report outline — no page caps.
+              </span>
+            </div>
+
             <div className={styles.quickTickers}>
               <span className={styles.quickLabel}>Quick Access:</span>
               {CURATED_TICKERS.map((item) => (

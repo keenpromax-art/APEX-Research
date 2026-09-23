@@ -50,8 +50,13 @@ export interface ReviewResult {
   overallScore: number; // 0-100
 }
 
-/** Reviewers' personas and their focus areas */
-const ReviewerNames = [
+/**
+ * Seats executed by `runQualityReview` (order is documentation; scoring walks
+ * the same list). Exported for AI-orchestration committee wiring — additive,
+ * no scoring change. Includes Research Judge (runs but was previously missing
+ * from the private name list).
+ */
+export const QUALITY_REVIEWER_NAMES = [
   "Financial Analyst",
   "Accounting Analyst",
   "Valuation Analyst",
@@ -59,8 +64,9 @@ const ReviewerNames = [
   "Skeptical Analyst",
   "Fact Checker",
   "Report Editor",
+  "Research Judge",
   "Final Institutional Research Reviewer",
-];
+] as const;
 
 /** Reviewer 1: Financial analyst — checks statement integrity, margin analysis, cash flow quality */
 const financialAnalyzer = (report: ResearchReport): ReviewFinding[] => {

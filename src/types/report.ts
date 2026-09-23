@@ -1236,6 +1236,17 @@ export interface ReportData {
   baselineReconciliation?: import("@/lib/guidance-reconciliation").BaselineReconciliation | null;
   /** Claim-level data-confidence tiers + grade. */
   dataConfidence?: import("@/lib/data-confidence").DataConfidenceReport | null;
+  /**
+   * Report-agnostic ResearchCase (Phase 2). Additive — attached by
+   * /api/company alongside canonical objects; renderers ignore absence.
+   */
+  researchCase?: import("@/lib/research-case").ResearchCase | null;
+  /**
+   * Composed report (Phase 5): resolved outline + module bundle for the PDF.
+   * Additive — attached by ReportClient after QA; renderer falls back to its
+   * legacy structure when absent.
+   */
+  composedReport?: import("@/lib/report-composer").ComposedReport | null;
   shareholding: ShareholdingData;
   peers: PeerData[];
   aiAnalysis: AIAnalysis;
