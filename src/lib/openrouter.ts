@@ -52,6 +52,7 @@ import {
   auditDraftSections,
   runGuardedDraft,
 } from "./ai/draft-quality";
+import { salvageTruncatedJsonObject, mergeSalvaged } from "./ai/json-salvage";
 
 export { RateLimitError };
 
@@ -361,8 +362,23 @@ function extractJsonFromResponse<T>(raw: string, fallback: T): T {
         return JSON.parse(raw.slice(firstBracket, lastBracket + 1)) as T;
       } catch {}
     }
+    // TRUNCATION SALVAGE: a length-cut response still contains every field the
+    // model finished writing before the cutoff. Recover those complete fields
+    // instead of discarding the whole draft (the biggest source of thin
+    // reports). Nothing is invented: only complete `"key": <value>` pairs are
+    // kept; the caller merges them over its safe fallback shape.
+    if (firstBrace !== -1 && isPlainObjectFallback(fallback)) {
+      const salvaged = salvageTruncatedJsonObject(raw.slice(firstBrace));
+      if (Object.keys(salvaged).length > 0) {
+        return mergeSalvaged(salvaged, fallback as Record<string, unknown>) as T;
+      }
+    }
     return fallback;
   }
+}
+
+function isPlainObjectFallback(fallback: unknown): boolean {
+  return Boolean(fallback) && typeof fallback === "object" && !Array.isArray(fallback);
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -1213,12 +1229,16 @@ Return ONLY raw JSON, no markdown formatting.`;
     capitalDeploymentHistory: { narrative: "", dividends: "", repurchases: "", debtPaydown: "" },
   };
   const om = operatingModel ?? buildResearchOperatingModel({ profile });
+  // Governance demands the largest prose block of any persona (up to ~4,850
+  // words incl. the 800-1100 word strategy). A 5,500-token budget truncates the
+  // tail (strategy + operating profile) with no repair path; 8,000 fits the
+  // schema and salvage recovers any residual cut.
   const { draft, issues } = await runGuardedDraft({
     writer: async (repairPrompt) => {
       const response = await callOpenRouterWithFailover([
         { role: "system", content: systemPrompt },
         { role: "user", content: buildUserPrompt(repairPrompt) },
-      ], 5500, 0.35, customConfig);
+      ], 8000, 0.35, customConfig);
       return extractJsonFromResponse(response, fallback);
     },
     sectionsOf: (d) => ({

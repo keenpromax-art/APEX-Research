@@ -26,6 +26,7 @@ import { parseLlmJson } from "./llm";
 import { buildAnalystBrief, renderAnalystBrief } from "./analyst-brief";
 import { buildHistoricalAnalysisPack, renderHistoricalAnalysisPack } from "./historical-analysis";
 import { renderResearchDiscovery } from "./research-discovery";
+import { DEPTH_DIRECTIVES, DEPTH_TOKEN_BUDGETS } from "./depth-guidance";
 
 export type NarrativeTransport = (opts: {
   system: string;
@@ -66,6 +67,8 @@ RULES:
 - Do not invent new numbers the forecast/valuation stages did not compute.
 - RESEARCH DISCOVERY SEEDS: context may include a discovery pack (coverage + moat/catalyst/risk/competitive seeds + economic insights like margin mechanism, working-capital chain, ROIC interpretation, target-price methodology). EXPLAIN those seeds as chains — never leave thesis/catalyst/risk/moat/competitive blank while usable seeds exist. If coverage marks an area "missing", state the gap honestly instead of inventing. Seeds tagged Tier-6 stay inference.
 
+${DEPTH_DIRECTIVES.narrative}
+
 Respond with ONLY JSON:
 {
   "thesis": {
@@ -94,6 +97,8 @@ export function narrativeContext(
     debates?: ThesisEngineOutput;
     evidenceMap?: EvidenceMap;
     discovery?: ResearchDiscoveryPack;
+    /** Deterministic ResearchDNA depth emphasis (see depth-guidance.depthBriefForIdentity). */
+    depthBrief?: string;
   }
 ): string {
   const engine = extras?.engine;
@@ -152,6 +157,7 @@ export function narrativeContext(
       }
       brief.missingInformation = [...new Set(brief.missingInformation)];
     }
+    if (extras?.depthBrief) brief.evidenceLines.push(extras.depthBrief.slice(0, 2000));
     return renderAnalystBrief(brief as any);
   } catch {}
   const clip = (s: string, n: number) => (s.length > n ? s.slice(0, n) + "…" : s);
@@ -200,6 +206,7 @@ export function narrativeContext(
   const discoveryBlock = discovery
     ? ["", "RESEARCH DISCOVERY SEEDS (explain — do not invent beyond seeds):", renderResearchDiscovery(discovery).slice(0, 6000)]
     : [];
+  const depthBlock = extras?.depthBrief ? ["", extras.depthBrief.slice(0, 2000)] : [];
   return [
     `COMPANY: ${understanding.companyName} (${pack.ticker})`,
     `What it does: ${clip(understanding.whatItDoes, 700)}`,
@@ -212,6 +219,7 @@ export function narrativeContext(
     ...(canonicalBasisBlock ? ["", canonicalBasisBlock] : []),
     ...debateBlock,
     ...discoveryBlock,
+    ...depthBlock,
     "",
     "REVENUE DRIVERS:",
     ...understanding.revenueDrivers.map((d) => `- ${d.name}: ${d.mechanism}`),
@@ -272,6 +280,8 @@ export async function buildNarrative(
     debates?: ThesisEngineOutput;
     evidenceMap?: EvidenceMap;
     discovery?: ResearchDiscoveryPack;
+    /** Deterministic ResearchDNA depth emphasis (see depth-guidance.depthBriefForIdentity). */
+    depthBrief?: string;
   }
 ): Promise<NarrativeOutput> {
   const ctx = narrativeContext(pack, understanding, modelSpec, canonicalForecast, extras);
@@ -287,7 +297,7 @@ OUTPUT
 ======
 Respond with ONLY the JSON object.`;
 
-  const resp = await transport({ system: SYSTEM_PROMPT, user, temperature: 0.4, maxTokens: 3500, jsonMode: true });
+  const resp = await transport({ system: SYSTEM_PROMPT, user, temperature: 0.4, maxTokens: DEPTH_TOKEN_BUDGETS.narrative, jsonMode: true });
   const parsed = parseLlmJson<Record<string, any>>(resp);
   if (!parsed) {
     throw new Error(`AI narrative builder returned unparseable output for ${pack.ticker}`);

@@ -16,6 +16,7 @@ import type { FactPack, CompanyUnderstanding, EconomicEngine, Debate, ThesisEngi
 import { parseLlmJson } from "./llm";
 import { buildHistoricalAnalysisPack } from "./historical-analysis";
 import { renderResearchDiscovery } from "./research-discovery";
+import { DEPTH_DIRECTIVES, DEPTH_TOKEN_BUDGETS } from "./depth-guidance";
 
 export type { Debate, ThesisEngineOutput, DebateEvidence };
 
@@ -43,12 +44,14 @@ Each debate must be a falsifiable question with:
 
 TASK 2 — Select the CENTRAL debate and build the THESIS around it.
 State:
-- Thesis (1 paragraph, mechanism-driven)
+- Thesis (2-3 paragraphs, mechanism-driven: P1 central debate + chain, P2 bull vs bear evidence, P3 what must happen + invalidation with KPIs)
 - Evidence supporting thesis (cite [F-...])
 - Evidence contradicting thesis / counter-thesis
 - Key uncertainty
-- What would prove thesis WRONG (invalidation condition)
+- What would prove thesis WRONG (invalidation condition — specific, observable, falsifiable)
 - Monitoring KPI to watch
+
+${DEPTH_DIRECTIVES.debates}
 
 RULES:
 - Every evidence item must cite [F-...] or model output; Tier6 inference alone = low confidence.
@@ -196,7 +199,7 @@ export async function buildDebates(
 ): Promise<ThesisEngineOutput> {
   const ctx = debateContext(brief);
   const user = `RESEARCH CONTEXT\n================\n${ctx}\n\nTASK\n====\nIdentify debates and build the thesis for ${brief.ticker} now.\n\nOUTPUT\n======\nRespond with ONLY the JSON object.`;
-  const resp = await transport({ system: SYSTEM_PROMPT, user, temperature: 0.3, maxTokens: 3500, jsonMode: true });
+  const resp = await transport({ system: SYSTEM_PROMPT, user, temperature: 0.3, maxTokens: DEPTH_TOKEN_BUDGETS.debates, jsonMode: true });
   const parsed = parseLlmJson<Record<string, any>>(resp);
   if (!parsed || !Array.isArray(parsed.debates)) throw new Error(`Debate engine returned unparseable output for ${brief.ticker}`);
   return parseDebates(parsed);
@@ -212,7 +215,7 @@ export async function buildDebatesEarly(
 ): Promise<ThesisEngineOutput> {
   const ctx = earlyDebateContext(pack, understanding, engine, discovery);
   const user = `RESEARCH CONTEXT\n================\n${ctx}\n\nTASK\n====\nIdentify debates and build the thesis for ${pack.ticker} now (model/valuation still pending — ground debates in company economics and [F-...] evidence).\n\nOUTPUT\n======\nRespond with ONLY the JSON object.`;
-  const resp = await transport({ system: SYSTEM_PROMPT, user, temperature: 0.3, maxTokens: 3500, jsonMode: true });
+  const resp = await transport({ system: SYSTEM_PROMPT, user, temperature: 0.3, maxTokens: DEPTH_TOKEN_BUDGETS.debates, jsonMode: true });
   const parsed = parseLlmJson<Record<string, any>>(resp);
   if (!parsed || !Array.isArray(parsed.debates)) throw new Error(`Early debate engine returned unparseable output for ${pack.ticker}`);
   return parseDebates(parsed);

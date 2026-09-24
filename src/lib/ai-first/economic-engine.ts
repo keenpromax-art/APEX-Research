@@ -17,6 +17,7 @@ import type {
 } from "./types";
 import { parseLlmJson } from "./llm";
 import { buildHistoricalAnalysisPack } from "./historical-analysis";
+import { DEPTH_DIRECTIVES, DEPTH_TOKEN_BUDGETS } from "./depth-guidance";
 
 export type EconomicEngineTransport = (opts: {
   system: string;
@@ -60,7 +61,9 @@ Respond with ONLY JSON:
   "statementBindings": [{ "statementLine": "string", "drivenBy": "string", "mechanism": "string", "sourceFacts": ["string"] }],
   "valueQuestions": ["string"],
   "confidence": 0.7
-}`;
+}
+
+${DEPTH_DIRECTIVES.economicEngine}`;
 
 function engineContext(pack: FactPack, u: CompanyUnderstanding, histSummary: string): string {
   const clip = (s: string, n: number) => (s.length > n ? s.slice(0, n) + "…" : s);
@@ -181,7 +184,7 @@ export async function buildEconomicEngine(
     system: SYSTEM_PROMPT,
     user,
     temperature: 0.3,
-    maxTokens: 3500,
+    maxTokens: DEPTH_TOKEN_BUDGETS.economicEngine,
     jsonMode: true,
   });
   const parsed = parseLlmJson<Record<string, any>>(resp);

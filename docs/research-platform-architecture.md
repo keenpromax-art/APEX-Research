@@ -469,8 +469,177 @@ npx tsx scratch/test-ai-orchestration.ts # Phase 6 orchestration roles/tasks/com
 npx tsx scratch/test-evidence-graph.ts # Phase 7 Source→…→Section material-claim traceability
 npx tsx scratch/test-advanced-blueprints.ts # Phase 8 advanced report-type golden cases
 npx tsx scratch/test-report-ui.ts # Phase 9 selector options + compose-with-options contract
+npx tsx scratch/test-research-identity.ts # Phase 11 adaptive identity (68 assertions)
+npx tsx scratch/test-content-depth.ts # Content depth: AI depth contracts + fallback richness (69 assertions)
 npm run test:golden                   # deterministic golden regression (ticker matrix)
 npm run lint                          # EXIT=0 (0 errors; warnings are non-failing)
 npm run build                         # Next build — lint + typecheck inside, all pages
-npm test                              # full suite (all 18 chained tests)
+npm test                              # full suite (all 19 chained tests)
 ```
+
+---
+
+## 8. Phase 11 — Adaptive research identity (DONE)
+
+Company-native reports without touching the financial kernel:
+
+```text
+ResearchCase (+ optional ResearchReport / AI proposal)
+  ↓
+ResearchDNA (buildResearchIdentity — pure, deterministic)
+  ↓
+composeReport({ ..., researchIdentity }) → ComposedReport
+  ↓
+planComposedPdf → ReportDocument → institutional PDF
+```
+
+### New files
+
+| File | Purpose |
+|------|---------|
+| `src/lib/research-identity/types.ts` | `ResearchDNA`, `MaterialityProfile`, `SectionArchitecture`, `Chart/TableSelection`, `CoverSpec`, `CollisionReport`, `FlavourQaResult`, debug + canonical-integrity contracts |
+| `src/lib/research-identity/proposal.ts` | Registries (`EconomicIdentityTypes`, `ValuationIdentityTypes`, `NarrativeProfiles`, `VisualProfiles`, `SignatureAnalysisTypes`, `MaterialityDrivers`, `ResearchQuestionTypes`) + `normalizeIdentityProposal` (fail-closed AI proposal validation) |
+| `src/lib/research-identity/registry.ts` | Materiality topics/dimensions/weights, signature/chart/table candidates, section hints + rhythms, narrative/visual profile registries — composable dimensions, zero company hardcoding |
+| `src/lib/research-identity/evidence-profile.ts` | Deterministic reference index (registry → canonical → derived → AI fact) + `makeEvidenceReferences` gate: unsupported ids become `insufficient_evidence`, never supported |
+| `src/lib/research-identity/data-availability.ts` | Canonical data-availability gates per chart/table selector (fail-closed reasons) |
+| `src/lib/research-identity/economic-identity.ts` | Economic machine classification (15 types) from sector/architecture/archetype/ontology + AI abstraction; every claim carries references |
+| `src/lib/research-identity/investor-question.ts` | Central investor question from AI engine/debate or validated proposal; explicitly `unavailable` otherwise |
+| `src/lib/research-identity/materiality.ts` | Deterministic 10-dimension scoring → `TIER_1_CORE … TIER_5_SUPPRESS` (weights fixed in registry; AI proposal capped at ±0.2 and only with supported evidence) |
+| `src/lib/research-identity/depth-allocation.ts` | Tier → depth 0–5, deepened by `full` depth, complexity ≥70, and signature status; unevidenced topics decay |
+| `src/lib/research-identity/valuation-identity.ts` | Valuation lens from canonical anchors (`resolveValuationAnchors`, never recomputed) + reverse-DCF centrality flag |
+| `src/lib/research-identity/event-profile.ts` | Catalyst/risk items from AI research with fact-id gating |
+| `src/lib/research-identity/debate-map.ts` | Formal debates (market view → assumption → evidence → difference → must-happen → invalidate); consensus never invented |
+| `src/lib/research-identity/narrative-profile.ts` | Analytical emphasis (11 archetypes) scored from materiality + debates; no personalities |
+| `src/lib/research-identity/visual-profile.ts` | Institutional visual treatment (density, divider, cover structure, emphasis) derived from identity; no random colors |
+| `src/lib/research-identity/signature-analysis.ts` | 1–3 signature analyses from a candidate registry gated on modules + data + evidence |
+| `src/lib/research-identity/chart-selection.ts` | Chart candidates with analytical question, required data, applicability, decision value; immaterial/unevidenced omitted with reasons |
+| `src/lib/research-identity/table-selection.ts` | Same contract for tables |
+| `src/lib/research-identity/section-architecture.ts` | Deterministic section inclusion/ordering/depth from materiality + question + signatures + report type; prepends `identity-overview`, appends `signature-analysis` |
+| `src/lib/research-identity/cover.ts` | Institutional cover/title engine from economic type + question + valuation context (+ validated AI title); no sensationalism |
+| `src/lib/research-identity/page-allocation.ts` | Emergent space units (depth + charts + tables + signature); estimate-only, never a cap |
+| `src/lib/research-identity/rhythm.ts` | Deterministic narrative → chart → interpretation → evidence → implication cadence per topic |
+| `src/lib/research-identity/similarity.ts` | Fingerprint + Jaccard/order/cosine similarity across section order, charts, tables, profiles, titles |
+| `src/lib/research-identity/collision-detector.ts` | Fail-closed template-collision check (watch 0.78 / collision 0.92, unrelated tickers only) |
+| `src/lib/research-identity/flavour-qa.ts` | 18-check FlavourQA (identity exists → gates intact); additive, never overrides publication gate |
+| `src/lib/research-identity/identity-tasks.ts` | 9 provider-agnostic AI proposal tasks (strict-JSON prompts, `normalizeIdentityProposal` parsing) |
+| `src/lib/research-identity/build.ts` | `buildResearchIdentity` orchestrator + `serializeResearchIdentity` JSON artifact + canonical seal/snapshot integrity |
+| `src/lib/research-identity/index.ts` | Module entry point |
+| `src/lib/ai-orchestration/identity.ts` | `buildIdentityResearchTasks` — deterministic 9-task graph over injected roles (no provider branch) |
+| `src/components/PDFDocument/identity-blocks.tsx` | Presentational primitives (`IdentityOverviewBlock`, `SignatureAnalysisBlock`, `DebateBlock`, `CoverIdentityBlock`, `PageAllocationBlock`) |
+| `scratch/test-research-identity.ts` | 68 assertions: construction → differentiation → regression (wired as `test:research-identity`, chained in `npm test`) |
+
+### Wiring (all additive, golden-safe)
+
+- `report-composer/types.ts` + `compose.ts`: optional `researchIdentity` input/output; legacy compose without identity is byte-identical; with identity, depths refine and `identity-overview`/`signature-analysis` append as generic pages.
+- `report-composer/pdf-plan.ts`: `composedPdfReportTitle` prefers the identity cover title when present, else the blueprint title (institutional golden unchanged).
+- `components/PDFDocument/index.tsx`: `ReportDocument` title resolves through `composedPdfReportTitle`; legacy path untouched.
+- `types/report.ts`: additive `ReportData.researchIdentity`.
+- `ai-orchestration/index.ts`: re-exports `buildIdentityResearchTasks`.
+- Publication gate, QA, valuation, ledger, evidence registry, sector architectures: untouched. FlavourQA runs alongside; existing gates stay authoritative.
+
+### Guarantees
+
+- Financial kernel deterministic and untouched (`canonicalIntegrity.unchanged` verified per identity + in tests).
+- AI proposes (`ResearchIdentityProposal` → schema + evidence validation); deterministic code disposes. Unsupported adjustments are dropped; missing data stays N/A.
+- No company hardcoding (FlavourQA check 15; registry-only dimensions), no randomization (check 14), no page caps (allocation is estimate-only).
+- Deterministic: same inputs → same fingerprint/identityId (tested).
+
+---
+
+## 9. Content depth contracts (DONE)
+
+Bland reports traced to three causes: (1) ai-first prompts with no length
+contract (`"thesis": "string"` → one sentence) and small token budgets;
+(2) deterministic fallback filler (`"assessed from…"`, hardcoded Big-Tech
+moat pillars, prompt-leak page language); (3) no depth signal reaching writers.
+
+### New file
+
+| File | Purpose |
+|------|---------|
+| `src/lib/ai-first/depth-guidance.ts` | `DEPTH_DIRECTIVES` (per-stage paragraph/sentence minimums for all 8 AI stages) + `DEPTH_TOKEN_BUDGETS` (5000/5000/5000/6000/6000/4500/4000/4000) + shared `DEPTH_EVIDENCE_GUARD` (appended to every stage: depth = mechanism/history/chains, NEVER new numbers) + `depthBriefForIdentity` (deterministic ResearchDNA emphasis brief) |
+
+### Wiring (shapes unchanged — JSON contracts identical)
+
+- All 8 builders interpolate their directive and use their budget:
+  `company-understanding`, `economic-engine`, `debate-engine` (both paths),
+  `narrative-builders` (thesis 3–4 paragraphs, bull/bear 4–6 chains, 4–8
+  catalysts, 5–8 risks, 3–6 rivals, 3–5 moat chains), `research-discovery`
+  (writer seeds 3–5 sentences), `model-builder`, `scenarios-builder`,
+  `valuation-builder`.
+- `narrative-builders` accepts optional `depthBrief` in extras (both context
+  paths) so TIER_1 topics/signature analyses expand and suppressed topics stay
+  suppressed. No caller change required (optional).
+- Council personas (openrouter.ts) already carry paragraph directives,
+  5500-token budgets and minChars repair loops — unchanged.
+- Fallback (`generateDataDrivenFallback`) enriched deterministically:
+  multi-year YoY/margin/FCF/debt trajectories in every statement commentary,
+  rate/demand/cost transmission in economic context, 2-paragraph DCF with
+  sensitivity chain, transmission-bearing risks, computed five-forces,
+  computed governance (loss-making dividends flagged as reserve-funded),
+  honest N/A for buybacks and board internals. Removed: supplier/substitute/
+  repurchase/governance filler, hardcoded search/ads/silicon moat pillars
+  (now operating-model-driven, empty when moat is None), the GOOG-ticker
+  hack (now operating-model platform detection), and prompt-leak page
+  language leaking into published prose.
+- Guards preserved: sanitizer bleed rules, sector guardrails, BS-detectors
+  (no self-funding claims on negative FCF, no credit on losses), publication
+  gate untouched. Pinned in `scratch/test-content-depth.ts` (81 assertions,
+  chained in `npm test` as `test:content-depth`).
+- Deterministic fallback measured field-by-field (no empty narrative fields
+  except news-gated arrays): trajectory-rich statement commentaries,
+  executive summary with corridor, operating-profile and enterprise-risk
+  blocks wired into the PDF (presentation-only, omitted when absent),
+  global/domestic industry split, company-native moat pillars, and a computed
+  mechanical understanding (honesty-labeled, confidence 0.2) so no-key
+  reports stay substantive without inventing.
+
+---
+
+## 10. Content delivery integrity (DONE)
+
+Two audits traced the remaining "bland report" causes to **delivery**, not
+generation. Rich AI content was being produced and then destroyed.
+
+### New file
+
+| File | Purpose |
+|------|---------|
+| `src/lib/ai/json-salvage.ts` | Recovers every COMPLETE top-level field from a length-truncated JSON draft (`salvageTruncatedJsonObject`, `salvageTruncatedJsonArray`, `mergeSalvaged`). Invents nothing: only byte-complete `"key": <value>` pairs are kept |
+
+### Fixes
+
+- **A. Truncation loss (biggest single win).** `extractJsonFromResponse`
+  discarded the entire draft when JSON was cut mid-write; writer fallbacks are
+  mostly empty, so a 2,000-word response became nothing. It now salvages the
+  completed fields and merges them over the safe fallback. Governance writer
+  budget raised 5,500 → 8,000 tokens (its schema demands up to ~6,800).
+- **B. Lossy bridge.** `enrichAIAnalysisFromResearchReport` replaced 800-word
+  council strategy prose with a one-line moat-chain join, replaced the
+  conclusion with a repeated thesis, and clipped the thesis to 4,000 chars
+  (bull/bear capped at 4). The bridge is now append-only/richer-wins: full
+  thesis clip 4,000 → 24,000, all bull/bear items retained, inflection points
+  mapped, catalyst mechanism + financial variable retained, risk severity
+  ranked deterministically instead of hardcoded `"High"`.
+- **C. Unmapped content.** Economic-engine driver narrative, `conclusion`,
+  `financialQuality`, `historicalAnalysis`, `managementAnalysis`, segment
+  revenue share, and discovery insights now reach `AIAnalysis`.
+- **D. Unrendered content.** `dupontCommentary`, `ratioCommentary`,
+  `ebitCommentary`, `patCommentary` and `quarterlyResultsCommentary` existed
+  but had **no PDF reference at all**. They now render as a "Forensic
+  Commentary — Return Quality, Earnings Quality & Cadence" block on the
+  DuPont/peer page. Five-forces falls back to moat chains instead of dropping.
+- **E. Removed fabrications.** The PDF printed hardcoded claims for every
+  company regardless of evidence: "The board of directors maintains active
+  succession planning…", "Executive compensation frameworks incorporate
+  multi-year performance criteria…", "confirming top-tier solvency
+  protection", "self-funding capability firmly established", plus asset-mgmt /
+  bank / generic sector template paragraphs appended to the income statement.
+  All replaced with computed, evidence-gated statements or explicit gaps.
+- **F. Post-enrichment guards.** Sanitization and canonical-moat capping ran
+  BEFORE ai-first enrichment, so new content bypassed them. The same
+  `sanitizeSectorBleed` + `capPillarsToRating` + `harmonizeMoatSources` pass now
+  runs after enrichment. Mechanical ai-first previews (`aiUsed: false`) are
+  rejected instead of being presented as research.
+
+Pinned in `scratch/test-content-delivery.ts` (45 assertions, `test:content-delivery`).

@@ -42,6 +42,7 @@ import type {
 } from "./types";
 import { parseLlmJson } from "./llm";
 import { buildHistoricalAnalysisPack, type HistoricalAnalysisPack } from "./historical-analysis";
+import { DEPTH_DIRECTIVES, DEPTH_TOKEN_BUDGETS } from "./depth-guidance";
 
 export type DiscoveryTransport = (opts: {
   system: string;
@@ -91,7 +92,9 @@ Respond with ONLY JSON:
   "roicInterpretation": "string",
   "targetPriceMethodology": "string",
   "summary": "string"
-}`;
+}
+
+${DEPTH_DIRECTIVES.discovery}`;
 
 const AREAS: DiscoveryArea[] = [
   "revenueDrivers", "marketShare", "competitiveLandscape", "brandStrength", "pricing",
@@ -787,7 +790,7 @@ export async function buildResearchDiscovery(
   const base = mechanicalResearchDiscovery(pack, understanding, engine, opts);
   const ctx = discoveryContext(pack, understanding, engine, base, opts);
   const user = `DISCOVERY CONTEXT\n=================\n${ctx}\n\nTASK\n====\nComplete the research discovery pack for ${understanding.companyName} now. Maximize filled/partial areas from available evidence; keep truly missing areas as missing. Produce writer seeds (not final prose).\n\nOUTPUT\n======\nRespond with ONLY the JSON object.`;
-  const resp = await transport({ system: SYSTEM_PROMPT, user, temperature: 0.3, maxTokens: 4000, jsonMode: true });
+  const resp = await transport({ system: SYSTEM_PROMPT, user, temperature: 0.3, maxTokens: DEPTH_TOKEN_BUDGETS.discovery, jsonMode: true });
   const parsed = parseLlmJson<Record<string, any>>(resp);
   if (!parsed) {
     // Fall back to mechanical — never fail the pipeline

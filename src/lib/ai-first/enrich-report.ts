@@ -37,9 +37,17 @@ function buildThesisText(t: ThesisSpecification, debates: ResearchReport["debate
   if (why) parts.push(`Why this company: ${why}`);
   if (t.whatMarketMayBeMissing) parts.push(`What the market may be missing: ${t.whatMarketMayBeMissing}`);
   if (t.whatCouldInvalidate?.length) parts.push(`Invalidation: ${t.whatCouldInvalidate.join("; ")}`);
-  if (t.bullCase?.length) parts.push(`Evidence FOR: ${t.bullCase.slice(0, 4).join(" | ")}`);
-  if (t.bearCase?.length) parts.push(`Evidence AGAINST: ${t.bearCase.slice(0, 4).join(" | ")}`);
-  return clip(parts.filter(Boolean).join("\n\n"), 4000);
+  if (t.keyInflectionPoints?.length) parts.push(`Inflection points: ${t.keyInflectionPoints.join("; ")}`);
+  if (t.bullCase?.length) parts.push(`Evidence FOR: ${t.bullCase.join(" | ")}`);
+  if (t.bearCase?.length) parts.push(`Evidence AGAINST: ${t.bearCase.join(" | ")}`);
+  return clip(parts.filter(Boolean).join("\n\n"), 24000);
+}
+
+/** Prefer the longer of two prose bodies — never shorten rich council text. */
+function richer(a: string | undefined | null, b: string | undefined | null): string {
+  const x = (a || "").trim();
+  const y = (b || "").trim();
+  return x.length >= y.length ? x : y;
 }
 
 function mapCatalysts(catalysts: Catalyst[]): AIAnalysis["catalysts"] {
@@ -47,18 +55,34 @@ function mapCatalysts(catalysts: Catalyst[]): AIAnalysis["catalysts"] {
     event: c.catalyst,
     horizon: c.timeframe || "Unscheduled",
     probability: c.quantitative ? "Evidence-backed" : "Qualitative only",
-    impact: [c.forecastImpact, c.valuationImpact].filter(Boolean).join(" → ") || "See chain",
+    impact: [c.mechanism, c.financialVariable, c.forecastImpact, c.valuationImpact, c.observableKpi ? `KPI: ${c.observableKpi}` : ""]
+      .filter(Boolean)
+      .join(" → ") || "See chain",
     kpi: c.observableKpi,
     direction: c.direction,
     invalidation: c.invalidation,
   }));
 }
 
+function riskSeverity(r: Risk, all: Risk[]): "High" | "Medium" | "Low" {
+  // Deterministic ranking, not invention: a risk is High when it carries a
+  // quantified financial consequence and sits in the leading half of the
+  // evidence-ranked set; otherwise Medium. No risk is silently downgraded.
+  const idx = all.findIndex((x) => x.risk === r.risk);
+  const quantified = /\d|%|margin|volume|price|credit|nim|occupancy|utilization|revenue|cost/i.test(
+    `${r.financialConsequence} ${r.valuationConsequence}`
+  );
+  if (!quantified) return "Medium";
+  return idx === 0 ? "High" : idx < all.length / 2 ? "High" : "Medium";
+}
+
 function mapRisks(risks: Risk[]): AIAnalysis["keyRisks"] {
   return risks.map((r) => ({
     risk: r.risk,
-    description: `${r.mechanism} | KPI: ${r.affectedKpi} | Financial: ${r.financialConsequence} | Valuation: ${r.valuationConsequence}`,
-    impact: "High" as const,
+    description: [r.mechanism, r.affectedKpi ? `KPI: ${r.affectedKpi}` : "", r.financialConsequence, r.valuationConsequence]
+      .filter(Boolean)
+      .join(" | "),
+    impact: riskSeverity(r, risks),
     mitigation: r.monitoringIndicator,
     valuationSensitivity: r.valuationConsequence,
   }));
@@ -69,7 +93,6 @@ function mapMoat(moat: MoatAnalysis): {
   moatSources?: AIAnalysis["moatSources"];
   moatPillars?: AIAnalysis["moatPillars"];
   moatChains?: AIAnalysis["moatChains"];
-  businessStrategyCommentary?: string;
 } {
   if (!moat?.sources?.length && !moat?.verdict) return {};
   const chains = moat.sources.map((s) => ({
@@ -99,7 +122,6 @@ function mapMoat(moat: MoatAnalysis): {
       costAdvantage: third?.chain || third?.evidence || "",
       moatTrend: moat.hasMoat ? "Supported by evidence chain" : "No economic moat",
     },
-    businessStrategyCommentary: chains.map((c) => c.chain).join(" | "),
   };
 }
 
@@ -143,6 +165,35 @@ function mapDiscovery(research: ResearchReport): AIAnalysis["researchDiscovery"]
   };
 }
 
+/**
+ * Economic-engine driver narrative — the part of ai-first that the legacy
+ * council never wrote. Rendered into the strategy and forensic sections so
+ * revenue/cost/margin/cash/balance-sheet mechanisms reach the PDF body.
+ */
+function economicEngineNarrative(research: ResearchReport): string {
+  const e = research.economicEngine;
+  if (!e) return "";
+  const families: Array<[string, typeof e.revenueDrivers]> = [
+    ["Revenue engines", e.revenueDrivers || []],
+    ["Cost drivers", e.costDrivers || []],
+    ["Margin engines", e.marginDrivers || []],
+    ["Cash engines", e.cashDrivers || []],
+    ["Balance-sheet engines", e.balanceSheetDrivers || []],
+    ["Capital engines", e.capitalDrivers || []],
+    ["Return engines", e.returnsDrivers || []],
+  ];
+  const lines: string[] = [];
+  if (e.primaryAbstraction) lines.push(`Primary economic abstraction: ${e.primaryAbstraction}.`);
+  for (const [label, drivers] of families) {
+    if (!drivers?.length) continue;
+    lines.push(`${label}: ${drivers.map((d) => `${d.name} — ${d.mechanism}`).join(" ")}`);
+  }
+  if (e.valueQuestions?.length) {
+    lines.push(`The value questions this machine raises: ${e.valueQuestions.join(" | ")}`);
+  }
+  return lines.join("\n\n");
+}
+
 /** Merge ai-first ResearchReport content into the report AIAnalysis (non-destructive for council fields). */
 export function enrichAIAnalysisFromResearchReport(
   aiAnalysis: AIAnalysis,
@@ -156,40 +207,96 @@ export function enrichAIAnalysisFromResearchReport(
   const competitiveLandscape = research.competitiveAnalysis
     ? mapCompetitive(research.competitiveAnalysis)
     : undefined;
+  const engineNarrative = economicEngineNarrative(research);
+
+  // Append-only where both sources exist: rich council prose is never
+  // shortened by the ai-first bridge (the previous behaviour replaced 800-word
+  // strategy prose with a one-line moat-chain join).
+  const strategyCombined = [
+    aiAnalysis.businessStrategyCommentary,
+    moatMaps.competitiveMoat,
+  ]
+    .filter((s) => s && s.trim().length > 0)
+    .join("\n\n");
+
+  const overviewCombined = [
+    aiAnalysis.companyOverview,
+    research.companyUnderstanding?.whatItDoes,
+    research.companyUnderstanding?.howItMakesMoney,
+    research.companyUnderstanding?.industryContext,
+    why,
+  ]
+    .filter((s) => s && s.trim().length > 0)
+    .join("\n\n");
+
+  const segmentsText = research.companyUnderstanding?.businessSegments
+    ?.map((s) => `${s.name}${s.shareOfRevenue != null ? ` (${(s.shareOfRevenue * 100).toFixed(0)}% of revenue)` : ""}: ${s.description}`)
+    .join(" | ");
+
+  const managementCombined = [
+    aiAnalysis.managementCommentary,
+    research.companyUnderstanding?.managementPriorities?.join("; "),
+    research.managementAnalysis,
+  ]
+    .filter((s) => s && s.trim().length > 0)
+    .join("\n\n");
+
+  const industryCombined = [
+    aiAnalysis.industryDynamicsCommentary,
+    aiAnalysis.globalIndustryAnalysis,
+    research.companyUnderstanding?.industryContext,
+  ]
+    .filter((s) => s && s.trim().length > 0)
+    .join("\n\n");
+
+  const forensicExtra = [
+    research.financialQuality,
+    research.historicalAnalysis,
+  ]
+    .filter((s) => s && s.trim().length > 0)
+    .join("\n\n");
 
   const enriched: AIAnalysis = {
     ...aiAnalysis,
-    investmentThesis: thesisText || aiAnalysis.investmentThesis,
-    investmentConclusion: thesisText || aiAnalysis.investmentConclusion,
-    companyOverview:
-      [research.companyUnderstanding?.whatItDoes, research.companyUnderstanding?.howItMakesMoney, why]
-        .filter(Boolean)
-        .join(" ") || aiAnalysis.companyOverview,
+    // Thesis/conclusion: the synthesized chain wins when present (it is the
+    // debate-driven body), but a longer council thesis is not truncated.
+    investmentThesis: richer(thesisText, aiAnalysis.investmentThesis),
+    // The ai-first conclusion is the closing verdict; it is preferred over a
+    // repeated thesis body, and the council conclusion is appended so neither
+    // source is lost.
+    investmentConclusion: [
+      research.conclusion || thesisText,
+      aiAnalysis.investmentConclusion,
+    ].filter((s) => s && s.trim().length > 0).join("\n\n") || aiAnalysis.investmentConclusion,
+    companyOverview: overviewCombined || aiAnalysis.companyOverview,
+    economicContext: richer([aiAnalysis.economicContext, forensicExtra].filter(Boolean).join("\n\n"), aiAnalysis.economicContext),
     whyThisCompany: why || aiAnalysis.whyThisCompany,
     researchDebates: research.debates?.length ? mapDebates(research) : aiAnalysis.researchDebates,
-    competitiveMoat: moatMaps.competitiveMoat || aiAnalysis.competitiveMoat,
-    moatChains: moatMaps.moatChains || aiAnalysis.moatChains,
+    competitiveMoat: richer(moatMaps.competitiveMoat, aiAnalysis.competitiveMoat),
+    moatChains: moatMaps.moatChains?.length ? moatMaps.moatChains : aiAnalysis.moatChains,
     moatPillars: moatMaps.moatPillars?.length ? moatMaps.moatPillars : aiAnalysis.moatPillars,
     moatSources: moatMaps.moatSources && Object.values(moatMaps.moatSources).some(Boolean)
       ? moatMaps.moatSources
       : aiAnalysis.moatSources,
-    businessStrategyCommentary: moatMaps.businessStrategyCommentary || aiAnalysis.businessStrategyCommentary,
+    businessStrategyCommentary: strategyCombined || aiAnalysis.businessStrategyCommentary,
+    operatingProfileCommentary: richer(
+      [aiAnalysis.operatingProfileCommentary, engineNarrative].filter(Boolean).join("\n\n"),
+      aiAnalysis.operatingProfileCommentary
+    ),
+    segmentAnalysis: richer(segmentsText, aiAnalysis.segmentAnalysis),
     competitiveLandscape: competitiveLandscape?.length ? competitiveLandscape : aiAnalysis.competitiveLandscape,
     catalysts: research.catalysts?.length ? mapCatalysts(research.catalysts) : aiAnalysis.catalysts,
     keyRisks: research.risks?.length ? mapRisks(research.risks) : aiAnalysis.keyRisks,
-    evidenceMapConfidence: research.evidenceMap?.overallConfidence,
-    evidenceUnsupported: research.evidenceMap?.unsupported,
+    evidenceMapConfidence: research.evidenceMap?.overallConfidence ?? aiAnalysis.evidenceMapConfidence,
+    evidenceUnsupported: research.evidenceMap?.unsupported ?? aiAnalysis.evidenceUnsupported,
     researchDiscovery: mapDiscovery(research) || aiAnalysis.researchDiscovery,
-    industryDynamicsCommentary:
-      research.companyUnderstanding?.industryContext || aiAnalysis.industryDynamicsCommentary,
-    managementCommentary:
-      research.companyUnderstanding?.managementPriorities?.join("; ") || aiAnalysis.managementCommentary,
-    capitalAllocationCommentary:
-      research.capitalAllocation || aiAnalysis.capitalAllocationCommentary,
-    segmentAnalysis:
-      research.companyUnderstanding?.businessSegments
-        ?.map((s) => `${s.name}: ${s.description}`)
-        .join(" | ") || aiAnalysis.segmentAnalysis,
+    industryDynamicsCommentary: industryCombined || aiAnalysis.industryDynamicsCommentary,
+    globalIndustryAnalysis: richer(aiAnalysis.globalIndustryAnalysis, research.companyUnderstanding?.industryContext),
+    managementCommentary: managementCombined || aiAnalysis.managementCommentary,
+    capitalAllocationCommentary: richer(
+      [aiAnalysis.capitalAllocationCommentary, research.capitalAllocation].filter(Boolean).join("\n\n"),
+      aiAnalysis.capitalAllocationCommentary
+    ),
   };
 
   // Keep any existing council verification from legacy pipeline

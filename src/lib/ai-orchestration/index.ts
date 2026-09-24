@@ -24,6 +24,8 @@ export {
 export type { OrchestrationCall, OrchestrationTransport } from "./transport";
 export { buildResearchTasks } from "./planner";
 export type { BuildResearchTasksInput } from "./planner";
+export { buildIdentityResearchTasks } from "./identity";
+export type { BuildIdentityTasksInput } from "./identity";
 export { derivePlanProgressTasks } from "./live-progress";
 export type {
   DerivePlanTasksInput,

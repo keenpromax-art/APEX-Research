@@ -856,9 +856,40 @@ export default function ReportClient({
         if (aiFirstRes.ok) {
           const aiFirstJson = await aiFirstRes.json();
           const research = aiFirstJson?.report;
-          if (research?.thesis) {
+          const aiUsed = aiFirstJson?.aiUsed !== false;
+          if (research?.thesis && aiUsed) {
             report.researchReport = research;
-            report.aiAnalysis = enrichAIAnalysisFromResearchReport(report.aiAnalysis, research);
+            const enriched = enrichAIAnalysisFromResearchReport(report.aiAnalysis, research);
+            // Post-enrichment guard pass: ai-first strings arrive AFTER the
+            // generation-time scrub above, so they must pass the same
+            // sector-bleed and canonical-moat gates or rich content would be
+            // the only unsanitized text in the report.
+            const postBleedLog: string[] = [];
+            const postCleaned = sanitizeSectorBleed(
+              enriched,
+              companyData.profile.sector,
+              companyData.profile.industry,
+              companyData.profile.description,
+              postBleedLog
+            );
+            if (postBleedLog.length > 0) {
+              bleedRewriteLog.push(...postBleedLog);
+            }
+            const postPillars = (postCleaned as any).moatPillars;
+            const postSources = (postCleaned as any).moatSources;
+            report.aiAnalysis = {
+              ...postCleaned,
+              moatPillars: Array.isArray(postPillars) && postPillars.length > 0
+                ? capPillarsToRating(postPillars, canonicalMoatRating)
+                : postPillars,
+              moatSources: postSources && typeof postSources === "object"
+                ? harmonizeMoatSources(postSources, canonicalMoatRating)
+                : postSources,
+            };
+          } else if (research?.thesis) {
+            // Mechanical ai-first preview: placeholder text must never be
+            // presented as research. Keep the council report untouched.
+            console.warn("[report] ai-first returned mechanical preview; keeping council analysis");
           }
         }
       } catch (e) {

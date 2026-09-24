@@ -1247,6 +1247,12 @@ export interface ReportData {
    * legacy structure when absent.
    */
   composedReport?: import("@/lib/report-composer").ComposedReport | null;
+  /**
+   * Adaptive research identity (ResearchDNA). Additive — attached alongside
+   * the composed report when the identity engine runs; renderers and QA
+   * ignore absence (legacy path unchanged).
+   */
+  researchIdentity?: import("@/lib/research-identity").ResearchDNA | null;
   shareholding: ShareholdingData;
   peers: PeerData[];
   aiAnalysis: AIAnalysis;

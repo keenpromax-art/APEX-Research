@@ -80,6 +80,12 @@ export interface ComposedReport {
   moduleIds: ResearchModuleId[];
   /** Aggregated unknowns across modules (never invented into sections). */
   unknowns: string[];
+  /**
+   * Adaptive research identity (ResearchDNA). Present when the caller composed
+   * with an identity; absent on the legacy/institutional path (golden-safe).
+   * Referenced, never recomputed; the renderer stays presentation-only.
+   */
+  researchIdentity?: import("@/lib/research-identity").ResearchDNA | null;
 }
 
 export interface ComposeReportInput {
@@ -97,4 +103,10 @@ export interface ComposeReportInput {
   researchCaseHasResearch?: boolean;
   /** Deterministic stamp for tests. */
   composedAt?: string;
+  /**
+   * Optional adaptive identity. When supplied, section depths are refined from
+   * the identity section plan and identity-overview/signature sections are
+   * appended (generic pages). Absent = legacy golden path, byte-identical.
+   */
+  researchIdentity?: import("@/lib/research-identity").ResearchDNA | null;
 }

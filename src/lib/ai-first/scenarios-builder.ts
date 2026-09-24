@@ -23,6 +23,7 @@ import { parseLlmJson } from "./llm";
 import { executeForecast } from "./forecast-engine";
 import { executeValuation } from "./valuation-engine";
 import { buildHistoricalAnalysisPack } from "./historical-analysis";
+import { DEPTH_DIRECTIVES, DEPTH_TOKEN_BUDGETS } from "./depth-guidance";
 
 export type ScenarioTransport = (opts: {
   system: string;
@@ -55,7 +56,9 @@ Respond with ONLY JSON:
   "generationRationale": "string",
   "scenarioDriverSummary": "string"
 }
-Note: values are in the same units as the model variables (growth rates as decimals, 0.08 = 8%).`;
+Note: values are in the same units as the model variables (growth rates as decimals, 0.08 = 8%).
+
+${DEPTH_DIRECTIVES.scenarios}`;
 
 /** Rich SCENARIO_CONTEXT with historical derived + model variables/formulas/base assumptions. */
 export function scenarioContext(
@@ -110,7 +113,7 @@ OUTPUT
 ======
 Respond with ONLY the JSON object.`;
 
-  const resp = await transport({ system: SYSTEM_PROMPT, user, temperature: 0.3, maxTokens: 2500, jsonMode: true });
+  const resp = await transport({ system: SYSTEM_PROMPT, user, temperature: 0.3, maxTokens: DEPTH_TOKEN_BUDGETS.scenarios, jsonMode: true });
   const parsed = parseLlmJson<Record<string, any>>(resp);
   if (!parsed || !Array.isArray(parsed.scenarios) || parsed.scenarios.length < 3) {
     throw new Error(`AI scenario builder returned unparseable or incomplete output for ${pack.ticker}`);

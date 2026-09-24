@@ -40,6 +40,11 @@ export function composeReport(input: ComposeReportInput): ComposedReport {
 
   const modules = runResearchModules(input.context, outline.moduleIds);
 
+  const identity = input.researchIdentity ?? null;
+  const identityDepthBySection = new Map(
+    (identity?.sections.sections ?? []).map((p) => [p.sectionId, p.depth] as const)
+  );
+
   const sections: ComposedSection[] = outline.sections.map((s) => {
     const moduleData: ComposedSection["moduleData"] = {};
     const unavailableModules: ComposedSection["unavailableModules"] = [];
@@ -49,6 +54,7 @@ export function composeReport(input: ComposeReportInput): ComposedReport {
       (moduleData as Record<string, unknown>)[id] = slice;
       if (slice == null) unavailableModules.push(id);
     }
+    const identityDepth = identityDepthBySection.get(s.id);
     return {
       index: s.index,
       id: s.id,
@@ -59,8 +65,43 @@ export function composeReport(input: ComposeReportInput): ComposedReport {
       pdfComponent: s.pdfComponent,
       moduleData,
       unavailableModules,
-    };
+      ...(identityDepth !== undefined ? { identityDepth } : {}),
+    } as ComposedSection;
   });
+
+  if (identity) {
+    const thesisSlice = getModuleData(modules, "thesis");
+    const valuationSlice = getModuleData(modules, "valuation");
+    let nextIndex = sections.length + 1;
+    const overview = identity.sections.sections.find((p) => p.sectionId === "identity-overview");
+    if (overview?.include) {
+      const moduleData: ComposedSection["moduleData"] = {};
+      (moduleData as Record<string, unknown>).thesis = thesisSlice;
+      sections.push({
+        index: nextIndex++,
+        id: "identity-overview",
+        title: overview.title,
+        modules: ["thesis"],
+        depth: outline.depth,
+        moduleData,
+        unavailableModules: thesisSlice == null ? ["thesis"] : [],
+      });
+    }
+    const signature = identity.sections.sections.find((p) => p.sectionId === "signature-analysis");
+    if (signature?.include) {
+      const moduleData: ComposedSection["moduleData"] = {};
+      (moduleData as Record<string, unknown>).valuation = valuationSlice;
+      sections.push({
+        index: nextIndex++,
+        id: "signature-analysis",
+        title: signature.title,
+        modules: ["valuation"],
+        depth: "full",
+        moduleData,
+        unavailableModules: valuationSlice == null ? ["valuation"] : [],
+      });
+    }
+  }
 
   return {
     version: REPORT_COMPOSER_VERSION,
@@ -73,6 +114,7 @@ export function composeReport(input: ComposeReportInput): ComposedReport {
     modules,
     moduleIds: outline.moduleIds,
     unknowns: [...modules.unknowns],
+    ...(identity ? { researchIdentity: identity } : {}),
   };
 }
 

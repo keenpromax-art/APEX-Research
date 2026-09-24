@@ -33,7 +33,7 @@ import type {
   EventPriceMovement,
   EventPriceTrajectoryPoint,
 } from "@/types/report";
-import { formatPct } from "@/lib/calculations";
+import { formatPct, formatLargeNum } from "@/lib/calculations";
 import { revalueSensitivity } from "@/lib/financial-kernel";
 import { buildEventPriceMovements } from "@/lib/event-price-engine";
 import {
@@ -74,7 +74,7 @@ import {
   canonicalScenarios,
 } from "@/lib/canonical";
 import { capPillarsToRating } from "@/lib/moat";
-import { planComposedPdf } from "@/lib/report-composer";
+import { planComposedPdf, composedPdfReportTitle } from "@/lib/report-composer";
 import type { ComposedReport, ComposedSection } from "@/lib/report-composer";
 import { getReportBlueprint } from "@/lib/report-types";
 import type {
@@ -2635,7 +2635,7 @@ const MoatSourcesPage = ({ data }: { data: ReportData }) => {
             </Text>
           </View>
           <Text style={S.bodyText}>
-            {pe.industryDynamicsCommentary || pe.globalIndustryAnalysis}
+            {pe.globalIndustryAnalysis || pe.industryDynamicsCommentary}
           </Text>
           <Text style={S.bodyText}>
             {pe.domesticIndustryAnalysis}
@@ -2676,18 +2676,32 @@ const MoatSourcesPage = ({ data }: { data: ReportData }) => {
             <Text style={[S.compactCellHeader, { width: "16%" }]}>Intensity</Text>
             <Text style={[S.compactCellHeader, { width: "60%" }]}>Sector Dynamics &amp; Strategic Defense</Text>
           </View>
-          {(pe.fiveForces && pe.fiveForces.length > 0 ? pe.fiveForces : []).map((item, ri) => (
-            <View key={ri} style={ri % 2 === 0 ? S.compactRow : S.compactRowAlt}>
-              <Text style={[S.compactCellBold, { width: "24%" }]}>{item.force}</Text>
-              <Text style={[S.compactCell, { width: "16%" }]}>{item.level}</Text>
-              <Text style={[S.compactCell, { width: "60%" }]}>{item.commentary}</Text>
-            </View>
-          ))}
-          {(!pe.fiveForces || pe.fiveForces.length === 0) && (
-            <View style={S.compactRow}>
-              <Text style={[S.compactCell, { width: "100%", color: COLORS.textMuted }]}>No five-forces assessment evidenced — unassessed rather than assumed.</Text>
-            </View>
-          )}
+          {(() => {
+            // Deterministic fallbacks derive from the ai-first moat chains and
+            // discovery risk seeds when the legacy five-forces array is absent,
+            // so the matrix is evidence-led rather than dropped.
+            const legacy = pe.fiveForces && pe.fiveForces.length > 0 ? pe.fiveForces : [];
+            const chains = (data.researchReport?.moat?.sources || []).map((s) => ({
+              force: s.source,
+              level: s.durability || "Unassessed",
+              commentary: `${s.chain || s.economicConsequence || ""}${s.threatsToDurability ? ` Threat: ${s.threatsToDurability}.` : ""}`.trim(),
+            }));
+            const rows = legacy.length >= 5 ? legacy.slice(0, 5) : [...legacy, ...chains].slice(0, 5);
+            if (rows.length === 0) {
+              return (
+                <View style={S.compactRow}>
+                  <Text style={[S.compactCell, { width: "100%", color: COLORS.textMuted }]}>No five-forces assessment evidenced — unassessed rather than assumed.</Text>
+                </View>
+              );
+            }
+            return rows.map((item, ri) => (
+              <View key={ri} style={ri % 2 === 0 ? S.compactRow : S.compactRowAlt}>
+                <Text style={[S.compactCellBold, { width: "24%" }]}>{item.force}</Text>
+                <Text style={[S.compactCell, { width: "16%" }]}>{item.level}</Text>
+                <Text style={[S.compactCell, { width: "60%" }]}>{item.commentary}</Text>
+              </View>
+            ));
+          })()}
         </View>
       </View>
 
@@ -2807,6 +2821,17 @@ const BullsSayBearsSayPage = ({ data }: { data: ReportData }) => {
             {pe.businessStrategyCommentary}
           </Text>
       </View>
+
+      {pe.operatingProfileCommentary ? (
+      <View style={{ borderTopWidth: 0.5, borderTopColor: COLORS.hairlineLight, paddingTop: 5, marginBottom: 6 }}>
+        <Text style={{ fontSize: 8.5, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 2 }}>
+          Operating Profile — Footprint, Margin &amp; Capital Intensity
+        </Text>
+          <Text style={S.bodyText}>
+            {pe.operatingProfileCommentary}
+          </Text>
+      </View>
+      ) : null}
 
       {/* Key Investment Catalysts & Downside Risk Milestones Table (Fills bottom gap) */}
       <View style={{ borderTopWidth: 0.5, borderTopColor: COLORS.hairlineLight, paddingTop: 5 }}>
@@ -3379,7 +3404,16 @@ const CreditAnalysisPage2 = ({ data }: { data: ReportData }) => {
   const sym = currency === "INR" ? "Rs. " : currency === "USD" ? "$" : currency === "GBP" ? "£" : currency === "EUR" ? "€" : "";
   const latest = data.annualFinancials[data.annualFinancials.length - 1] || ({} as AnnualFinancials);
   const sevRank = (s: string) => (s === "High" ? 0 : s === "Low" ? 2 : 1);
-  const risks = (Array.isArray(pe.keyRisks) && pe.keyRisks.length > 0
+  const risks = (Array.isArray(pe.enterpriseRiskCommentary) && pe.enterpriseRiskCommentary.length > 0
+    ? pe.enterpriseRiskCommentary.map(e => ({
+        risk: e.risk,
+        severity: (e.severity === "High" || e.severity === "Low" || e.severity === "Medium") ? e.severity : "Moderate",
+        description: e.description,
+        mitigation: e.mitigation || "Mitigation not evidenced in available disclosures.",
+        horizon: (e as any).horizon || null,
+        valuationSensitivity: (e as any).valuationSensitivity || null,
+      }))
+    : (Array.isArray(pe.keyRisks) && pe.keyRisks.length > 0
     ? pe.keyRisks.map(k => ({
         risk: k.risk,
         severity: k.impact === "High" ? "High" : k.impact === "Low" ? "Low" : "Moderate",
@@ -3390,7 +3424,7 @@ const CreditAnalysisPage2 = ({ data }: { data: ReportData }) => {
         horizon: (k as any).horizon || null,
         valuationSensitivity: (k as any).valuationSensitivity || null,
       }))
-    : []).sort((a, b) => sevRank(a.severity) - sevRank(b.severity));
+    : [])).sort((a, b) => sevRank(a.severity) - sevRank(b.severity));
 
   return (
     <Page size="A4" style={S.page}>
@@ -3803,15 +3837,15 @@ const ManagementAndOwnershipPage2 = ({ data }: { data: ReportData }) => {
           </View>
           <Text style={S.bodyText}>
             {pe.capitalDeploymentHistory?.narrative ||
-              `A central pillar of ${data.profile.name}'s multi-year investment thesis is its disciplined approach to capital deployment. Management adheres to a strict hierarchy: first, fully funding high-return internal manufacturing and technology enhancements; second, preserving adequate liquidity buffers; and third, distributing excess capital to equity holders.`}
+              `Capital deployment disclosure is limited: ${data.profile.name} has not provided a filing-level capital allocation policy in the available dataset. The analysis therefore rests on reported cash generation, capex, dividends and debt movements rather than stated management intent.`}
           </Text>
           <Text style={S.bodyText}>
             {pe.capitalDeploymentHistory?.dividends ||
-              `Dividend distributions are evaluated against internal reinvestment opportunities and credit rating objectives. The board seeks to maintain a sustainable payout ratio that does not jeopardize capital expenditure or liquidity cushions across cyclical downturns.`}
+              `Dividend policy cannot be assessed from the available data; no distribution-policy disclosure is evidenced here.`}
           </Text>
           <Text style={S.bodyText}>
             {pe.capitalDeploymentHistory?.repurchases ||
-              `Regarding external corporate investments, management maintains rigorous hurdle rates, avoiding dilutive, debt-fueled acquisitions that could compromise balance sheet strength or dilute organizational focus.`}
+              `Acquisition and buyback policy cannot be assessed from the available data; no transaction-policy disclosure is evidenced here.`}
           </Text>
         </View>
 
@@ -3823,14 +3857,24 @@ const ManagementAndOwnershipPage2 = ({ data }: { data: ReportData }) => {
           </View>
           <Text style={S.bodyText}>
             {pe.capitalDeploymentHistory?.debtPaydown ||
-              `Debt management is centered on extending maturity schedules, eliminating punitive debt covenants, and optimizing the blended cost of debt capital. Operating cash flows provide robust coverage over scheduled debt service.`}
+              `Debt management cannot be characterised from the available data; maturity schedules and covenant terms require filing-level disclosure that is not in this dataset.`}
           </Text>
           <Text style={S.bodyText}>
-            The board of directors maintains active succession planning across all senior operating roles and key technical divisions. Executive compensation frameworks incorporate multi-year performance criteria including return on capital employed (ROCE) and operational cash generation benchmarks.
+            {(() => {
+              // Board succession, executive compensation design and alignment
+              // are NOT asserted without disclosure. Previously these were
+              // hardcoded claims printed for every company.
+              const officers = (data.aiAnalysis as { officers?: unknown })?.officers;
+              void officers;
+              const hasOfficerData = (data.researchCase?.management?.officers?.length ?? 0) > 0;
+              return hasOfficerData
+                ? `Executive roster data is available in the ownership table below. Board composition, succession planning and compensation design require annual-report and proxy disclosure, which are outside the available dataset and are therefore not characterised here.`
+                : `Board composition, succession planning and executive compensation design require annual-report and proxy disclosure, which are outside the available dataset. No characterisation is made rather than assuming favourable governance.`;
+            })()}
           </Text>
-          <Text style={S.bodyText}>
-            In conclusion, our buy-side evaluation confirms that {data.profile.name}&apos;s leadership maintains disciplined stewardship of invested capital. Their focus on operational de-risking and conservative balance sheet management supports our positive fundamental outlook.
-          </Text>
+          {pe.governanceCommentary ? (
+            <Text style={S.bodyText}>{pe.governanceCommentary}</Text>
+          ) : null}
         </View>
       </View>
 
@@ -5391,19 +5435,16 @@ const IncomeStatementDetailedPage = ({ data, concise = true }: { data: ReportDat
         <View wrap={false} style={{ flexDirection: "row", gap: 10 }}>
           {(() => {
             const sectorProfile = classifySector(data.profile.sector, data.profile.industry, data.profile.description);
-            const isAssetMgmt = sectorProfile.id === "asset-management";
-            const isBank = sectorProfile.id === "bank" || sectorProfile.id === "nbfc";
 
-            let revenueNarrative = `${pe.revenueCommentary} Forecast revenues reflect discrete multi-stage DCF modeling incorporating baseline organic market growth, capacity expansion, and customer contract delivery milestones. Mix migration toward higher-value solutions and specialized services continues to support overall realization pricing.`;
-            let marginNarrative = `${pe.ebitdaCommentary} Operating leverage is projected to expand over the forecast period as incremental revenue throughput absorbs fixed operational costs. Disciplined overhead spending and procurement efficiencies provide resilience against cost inflation, driving strong cash conversion into operating profits.`;
-
-            if (isAssetMgmt) {
-              revenueNarrative = `${pe.revenueCommentary} Discrete multi-stage forecasting incorporates baseline AUM organic net inflows, fee rate realization across active and passive mandates, and expanding recurring technology subscription ARR from enterprise risk and analytics platforms.`;
-              marginNarrative = `${pe.ebitdaCommentary} Operating leverage is driven by asset management platform scalability: incremental AUM incurs minimal marginal distribution expense while technology infrastructure scales efficiently. Disciplined compensation ratios and overhead control support strong operating cash conversion.`;
-            } else if (isBank) {
-              revenueNarrative = `${pe.revenueCommentary} Top-line expansion is driven by disciplined loan compounding across prime retail and corporate books, supported by stable net interest margins and sticky non-interest fee generation.`;
-              marginNarrative = `${pe.ebitdaCommentary} Cost-to-income efficiency improves as digital self-service channels and automated underwriting lower branch intermediation costs, sustaining robust pre-provision operating profitability.`;
-            }
+            // No template prose: when the forensic agent produced nothing, say
+            // so. Previously these strings appended sector boilerplate to (or
+            // fully replaced) AI analysis, which is exactly the bland output
+            // this section is meant to avoid.
+            const revenueNarrative = pe.revenueCommentary
+              || "Revenue commentary unavailable — the forensic analyst produced no evidence-constrained revenue analysis for this company.";
+            const marginNarrative = pe.ebitdaCommentary
+              || "Margin commentary unavailable — the forensic analyst produced no evidence-constrained margin analysis for this company.";
+            void sectorProfile;
 
             return (
               <>
@@ -5575,7 +5616,14 @@ const BalanceSheetDetailedPage = ({ data }: { data: ReportData }) => {
                 if (wcChain) {
                   return `${pe.balanceSheetCommentary ? pe.balanceSheetCommentary + " " : ""}${wcChain}`;
                 }
-                return `${pe.balanceSheetCommentary} Working capital management remains tightly managed across receivables and inventory cycles. Negative or lean working capital attributes across key divisions generate structural operating cash float, minimizing reliance on external revolving credit lines.`;
+                if (pe.balanceSheetCommentary) return pe.balanceSheetCommentary;
+                const lf = data.annualFinancials[data.annualFinancials.length - 1];
+                if (!lf) return `Working-capital analysis unavailable — no financial statements are present.`;
+                const nwc = lf.netWorkingCapital;
+                if (nwc === undefined || nwc === null) {
+                  return `Working-capital components are not disclosed in the available statements, so no cash-float or funding claim is made.`;
+                }
+                return `Net working capital of ${formatLargeNum(nwc, data.profile.currency)} ${nwc < 0 ? "is negative, so customer and supplier funding offset part of the operating asset base" : "is a use of funds that grows with the top line"} — cash conversion depends on the receivables and inventory days shown in the statements above.`;
               })()}
             </Text>
           </View>
@@ -5585,7 +5633,20 @@ const BalanceSheetDetailedPage = ({ data }: { data: ReportData }) => {
             </Text>
             <Text style={{ fontSize: 6.6, color: COLORS.textSecondary, lineHeight: 1.35, textAlign: "justify" }}>
               {pe.creditAnalysisCommentary?.financialHealth ||
-                `${data.profile.name} exhibits a disciplined capital structure designed to maintain operational resilience across sector cycles.`} Conservative debt leverage and ample interest coverage ratios provide extensive covenant headroom, confirming top-tier solvency protection.
+                (() => {
+                  // Solvency is computed from reported figures, never asserted.
+                  const lf = data.annualFinancials[data.annualFinancials.length - 1];
+                  if (!lf) return `Solvency cannot be assessed — no financial statements are available.`;
+                  const debt = lf.totalDebt || 0;
+                  const cash = (lf.cash || 0) + stmtNum(lf, "shortTermInvestments");
+                  const ebitda = stmtNum(lf, "ebitda");
+                  const lev = ebitda > 0 ? debt / ebitda : null;
+                  const interest = stmtNum(lf, "interestExpense");
+                  const coverage = interest > 0 ? stmtNum(lf, "operatingIncome") / interest : null;
+                  return lev === null
+                    ? `Reported gross debt is ${formatLargeNum(debt, data.profile.currency)} against ${formatLargeNum(cash, data.profile.currency)} of cash and liquid investments. EBITDA is undisclosed, so a leverage multiple cannot be computed and no solvency rating is asserted.`
+                    : `Gross debt of ${formatLargeNum(debt, data.profile.currency)} against ${formatLargeNum(cash, data.profile.currency)} cash implies ${lev.toFixed(2)}x debt/EBITDA${coverage !== null ? `, with ${coverage.toFixed(1)}x operating-income interest coverage` : ""}. ${lev < 1.5 ? "Low reported leverage provides cushion against cyclicality." : lev < 3 ? "Moderate leverage is serviceable at current earnings but sensitive to an earnings shortfall." : "Elevated leverage constrains distributions and raises refinancing sensitivity."}`;
+                })()}
             </Text>
           </View>
         </View>
@@ -5737,7 +5798,20 @@ const CashFlowDetailedPage = ({ data }: { data: ReportData }) => {
             </Text>
             <Text style={{ fontSize: 6.6, color: COLORS.textSecondary, lineHeight: 1.35, textAlign: "justify" }}>
               {pe.capitalDeploymentHistory?.narrative ||
-                `A central pillar of ${data.profile.name}'s multi-year thesis is its disciplined approach to capital deployment.`} Discretionary free cash flow comfortably covers internal sustaining and growth capital expenditures. With self-funding capability firmly established, excess liquidity provides full optionality for dividend continuity.
+                (() => {
+                  // Self-funding is computed from reported FCF, never asserted.
+                  const lf = data.annualFinancials[data.annualFinancials.length - 1];
+                  if (!lf) return `Reinvestment capacity cannot be assessed — no financial statements are available.`;
+                  const capex = lf.capitalExpenditures || 0;
+                  const fcf = lf.freeCashFlow ?? ((lf.operatingCashFlow || 0) - capex);
+                  if (fcf > 0 && fcf >= capex) {
+                    return `Free cash flow of ${formatLargeNum(fcf, data.profile.currency)} covers ${formatLargeNum(capex, data.profile.currency)} of capex, so the current investment programme is self-funded from operations, with the residual available for distributions or debt reduction.`;
+                  }
+                  if (fcf > 0) {
+                    return `Free cash flow of ${formatLargeNum(fcf, data.profile.currency)} falls short of ${formatLargeNum(capex, data.profile.currency)} of capex; the funding gap must be met from cash reserves or external financing.`;
+                  }
+                  return `Free cash flow is negative at ${formatLargeNum(fcf, data.profile.currency)} against ${formatLargeNum(capex, data.profile.currency)} of capex, so growth is externally funded and no self-funding capability is claimed.`;
+                })()}
             </Text>
           </View>
         </View>
@@ -6467,6 +6541,38 @@ const ComparableCompanyAnalysisPage2 = ({ data }: { data: ReportData }) => {
                 </Text>
               </View>
             </View>
+          </View>
+        );
+      })()}
+
+      {(() => {
+        // AI forensic commentary that previously never rendered: DuPont
+        // dissection, ratio evaluation, EBIT/PAT quality, quarterly cadence.
+        // Presentation-only pass-through — no calculation, no invention.
+        const pe = getPEAnalysis(data);
+        const blocks: Array<{ title: string; body: string }> = [
+          { title: "DuPont Dissection — Quality of Return", body: pe.dupontCommentary || "" },
+          { title: "Liquidity, Leverage & Capital Efficiency", body: pe.ratioCommentary || "" },
+          { title: "Operating Profit Quality", body: pe.ebitCommentary || "" },
+          { title: "Net Earnings Quality", body: pe.patCommentary || "" },
+          { title: "Quarterly Cadence & Watchlist", body: pe.quarterlyResultsCommentary || "" },
+        ].filter((b) => b.body && b.body.trim().length > 0);
+        if (blocks.length === 0) return null;
+        return (
+          <View style={{ borderTopWidth: 0.5, borderTopColor: COLORS.hairlineLight, paddingTop: 5, marginTop: 6 }}>
+            <Text style={{ fontSize: 8.5, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 3 }}>
+              Forensic Commentary — Return Quality, Earnings Quality &amp; Cadence
+            </Text>
+            {blocks.map((b) => (
+              <View key={b.title} style={{ marginBottom: 4 }}>
+                <Text style={{ fontSize: 7.2, fontFamily: "Helvetica-Bold", color: COLORS.slateDark, marginBottom: 1.5 }}>
+                  {b.title}
+                </Text>
+                <Text style={{ fontSize: 6.8, color: COLORS.textSecondary, lineHeight: 1.38, textAlign: "justify" }}>
+                  {b.body}
+                </Text>
+              </View>
+            ))}
           </View>
         );
       })()}
@@ -8484,6 +8590,7 @@ export const ReportDocument = ({
   const composed = composedProp ?? data.composedReport ?? null;
   const depthConcise = composed ? composed.depth === "concise" : concise;
   const reportTitle =
+    (composed && composedPdfReportTitle(composed)) ||
     (composed && getReportBlueprint(composed.blueprintId)?.title) ||
     "Institutional Equity Research";
   const docMeta = {

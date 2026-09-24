@@ -37,6 +37,8 @@ export interface ComposedPdfPlan {
 
 /** Blueprint display title for a composed report (fail-closed to institutional). */
 export function composedPdfReportTitle(composed: ComposedReport): string {
+  const identityTitle = composed.researchIdentity?.cover.title;
+  if (identityTitle && identityTitle.trim().length > 3) return identityTitle;
   return getReportBlueprint(composed.blueprintId)?.title ?? "Institutional Equity Research";
 }
 

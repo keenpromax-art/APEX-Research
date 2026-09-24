@@ -167,7 +167,8 @@ function revenueSeries(pack: FactPack): number[] {
     .map((f) => f.value as number);
 }
 
-function mechanicalUnderstanding(pack: FactPack): CompanyUnderstanding {
+/** Exported for content-depth tests (deterministic, no LLM). */
+export function mechanicalUnderstanding(pack: FactPack): CompanyUnderstanding {
   const name =
     pack.company.facts.find((f) => f.metric === "companyName")?.textValue ??
     pack.ticker;
@@ -178,51 +179,102 @@ function mechanicalUnderstanding(pack: FactPack): CompanyUnderstanding {
     pack.company.facts.find((f) => f.metric === "sector")?.textValue ?? "";
   const industry =
     pack.company.facts.find((f) => f.metric === "industry")?.textValue ?? "";
+  // Computed mechanical depth (deterministic yfinance facts — no invention).
+  const revs = revenueSeries(pack);
+  const cagr = historicalCagr(revs);
+  const revScale = revs.length ? revs[revs.length - 1] : 0;
+  const niHist = pack.incomeStatement.facts.filter((f) => /netIncome/i.test(f.metric) && f.value !== undefined).map((f) => f.value as number);
+  const lastNi = niHist.length ? niHist[niHist.length - 1] : 0;
+  const lastMargin = revScale > 0 ? lastNi / revScale : 0;
+  const ocfHist = pack.cashFlow.facts.filter((f) => /operatingCashFlow/i.test(f.metric) && f.value !== undefined).map((f) => f.value as number);
+  const lastOcf = ocfHist.length ? ocfHist[ocfHist.length - 1] : 0;
+  const debtNow = pack.balanceSheet.facts.filter((f) => /totalDebt/i.test(f.metric) && f.value !== undefined).map((f) => f.value as number).pop() ?? 0;
+  const eqNow = pack.balanceSheet.facts.filter((f) => /totalEquity/i.test(f.metric) && f.value !== undefined).map((f) => f.value as number).pop() ?? 0;
+  const where = [sector, industry].filter(Boolean).join(" / ") || "its disclosed market";
   return {
     ticker: pack.ticker,
     companyName: name,
     whatItDoes: desc
-      ? `Mechanical preview (no AI key): ${desc.slice(0, 600)}`
-      : `Mechanical preview (no AI key) for ${name}. AI company understanding unavailable.`,
+      ? `Mechanical preview (no AI key): ${desc.slice(0, 600)} The company operates in ${where} with trailing revenue of scale ${revScale > 0 ? revScale.toFixed(0) : "undisclosed"} across ${revs.length} reported period(s). Business segments, footprint detail and strategy require AI analysis or filings — see unknowns.`
+      : `Mechanical preview (no AI key) for ${name} (${where}). AI company understanding unavailable; trailing revenue ${revScale > 0 ? revScale.toFixed(0) : "undisclosed"} over ${revs.length} period(s).`,
     howItMakesMoney:
-      "Mechanical preview: revenue-driven abstraction pending AI analysis.",
+      `Mechanical preview: revenue ${revs.length > 1 ? `compounding at ${(cagr * 100).toFixed(1)}% CAGR over ${revs.length} periods` : "trajectory pending more history"} with net margin ${(lastMargin * 100).toFixed(1)}% on the latest print${ocfHist.length ? `; operating cash flow ${lastOcf.toFixed(0)} ${lastOcf > 0 ? "validates" : "does not currently validate"} reported earnings` : "; cash validation pending statement detail"}. Full revenue equation (volume × realization × mix) requires AI analysis.`,
     businessSegments: [],
     economicUnits: ["revenue"],
     primaryEconomicAbstraction: "revenue",
     revenueDrivers: [
       {
         name: "Revenue",
-        mechanism: "Historical reported revenue compounds forward at the AI-unavailable mechanical growth estimate.",
+        mechanism: `Historical reported revenue compounds forward at ${(cagr * 100).toFixed(1)}% CAGR (${revs.length} periods; mechanical growth estimate, AI-unavailable). Volume vs realization split unknown — requires filings.`,
         sourceFacts: ["totalRevenue"],
         statementLine: "totalRevenue",
       },
     ],
     costDrivers: [],
-    marginDrivers: [],
-    cashGenerationDrivers: [],
-    balanceSheetDrivers: [],
+    marginDrivers: niHist.length
+      ? [
+          {
+            name: "Net margin band",
+            mechanism: `Net margin printed ${(lastMargin * 100).toFixed(1)}% on the latest print; margin defense vs expansion decides earnings leverage. Cost structure detail requires AI analysis.`,
+            sourceFacts: ["netIncome"],
+            statementLine: "netIncome",
+          },
+        ]
+      : [],
+    cashGenerationDrivers: ocfHist.length
+      ? [
+          {
+            name: "Operating cash conversion",
+            mechanism: `Latest operating cash flow ${lastOcf.toFixed(0)} against revenue scale ${revScale.toFixed(0)}; conversion quality decides earnings defensibility. Working-capital chain requires AI analysis.`,
+            sourceFacts: ["operatingCashFlow"],
+            statementLine: "operatingCashFlow",
+          },
+        ]
+      : [],
+    balanceSheetDrivers: debtNow > 0 || eqNow > 0
+      ? [
+          {
+            name: "Funded leverage",
+            mechanism: `Reported debt ${debtNow.toFixed(0)} against equity ${eqNow.toFixed(0)}; balance-sheet capacity constrains growth funding and downside. Maturity detail requires filings.`,
+            sourceFacts: ["totalDebt"],
+            statementLine: "totalDebt",
+          },
+        ]
+      : [],
     returnsDrivers: [],
     capitalEngines: [],
     keyKpis: [
       {
         name: "Revenue",
-        rationale: "Top-line scale anchors the mechanical preview.",
+        rationale: `Top-line scale anchors the mechanical preview (${(cagr * 100).toFixed(1)}% CAGR).`,
         availability: "yfinance",
         unit: "currency",
       },
+      ...(niHist.length
+        ? [
+            {
+              name: "Net margin",
+              rationale: `Latest ${(lastMargin * 100).toFixed(1)}% — earnings leverage indicator.`,
+              availability: "yfinance" as const,
+              unit: "percent",
+            },
+          ]
+        : []),
     ],
     metricsToAvoid: [],
     statementsThatMatterMost: ["incomeStatement"],
     industryContext:
-      [sector, industry].filter(Boolean).join(" / ") ||
-      "Industry context pending AI analysis.",
+      [sector, industry].filter(Boolean).join(" / ") +
+        (revs.length
+          ? ` — trailing revenue scale ${revScale.toFixed(0)}, ${(cagr * 100).toFixed(1)}% CAGR, latest net margin ${(lastMargin * 100).toFixed(1)}%. Cycle position and share require AI analysis.`
+          : " — industry context pending AI analysis."),
     appropriateValuationMethods: [
       { method: "DCF", why: "Mechanical preview default; AI selection unavailable." },
     ],
     confidence: {
       overall: 0.2,
       dataQuality: "mechanical-preview",
-      reasoning: "No AI transport available; generic revenue model used.",
+      reasoning: "No AI transport available; computed yfinance trajectories used, generic revenue model retained.",
     },
   };
 }

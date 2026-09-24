@@ -7,6 +7,7 @@
  */
 import type { FactPack, CompanyUnderstanding, BusinessDriver, KpiDefinition, Fact } from "./types";
 import { parseLlmJson } from "./llm";
+import { DEPTH_DIRECTIVES, DEPTH_TOKEN_BUDGETS } from "./depth-guidance";
 
 export type UnderstandingTransport = (opts: {
   system: string;
@@ -98,7 +99,9 @@ Respond with ONLY JSON in this exact shape:
   "confidence": { "overall": 0.5, "dataQuality": "string", "reasoning": "string" },
   "epistemic": { "knownFacts": ["string"], "inferences": ["string"], "unknowns": ["string"], "requiredResearch": ["string"] }
 }
-Note: The "epistemic" object is OPTIONAL but preferred — if included, downstream stages surface unknowns honestly. If omitted, confidence must reflect the gap. `;
+Note: The "epistemic" object is OPTIONAL but preferred — if included, downstream stages surface unknowns honestly. If omitted, confidence must reflect the gap.
+
+${DEPTH_DIRECTIVES.understanding} `;
 
 /** AI company understanding from the fact pack. */
 export async function understandCompany(
@@ -108,7 +111,7 @@ export async function understandCompany(
   const ctx = businessContext(pack);
   const user = `Company ticker: ${pack.ticker}\n\n${ctx}\n\nUnderstand this company now. Respond with ONLY the JSON object.`;
 
-  const resp = await transport({ system: SYSTEM_PROMPT, user, temperature: 0.3, maxTokens: 3000, jsonMode: true });
+  const resp = await transport({ system: SYSTEM_PROMPT, user, temperature: 0.3, maxTokens: DEPTH_TOKEN_BUDGETS.understanding, jsonMode: true });
   const parsed = parseLlmJson<Record<string, any>>(resp);
   if (!parsed) {
     throw new Error(`AI company understanding returned unparseable output for ${pack.ticker}`);

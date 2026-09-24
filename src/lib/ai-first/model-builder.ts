@@ -19,6 +19,7 @@ import type {
 } from "./types";
 import { parseLlmJson } from "./llm";
 import { buildHistoricalAnalysisPack } from "./historical-analysis";
+import { DEPTH_DIRECTIVES, DEPTH_TOKEN_BUDGETS } from "./depth-guidance";
 
 export type ModelTransport = (opts: {
   system: string;
@@ -81,7 +82,9 @@ Respond with ONLY JSON:
   "assumptions": [{ "id": "A1", "assumption": "string", "variable": "string", "value": 0.08, "unit": "%", "period": "Y1", "rationale": "string", "historicalEvidence": "string citing [F-...] ids", "confidence": 0.8 }],
   "driverPaths": { "volume": [0.08, 0.06] }
 }
-Note: growth rates and ratio assumptions are DECIMALS (0.08 = 8%).`;
+Note: growth rates and ratio assumptions are DECIMALS (0.08 = 8%).
+
+${DEPTH_DIRECTIVES.model}`;
 /** Rich MODEL_CONTEXT with deterministic derived metrics (no longer compact-only). */
 export function modelContext(input: ModelBuilderInput): string {
   const { pack, understanding, engine, debates } = input;
@@ -184,7 +187,7 @@ OUTPUT
 ======
 Respond with ONLY the JSON object.`;
 
-  const resp = await transport({ system: SYSTEM_PROMPT, user, temperature: 0.25, maxTokens: 3500, jsonMode: true });
+  const resp = await transport({ system: SYSTEM_PROMPT, user, temperature: 0.25, maxTokens: DEPTH_TOKEN_BUDGETS.model, jsonMode: true });
   const parsed = parseLlmJson<Record<string, any>>(resp);
   if (!parsed) throw new Error(`AI model builder agent returned unparseable output for ${pack.ticker}`);
 

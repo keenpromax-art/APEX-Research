@@ -20,6 +20,7 @@ import type {
 } from "./types";
 import { parseLlmJson } from "./llm";
 import { buildHistoricalAnalysisPack } from "./historical-analysis";
+import { DEPTH_DIRECTIVES, DEPTH_TOKEN_BUDGETS } from "./depth-guidance";
 
 export type ValuationTransport = (opts: {
   system: string;
@@ -61,7 +62,9 @@ Respond with ONLY JSON:
   "methodsConsidered": [{ "method": "string", "verdict": "selected", "reason": "string" }],
   "limitations": ["string"]
 }
-Note: rates are DECIMALS (0.105 = 10.5%). The methodology MUST be executable by the deterministic engine — if the economically ideal method is not executable, choose the closest executable one and explain the limitation.`;
+Note: rates are DECIMALS (0.105 = 10.5%). The methodology MUST be executable by the deterministic engine — if the economically ideal method is not executable, choose the closest executable one and explain the limitation.
+
+${DEPTH_DIRECTIVES.valuation}`;
 
 /** Rich VALUATION_CONTEXT with historical derived + forecast anchors. */
 export function valuationContext(input: ValuationBuilderInput): string {
@@ -141,7 +144,7 @@ OUTPUT
 ======
 Respond with ONLY the JSON object.`;
 
-  const resp = await transport({ system: SYSTEM_PROMPT, user, temperature: 0.25, maxTokens: 2500, jsonMode: true });
+  const resp = await transport({ system: SYSTEM_PROMPT, user, temperature: 0.25, maxTokens: DEPTH_TOKEN_BUDGETS.valuation, jsonMode: true });
   const parsed = parseLlmJson<Record<string, any>>(resp);
   if (!parsed || !parsed.methodology) {
     throw new Error(`AI valuation builder returned unparseable output for ${input.pack.ticker}`);
