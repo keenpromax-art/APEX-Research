@@ -198,13 +198,13 @@ npm run dev                  # → http://localhost:3000
 | Command | Purpose |
 |---------|---------|
 | `npm run dev` | Local terminal |
-| `npm run build` | Next + OpenNext Cloudflare build |
-| `npm run preview` | Local Wrangler Pages simulation |
-| `npm run deploy` | Build + deploy to Pages |
+| `npm run build` | Next + production build |
+| `npm run preview` | Build + local Cloudflare Worker simulation |
+| `npm run deploy` | Build + deploy to Cloudflare Workers |
 | `npm run lint` / `npx tsc --noEmit` | Lint / typecheck |
 | `npm test` / `npm run test:golden` | Golden regression + AI provider tests |
 
-Cloudflare Pages: build `npx @opennextjs/cloudflare build`, output `.open-next/assets`, env `OPENROUTER_API_KEY` · `OPENROUTER_MODEL` · `NODE_VERSION=20`.
+Cloudflare Workers: run `npx opennextjs-cloudflare build`; configure the `RESEARCH_RUN_DB` D1 binding and apply `migrations/0001_research_runs.sql` before deployment. Environment: `OPENROUTER_API_KEY` · `OPENROUTER_MODEL` · `NODE_VERSION=20`.
 
 > Build flakiness note: on Windows, `next build` occasionally fails with `Cannot find module './XXX.js'` (changing chunk ID each run) during static-page collection — a file-locking race, not a code error. Fix: delete `.next` and rebuild; it passes on retry. If persistent, exclude the folder from antivirus scanning.
 
@@ -219,7 +219,7 @@ Cloudflare Pages: build `npx @opennextjs/cloudflare build`, output `.open-next/a
 
 ## Limitations
 
-- No database; reports generate on demand. Yahoo is unofficial — quotes are delayed and newly listed names can have gaps (e.g. `Revenue 0` → CAGR artifact, flagged in-report; verify pre-IPO names manually).
+- Research-run history is D1-backed when `RESEARCH_RUN_DB` is configured; without that binding, reports remain explicitly local-only. Yahoo is unofficial — quotes are delayed and newly listed names can have gaps (e.g. `Revenue 0` → CAGR artifact, flagged in-report; verify pre-IPO names manually).
 - Tables take precedence over prose; LLMs can still err — the mandatory AI disclosure applies.
 - Non-registered academic/demonstration software — not investment advice.
 

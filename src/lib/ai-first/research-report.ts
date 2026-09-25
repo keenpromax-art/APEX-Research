@@ -36,6 +36,7 @@ import type {
   EvidenceMap,
   ResearchDiscoveryPack,
 } from "./types";
+import type { ResearchPlan } from "./research-planner";
 
 /** Version string for the research report assembly. */
 export const RESEARCH_REPORT_VERSION = "1.0.0";
@@ -70,6 +71,7 @@ export interface ReportAssemblerInput {
   debates?: Debate[];
   evidenceMap?: EvidenceMap;
   researchDiscovery?: ResearchDiscoveryPack;
+  researchPlan?: ResearchPlan;
 }
 
 /**
@@ -105,6 +107,7 @@ export function assembleResearchReport(input: ReportAssemblerInput): ResearchRep
     debates,
     evidenceMap,
     researchDiscovery,
+    researchPlan,
   } = input;
 
   const researchRunId = `RUN-${factPack.ticker}-${new Date().toISOString().slice(0, 10)}-${String(Date.now()).slice(-6)}`;
@@ -165,6 +168,7 @@ export function assembleResearchReport(input: ReportAssemblerInput): ResearchRep
     debates,
     evidenceMap,
     researchDiscovery,
+    researchPlan,
 
     reviews,
     reviewPassed,

@@ -7,8 +7,6 @@ import { stmtNum, isInsuranceStatement, isReitStatement, isAssetLightStatement, 
 import { createAssumptionsLedger } from "@/lib/assumptions-ledger";
 import { emptyAIAnalysis } from "@/lib/openrouter";
 import { canonicalValuation } from "@/lib/canonical";
-import { validateReportIntegrity } from "@/lib/report-qa";
-import { validateMasterReport } from "@/lib/report-validator";
 import { buildMasterReportFacts } from "@/lib/report-facts";
 import { classifySector } from "@/lib/sectors";
 import { sanitizeAIText, sanitizeSectorBleed } from "@/lib/ai/sanitizer";
@@ -17,7 +15,13 @@ import { buildEventPriceMovements } from "@/lib/event-price-engine";
 import ApiKeyModal, { loadSavedAiConfig, loadServerModelOverride } from "@/components/ApiKeyModal";
 import { SUPPORTED_PROVIDERS, type CustomKeyConfig } from "@/lib/ai-providers";
 import { enrichAIAnalysisFromResearchReport } from "@/lib/ai-first/enrich-report";
-import { composeReportFromData } from "@/lib/report-composer";
+import { checkForecastCompatibility } from "@/lib/ai-first/forecast-compatibility";
+import { finalizeReport } from "@/lib/report-finalization";
+import { buildResearchMemorySnapshot, loadResearchMemory, storeResearchMemory } from "@/lib/research-ledger";
+import { projectReportArtifactV1 } from "@/lib/report-artifact";
+import { useResearchRunPersistence } from "@/lib/research-runs/client";
+import { sourceQualityScore } from "@/lib/evidence-registry";
+import type { ResearchPlan } from "@/lib/ai-first/research-planner";
 import {
   getReportBlueprint,
   selectableReportTypes,
@@ -53,6 +57,9 @@ const INITIAL_SUPERVISOR_CHECKPOINTS: AgentCheckpoint[] = [
 ];
 
 import PDFDownloadButton from "./PDFDownloadButton";
+import ValuationWhatIf from "@/components/ValuationWhatIf";
+import WatchlistButton from "@/components/WatchlistButton";
+import ResearchHistoryPanel from "@/components/ResearchHistoryPanel";
 
 interface Props {
   ticker: string;
@@ -78,6 +85,7 @@ export default function ReportClient({
     supervisorCheckpoints: INITIAL_SUPERVISOR_CHECKPOINTS,
   });
   const [reportData, setReportData] = useState<ReportData | null>(null);
+  const { status: researchRunPersistenceStatus, persist: persistResearchRun } = useResearchRunPersistence();
   const [activeTab, setActiveTab] = useState<TabKey>("overview");
   const [selectedAgentFilter, setSelectedAgentFilter] = useState<string>("all");
   // Phase 9: selectors — never in generateReport deps (changing them
@@ -295,7 +303,7 @@ export default function ReportClient({
       // Canonical ledger FIRST (pure, cheap): AI personas and the deterministic PE
       // engine harmonize moat pillars/narrative to its moatRating. Reused below —
       // never recomputed — so gate, narrative, and PDF share one canonical source.
-      const earlyLedger = createAssumptionsLedger({
+      const earlyLedger = companyData.researchCase?.assumptionsLedger ?? createAssumptionsLedger({
         profile: companyData.profile,
         stockData: companyData.stockData,
         annualFinancials: companyData.annualFinancials,
@@ -807,7 +815,18 @@ export default function ReportClient({
         baselineReconciliation: companyData.baselineReconciliation ?? null,
         dataConfidence: companyData.dataConfidence ?? null,
         researchCase: companyData.researchCase ?? null,
+        evidenceRegistry: companyData.evidenceRegistry ?? companyData.researchCase?.evidence ?? null,
+        sourceQuality: companyData.evidenceRegistry ? sourceQualityScore(companyData.evidenceRegistry) : null,
+        researchGraph: companyData.researchGraph ?? null,
+        researchPlan: null,
         canonicalForecast: companyData.canonicalForecast ?? (dcf as any)?.canonicalForecast ?? null,
+        canonicalFacts: companyData.canonicalFacts ?? null,
+        canonicalReport: companyData.canonicalReport ?? null,
+        reconciliation: companyData.reconciliation ?? null,
+        identityIssues: companyData.identityIssues ?? [],
+        dependencyState: companyData.dependencyState ?? null,
+        independentReport: companyData.independentReport ?? null,
+        supervisorDiagnostics: companyData.supervisorDiagnostics ?? [],
         shareholding: companyData.shareholding,
         peers: companyData.peers || [],
         aiAnalysis: sanitizedAiAnalysis,
@@ -856,8 +875,36 @@ export default function ReportClient({
         if (aiFirstRes.ok) {
           const aiFirstJson = await aiFirstRes.json();
           const research = aiFirstJson?.report;
+          const researchPlan = (aiFirstJson?.researchPlan ?? research?.researchPlan) as ResearchPlan | undefined;
           const aiUsed = aiFirstJson?.aiUsed !== false;
-          if (research?.thesis && aiUsed) {
+          if (researchPlan && report.researchCase) {
+            report.researchPlan = researchPlan;
+            const existingUnknowns = report.researchCase.unknowns;
+            const knownUnknowns = new Set(existingUnknowns.map((item) => item.statement.toLowerCase()));
+            const plannerUnknowns = (researchPlan.unknowns ?? [])
+              .filter((statement) => statement && !knownUnknowns.has(statement.toLowerCase()))
+              .map((statement, index) => ({
+                id: `PLAN-${String(index + 1).padStart(3, "0")}`,
+                statement,
+                source: "planner" as const,
+              }));
+            report.researchCase = {
+              ...report.researchCase,
+              researchQuestions: researchPlan.questions?.length ? researchPlan.questions : report.researchCase.researchQuestions,
+              unknowns: [...existingUnknowns, ...plannerUnknowns],
+            };
+          }
+          const compatibility = research
+            ? checkForecastCompatibility({
+                profileTicker: ticker,
+                canonicalForecast: report.canonicalForecast,
+                assumptionsLedger: report.assumptionsLedger,
+                canonicalValuation: report.dcf,
+                researchReport: research,
+              })
+            : null;
+          report.forecastCompatibility = compatibility ?? null;
+          if (research?.thesis && aiUsed && compatibility?.qualitativeCompatible) {
             report.researchReport = research;
             const enriched = enrichAIAnalysisFromResearchReport(report.aiAnalysis, research);
             // Post-enrichment guard pass: ai-first strings arrive AFTER the
@@ -887,35 +934,56 @@ export default function ReportClient({
                 : postSources,
             };
           } else if (research?.thesis) {
-            // Mechanical ai-first preview: placeholder text must never be
-            // presented as research. Keep the council report untouched.
-            console.warn("[report] ai-first returned mechanical preview; keeping council analysis");
+            console.warn("[report] ai-first report not attached:", compatibility?.issues.join("; ") ?? "mechanical preview");
           }
         }
       } catch (e) {
         console.warn("[report] content-intelligence enrichment skipped:", e);
       }
 
-      const qaReport = validateReportIntegrity(report);
-      report.qaReport = qaReport;
-
-      const finalQAResult = validateMasterReport(masterReportFacts, report);
-      report.finalQAResult = finalQAResult;
-
-      // Phase 5: research → ComposedReport (outline + modules). Non-blocking;
-      // on failure the PDF keeps its legacy structure. Phase 9: composition
-      // honours the selected report type + research depth (selector refs —
-      // not state deps, so a selector change never restarts generation).
+      const finalization = finalizeReport(report, {
+        reportTypeId: selectorRef.current.type,
+        depth: selectorRef.current.depth,
+        graphBuiltAt: report.generatedAt,
+      });
+      Object.assign(report, finalization.report);
       try {
-        report.composedReport = composeReportFromData(report, {
-          reportTypeId: selectorRef.current.type,
-          depth: selectorRef.current.depth,
+        const memoryKey = `apex_research_memory_${ticker}`;
+        const previousMemory = loadResearchMemory(memoryKey);
+        const memory = buildResearchMemorySnapshot(report, previousMemory);
+        report.researchMemory = memory;
+        storeResearchMemory(memoryKey, memory);
+        report.reportArtifact = projectReportArtifactV1({
+          ticker: report.profile.ticker,
+          companyName: report.profile.name,
+          asOf: report.researchCase?.dataCutoff ?? report.generatedAt,
+          currency: report.profile.currency,
+          valuation: {
+            method: report.researchReport?.valuation.methodology ?? report.selectedModel ?? "UNKNOWN",
+            wacc: report.assumptionsLedger?.wacc ?? report.dcf?.assumptions?.wacc ?? null,
+            terminalGrowthRate: report.assumptionsLedger?.terminalGrowthRate ?? report.dcf?.assumptions?.terminalGrowthRate ?? null,
+            enterpriseValue: report.dcf?.enterpriseValue ?? null,
+            equityValue: report.dcf?.equityValue ?? null,
+            fairValuePerShare: report.assumptionsLedger?.fairValue ?? report.targetPrice,
+          },
+          recommendation: {
+            rating: report.assumptionsLedger?.rating ?? report.recommendation,
+            currentPrice: report.assumptionsLedger?.currentPrice ?? report.cmp,
+            targetPrice: report.assumptionsLedger?.targetPrice ?? report.targetPrice,
+            upsideDownside: report.assumptionsLedger?.upsideDownsidePct ?? null,
+          },
         });
-        composedForRef.current = { ...selectorRef.current };
       } catch (e) {
-        console.warn("[report] composeReport skipped:", e);
-        report.composedReport = null;
+        console.warn("[report] research memory skipped:", e);
       }
+      composedForRef.current = { ...selectorRef.current };
+      if (finalization.compositionError) console.warn("[report] composeReport skipped:", finalization.compositionError);
+      if (finalization.graphError) console.warn("[report] research graph skipped:", finalization.graphError);
+      void persistResearchRun(report, {
+        reportType: selectorRef.current.type,
+        depth: selectorRef.current.depth,
+        status: finalization.compositionError || finalization.graphError ? "partial" : "complete",
+      });
 
       setReportData(report);
       setState({ step: "done", progress: 100, message: "Research model active" });
@@ -927,7 +995,7 @@ export default function ReportClient({
         error: err instanceof Error ? err.message : "An unexpected error occurred",
       });
     }
-  }, [ticker, customKeyConfig]);
+  }, [ticker, customKeyConfig, persistResearchRun]);
 
   // Phase B: derive display rows from the task plan + live agent checkpoints.
   // Pure mapping — re-renders whenever agents advance or red-team/committee
@@ -964,13 +1032,24 @@ export default function ReportClient({
     const cur = composedForRef.current;
     if (cur && cur.type === reportTypeId && cur.depth === depth) return;
     try {
-      const composed = composeReportFromData(reportData, { reportTypeId, depth });
+      const finalization = finalizeReport(reportData, {
+        reportTypeId,
+        depth,
+        graphBuiltAt: reportData.generatedAt,
+      });
       composedForRef.current = { type: reportTypeId, depth };
-      setReportData({ ...reportData, composedReport: composed });
+      setReportData(finalization.report);
+      void persistResearchRun(finalization.report, {
+        reportType: reportTypeId,
+        depth,
+        status: finalization.compositionError || finalization.graphError ? "partial" : "complete",
+      });
+      if (finalization.compositionError) console.warn("[report] recomposeReport skipped:", finalization.compositionError);
+      if (finalization.graphError) console.warn("[report] research graph skipped:", finalization.graphError);
     } catch (e) {
-      console.warn("[report] recomposeReport skipped:", e);
+      console.warn("[report] report finalization skipped:", e);
     }
-  }, [reportData, reportTypeId, depth]);
+  }, [reportData, reportTypeId, depth, persistResearchRun]);
 
   const handleKeyModalSave = (newConfig: CustomKeyConfig | null, shouldRetry = false) => {
     setCustomKeyConfig(newConfig);
@@ -1053,9 +1132,20 @@ export default function ReportClient({
             </span>
           </button>
 
-          <div className={styles.marketStatus}>
+          <div
+            className={styles.marketStatus}
+            title={researchRunPersistenceStatus.state === "local-only" ? researchRunPersistenceStatus.message : "Research run persistence status"}
+          >
             <span className={styles.marketDot} />
-            <span>LIVE FEED</span>
+            <span>
+              {researchRunPersistenceStatus.state === "local-only"
+                ? "LOCAL ONLY"
+                : researchRunPersistenceStatus.state === "saved"
+                  ? "RUN SAVED"
+                  : researchRunPersistenceStatus.state === "saving"
+                    ? "SAVING RUN"
+                    : "LIVE FEED"}
+            </span>
           </div>
         </div>
       </header>
@@ -1278,6 +1368,12 @@ export default function ReportClient({
                         : "AI Key: Default"}
                     </span>
                   </button>
+                  <WatchlistButton
+                    ticker={reportData.profile.ticker}
+                    reportId={reportData.researchMemory?.run.runId ?? reportData.researchReport?.researchRunId}
+                    fairValue={reportData.assumptionsLedger?.fairValue ?? reportData.targetPrice}
+                    currentPrice={reportData.cmp}
+                  />
                   <PDFDownloadButton data={reportData} />
                 </div>
               </div>
@@ -1489,6 +1585,7 @@ export default function ReportClient({
                         </div>
                       );
                     })()}
+                    <ResearchHistoryPanel memory={reportData.researchMemory} />
                   </>
                 )}
 
@@ -2474,11 +2571,12 @@ export default function ReportClient({
                         <span className={styles.statVal} style={{ color: dcf.plusCash > 0 ? "var(--bullish)" : "var(--bearish)" }}>
                           {dcf.plusCash > 0 ? `+${fmtMoney(dcf.plusCash)}` : `-${fmtMoney(dcf.lessDebt)}`}
                         </span>
-                        <span className={styles.statSub}>{dcf.plusCash > 0 ? "Net Cash Position" : "Net Debt Position"}</span>
-                      </div>
-                    </div>
-                  </>
-                )}
+                         <span className={styles.statSub}>{dcf.plusCash > 0 ? "Net Cash Position" : "Net Debt Position"}</span>
+                       </div>
+                     </div>
+                     <ValuationWhatIf data={reportData} />
+                   </>
+                 )}
 
                 {/* ── TAB 3: 5-YEAR FINANCIALS ── */}
                 {activeTab === "financials" && (

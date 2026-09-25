@@ -278,6 +278,7 @@ async function runMechanicalChecks(): Promise<void> {
   check("pipeline marks mechanical run", pipe.aiUsed === false);
   check("pipeline forecast has 5 years", pipe.report.forecast.incomeStatement.length === 5);
   check("pipeline scenarios are Bear/Base/Bull", pipe.report.scenarios.length === 3);
+  check("research plan propagates through the run result", pipe.researchPlan.questions.length > 0 && pipe.report.researchPlan === pipe.researchPlan);
   const blob = JSON.stringify(pipe.report).toLowerCase();
   const leaks = ["search index", "advertiser bidding", "custom silicon", "hyperscale infrastructure", "same-store sales", "foot traffic"].filter((s) => blob.includes(s));
   check("mechanical report has no cross-sector contamination", leaks.length === 0, leaks.join(", "));

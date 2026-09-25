@@ -80,6 +80,7 @@ export interface ComposedReport {
   moduleIds: ResearchModuleId[];
   /** Aggregated unknowns across modules (never invented into sections). */
   unknowns: string[];
+  evidenceGraph?: import("@/lib/evidence-graph").EvidenceGraph | null;
   /**
    * Adaptive research identity (ResearchDNA). Present when the caller composed
    * with an identity; absent on the legacy/institutional path (golden-safe).

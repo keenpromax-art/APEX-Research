@@ -1,7 +1,7 @@
 "use client";
 import React, { useState } from "react";
 import type { ReportData } from "@/types/report";
-import { QA_GATES_ENABLED } from "@/lib/qa-gates";
+import { canPublishReport } from "@/lib/canonical";
 import { getReportBlueprint } from "@/lib/report-types";
 import styles from "./report.module.css";
 
@@ -18,16 +18,10 @@ export default function PDFDownloadButton({ data }: Props) {
   const councilPassed = councilAudit?.status === "VERIFIED" || councilAudit?.status === "CORRECTED";
   const councilScore = councilAudit?.integrityScore ?? 0;
   const failedChecks = councilAudit?.checks?.filter(c => c.status === "FLAG") ?? [];
-  // Hard export lock: QA BLOCKED (any FAIL check) or final QA canPublish=false
-  // disables export independently of the council audit. Detected numerical
-  // failures must stop publication — a rendered BLOCK banner is not enough.
-  // Kill-switch: when QA_GATES_ENABLED is false, FAIL checks stay visible for
-  // content diagnostics but never lock the export button.
-  const qaGateStatus = (data as any).qaReport?.gateStatus;
-  const qaCanPublish = (data as any).finalQAResult?.canPublish;
-  const qaBlocked = QA_GATES_ENABLED && (qaGateStatus === "BLOCKED" || qaCanPublish === false);
-  const qaFailCount = ((data as any).qaReport?.checks ?? []).filter((c: any) => c.status === "FAIL").length;
-  const isBlocked = (!councilPassed && councilAudit !== undefined) || qaBlocked;
+  const publishGate = canPublishReport(data);
+  const qaBlocked = !publishGate.canPublish;
+  const qaFailCount = (data.qaReport?.checks ?? []).filter((check) => check.status === "FAIL").length;
+  const isBlocked = qaBlocked || (!councilPassed && councilAudit !== undefined);
   // Per-report-type label: composed blueprint title, else institutional default.
   const bpTitle =
     (data.composedReport &&
@@ -36,6 +30,8 @@ export default function PDFDownloadButton({ data }: Props) {
 
   const handleDownload = async () => {
     try {
+      const latestGate = canPublishReport(data);
+      if (!latestGate.canPublish) throw new Error(latestGate.reasons.join("; ") || "Publication gate is blocked");
       setLoading(true);
       setError(null);
       setStatusText("Initializing PDF Engine...");
@@ -73,6 +69,22 @@ export default function PDFDownloadButton({ data }: Props) {
     }
   };
 
+  const handleJsonDownload = () => {
+    if (!data.reportArtifact) {
+      setError("JSON artifact is not available");
+      return;
+    }
+    const blob = new Blob([JSON.stringify(data.reportArtifact, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `${data.profile.ticker}_research_artifact.json`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
       <button
@@ -104,6 +116,14 @@ export default function PDFDownloadButton({ data }: Props) {
             Download {bpTitle} (PDF)
           </>
         )}
+      </button>
+      <button
+        className={`btn-secondary ${styles.downloadBtn}`}
+        onClick={handleJsonDownload}
+        disabled={!data.reportArtifact || isBlocked}
+        title="Export the versioned research artifact as JSON"
+      >
+        Download JSON artifact
       </button>
       {error && <span style={{ color: "#ef4444", fontSize: 12 }}>{error}</span>}
       {isBlocked && (failedChecks.length > 0 || qaBlocked) && (

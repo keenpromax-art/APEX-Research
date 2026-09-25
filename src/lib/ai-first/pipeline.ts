@@ -32,7 +32,7 @@
 import { buildFactPack } from "./fact-pack";
 import { buildHistoricalAnalysisPack, renderHistoricalAnalysisPack } from "./historical-analysis";
 import { buildAnalystBrief } from "./analyst-brief";
-import { buildResearchPlan, mechanicalResearchPlan } from "./research-planner";
+import { buildResearchPlan, mechanicalResearchPlan, type ResearchPlan } from "./research-planner";
 import { buildDebatesEarly, mechanicalDebates } from "./debate-engine";
 import { buildEconomicEngine, mechanicalEconomicEngine } from "./economic-engine";
 import { buildEvidenceMap, mechanicalEvidenceMap } from "./evidence-mapper";
@@ -459,6 +459,7 @@ export interface AiFirstRunResult {
   forecastSpec: ForecastSpecification;
   valuationSpec: ValuationSpecification;
   regenerationCandidates: string[];
+  researchPlan: ResearchPlan;
   aiUsed: boolean;
 }
 
@@ -833,6 +834,7 @@ export async function runAiFirstResearch(
     debates: debateOutput.debates as Debate[],
     evidenceMap,
     researchDiscovery,
+    researchPlan,
   });
 
   // 12. Quality review (deterministic gates) + adjudication
@@ -861,6 +863,7 @@ export async function runAiFirstResearch(
     forecastSpec,
     valuationSpec,
     regenerationCandidates: adjudicated.regenerate,
+    researchPlan,
     aiUsed,
   };
 }

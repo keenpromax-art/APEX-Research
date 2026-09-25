@@ -19,6 +19,8 @@ import { validateIndependently } from "@/lib/independent-validator";
 import { buildCanonicalReport } from "@/lib/canonical-report";
 import { reconcileAll } from "@/lib/source-reconciliation";
 import { buildEvidenceRegistryFromInputs } from "@/lib/evidence-registry";
+import { buildEvidenceGraph } from "@/lib/evidence-graph";
+import { resolveSafeProviderConfig } from "@/lib/security/request-policy";
 import { generateAIDCFAssumptions } from "@/lib/openrouter";
 import { runFinancialSupervisor } from "@/lib/financial-supervisor";
 import { auditValuation } from "@/lib/valuation-audit";
@@ -29,7 +31,7 @@ import { fetchScreenerSnapshot, type ScreenerCrosscheck } from "@/lib/screener-c
 import { fetchEdgarSnapshot, type EdgarCrosscheck } from "@/lib/edgar-crosscheck";
 import { fetchNasdaqCheck, type NasdaqCheck } from "@/lib/nasdaq-crosscheck";
 import { fetchFxRate, normalizeCrossListing } from "@/lib/cross-listing";
-import type { SupportedProvider, CustomKeyConfig } from "@/lib/ai-providers";
+import type { CustomKeyConfig } from "@/lib/ai-providers";
 
 export const runtime = "nodejs";
 export const maxDuration = 90;
@@ -74,13 +76,13 @@ export async function GET(request: NextRequest) {
   // Custom AI key headers (same contract as /api/analyze): lets the Step-02
   // AI Financial Supervisor run company-aware LLM audit on the user's key.
   // Absence is fine — supervisor falls back to deterministic heuristics.
-  const headerApiKey = request.headers.get("x-custom-api-key")?.trim();
-  const headerProvider = (request.headers.get("x-custom-api-provider")?.trim() || "openrouter") as SupportedProvider;
+  const safeProvider = resolveSafeProviderConfig(null, request.headers);
+  if (!safeProvider.ok) {
+    return NextResponse.json({ error: safeProvider.error.message, code: safeProvider.error.code }, { status: 400 });
+  }
   const headerModel = request.headers.get("x-custom-api-model")?.trim() || undefined;
-  let supervisorKeyConfig: CustomKeyConfig | null = null;
-  if (headerApiKey) {
-    supervisorKeyConfig = { provider: headerProvider, apiKey: headerApiKey, model: headerModel };
-  } else if (headerModel && process.env.OPENROUTER_API_KEY) {
+  let supervisorKeyConfig: CustomKeyConfig | null = safeProvider.value;
+  if (!supervisorKeyConfig && headerModel && process.env.OPENROUTER_API_KEY) {
     supervisorKeyConfig = { provider: "openrouter", apiKey: process.env.OPENROUTER_API_KEY, model: headerModel };
   }
 
@@ -615,6 +617,8 @@ export async function GET(request: NextRequest) {
         annualFinancials: annualFinancials as never,
         stockData: stockData as never,
         dcf: dcf as never,
+        currency: companyProfile.currency,
+        scale: canonicalFacts?.scale,
       });
     } catch (e) { console.warn("Evidence registry build failed (non-blocking):", e); }
 
@@ -696,6 +700,19 @@ export async function GET(request: NextRequest) {
       console.warn("[company] ResearchCase build failed (non-blocking):", e instanceof Error ? e.message : e);
     }
 
+    let researchGraph: ReturnType<typeof buildEvidenceGraph> | null = null;
+    try {
+      if (researchCase) {
+        researchGraph = buildEvidenceGraph({
+          researchCase,
+          registry: evidenceRegistry,
+          builtAt: researchCase.dataCutoff,
+        });
+      }
+    } catch (e) {
+      console.warn("[company] Research graph build failed (non-blocking):", e instanceof Error ? e.message : e);
+    }
+
     return NextResponse.json({
       pipeline: lifecycle.history_(),
       profile: companyProfile,
@@ -735,6 +752,7 @@ export async function GET(request: NextRequest) {
       // ResearchCase (Phase 2): report-agnostic research container for later
       // blueprints/composer. Optional for legacy consumers — absence = not built.
       researchCase,
+      researchGraph,
       // Advisory cross-check annex: Screener.in vs Yahoo (India-only).
       // Priced figures everywhere remain Yahoo-only; this elaborates gaps.
       screenerCrosscheck,

@@ -396,6 +396,45 @@ export function buildEventPriceMovements(
       let volumeMultiplier: number;
       let trajectory: EventPriceTrajectoryPoint[];
       let isMeasured = false;
+      const pushMovement = (): void => {
+        const verdict: EventPriceMovement["verdict"] = multiDayReturnPct > 0.035
+          ? "Bullish Inflection"
+          : immediateReturnPct > 0.02 && multiDayReturnPct < 0.015
+            ? "Transitory Spike"
+            : multiDayReturnPct < -0.015
+              ? "Negative De-rating"
+              : "Absorbed / Neutral";
+        results.push({
+          id: `EPM-${idx + 1}`,
+          headline: cleanTitle,
+          publisher: item.publisher || "Source not disclosed",
+          eventDate: dateStr,
+          category,
+          categoryLabel: label,
+          summary: item.summary || `${profile.name} disclosed an item classified as ${label.toLowerCase()} (summary not provided by the feed).`,
+          preEventPrice,
+          eventDayPrice,
+          postEventPrice,
+          immediateReturnPct,
+          multiDayReturnPct,
+          abnormalReturnPct,
+          benchmarkReturnPct,
+          abnormalSignificant,
+          volumeSpikeMultiplier: volumeMultiplier,
+          verdict,
+          measured: isMeasured,
+          narrative: {
+            whatHappened: `On ${dateStr}, ${profile.name} disclosed material operational progress regarding ${label.toLowerCase()}: "${item.title}".`,
+            priceImpact: isMeasured
+              ? `Measured exchange sessions show an immediate ${immediateReturnPct >= 0 ? "+" : ""}${(immediateReturnPct * 100).toFixed(1)}% session move on ${volumeMultiplier.toFixed(1)}x 20-day average volume, with a 5-day drift of ${multiDayReturnPct >= 0 ? "+" : ""}${(multiDayReturnPct * 100).toFixed(1)}%${benchmarkReturnPct !== null ? ` (${(abnormalReturnPct >= 0 ? "+" : "")}${(abnormalReturnPct * 100).toFixed(1)}% abnormal vs benchmark${abnormalSignificant ? ", significant at ~2σ" : ", not significant"})` : " (no benchmark coverage)"}.`
+              : `The model-illustrative trajectory (anchored on pre-event closes; not measured tick data) implies an immediate ${immediateReturnPct >= 0 ? "+" : ""}${(immediateReturnPct * 100).toFixed(1)}% session move on ${volumeMultiplier.toFixed(1)}x baseline volume, with a stylized 5-day drift of ${multiDayReturnPct >= 0 ? "+" : ""}${(multiDayReturnPct * 100).toFixed(1)}%. Interpret directionally only.`,
+            modelImplication: isMeasured
+              ? `Observed market reaction is consistent with — not proof of — thesis transmission; direction and magnitude are measured, causality is not claimed.`
+              : `Illustrative transmission sketch — supports baseline thesis tracking but must not be read as a measured abnormal-return event study.`,
+          },
+          priceTrajectory: trajectory,
+        });
+      };
 
       if (measured) {
         // Real closes/volumes — verdicts below describe measured market action.
@@ -403,6 +442,7 @@ export function buildEventPriceMovements(
         preEventPrice = measured.base;
         eventDayPrice = measured.t0;
         postEventPrice = measured.t5;
+        volumeMultiplier = measured.volMult;
         immediateReturnPct = measured.t0 / measured.base - 1;
         multiDayReturnPct = measured.t5 / measured.base - 1;
         // Market-model abnormal return vs benchmark index (when available);
@@ -430,6 +470,7 @@ export function buildEventPriceMovements(
             benchmarkNormalizedPrice: 100,
           };
         });
+        pushMovement();
       } else {
       // ── ILLUSTRATIVE fallback (labeled; never presented as measured) ──
       // Compute or retrieve preEventPrice for this calendar date
@@ -551,47 +592,7 @@ export function buildEventPriceMovements(
         };
       });
 
-      let verdict: EventPriceMovement["verdict"] = "Bullish Inflection";
-      if (multiDayReturnPct > 0.035) {
-        verdict = "Bullish Inflection";
-      } else if (immediateReturnPct > 0.02 && multiDayReturnPct < 0.015) {
-        verdict = "Transitory Spike";
-      } else if (multiDayReturnPct < -0.015) {
-        verdict = "Negative De-rating";
-      } else {
-        verdict = "Absorbed / Neutral";
-      }
-
-      results.push({
-        id: `EPM-${idx + 1}`,
-        headline: cleanTitle,
-        publisher: item.publisher || "Source not disclosed",
-        eventDate: dateStr,
-        category,
-        categoryLabel: label,
-        summary: item.summary || `${profile.name} disclosed an item classified as ${label.toLowerCase()} (summary not provided by the feed).`,
-        preEventPrice,
-        eventDayPrice,
-        postEventPrice,
-        immediateReturnPct,
-        multiDayReturnPct,
-        abnormalReturnPct,
-        benchmarkReturnPct,
-        abnormalSignificant,
-        volumeSpikeMultiplier: volumeMultiplier,
-        verdict,
-        measured: isMeasured,
-        narrative: {
-          whatHappened: `On ${dateStr}, ${profile.name} disclosed material operational progress regarding ${label.toLowerCase()}: "${item.title}".`,
-          priceImpact: isMeasured
-            ? `Measured exchange sessions show an immediate ${immediateReturnPct >= 0 ? "+" : ""}${(immediateReturnPct * 100).toFixed(1)}% session move on ${volumeMultiplier.toFixed(1)}x 20-day average volume, with a 5-day drift of ${multiDayReturnPct >= 0 ? "+" : ""}${(multiDayReturnPct * 100).toFixed(1)}%${benchmarkReturnPct !== null ? ` (${(abnormalReturnPct >= 0 ? "+" : "")}${(abnormalReturnPct * 100).toFixed(1)}% abnormal vs benchmark${abnormalSignificant ? ", significant at ~2σ" : ", not significant"})` : " (no benchmark coverage)"}.`
-            : `The model-illustrative trajectory (anchored on pre-event closes; not measured tick data) implies an immediate ${immediateReturnPct >= 0 ? "+" : ""}${(immediateReturnPct * 100).toFixed(1)}% session move on ${volumeMultiplier.toFixed(1)}x baseline volume, with a stylized 5-day drift of ${multiDayReturnPct >= 0 ? "+" : ""}${(multiDayReturnPct * 100).toFixed(1)}%. Interpret directionally only.`,
-          modelImplication: isMeasured
-            ? `Observed market reaction is consistent with — not proof of — thesis transmission; direction and magnitude are measured, causality is not claimed.`
-            : `Illustrative transmission sketch — supports baseline thesis tracking but must not be read as a measured abnormal-return event study.`,
-        },
-        priceTrajectory: trajectory,
-      });
+      pushMovement();
       } // end illustrative fallback (measured path assigns the same bindings above)
     });
   }

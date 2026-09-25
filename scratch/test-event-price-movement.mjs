@@ -70,8 +70,8 @@ console.log("--- 1. Event Extraction & Institutional Categorization ---");
 
 const events = buildEventPriceMovements(mockNews, mockStockData, mockProfile);
 
-it("Builds comprehensive 6-8 event movement objects from news items and corporate surveillance filings", () => {
-  assert.ok(events.length >= 6 && events.length <= 8, `Expected 6-8 events, got ${events.length}`);
+it("Builds one event movement per real dated news item", () => {
+  assert.strictEqual(events.length, 3, `Expected 3 real events, got ${events.length}`);
 });
 
 it("Correctly categorizes earnings result announcement", () => {
@@ -139,15 +139,26 @@ it("Assigns an institutional market reaction verdict with complete narrative dec
   });
 });
 
-// ── 3. Fallback Generation When News is Empty ──
-console.log("\n--- 3. Fallback Generation for Tickers With Sparse News ---");
-
-it("Generates canonical domain-specific corporate events when news is empty", () => {
+it("Does not fabricate events when news is empty", () => {
   const fallbackEvents = buildEventPriceMovements([], mockStockData, mockProfile);
-  assert.ok(fallbackEvents.length >= 6, `Expected at least 6 fallback events, got ${fallbackEvents.length}`);
-  assert.ok(fallbackEvents[0].headline.includes("PI Industries"));
-  assert.ok(fallbackEvents[0].priceTrajectory.length === 8);
-  assert.strictEqual(fallbackEvents[0].priceTrajectory.find((p) => p.dayOffset === -1).normalizedPrice, 100.0);
+  assert.strictEqual(fallbackEvents.length, 0);
+});
+
+it("Uses measured exchange sessions when the full window is available", () => {
+  const sessions = Array.from({ length: 60 }, (_, index) => {
+    const date = new Date(Date.UTC(2025, 10, 1 + index));
+    return {
+      date: date.toISOString().slice(0, 10),
+      close: 100 + index * 0.25,
+      volume: 1_000_000 + index * 1_000,
+    };
+  });
+  const measuredNews = [{ ...mockNews[0], publishedAt: "2025-12-15T09:30:00.000Z" }];
+  const measuredEvents = buildEventPriceMovements(measuredNews, mockStockData, mockProfile, { sessions });
+  assert.strictEqual(measuredEvents.length, 1);
+  assert.strictEqual(measuredEvents[0].measured, true);
+  assert.ok(measuredEvents[0].priceTrajectory.length === 8);
+  assert.ok(Number.isFinite(measuredEvents[0].volumeSpikeMultiplier));
 });
 
 console.log("\n===============================================================");

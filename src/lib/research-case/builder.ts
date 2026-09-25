@@ -373,6 +373,8 @@ export function buildResearchCase(params: BuildResearchCaseParams): ResearchCase
         stockData,
         dcf: valuation ?? undefined,
         asOf: params.dataCutoff ?? createdAt,
+        currency: profile.currency,
+        scale: canonicalFacts?.scale,
       });
       derived.push("evidence");
     } catch {

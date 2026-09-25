@@ -1241,6 +1241,11 @@ export interface ReportData {
    * /api/company alongside canonical objects; renderers ignore absence.
    */
   researchCase?: import("@/lib/research-case").ResearchCase | null;
+  /** Report-agnostic evidence graph with claims, questions, conflicts, and counter-evidence. */
+  researchGraph?: import("@/lib/evidence-graph").EvidenceGraph | null;
+  researchPlan?: import("@/lib/ai-first/research-planner").ResearchPlan | null;
+  researchMemory?: import("@/lib/research-ledger/report-adapter").ResearchMemorySnapshot | null;
+  reportArtifact?: import("@/lib/report-artifact").ReportArtifactV1 | null;
   /**
    * Composed report (Phase 5): resolved outline + module bundle for the PDF.
    * Additive — attached by ReportClient after QA; renderer falls back to its
@@ -1275,10 +1280,19 @@ export interface ReportData {
    * legacy fixtures (claim-validator treats absence as unevidenced).
    */
   evidenceRegistry?: import("@/lib/evidence-registry").EvidenceRegistry;
+  sourceQuality?: ReturnType<typeof import("@/lib/evidence-registry").sourceQualityScore> | null;
   /** Single canonical forecast (P0 #4) — the ONLY authoritative forward numbers. */
   canonicalForecast?: import("@/lib/canonical-forecast").CanonicalForecast;
+  canonicalFacts?: import("@/lib/canonical-facts").CanonicalFactGraph | null;
+  canonicalReport?: import("@/lib/canonical-report").CanonicalReport | null;
+  reconciliation?: import("@/lib/source-reconciliation").ReconciliationResult[] | null;
+  identityIssues?: string[];
+  dependencyState?: Record<string, unknown> | null;
+  independentReport?: import("@/lib/independent-validator").IndependentReport | null;
+  supervisorDiagnostics?: unknown[];
   /** AI-first content-intelligence ResearchReport (economic engine, debates, evidence map). */
   researchReport?: import("@/lib/ai-first/types").ResearchReport | null;
+  forecastCompatibility?: import("@/lib/ai-first/forecast-compatibility").ForecastCompatibilityResult | null;
   /**
    * Screener.in advisory cross-check (India-only, Yahoo stays authoritative).
    * Elaboration annex only — never prices anything. Absent on US/global tickers

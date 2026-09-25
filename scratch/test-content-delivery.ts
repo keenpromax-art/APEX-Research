@@ -152,7 +152,8 @@ function researchReport(over: Partial<ResearchReport> = {}): ResearchReport {
   check("strategy prose not shortened", (out.businessStrategyCommentary || "").length >= longStrategy.length, `${(out.businessStrategyCommentary || "").length}`);
   check("overview not replaced by short join", (out.companyOverview || "").length >= longOverview.length);
   check("economic engine narrative mapped", /Primary economic abstraction: unit-volume compounder/.test(out.operatingProfileCommentary || ""));
-  check("conclusion mapped", (out.investmentConclusion || "").includes("The conclusion body."));
+  check("council conclusion remains authoritative", (out.investmentConclusion || "").includes("C".repeat(400)));
+  check("research conclusion does not override council conclusion", !(out.investmentConclusion || "").includes("The conclusion body."));
   check("inflection points mapped", /inflection-1/.test(out.investmentThesis || ""));
   check("all bull cases retained", (out.investmentThesis || "").includes("bull-7"));
   check("all bear cases retained", (out.investmentThesis || "").includes("bear-7"));

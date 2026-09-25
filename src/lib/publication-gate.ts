@@ -29,7 +29,7 @@ import type { ResearchSeverity } from "./severity";
 import { maxSeverity, researchToGate } from "./severity";
 import { scoreFromSeverities, type ResearchIntegrityScore } from "./research-integrity-score";
 import type { EvidenceRegistry } from "./evidence-registry";
-import { sourceQualityScore } from "./evidence-registry";
+import { sourceQualityScore, listEvidenceConflicts } from "./evidence-registry";
 import { QA_GATES_ENABLED } from "./qa-gates";
 
 export type GateDecision = "READY" | "READY_WITH_WARNINGS" | "BLOCKED";
@@ -209,6 +209,16 @@ export function checkSourceQuality(registry: EvidenceRegistry): GateFinding[] {
       severity: "warn",
       priority: "P2",
       detail: `Low PRIMARY source coverage: ${primary}/${registry.items.length} fields (${(sqs.primaryCoverage * 100).toFixed(0)}%). ${secondary} SECONDARY, ${tertiary} TERTIARY, ${model} MODEL_DERIVED. Verify data freshness and consider filing-sourced corroboration.`,
+    });
+  }
+
+  for (const conflict of listEvidenceConflicts(registry).filter((item) => item.material)) {
+    findings.push({
+      source: "QA",
+      code: "SOURCE-CONFLICT",
+      severity: "material",
+      priority: "P1",
+      detail: `${conflict.field} has conflicting evidence (${conflict.reason}); ${conflict.selected.tier} source selected: ${conflict.detail}`,
     });
   }
 

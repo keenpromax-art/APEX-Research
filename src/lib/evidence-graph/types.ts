@@ -14,7 +14,7 @@
  *  - Missing registry / narratives stay null + unknowns (fail-closed).
  */
 import type { ResearchCase } from "@/lib/research-case";
-import type { EvidenceRegistry, SourceTier } from "@/lib/evidence-registry";
+import type { EvidenceConflict, EvidenceRegistry, SourceTier } from "@/lib/evidence-registry";
 import type { Claim } from "@/lib/claims";
 import type { ResearchSeverity } from "@/lib/severity";
 import type { ResearchModuleId, ModuleRunBundle } from "@/lib/research-modules";
@@ -32,7 +32,7 @@ export type EvidenceStage =
   | "conclusion"
   | "section";
 
-export type EvidenceNodeKind = EvidenceStage;
+export type EvidenceNodeKind = EvidenceStage | "question" | "counter-evidence" | "conflict";
 
 export interface EvidenceGraphNode {
   id: string;
@@ -51,7 +51,12 @@ export type EvidenceEdgeKind =
   | "claim-supports-conclusion"
   | "analysis-feeds-section"
   | "conclusion-feeds-section"
-  | "claim-in-section";
+  | "claim-in-section"
+  | "question-informs-analysis"
+  | "question-covers-claim"
+  | "evidence-counter-evidence"
+  | "counter-evidence-challenges-claim"
+  | "conflict-informs-evidence";
 
 export interface EvidenceGraphEdge {
   from: string;
@@ -73,6 +78,9 @@ export interface EvidenceNarrative {
    * default `analysis` links through the owning module when present.
    */
   role?: "analysis" | "conclusion";
+  stance?: "supports" | "contradicts" | "neutral";
+  targetClaimId?: string;
+  questionId?: string;
 }
 
 /** Per-claim traceability record (material claims gate the exit criterion). */
@@ -95,6 +103,42 @@ export interface ClaimTrace {
   role: "analysis" | "conclusion";
   /** Material % / currency claim with no evidence chain. */
   material: boolean;
+  field?: string;
+  unit?: string;
+  currency?: string;
+  scale?: string;
+  period?: string;
+  periodType?: Claim["periodType"];
+  stance: "supports" | "contradicts" | "neutral";
+  targetClaimId: string | null;
+  questionId: string | null;
+}
+
+export interface EvidenceGraphQuestion {
+  id: string;
+  nodeId: string;
+  question: string;
+  requiredFor: string;
+  evidenceNeeded: string;
+}
+
+export interface EvidenceGraphConflict {
+  id: string;
+  nodeId: string;
+  field: string;
+  reason: EvidenceConflict["reason"];
+  selectedEvidenceId: string;
+  incomingEvidenceIds: string[];
+  material: boolean;
+}
+
+export interface ResearchCompleteness {
+  totalQuestions: number;
+  addressedQuestions: number;
+  evidenceBackedQuestions: number;
+  unresolvedQuestions: number;
+  score: number;
+  evidenceScore: number;
 }
 
 export interface EvidenceGraph {
@@ -104,6 +148,9 @@ export interface EvidenceGraph {
   nodes: EvidenceGraphNode[];
   edges: EvidenceGraphEdge[];
   claims: ClaimTrace[];
+  questions: EvidenceGraphQuestion[];
+  conflicts: EvidenceGraphConflict[];
+  completeness: ResearchCompleteness;
   /** Exit criterion: every material claim has Source→Evidence→Claim chain. */
   materialClaimsTraceable: boolean;
   materialClaimCount: number;

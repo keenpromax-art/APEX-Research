@@ -6,3 +6,4 @@
  */
 export * from "./types";
 export { buildEvidenceGraph, traceClaimPath } from "./build";
+export { buildEvidenceGraphFromReportData } from "./report-adapter";

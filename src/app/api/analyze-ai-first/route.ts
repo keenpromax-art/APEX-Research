@@ -7,20 +7,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { fetchQuoteSummary } from "@/lib/yahoo-finance";
 import { normalizeTicker } from "@/lib/request-validation";
-import type {
-  CustomKeyConfig,
-  SupportedProvider,
-} from "@/lib/ai-providers";
+import type { CustomKeyConfig } from "@/lib/ai-providers";
 import { runAiFirstResearch } from "@/lib/ai-first/pipeline";
+import { resolveSafeProviderConfig, validateRequestBodySize, validateTicker } from "@/lib/security/request-policy";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
 export async function POST(request: NextRequest) {
-  const headerApiKey = request.headers.get("x-custom-api-key")?.trim();
-  const headerProvider = (request.headers.get("x-custom-api-provider")?.trim() ||
-    "openrouter") as SupportedProvider;
-  const headerModel = request.headers.get("x-custom-api-model")?.trim() || undefined;
+  const rawBody = await request.text();
+  const bodySize = validateRequestBodySize(rawBody, request.headers);
+  if (!bodySize.ok) {
+    return NextResponse.json({ error: bodySize.error.message, code: bodySize.error.code }, { status: bodySize.error.code === "BODY_TOO_LARGE" ? 413 : 400 });
+  }
 
   let body: {
     ticker?: string;
@@ -28,13 +27,22 @@ export async function POST(request: NextRequest) {
     customKeyConfig?: CustomKeyConfig;
   };
   try {
-    body = await request.json();
+    body = JSON.parse(rawBody) as typeof body;
   } catch {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
+  const safeConfig = resolveSafeProviderConfig(body, request.headers);
+  if (!safeConfig.ok) {
+    return NextResponse.json({ error: safeConfig.error.message, code: safeConfig.error.code }, { status: 400 });
+  }
+  const headerModel = request.headers.get("x-custom-api-model")?.trim() || undefined;
   const rawTicker = body.ticker ?? body.symbol ?? "";
-  const symbol = normalizeTicker(rawTicker);
+  const tickerPolicy = validateTicker(rawTicker);
+  if (!tickerPolicy.ok) {
+    return NextResponse.json({ error: tickerPolicy.error.message, code: tickerPolicy.error.code }, { status: 400 });
+  }
+  const symbol = normalizeTicker(tickerPolicy.value);
   if (!symbol) {
     return NextResponse.json(
       { error: "A valid ticker symbol is required." },
@@ -42,16 +50,8 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  let customConfig: CustomKeyConfig | null = null;
-  if (headerApiKey) {
-    customConfig = { provider: headerProvider, apiKey: headerApiKey, model: headerModel };
-  } else if (body.customKeyConfig?.apiKey?.trim()) {
-    customConfig = {
-      provider: body.customKeyConfig.provider || "openrouter",
-      apiKey: body.customKeyConfig.apiKey.trim(),
-      model: body.customKeyConfig.model?.trim(),
-    };
-  } else if (headerModel && process.env.OPENROUTER_API_KEY) {
+  let customConfig: CustomKeyConfig | null = safeConfig.value;
+  if (!customConfig && headerModel && process.env.OPENROUTER_API_KEY) {
     customConfig = {
       provider: "openrouter",
       apiKey: process.env.OPENROUTER_API_KEY,
@@ -90,7 +90,7 @@ export async function POST(request: NextRequest) {
               customKeyConfig: customConfig,
               onProgress: emit?.(send),
             });
-            send({ type: "done", report: result.report, aiUsed: result.aiUsed });
+            send({ type: "done", report: result.report, researchPlan: result.researchPlan, aiUsed: result.aiUsed });
           } catch (error) {
             const message =
               error instanceof Error ? error.message : "AI-first analysis failed";
@@ -116,6 +116,7 @@ export async function POST(request: NextRequest) {
     });
     return NextResponse.json({
       report: result.report,
+      researchPlan: result.researchPlan,
       aiUsed: result.aiUsed,
       regenerationCandidates: result.regenerationCandidates,
     });

@@ -998,8 +998,17 @@ export function adjudicateRegeneration(
   // - if a component has any blocker, regenerate it
   // - if a component has only minors, keep but annotate
 
+  const findingsByComponent = new Map<string, ReviewFinding[]>();
+  for (const findings of Object.values(perReviewer)) {
+    for (const finding of findings) {
+      const list = findingsByComponent.get(finding.component) ?? [];
+      list.push(finding);
+      findingsByComponent.set(finding.component, list);
+    }
+  }
+
   for (const component of regenerationCandidates) {
-    const componentFindings = perReviewer[component] || [];
+    const componentFindings = findingsByComponent.get(component) ?? [];
     
     const hasBlocker = componentFindings.some((f: any) => f.severity === "blocker");
     const hasMajor = componentFindings.some((f: any) => f.severity === "major");

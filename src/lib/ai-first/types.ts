@@ -521,6 +521,7 @@ export interface ReviewFinding {
 }
 
 export interface ResearchReport {
+  researchPlan?: import("@/lib/ai-first/research-planner").ResearchPlan;
   /** Versioning — every AI-generated package is reproducible (Principle 34). */
   researchRunId: string;
   companyTicker: string;

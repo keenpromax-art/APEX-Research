@@ -28,8 +28,12 @@ export interface ClaimVerdict {
   evidenceId: string | null;
   severity: ResearchSeverity;
   detail: string;
-  /** Period tag from the claim text (e.g., "FY26", "2026E"). */
+  field?: string;
+  unit?: string;
+  currency?: string;
+  scale?: string;
   period?: string;
+  periodType?: Claim["periodType"];
   /** Direction consistency: does the claim's direction match the model's forecast? */
   directionConsistent?: boolean;
 }
@@ -59,14 +63,32 @@ export function validateClaim(
   claim: Claim,
   registry: EvidenceRegistry
 ): ClaimVerdict {
-  const base = { claimId: claim.id, text: claim.text, kind: claim.kind };
+  const base = {
+    claimId: claim.id,
+    text: claim.text,
+    kind: claim.kind,
+    field: claim.field,
+    unit: claim.unit,
+    currency: claim.currency,
+    scale: claim.scale,
+    period: claim.period,
+    periodType: claim.periodType,
+  };
   if (claim.numericValue === undefined || !Number.isFinite(claim.numericValue)) {
     return {
       ...base, supported: false, tier: null, evidenceId: null, severity: "warn",
       detail: `Claim carries no parseable numeric — nothing to evidence (kind ${claim.kind}).`,
     };
   }
-  const hit = matchNumericEvidence(registry, claim.numericValue, { kind: claim.kind, ...toleranceFor(claim.kind) });
+  const hit = matchNumericEvidence(registry, claim.numericValue, {
+    kind: claim.kind,
+    ...toleranceFor(claim.kind),
+    field: claim.field,
+    unit: claim.unit,
+    currency: claim.currency,
+    scale: claim.scale,
+    period: claim.period,
+  });
   if (hit) {
     return {
       ...base, supported: true, tier: hit.tier, evidenceId: hit.id, severity: "info",
@@ -76,12 +98,12 @@ export function validateClaim(
   if (MATERIAL_KINDS.has(claim.kind)) {
     return {
       ...base, supported: false, tier: null, evidenceId: null, severity: "blocker",
-      detail: `FATAL: material ${claim.kind} claim "${claim.numericRaw ?? claim.numericValue}" has no registry evidence — unevidenced numbers must not publish.`,
+      detail: `FATAL: material ${claim.kind} claim "${claim.numericRaw ?? claim.numericValue}" has no compatible registry evidence — field, unit, currency, scale, and period must agree.`,
     };
   }
   return {
     ...base, supported: false, tier: null, evidenceId: null, severity: "warn",
-    detail: `Thin ${claim.kind} claim "${claim.numericRaw ?? claim.numericValue}" has no registry evidence — corroborate or drop.`,
+    detail: `Thin ${claim.kind} claim "${claim.numericRaw ?? claim.numericValue}" has no compatible registry evidence — corroborate or drop.`,
   };
 }
 

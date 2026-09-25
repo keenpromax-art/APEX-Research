@@ -5,7 +5,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { generateAIAnalysis, RateLimitError } from "@/lib/openrouter";
 import { PausedForRateLimitError } from "@/lib/ai-providers";
-import type { SupportedProvider, CustomKeyConfig } from "@/lib/ai-providers";
+import type { CustomKeyConfig } from "@/lib/ai-providers";
+import { resolveSafeProviderConfig, validateRequestBodySize } from "@/lib/security/request-policy";
 import type { CompanyProfile, StockData, AnnualFinancials, DCFResult, TickerNewsItem } from "@/types/report";
 
 export const runtime = "nodejs";
@@ -14,10 +15,9 @@ export const runtime = "nodejs";
 export const maxDuration = 300;
 
 export async function POST(request: NextRequest) {
-  // Extract custom API key headers if supplied by the client
-  const headerApiKey = request.headers.get("x-custom-api-key")?.trim();
-  const headerProvider = (request.headers.get("x-custom-api-provider")?.trim() || "openrouter") as SupportedProvider;
-  const headerModel = request.headers.get("x-custom-api-model")?.trim() || undefined;
+  const rawBody = await request.text();
+  const size = validateRequestBodySize(rawBody, request.headers);
+  if (!size.ok) return NextResponse.json({ error: size.error.message, code: size.error.code }, { status: size.error.code === "BODY_TOO_LARGE" ? 413 : 400 });
 
   let body: {
     profile: CompanyProfile;
@@ -27,37 +27,20 @@ export async function POST(request: NextRequest) {
     news?: TickerNewsItem[];
     customKeyConfig?: CustomKeyConfig;
     assumptionsLedger?: any;
-    // Checkpoint resume: raw per-agent results from an interrupted run.
     resumeFrom?: Record<string, unknown> | null;
   };
-
   try {
-    body = await request.json();
+    body = JSON.parse(rawBody) as typeof body;
   } catch {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  // Resolve custom key configuration: prioritize HTTP headers, then JSON body
-  let customConfig: CustomKeyConfig | null = null;
-  if (headerApiKey) {
-    customConfig = {
-      provider: headerProvider,
-      apiKey: headerApiKey,
-      model: headerModel,
-    };
-  } else if (body.customKeyConfig && body.customKeyConfig.apiKey?.trim()) {
-    customConfig = {
-      provider: body.customKeyConfig.provider || "openrouter",
-      apiKey: body.customKeyConfig.apiKey.trim(),
-      model: body.customKeyConfig.model?.trim(),
-    };
-  } else if (headerModel && process.env.OPENROUTER_API_KEY) {
-    // No custom key, but user selected a model — use server key with that model
-    customConfig = {
-      provider: "openrouter",
-      apiKey: process.env.OPENROUTER_API_KEY,
-      model: headerModel,
-    };
+  const safeConfig = resolveSafeProviderConfig(body, request.headers);
+  if (!safeConfig.ok) return NextResponse.json({ error: safeConfig.error.message, code: safeConfig.error.code }, { status: 400 });
+  const headerModel = request.headers.get("x-custom-api-model")?.trim() || undefined;
+  let customConfig: CustomKeyConfig | null = safeConfig.value;
+  if (!customConfig && headerModel && process.env.OPENROUTER_API_KEY) {
+    customConfig = { provider: "openrouter", apiKey: process.env.OPENROUTER_API_KEY, model: headerModel };
   }
 
   // If no server key and no custom key provided, prompt user to supply key

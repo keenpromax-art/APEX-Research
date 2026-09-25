@@ -30,6 +30,8 @@ import {
   type ResearchOperatingModel,
 } from "./research-model";
 import { getCompanySemanticProfile } from "./company-semantics";
+import { sanitizeSourceContent } from "./security/source-sanitizer";
+import { AiMetricsCollector } from "./ai-observability";
 import {
   SUPPORTED_PROVIDERS,
   CustomKeyConfig,
@@ -124,6 +126,11 @@ let llmGateLastStart = 0;
 // This is what makes a whole report eventually succeed instead of dying fast.
 let llmGateCooldownUntil = 0;
 let llmConsecutiveThrottles = 0;
+const aiMetrics = new AiMetricsCollector({ maxSamples: 2_000 });
+
+export function getAiMetricsSnapshot() {
+  return aiMetrics.snapshot();
+}
 
 function llmSleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, Math.max(0, ms)));
@@ -253,6 +260,7 @@ async function callOpenRouterWithFailover(
     for (let attempt = 0; attempt < 4; attempt++) {
       if (httpAttempts >= LLM_MAX_HTTP_ATTEMPTS) break;
       const release = await acquireLlmSlot();
+      const attemptStartedAt = Date.now();
       try {
         httpAttempts++;
         const controller = new AbortController();
@@ -272,8 +280,9 @@ async function callOpenRouterWithFailover(
 
         clearTimeout(timeout);
 
-        if (!res.ok) {
-          const errText = await res.text();
+         if (!res.ok) {
+           aiMetrics.record({ provider: providerKey, model, latencyMs: Date.now() - attemptStartedAt, success: false, attributes: { status: res.status } });
+           const errText = await res.text();
           console.warn(`[${providerMeta.name}] Model ${model} returned HTTP ${res.status}: ${errText.slice(0, 100)}`);
 
           const kind = classifyLlmFailure(res.status, errText);
@@ -306,16 +315,26 @@ async function callOpenRouterWithFailover(
           break;
         }
 
-        const json = await res.json();
-        const content = json.choices?.[0]?.message?.content || "";
+         const json = await res.json();
+         aiMetrics.record({
+           provider: providerKey,
+           model,
+           promptTokens: json.usage?.prompt_tokens,
+           completionTokens: json.usage?.completion_tokens,
+           totalTokens: json.usage?.total_tokens,
+           latencyMs: Date.now() - attemptStartedAt,
+           success: true,
+         });
+         const content = json.choices?.[0]?.message?.content || "";
         if (content && content.trim().length > 0) {
           recordLlmSuccess();
           return content.trim();
         }
         lastError = new Error(`[${providerMeta.name}] ${model} returned empty content.`);
         break;
-      } catch (err: unknown) {
-        if (err instanceof RateLimitError) throw err;
+       } catch (err: unknown) {
+         aiMetrics.record({ provider: providerKey, model, latencyMs: Date.now() - attemptStartedAt, success: false, attributes: { errorType: err instanceof Error ? err.name : "unknown" } });
+         if (err instanceof RateLimitError) throw err;
         lastError = err instanceof Error ? err : new Error(String(err));
         console.warn(`[${providerMeta.name}] Model ${model} attempt failed: ${lastError.message}`);
         break;
@@ -541,18 +560,19 @@ async function runNewsIntelligenceAnalyst(
   catalysts: { event: string; horizon: string; probability: string; impact: string }[];
   analystNotes: { title: string; date: string; paragraphs: string[] }[];
 }> {
-  const latest = annualFinancials[annualFinancials.length - 1] || ({} as AnnualFinancials);
   const genDate = new Date().toLocaleDateString("en-US", { month: "short", year: "numeric" });
 
   const newsContext = news.length > 0
     ? news
         .slice(0, 6)
-        .map(
-          (n, i) =>
-            `[Item ${i + 1}] Title: ${n.title}\nPublisher: ${n.publisher || "Financial Wire"}\nDate: ${n.publishedAt?.slice(0, 10) || "Recent"}\nSummary: ${n.summary || "N/A"}`
-        )
+        .map((n, i) => {
+          const title = sanitizeSourceContent(n.title, 1_000).content;
+          const publisher = sanitizeSourceContent(n.publisher || "Financial Wire", 200).content;
+          const summary = sanitizeSourceContent(n.summary || "N/A", 2_000).content;
+          return `[Item ${i + 1}] Title: ${title}\nPublisher: ${publisher}\nDate: ${n.publishedAt?.slice(0, 10) || "Recent"}\nSummary: ${summary}`;
+        })
         .join("\n\n")
-    : `Primary operational milestone: ${profile.name} expands institutional order backlog, executing on multi-year delivery contracts across core commercial segments. Financial trajectory: Revenue of ${formatLargeNum(latest.revenue, profile.currency)} with expanding operating margins.`;
+    : "No dated news items are available. Do not invent events, catalysts, or operating milestones.";
 
   const prompt = `You are the Chief Corporate Intelligence & Real-Time News Analyst at an institutional research desk.
 Analyze the recent corporate developments, order execution milestones, and market catalysts for ${profile.name} (${profile.ticker}, ${profile.industry}):
@@ -1508,8 +1528,12 @@ async function runNewsSummaryDesk(
   operatingModel?: ResearchOperatingModel | null
 ): Promise<{ newsSummary: NewsSummaryDeskAnalysis }> {
   const newsList = (news && news.length > 0)
-    ? news.slice(0, 8).map(n => `- [${n.publisher || "Wire"}] ${n.title} (${n.publishedAt ? n.publishedAt.slice(0, 10) : "Recent"})`).join("\n")
-    : "- Continuous commercial contract execution and regulatory disclosures filed across exchange portals.";
+    ? news.slice(0, 8).map((n) => {
+        const publisher = sanitizeSourceContent(n.publisher || "Wire", 200).content;
+        const title = sanitizeSourceContent(n.title, 1_000).content;
+        return `- [${publisher}] ${title} (${n.publishedAt ? n.publishedAt.slice(0, 10) : "Recent"})`;
+      }).join("\n")
+    : "- No dated news items are available; do not infer a media narrative.";
 
   const prompt = `You are the Head of the News Sentiment & Executive Briefing Desk at an institutional buy-side research firm.
 Produce an executive news briefing and media sentiment impact analysis for ${profile.name} (${profile.ticker}).

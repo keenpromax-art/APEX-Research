@@ -101,39 +101,59 @@ export function identityIssues(data: ReportData): string[] {
 export interface PublishGate {
   canPublish: boolean;
   reasons: string[];
+  decision: "READY" | "READY_WITH_WARNINGS" | "BLOCKED";
+  warnings: string[];
 }
 
-/**
- * THE canonical publish gate — fail-closed. Every surface (download button,
- * banners, badges) must use this. Missing QA objects block: an unaudited
- * report is not a publishable report.
- */
+function hasInvalidReconciliation(entries: unknown): boolean {
+  return Array.isArray(entries) && entries.some((entry) => Boolean((entry as { invalid?: boolean })?.invalid));
+}
+
 export function canPublishReport(data: ReportData | null | undefined): PublishGate {
-  if (!data) return { canPublish: false, reasons: ["No report data"] };
-  // Kill-switch: when QA_GATES_ENABLED is false, missing/blocked QA objects
-  // stay visible for content diagnostics but never lock publication.
-  if (!QA_GATES_ENABLED) return { canPublish: true, reasons: [] };
+  if (!data) {
+    return { canPublish: false, reasons: ["No report data"], decision: "BLOCKED", warnings: [] };
+  }
+
   const reasons: string[] = [];
-  if (!data.qaReport) {
-    reasons.push("Pre-publish QA has not run (qaReport missing)");
-  } else if (data.qaReport.gateStatus === "BLOCKED") {
-    for (const c of data.qaReport.checks.filter((c) => c.status === "FAIL")) {
-      reasons.push(`${c.id}: ${c.name}`);
-    }
-    if (reasons.length === 0) reasons.push("QA gate BLOCKED with no itemized failures");
+  const warnings: string[] = [];
+  const identity = identityIssues(data);
+  if (identity.length > 0) reasons.push(...identity.map((issue) => `Identity: ${issue}`));
+  if (!data.qaReport) reasons.push("Pre-publish QA has not run (qaReport missing)");
+  else if (data.qaReport.gateStatus === "BLOCKED") {
+    for (const check of data.qaReport.checks.filter((item) => item.status === "FAIL")) reasons.push(`${check.id}: ${check.name}`);
+    if (data.qaReport.checks.every((item) => item.status !== "FAIL")) reasons.push("QA gate BLOCKED with no itemized failures");
   }
-  if (!data.finalQAResult) {
-    reasons.push("Final QA result missing");
-  } else if (!data.finalQAResult.canPublish) {
-    for (const e of data.finalQAResult.errors || []) {
-      const code = (e as any).code ? `${(e as any).code}: ` : "";
-      if (!reasons.some((r) => r.includes(code.trim()))) {
-        reasons.push(`${code}${(e as any).message || "Final QA error"}`);
-      }
+  if (!data.finalQAResult) reasons.push("Final QA result missing");
+  else if (!data.finalQAResult.canPublish) {
+    for (const error of data.finalQAResult.errors || []) {
+      const code = (error as { code?: string }).code ? `${(error as { code?: string }).code}: ` : "";
+      reasons.push(`${code}${(error as { message?: string }).message || "Final QA error"}`);
     }
-    if (!reasons.some((r) => r.includes("Final QA"))) {
-      reasons.push("Final QA disallows publication");
-    }
+    if (reasons.length === 0) reasons.push("Final QA disallows publication");
   }
-  return { canPublish: reasons.length === 0, reasons };
+  if (!data.canonicalForecast) reasons.push("Canonical forecast is missing");
+  if (!data.researchCase) reasons.push("Research case is missing");
+  if (!data.evidenceRegistry || data.evidenceRegistry.items.length === 0) reasons.push("Evidence registry is missing or empty");
+  if (data.researchGraph) {
+    if (!data.researchGraph.materialClaimsTraceable) reasons.push("Evidence graph contains untraceable material claims");
+    for (const blocker of data.researchGraph.blockers) reasons.push(`Evidence graph: ${blocker}`);
+  } else {
+    warnings.push("Evidence graph has not been attached");
+  }
+  if (hasInvalidReconciliation(data.reconciliation)) reasons.push("Primary/secondary source reconciliation contains an invalid field");
+  if (data.independentReport?.issues?.some((issue) => issue.severity === "FAIL")) reasons.push("Independent validator contains a failure");
+  if (data.researchReport && data.researchReport.reviewPassed === false) reasons.push("Attached AI-first research review did not pass");
+  if (data.assumptionsLedger && data.researchCase?.assumptionsLedger && data.assumptionsLedger !== data.researchCase.assumptionsLedger) {
+    warnings.push("Report and ResearchCase assumptions ledgers are not the same object");
+  }
+  if (data.aiAnalysis?.councilVerification?.status === "FLAGGED") warnings.push("Council verification is flagged");
+
+  const strict = QA_GATES_ENABLED;
+  const decision = reasons.length > 0 && strict ? "BLOCKED" : reasons.length > 0 || warnings.length > 0 ? "READY_WITH_WARNINGS" : "READY";
+  return {
+    canPublish: !strict || reasons.length === 0,
+    reasons,
+    decision,
+    warnings,
+  };
 }

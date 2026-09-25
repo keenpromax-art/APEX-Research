@@ -6,10 +6,10 @@
  * (claim-validator is the sole scoring engine). Section/module edges come
  * from the Phase 3/4 wiring already on the case — never recomputed here.
  */
-import { extractClaims, type Claim } from "@/lib/claims";
+import { extractStructuredClaims, type Claim } from "@/lib/claims";
 import { validateClaimSet } from "@/lib/claim-validator";
 import { resolveValuationAnchors } from "@/lib/research-modules";
-import { getEvidence } from "@/lib/evidence-registry";
+import { getEvidence, listEvidenceConflicts, type EvidenceItem } from "@/lib/evidence-registry";
 import type { ResearchModuleId } from "@/lib/research-modules";
 import type {
   BuildEvidenceGraphInput,
@@ -18,6 +18,9 @@ import type {
   EvidenceGraphEdge,
   EvidenceGraphNode,
   EvidenceNarrative,
+  EvidenceGraphQuestion,
+  EvidenceGraphConflict,
+  ResearchCompleteness,
 } from "./types";
 import { EVIDENCE_GRAPH_VERSION } from "./types";
 
@@ -30,6 +33,10 @@ function pushUnique<T>(list: T[], item: T, key: (x: T) => string): void {
 
 function pushEdge(edges: EvidenceGraphEdge[], e: EvidenceGraphEdge): void {
   pushUnique(edges, e, (x) => `${x.from}|${x.kind}|${x.to}`);
+}
+
+function emptyCompleteness(): ResearchCompleteness {
+  return { totalQuestions: 0, addressedQuestions: 0, evidenceBackedQuestions: 0, unresolvedQuestions: 0, score: 1, evidenceScore: 1 };
 }
 
 function sectionIdOf(s: { id: string }): string {
@@ -72,6 +79,19 @@ function moduleAnalysisNode(
   };
 }
 
+function addEvidenceNode(
+  nodes: EvidenceGraphNode[],
+  edges: EvidenceGraphEdge[],
+  item: EvidenceItem
+): { sourceId: string; evidenceId: string } {
+  const sourceId = `source:${item.tier}:${item.source}`;
+  const evidenceId = `evidence:${item.id}`;
+  pushUnique(nodes, { id: sourceId, kind: "source", label: item.source, ref: item.tier, meta: { tier: item.tier, reliability: item.reliabilityScore ?? null } }, (node) => node.id);
+  pushUnique(nodes, { id: evidenceId, kind: "evidence", label: `${item.field}${item.note ? ` (${item.note})` : ""}`, ref: item.id, meta: { tier: item.tier, field: item.field, period: item.periodCovered ?? null, currency: item.currency ?? null, scale: item.scale ?? null } }, (node) => node.id);
+  pushEdge(edges, { from: sourceId, to: evidenceId, kind: "source-produces-evidence" });
+  return { sourceId, evidenceId };
+}
+
 export function buildEvidenceGraph(input: BuildEvidenceGraphInput): EvidenceGraph {
   const rc = input.researchCase;
   const builtAt = input.builtAt ?? new Date().toISOString();
@@ -80,6 +100,8 @@ export function buildEvidenceGraph(input: BuildEvidenceGraphInput): EvidenceGrap
   const blockers: string[] = [];
   const unknowns: string[] = [];
   const claims: ClaimTrace[] = [];
+  const questions: EvidenceGraphQuestion[] = [];
+  const conflicts: EvidenceGraphConflict[] = [];
 
   if (!rc?.caseId) {
     return {
@@ -89,6 +111,9 @@ export function buildEvidenceGraph(input: BuildEvidenceGraphInput): EvidenceGrap
       nodes,
       edges,
       claims,
+      questions,
+      conflicts,
+      completeness: emptyCompleteness(),
       materialClaimsTraceable: false,
       materialClaimCount: 0,
       traceableMaterialCount: 0,
@@ -105,33 +130,59 @@ export function buildEvidenceGraph(input: BuildEvidenceGraphInput): EvidenceGrap
       "EvidenceRegistry absent or empty — material claims cannot be traced to a source."
     );
   } else {
-    for (const item of registry.items) {
-      const sourceId = `source:${item.tier}:${item.source}`;
-      pushUnique(
-        nodes,
-        {
-          id: sourceId,
-          kind: "source",
-          label: item.source,
-          ref: item.tier,
-          meta: { tier: item.tier },
+    for (const item of registry.items) addEvidenceNode(nodes, edges, item);
+    for (const conflict of listEvidenceConflicts(registry)) {
+      const nodeId = `conflict:${conflict.id}`;
+      pushUnique(nodes, {
+        id: nodeId,
+        kind: "conflict",
+        label: `${conflict.field}: ${conflict.reason}`,
+        ref: conflict.id,
+        meta: {
+          field: conflict.field,
+          reason: conflict.reason,
+          resolution: conflict.resolution,
+          material: conflict.material,
         },
-        (n) => n.id
-      );
-      const evidenceId = `evidence:${item.id}`;
-      pushUnique(
-        nodes,
-        {
-          id: evidenceId,
-          kind: "evidence",
-          label: `${item.field}${item.note ? ` (${item.note})` : ""}`,
-          ref: item.id,
-          meta: { tier: item.tier, field: item.field },
-        },
-        (n) => n.id
-      );
-      pushEdge(edges, { from: sourceId, to: evidenceId, kind: "source-produces-evidence" });
+      }, (node) => node.id);
+      const selected = addEvidenceNode(nodes, edges, conflict.selected);
+      const existing = addEvidenceNode(nodes, edges, conflict.existing);
+      const incoming = addEvidenceNode(nodes, edges, conflict.incoming);
+      for (const evidenceId of new Set([selected.evidenceId, existing.evidenceId, incoming.evidenceId])) {
+        pushEdge(edges, { from: nodeId, to: evidenceId, kind: "conflict-informs-evidence" });
+      }
+      conflicts.push({
+        id: conflict.id,
+        nodeId,
+        field: conflict.field,
+        reason: conflict.reason,
+        selectedEvidenceId: conflict.selected.id,
+        incomingEvidenceIds: [conflict.existing.id, conflict.incoming.id].filter((id) => id !== conflict.selected.id),
+        material: conflict.material,
+      });
     }
+  }
+
+  for (const [index, question] of (rc.researchQuestions ?? []).entries()) {
+    const nodeId = `question:${index + 1}`;
+    pushUnique(nodes, {
+      id: nodeId,
+      kind: "question",
+      label: question.question,
+      ref: `research-question:${index + 1}`,
+      meta: {
+        requiredFor: question.requiredFor,
+        evidenceNeeded: question.evidenceNeeded,
+        yfinanceAvailable: question.yfinanceAvailable,
+      },
+    }, (node) => node.id);
+    questions.push({
+      id: `question:${index + 1}`,
+      nodeId,
+      question: question.question,
+      requiredFor: question.requiredFor,
+      evidenceNeeded: question.evidenceNeeded,
+    });
   }
 
   // ── Sections (Section nodes + module feed edges) ────────────────────
@@ -229,6 +280,16 @@ export function buildEvidenceGraph(input: BuildEvidenceGraphInput): EvidenceGrap
     );
   }
 
+  for (const question of questions) {
+    const required = question.requiredFor.toLowerCase();
+    const target = [...moduleIds].find((moduleId) => required === moduleId || required.includes(moduleId));
+    if (target) {
+      pushEdge(edges, { from: question.nodeId, to: `analysis:${target}`, kind: "question-informs-analysis" });
+    } else if (conclusion) {
+      pushEdge(edges, { from: question.nodeId, to: conclusion.id, kind: "question-informs-analysis" });
+    }
+  }
+
   // ── Claims from narratives ──────────────────────────────────────────
   const narratives: EvidenceNarrative[] = input.narratives ?? [];
   if (narratives.length === 0) {
@@ -238,70 +299,62 @@ export function buildEvidenceGraph(input: BuildEvidenceGraphInput): EvidenceGrap
   for (const narrative of narratives) {
     const text = narrative.text ?? "";
     if (!text.trim()) continue;
-    const extracted = extractClaims(text);
+    const extracted = extractStructuredClaims(text);
     if (extracted.length === 0) continue;
 
     const verdicts = registry ? validateClaimSet(extracted, registry) : null;
     const role = narrative.role ?? "analysis";
+    const stance = narrative.stance ?? "supports";
     const sectionId = narrative.sectionId ?? null;
     const moduleId = narrative.moduleId ?? null;
+    const questionNode = narrative.questionId
+      ? questions.find((question) => question.id === narrative.questionId || question.nodeId === narrative.questionId || question.question === narrative.questionId)
+      : null;
 
-    // Ensure owning analysis node exists when the narrative declares a module.
     if (moduleId) {
-      pushUnique(
-        nodes,
-        {
-          id: `analysis:${moduleId}`,
-          kind: "analysis",
-          label: moduleId,
-          ref: moduleId,
-          meta: { available: null },
-        },
-        (n) => n.id
-      );
+      pushUnique(nodes, {
+        id: `analysis:${moduleId}`,
+        kind: "analysis",
+        label: moduleId,
+        ref: moduleId,
+        meta: { available: null },
+      }, (node) => node.id);
     }
-    if (sectionId && sectionIds.has(sectionId)) {
-      // section node already present
-    } else if (sectionId) {
-      pushUnique(
-        nodes,
-        {
-          id: `section:${sectionId}`,
-          kind: "section",
-          label: sectionId,
-          ref: sectionId,
-          meta: { index: null },
-        },
-        (n) => n.id
-      );
+    if (sectionId && !sectionIds.has(sectionId)) {
+      pushUnique(nodes, {
+        id: `section:${sectionId}`,
+        kind: "section",
+        label: sectionId,
+        ref: sectionId,
+        meta: { index: null },
+      }, (node) => node.id);
       sectionIds.add(sectionId);
     }
 
     for (const claim of extracted) {
-      const verdict = verdicts?.verdicts.find((v) => v.claimId === claim.id) ?? null;
+      const verdict = verdicts?.verdicts.find((candidate) => candidate.claimId === claim.id) ?? null;
       const supported = Boolean(verdict?.supported);
       const evidenceId = verdict?.evidenceId ?? null;
       const tier = verdict?.tier ?? null;
       const severity = verdict?.severity ?? "warn";
       const material = MATERIAL_KINDS.has(claim.kind);
-
       const claimNodeId = `claim:${claim.id}:${narrative.originId}`;
-      pushUnique(
-        nodes,
-        {
-          id: claimNodeId,
-          kind: "claim",
-          label: claim.text.slice(0, 160),
-          ref: claim.id,
-          meta: {
-            kind: claim.kind,
-            supported,
-            material,
-            originId: narrative.originId,
-          },
+      const claimNodeKind = stance === "contradicts" ? "counter-evidence" : "claim";
+      pushUnique(nodes, {
+        id: claimNodeId,
+        kind: claimNodeKind,
+        label: claim.text.slice(0, 160),
+        ref: claim.id,
+        meta: {
+          kind: claim.kind,
+          supported,
+          material,
+          originId: narrative.originId,
+          stance,
+          field: claim.field ?? null,
+          period: claim.period ?? null,
         },
-        (n) => n.id
-      );
+      }, (node) => node.id);
 
       const path: string[] = [];
       if (supported && evidenceId) {
@@ -310,44 +363,35 @@ export function buildEvidenceGraph(input: BuildEvidenceGraphInput): EvidenceGrap
         const sourceNodeId = item ? `source:${item.tier}:${item.source}` : null;
         if (sourceNodeId) {
           path.push(sourceNodeId, evidenceNodeId, claimNodeId);
-          pushEdge(edges, { from: evidenceNodeId, to: claimNodeId, kind: "evidence-supports-claim" });
+          pushEdge(edges, {
+            from: evidenceNodeId,
+            to: claimNodeId,
+            kind: stance === "contradicts" ? "evidence-counter-evidence" : "evidence-supports-claim",
+          });
         } else {
-          // Registry lost the id between validate and lookup — fail closed.
           path.push(claimNodeId);
-          unknowns.push(
-            `Evidence ${evidenceId} resolved by validator but missing from registry at graph build.`
-          );
+          unknowns.push(`Evidence ${evidenceId} resolved by validator but missing from registry at graph build.`);
         }
       } else {
         path.push(claimNodeId);
       }
 
+      if (questionNode) {
+        pushEdge(edges, { from: claimNodeId, to: questionNode.nodeId, kind: "question-covers-claim" });
+      }
       if (role === "conclusion" && conclusion) {
-        pushEdge(edges, {
-          from: claimNodeId,
-          to: conclusion.id,
-          kind: "claim-supports-conclusion",
-        });
+        pushEdge(edges, { from: claimNodeId, to: conclusion.id, kind: "claim-supports-conclusion" });
         path.push(conclusion.id);
       } else if (moduleId) {
-        pushEdge(edges, {
-          from: claimNodeId,
-          to: `analysis:${moduleId}`,
-          kind: "claim-informs-analysis",
-        });
+        pushEdge(edges, { from: claimNodeId, to: `analysis:${moduleId}`, kind: "claim-informs-analysis" });
         path.push(`analysis:${moduleId}`);
       }
-
       if (sectionId) {
-        pushEdge(edges, {
-          from: claimNodeId,
-          to: `section:${sectionId}`,
-          kind: "claim-in-section",
-        });
+        pushEdge(edges, { from: claimNodeId, to: `section:${sectionId}`, kind: "claim-in-section" });
         path.push(`section:${sectionId}`);
       }
 
-      const trace: ClaimTrace = {
+      claims.push({
         claimId: claim.id,
         originId: narrative.originId,
         text: claim.text,
@@ -363,15 +407,34 @@ export function buildEvidenceGraph(input: BuildEvidenceGraphInput): EvidenceGrap
         moduleId,
         role,
         material,
-      };
-      claims.push(trace);
+        field: claim.field,
+        unit: claim.unit,
+        currency: claim.currency,
+        scale: claim.scale,
+        period: claim.period,
+        periodType: claim.periodType,
+        stance,
+        targetClaimId: narrative.targetClaimId ?? null,
+        questionId: questionNode?.id ?? null,
+      });
 
       if (material && !(supported && evidenceId)) {
-        blockers.push(
-          `UNTRACEABLE_CLAIM:${claim.id}: material ${claim.kind} claim has no Source→Evidence chain — ${claim.numericRaw ?? claim.numericValue}`
-        );
+        blockers.push(`UNTRACEABLE_CLAIM:${claim.id}: material ${claim.kind} claim has no Source→Evidence chain — ${claim.numericRaw ?? claim.numericValue}`);
       }
     }
+  }
+
+  for (const counter of claims.filter((claim) => claim.stance === "contradicts" && claim.targetClaimId)) {
+    const target = claims.find((claim) => claim.claimId === counter.targetClaimId && claim.stance !== "contradicts");
+    if (!target) {
+      unknowns.push(`Counter-evidence ${counter.claimId} targets missing claim ${counter.targetClaimId}.`);
+      continue;
+    }
+    pushEdge(edges, {
+      from: `claim:${counter.claimId}:${counter.originId}`,
+      to: `claim:${target.claimId}:${target.originId}`,
+      kind: "counter-evidence-challenges-claim",
+    });
   }
 
   const materialClaims = claims.filter((c) => c.material);
@@ -384,6 +447,26 @@ export function buildEvidenceGraph(input: BuildEvidenceGraphInput): EvidenceGrap
     (traceableMaterial.length === materialClaims.length &&
       !blockers.some((b) => b.startsWith("UNTRACEABLE_CLAIM:")));
 
+  const addressedQuestions = new Set<string>();
+  const evidenceBackedQuestions = new Set<string>();
+  for (const edge of edges) {
+    if (edge.kind === "question-informs-analysis") addressedQuestions.add(edge.from);
+    if (edge.kind === "question-covers-claim") {
+      addressedQuestions.add(edge.from);
+      const target = nodes.find((node) => node.id === edge.to);
+      if (target?.meta?.supported === true) evidenceBackedQuestions.add(edge.from);
+    }
+  }
+  const totalQuestions = questions.length;
+  const completeness: ResearchCompleteness = {
+    totalQuestions,
+    addressedQuestions: addressedQuestions.size,
+    evidenceBackedQuestions: evidenceBackedQuestions.size,
+    unresolvedQuestions: Math.max(0, totalQuestions - addressedQuestions.size),
+    score: totalQuestions === 0 ? 1 : addressedQuestions.size / totalQuestions,
+    evidenceScore: totalQuestions === 0 ? 1 : evidenceBackedQuestions.size / totalQuestions,
+  };
+
   return {
     version: EVIDENCE_GRAPH_VERSION,
     caseId: rc.caseId,
@@ -391,6 +474,9 @@ export function buildEvidenceGraph(input: BuildEvidenceGraphInput): EvidenceGrap
     nodes,
     edges,
     claims,
+    questions,
+    conflicts,
+    completeness,
     materialClaimsTraceable,
     materialClaimCount: materialClaims.length,
     traceableMaterialCount: traceableMaterial.length,

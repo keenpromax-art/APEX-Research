@@ -1,8 +1,19 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
+  "main": ".open-next/worker.js",
   "name": "equity-research-generator",
   "compatibility_date": "2024-12-18",
-  "compatibility_flags": ["nodejs_compat"],
-  "pages_build_output_dir": ".open-next/assets",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+  "d1_databases": [
+    {
+      "binding": "RESEARCH_RUN_DB",
+      "database_name": "equity-research-generator-research-runs",
+      "migrations_dir": "migrations"
+    }
+  ],
   "send_metrics": false
 }

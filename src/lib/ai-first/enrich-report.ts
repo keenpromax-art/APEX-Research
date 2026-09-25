@@ -261,13 +261,7 @@ export function enrichAIAnalysisFromResearchReport(
     // Thesis/conclusion: the synthesized chain wins when present (it is the
     // debate-driven body), but a longer council thesis is not truncated.
     investmentThesis: richer(thesisText, aiAnalysis.investmentThesis),
-    // The ai-first conclusion is the closing verdict; it is preferred over a
-    // repeated thesis body, and the council conclusion is appended so neither
-    // source is lost.
-    investmentConclusion: [
-      research.conclusion || thesisText,
-      aiAnalysis.investmentConclusion,
-    ].filter((s) => s && s.trim().length > 0).join("\n\n") || aiAnalysis.investmentConclusion,
+    investmentConclusion: aiAnalysis.investmentConclusion,
     companyOverview: overviewCombined || aiAnalysis.companyOverview,
     economicContext: richer([aiAnalysis.economicContext, forensicExtra].filter(Boolean).join("\n\n"), aiAnalysis.economicContext),
     whyThisCompany: why || aiAnalysis.whyThisCompany,

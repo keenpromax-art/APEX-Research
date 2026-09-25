@@ -7,15 +7,28 @@
 import type { MasterReportFacts } from "./report-facts";
 import type { AnnualFinancials } from "@/types/report";
 
+export type ClaimPeriodType = "ACTUAL" | "ESTIMATE" | "FORECAST" | "CURRENT" | "UNKNOWN";
+
 export interface Claim {
-  id: string; // SHA-256-like deterministic hash of normalized sentence
+  id: string;
   text: string;
   numericValue?: number;
   numericRaw?: string;
   kind: "percentage" | "currency" | "multiple" | "count";
-  sourceFactId: string | null; // null = unsupported
-  evidence: string | null; // e.g. "DCF:revenueGrowthRates[0]=12.5%" or "Filing:FY24 Rev 1,234M"
+  sourceFactId: string | null;
+  evidence: string | null;
   supported: boolean;
+  field?: string;
+  unit?: string;
+  currency?: string;
+  scale?: string;
+  period?: string;
+  periodType?: ClaimPeriodType;
+}
+
+export interface StructuredClaim extends Claim {
+  sentenceIndex: number;
+  numericIndex: number;
 }
 
 // Simple deterministic hash (FNV-1a 32-bit hex, avoids crypto dependency)
@@ -32,49 +45,124 @@ function normalizeSentence(s: string): string {
   return s.trim().toLowerCase().replace(/\s+/g, " ").slice(0, 240);
 }
 
-/**
- * Extract claims that contain material numerics.
- * Scans investmentThesis/overview/etc. joined text.
- */
-export function extractClaims(text: string): Claim[] {
+const NUMERIC_CLAIM_RE = /(?<![\w])[-+]?\s*(?:(?:₹|rs\.?|inr|usd|eur|gbp|\$|€|£)\s*)?(?:\d[\d,]*(?:\.\d+)?|\.\d+)\s*(?:%|x|bn|billion|mn|million|m|cr|crore|l|lakh|k|thousand)?/gi;
+
+function normalizeScale(raw: string | undefined): string {
+  const value = String(raw ?? "").toLowerCase();
+  if (value === "bn" || value === "billion") return "billion";
+  if (value === "mn" || value === "m" || value === "million") return "million";
+  if (value === "cr" || value === "crore") return "crore";
+  if (value === "l" || value === "lakh") return "lakh";
+  if (value === "k" || value === "thousand") return "thousand";
+  return "raw";
+}
+
+function currencyFromToken(raw: string): string | undefined {
+  const token = raw.toLowerCase();
+  if (token.includes("₹") || /\brs\.?\b/.test(token) || token.includes("inr")) return "INR";
+  if (token.includes("$") || token.includes("usd")) return "USD";
+  if (token.includes("€") || token.includes("eur")) return "EUR";
+  if (token.includes("£") || token.includes("gbp")) return "GBP";
+  return undefined;
+}
+
+function periodFromText(text: string): { period?: string; periodType?: ClaimPeriodType } {
+  const match = text.match(/\b(?:Q[1-4]\s*)?FY\s*\d{2,4}\b|\b(?:19|20)\d{2}[AE]?\b|\bTTM\b|\b(?:current|last quarter|next quarter|annual|quarterly)\b/i);
+  if (!match) return {};
+  const raw = match[0].trim();
+  const upper = raw.toUpperCase();
+  if (upper === "TTM") return { period: upper, periodType: "CURRENT" };
+  if (/CURRENT|QUARTER|ANNUAL/.test(upper)) return { period: upper.replace(/\s+/g, " "), periodType: "CURRENT" };
+  const periodType: ClaimPeriodType = /E$/.test(upper) ? "ESTIMATE" : /A$/.test(upper) ? "ACTUAL" : "UNKNOWN";
+  return { period: upper.replace(/\s+/g, " "), periodType };
+}
+
+function inferClaimField(text: string, raw?: string, position = 0): string | undefined {
+  const value = text.toLowerCase();
+  const before = text.slice(Math.max(0, position - 48), position).toLowerCase();
+  const fields: Array<[RegExp, string]> = [
+    [/\bterminal\s+growth\b|\btgr\b/, "terminalGrowth"],
+    [/\bwacc\b|weighted\s+average\s+cost/, "wacc"],
+    [/\bfair\s+value\b|\bintrinsic\s+value\b|\btarget\s+price\b/, "fairValue"],
+    [/\bcurrent\s+price\b|\bmarket\s+price\b|\bcmp\b/, "currentPrice"],
+    [/\b(?:revenue|sales|top[- ]line|turnover)\s+growth\b/, "revenueGrowth"],
+    [/\brevenue\b|\bsales\b|\btop[- ]line\b|\bturnover\b/, "revenue"],
+    [/\bebitda\b/, "ebitda"],
+    [/\bebit\s+margin\b|\boperating\s+margin\b|\bmargin\b/, "ebitMargin"],
+    [/\bnet\s+income\b|\bnet\s+profit\b|\bearnings\b/, "netIncome"],
+    [/\bfree\s+cash\s+flow\b|\bfcf\b/, "freeCashFlow"],
+    [/\boccupancy\b/, "occupancy"],
+    [/\brevpar\b/, "revpar"],
+    [/\bpe\b|\bprice\s+to\s+earnings\b/, "pe"],
+    [/\bshares\s+outstanding\b/, "sharesOutstanding"],
+  ];
+  const beforeMatches = fields
+    .map(([pattern, field]) => ({ field, index: before.search(pattern) }))
+    .filter((candidate) => candidate.index >= 0)
+    .sort((a, b) => b.index - a.index);
+  if (beforeMatches.length > 0) return beforeMatches[0].field;
+  return fields.find(([pattern]) => pattern.test(value))?.[1];
+}
+
+function numericKind(raw: string, currency: string | undefined): Claim["kind"] {
+  if (raw.includes("%")) return "percentage";
+  if (/\d\s*x$/i.test(raw) || /\b(?:multiple|turns?)\b/i.test(raw)) return "multiple";
+  if (currency) return "currency";
+  return "count";
+}
+
+export function extractStructuredClaims(text: string): StructuredClaim[] {
   if (!text) return [];
-  // Split into sentences
   const sentences = text.split(/(?<=[.!?])\s+/);
-  const claims: Claim[] = [];
-  for (const sent of sentences) {
-    const hasNumeric = /(\d+(?:,\d{3})*(?:\.\d+)?\s*%|\d+(?:,\d{3})*(?:\.\d+)?\s*(?:x|cr|l|m|bn|b)|\b(?:rs\.?|₹|\$|€|£)\s*\d+)/i.test(sent);
-    if (!hasNumeric) continue;
-    // Extract first numeric token
-    const m = sent.match(/(\d+(?:,\d{3})*(?:\.\d+)?\s*%|\d+(?:,\d{3})*(?:\.\d+)?\s*x|\b(?:rs\.?|₹|\$)\s*\d[\d,]*(?:\.\d+)?)/i);
-    const raw = m ? m[1] : sent.slice(0, 40);
-    // Numeric parse must preserve the decimal point ("9.5%" → 9.5, never 95).
-    // Strip thousand-separators, currency glyphs, the Rs abbreviation (with
-    // its optional period), then the %/x/unit suffix — digits and "." survive.
-    const val = m
-      ? parseFloat(
-          raw
-            .replace(/,/g, "")
-            .replace(/(rs\.?|₹|\$|€|£)/gi, "")
-            .replace(/%/g, "")
-            .replace(/x$/i, "")
-            .replace(/(cr|l|m|bn|b)\.?$/i, "")
-            .trim()
-        )
-      : undefined;
-    const kind: Claim["kind"] = raw.includes("%") ? "percentage" : raw.toLowerCase().includes("x") ? "multiple" : raw.match(/₹|\$|rs/i) ? "currency" : "count";
-    const id = hashClaim(normalizeSentence(sent));
-    claims.push({
-      id,
-      text: sent.trim().slice(0, 320),
-      numericRaw: raw,
-      numericValue: Number.isFinite(val) ? val : undefined,
-      kind,
-      sourceFactId: null,
-      evidence: null,
-      supported: false,
-    });
+  const claims: StructuredClaim[] = [];
+  for (let sentenceIndex = 0; sentenceIndex < sentences.length; sentenceIndex++) {
+    const sentence = sentences[sentenceIndex];
+    const matches = sentence.matchAll(NUMERIC_CLAIM_RE);
+    let numericIndex = 0;
+    for (const match of matches) {
+      const raw = match[0].trim();
+      const lower = raw.toLowerCase();
+      const suffix = lower.match(/(%|x|bn|billion|mn|million|m|cr|crore|l|lakh|k|thousand)$/i)?.[1];
+      const currency = currencyFromToken(raw);
+      const hasScale = Boolean(suffix && !["%", "x"].includes(suffix.toLowerCase()));
+      const hasCountContext = /\b(?:employees|units|shares|customers|orders|beds|seats|vehicles|workers|staff)\b/i.test(sentence);
+      if (!currency && !suffix && !hasCountContext) continue;
+      const numericToken = raw.replace(/,/g, "").replace(/[^\d.+-]/g, "");
+      const numericValue = Number.parseFloat(numericToken);
+      if (!Number.isFinite(numericValue)) continue;
+      const period = periodFromText(sentence);
+      const kind = numericKind(raw, currency);
+      claims.push({
+        id: hashClaim(`${normalizeSentence(sentence)}|${raw}|${numericIndex}`),
+        text: sentence.trim().slice(0, 320),
+        numericRaw: raw,
+        numericValue,
+        kind,
+        field: inferClaimField(sentence, raw, match.index ?? 0),
+        unit: kind === "percentage" ? "pct" : kind === "multiple" ? "multiple" : kind === "currency" ? "money" : hasScale ? "count" : undefined,
+        currency,
+        scale: hasScale ? normalizeScale(suffix) : "raw",
+        period: period.period,
+        periodType: period.periodType,
+        sourceFactId: null,
+        evidence: null,
+        supported: false,
+        sentenceIndex,
+        numericIndex,
+      });
+      numericIndex++;
+    }
   }
   return claims;
+}
+
+export function extractClaims(text: string): Claim[] {
+  const firstBySentence = new Set<number>();
+  return extractStructuredClaims(text).filter((claim) => {
+    if (firstBySentence.has(claim.sentenceIndex)) return false;
+    firstBySentence.add(claim.sentenceIndex);
+    return true;
+  });
 }
 
 /**
@@ -172,7 +260,7 @@ export function validateGrowthClaims(
     /revenue\s+at\s+a\s+cagr\s+of\s+(\d+(?:\.\d+)?)\s*%/gi,
   ];
 
-  const claims = extractClaims(narrativeText);
+  const claims = extractStructuredClaims(narrativeText);
   for (const claim of claims) {
     if (claim.kind !== "percentage" || claim.numericValue === undefined) continue;
     // Check if the claim sentence relates to growth
