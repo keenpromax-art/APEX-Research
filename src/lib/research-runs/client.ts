@@ -5,8 +5,12 @@ import type { ReportData } from "@/types/report";
 import type { ReportTypeId, ResearchDepth } from "@/lib/report-types";
 import {
   RESEARCH_RUN_MANIFEST_VERSION,
+  RESEARCH_RUN_MANIFEST_V2,
+  deriveServerProvenance,
   parseResearchRunManifest,
+  parseResearchRunManifestV2,
   type ResearchRunManifestV1,
+  type ResearchRunManifestV2,
   type ResearchRunStatus,
 } from "./manifest";
 
@@ -106,6 +110,43 @@ export function buildFinalizedResearchRunManifest(
   });
 }
 
+export function qaDecisionOf(report: ReportData): "BLOCK" | "REVIEW" | "QUALIFIED" | "READY" | null {
+  const direct = (report as unknown as Record<string, unknown>).canonicalPackage as unknown as Record<string, unknown> | null | undefined;
+  const fromPackage = direct && typeof direct === "object" ? (direct.qaDecision as string | undefined ?? (direct.canonicalQa as Record<string, unknown> | undefined)?.decision as string | undefined) : undefined;
+  const fromReport = report.researchReport?.qaDecision ?? report.researchReport?.canonicalQa?.decision ?? undefined;
+  const value = fromPackage ?? fromReport ?? null;
+  return value === "BLOCK" || value === "REVIEW" || value === "QUALIFIED" || value === "READY" ? value : null;
+}
+export function buildFinalizedResearchRunManifestV2(
+  report: ReportData,
+  options: ResearchRunPersistenceOptions,
+): ResearchRunManifestV2 {
+  const v1 = buildFinalizedResearchRunManifest(report, options);
+  const canonicalPackageHash = (report.canonicalPackage as unknown as Record<string, unknown> | null)?.packageHash as string | undefined ?? null;
+  const packageHash = canonicalPackageHash;
+  const provenance = deriveServerProvenance({
+    summaryStatement: v1.summary.thesis.statement,
+    forecastRows: v1.summary.forecast.rows,
+    reportArtifact: v1.reportArtifact,
+    canonicalPackageHash,
+    packageHash,
+    pdfHash: null,
+    qaDecision: qaDecisionOf(report),
+  });
+  return parseResearchRunManifestV2({
+    ...(v1 as unknown as Record<string, unknown>),
+    version: RESEARCH_RUN_MANIFEST_V2,
+    provenance,
+  });
+}
+export function exportGateForReport(report: ReportData): { exportAllowed: boolean; publishAllowed: boolean; label: string; qaDecision: string | null } {
+  const decision = qaDecisionOf(report);
+  const canPublish = report.canonicalPackage?.quality.canPublish ?? report.canonicalQuality?.canPublish ?? false;
+  if (decision === "READY") return { exportAllowed: true, publishAllowed: true, label: "PDF", qaDecision: decision };
+  if (decision === "QUALIFIED") return { exportAllowed: true, publishAllowed: true, label: "Qualified PDF with disclosed qualifications", qaDecision: decision };
+  if (decision === "REVIEW" || decision === "BLOCK") return { exportAllowed: false, publishAllowed: false, label: "Diagnostic preview (non-publishable)", qaDecision: decision };
+  return { exportAllowed: canPublish, publishAllowed: canPublish, label: canPublish ? "PDF" : "Diagnostic preview (non-publishable)", qaDecision: decision };
+}
 async function parsePersistResponse(response: Response): Promise<PersistApiResponse | null> {
   const text = await response.text();
   if (new TextEncoder().encode(text).byteLength > 65_536) return null;

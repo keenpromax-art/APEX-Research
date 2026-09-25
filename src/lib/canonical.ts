@@ -10,6 +10,7 @@
  */
 import type { ReportData } from "@/types/report";
 import { QA_GATES_ENABLED } from "./qa-gates";
+import { assessSealedResearchPackage } from "./research-package/quality";
 
 export interface CanonicalValuation {
   cmp: number;
@@ -112,6 +113,23 @@ function hasInvalidReconciliation(entries: unknown): boolean {
 export function canPublishReport(data: ReportData | null | undefined): PublishGate {
   if (!data) {
     return { canPublish: false, reasons: ["No report data"], decision: "BLOCKED", warnings: [] };
+  }
+  if (data.canonicalPackage) {
+    const packageGate = assessSealedResearchPackage(data.canonicalPackage);
+    return {
+      canPublish: packageGate.canPublish,
+      reasons: packageGate.blockers,
+      decision: packageGate.canPublish ? "READY" : "BLOCKED",
+      warnings: packageGate.warnings,
+    };
+  }
+  if (data.canonicalQuality && !data.canonicalQuality.canPublish) {
+    return {
+      canPublish: false,
+      reasons: data.canonicalQuality.blockers,
+      decision: "BLOCKED",
+      warnings: data.canonicalQuality.warnings,
+    };
   }
 
   const reasons: string[] = [];

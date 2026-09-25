@@ -1,230 +1,142 @@
-/**
- * APEX RESEARCH — DETERMINISTIC FORECAST ENGINE
- *
- * "AI decides the model. Code executes the model."
- *
- * Takes the AI-generated ForecastSpecification (variables, formulas,
- * assumptions, driverPaths) and the yfinance fact pack, and produces
- * deterministic forecasted financial statements.
- *
- * The LLM NEVER performs arithmetic. It produces Formula specifications and
- * Assumption specifications; this engine evaluates them with safe arithmetic
- * and enforces statement identities with labeled balancing plugs.
- *
- * Provenance per number: "fact" (yfinance) / "derived" (computed from facts) /
- * "assumption" (AI input) / "forecast" (computed from assumptions).
- */
-import type {
-  FactPack,
-  Fact,
-  ForecastSpecification,
-  ForecastStatementYear,
-  ForecastResult,
-} from "./types";
-import type { ProvenanceTier } from "./types";
-import { evalExpression } from "./model-runtime";
-import { enforceStatementIdentities } from "./statement-identities";
+import type { CompanyUnderstanding, EconomicEngine, FactPack, ForecastSpecification, ForecastResult, ProvenanceTier } from "./types";
+import { compileForecast } from "./forecast-compiler";
+import { selectAccountingArchitecture, type AccountingArchitecture } from "./accounting-architecture";
+import { enforceStatementIdentities, type IdentityCheck } from "./statement-identities";
+import { validateModelSpec, type ModelSpecValidationResult } from "./model-spec-validator";
 
 export interface ForecastEngineInput {
-  /** AI-generated model specification. */
   model: ForecastSpecification;
-  /** Canonical yfinance fact pack. */
   factPack: FactPack;
+  architecture?: AccountingArchitecture;
+  understanding?: Partial<CompanyUnderstanding>;
+  engine?: Partial<EconomicEngine>;
+  validationOptions?: {
+    requireEvidence?: boolean;
+    enforceCanonicalBases?: boolean;
+    allowUnresolvedBaseValues?: boolean;
+  };
+  validation?: ModelSpecValidationResult;
 }
 
 export interface ForecastEngineOutput {
   forecast: ForecastResult;
-  /** Formulas evaluated, per formula id (null when skipped/failed). */
   formulasEvaluated: Record<string, number | null>;
-  identityChecks: Array<{ check: string; pass: boolean; detail?: string }>;
-  /** Provenance of every computed variable. */
+  identityChecks: IdentityCheck[];
   provenance: Record<string, ProvenanceTier>;
-  /** Labeled balancing plugs applied. */
   plugs: string[];
+  validation?: ModelSpecValidationResult;
+  architecture?: AccountingArchitecture;
+  status: "ready" | "blocked" | "incomplete";
+  blockers: string[];
+  publicationBlocked: boolean;
 }
 
-/** Pull the latest numeric value for a metric from a fact section. */
-function latestValue(sec: { facts: Fact[] }, metric: string): number | undefined {
-  const fact = sec.facts.find((f) => f.metric === metric && f.value !== undefined);
-  return fact?.value;
-}
-
-/**
- * Execute the deterministic forecast engine.
- */
-export function executeForecast(input: ForecastEngineInput): ForecastEngineOutput {
-  const { model, factPack } = input;
-  const years: ForecastStatementYear[] = [];
-  const provenance: Record<string, ProvenanceTier> = {};
+function blockedResult(validation: ModelSpecValidationResult, architecture?: AccountingArchitecture): ForecastEngineOutput {
+  const blockers = validation.errors.map((entry) => `${entry.code}: ${entry.message}`);
+  const identityChecks: IdentityCheck[] = [{ check: "Forecast execution is blocked", pass: false, critical: true, code: "MODEL_SPEC_INVALID", detail: blockers.join("; ") || "Model validation failed" }];
+  const forecast: ForecastResult = {
+    incomeStatement: [],
+    balanceSheet: [],
+    cashFlow: [],
+    identityChecks,
+    status: "blocked",
+    publicationStatus: "blocked",
+    blockers,
+    publicationBlocked: true,
+    validation: { valid: false, issues: blockers },
+    modelValidation: { valid: false, issues: blockers },
+    ...(architecture ? { architecture: architecture.id } : {}),
+  };
   const formulasEvaluated: Record<string, number | null> = {};
-  const log: string[] = [];
+  for (const formula of validation.spec?.formulas ?? []) formulasEvaluated[formula.id] = null;
+  return { forecast, formulasEvaluated, identityChecks, provenance: {}, plugs: [], validation, architecture, status: "blocked", blockers, publicationBlocked: true };
+}
 
-  // ── Step 1: base-year environment from yfinance facts ────
-  const baseEnv: Record<string, number> = {};
-  const markFact = (m: string, v: number) => {
-    baseEnv[m] = v;
-    provenance[m] = "fact";
+function valueForYear(result: ForecastResult, statement: "incomeStatement" | "balanceSheet" | "cashFlow", key: string): number | undefined {
+  const years = result[statement];
+  return years[years.length - 1]?.values?.[key];
+}
+
+export function executeForecast(input: ForecastEngineInput): ForecastEngineOutput {
+  const architecture = input.architecture ?? selectAccountingArchitecture({ understanding: input.understanding, engine: input.engine, factPack: input.factPack });
+  let validation = input.validation ?? validateModelSpec(input.model, input.factPack, {
+    requireEvidence: input.validationOptions?.requireEvidence ?? false,
+    enforceCanonicalBases: input.validationOptions?.enforceCanonicalBases ?? false,
+    allowUnresolvedBaseValues: input.validationOptions?.allowUnresolvedBaseValues ?? true,
+    allowComputedDriverPaths: true,
+  });
+  if (input.model.validation?.valid === false && validation.valid) {
+    const markerIssues = input.model.validation.issues.map((message) => `MODEL_SPEC_INVALID: ${message}`);
+    const marker = { code: "SCHEMA_INVALID" as const, path: "$.validation", message: markerIssues.join("; "), severity: "error" as const, blocking: true };
+    validation = { ...validation, valid: false, ok: false, blocked: true, issues: [...validation.issues, marker], errors: [...validation.errors, marker], modelValidation: { valid: false, issues: markerIssues } } as ModelSpecValidationResult;
+  }
+  if (!validation.valid) return blockedResult(validation, architecture);
+  const compiled = compileForecast({ model: input.model, factPack: input.factPack, architecture });
+  const identity = enforceStatementIdentities({
+    incomeStatement: compiled.years.map((year) => year.incomeStatement),
+    balanceSheet: compiled.years.map((year) => year.balanceSheet),
+    cashFlow: compiled.years.map((year) => year.cashFlow),
+  }, { architecture, baseValues: compiled.baseValues });
+  const coverageChecks: IdentityCheck[] = [];
+  const allValues = compiled.years.flatMap((year) => [year.incomeStatement.values, year.balanceSheet.values, year.cashFlow.values]);
+  const lineAliases: Record<string, string[]> = { netInterestIncome: ["netInterestIncome", "netInterest", "nii"], interestIncome: ["interestIncome", "interestIncomeTotal"], interestExpense: ["interestExpense", "interestExpenseTotal"], feeRevenue: ["feeRevenue", "feeBasedRevenue", "revenue"], rentalIncome: ["rentalIncome", "rental"], properties: ["properties", "propertyPlantAndEquipment", "ppe"], premiums: ["premiums", "premiumRevenue"], claims: ["claims", "claimsExpense"] };
+  const hasValue = (key: string): boolean => {
+    const aliases = lineAliases[key] ?? [key];
+    return allValues.some((values) => aliases.some((alias) => typeof values[alias] === "number" && Number.isFinite(values[alias])));
   };
-  for (const f of factPack.incomeStatement.facts) {
-    if (f.value !== undefined && baseEnv[f.metric] === undefined) markFact(f.metric, f.value);
+  const statementCheck = (prefix: string): boolean => identity.identityChecks.some((check) => check.code?.startsWith(prefix));
+  if (!statementCheck("IS_") && architecture.primaryStatement !== "balanceSheet") coverageChecks.push({ check: "Income statement identity coverage", pass: false, critical: true, code: "IS_IDENTITIES_UNAVAILABLE", detail: "No complete income identity was executable" });
+  if (!statementCheck("BS_")) coverageChecks.push({ check: "Balance sheet identity coverage", pass: false, critical: true, code: "BS_IDENTITIES_UNAVAILABLE", detail: "No complete balance-sheet identity was executable" });
+  if (architecture.supportsCashFlow && !statementCheck("CF_")) coverageChecks.push({ check: "Cash flow identity coverage", pass: false, critical: true, code: "CF_IDENTITIES_UNAVAILABLE", detail: "No complete cash-flow identity was executable" });
+  for (const line of architecture.requiredLines) if (!hasValue(line)) coverageChecks.push({ check: `Required architecture line ${line}`, pass: false, critical: true, code: "MISSING_REQUIRED_ARCHITECTURE_LINE", detail: `No canonical or forecast value was available for ${line}` });
+  identity.identityChecks.push(...coverageChecks);
+  const blockers = [...compiled.blockers];
+  for (const check of identity.identityChecks) if (check.critical && !check.pass) blockers.push(`${check.code ?? "IDENTITY"}: ${check.detail ?? check.check}`);
+  const forecast: ForecastResult = {
+    incomeStatement: compiled.years.map((year) => year.incomeStatement),
+    balanceSheet: compiled.years.map((year) => year.balanceSheet),
+    cashFlow: compiled.years.map((year) => year.cashFlow),
+    identityChecks: identity.identityChecks,
+    status: blockers.length === 0 && identity.identityChecks.length > 0 ? "ready" : "blocked",
+    publicationStatus: blockers.length === 0 && identity.identityChecks.length > 0 ? "ready" : "blocked",
+    blockers: [...new Set(blockers)],
+    publicationBlocked: blockers.length > 0 || identity.identityChecks.length === 0,
+    validation: { valid: true, issues: [] },
+    modelValidation: { valid: true, issues: validation.issues.map((entry) => `${entry.code}: ${entry.message}`) },
+    architecture: architecture.id,
+  };
+  const formulasEvaluated: Record<string, number | null> = {};
+  for (const formula of input.model.formulas) {
+    const result = compiled.formulaValues[compiled.formulaValues.length - 1]?.[formula.id];
+    formulasEvaluated[formula.id] = result === undefined ? null : result;
   }
-  for (const f of factPack.balanceSheet.facts) {
-    if (f.value !== undefined && baseEnv[f.metric] === undefined) markFact(f.metric, f.value);
-  }
-  for (const f of factPack.cashFlow.facts) {
-    if (f.value !== undefined && baseEnv[f.metric] === undefined) markFact(f.metric, f.value);
-  }
-  const priceFact = factPack.market.facts.find((f: Fact) => f.metric === "currentPrice");
-  if (priceFact?.value !== undefined) markFact("currentPrice", priceFact.value);
-  const sharesFact =
-    factPack.shares.facts.find((f: Fact) => f.metric === "sharesOutstanding" && f.value !== undefined) ||
-    factPack.market.facts.find((f: Fact) => f.metric === "sharesOutstanding" && f.value !== undefined);
-  if (sharesFact?.value !== undefined) markFact("sharesOutstanding", sharesFact.value);
-
-  // ── Step 2: AI assumptions lookup ────────────────────────
-  const assumptionByVar = new Map<string, (typeof model.assumptions)[number]>();
-  for (const a of model.assumptions) assumptionByVar.set(a.variable, a);
-
-  // ── Step 3: base fiscal year ─────────────────────────────
-  const firstPeriod = factPack.incomeStatement.facts.find((f) => f.period)?.period || `FY${new Date().getFullYear()}`;
-  const baseFiscalYear = extractFiscalYear(firstPeriod);
-
-  // ── Step 4: forecast years ───────────────────────────────
-  for (let yr = 1; yr <= model.horizonYears; yr++) {
-    const periodStr = `FY${baseFiscalYear + yr}`;
-    const env: Record<string, number> = { ...baseEnv };
-
-    // 4a. Apply AI driverPaths (decimal growth rates per input variable).
-    //     Code performs the compounding — the AI only chose the rates.
-    for (const varDef of model.variables) {
-      if (varDef.kind !== "input") continue;
-      const path = model.driverPaths[varDef.name];
-      const baseVal = varDef.baseValue ?? baseEnv[varDef.name];
-      if (path && path.length > 0 && baseVal !== undefined) {
-        const g = path[Math.min(yr - 1, path.length - 1)];
-        env[varDef.name] = baseVal * (1 + (isFinite(g) ? g : 0));
-        env[`${varDef.name}_growth`] = isFinite(g) ? g : 0;
-        provenance[varDef.name] = "forecast";
-        provenance[`${varDef.name}_growth`] = "assumption";
-      } else if (assumptionByVar.has(varDef.name) && baseVal !== undefined) {
-        // Assumption value acts as a growth rate when unit is %, else a level.
-        const a = assumptionByVar.get(varDef.name)!;
-        if (a.unit === "%" || a.unit === "percent") {
-          env[varDef.name] = baseVal * (1 + a.value);
-          env[`${varDef.name}_growth`] = a.value;
-        } else {
-          env[varDef.name] = a.value;
-        }
-        provenance[varDef.name] = "forecast";
-      }
-    }
-
-    // 4b. Evaluate AI formulas each year (deterministic arithmetic).
-    //     Repeat twice so formulas can consume other formulas' outputs.
-    const yearFormulaResults: Record<string, number> = {};
-    for (let pass = 0; pass < 2; pass++) {
-      for (const f of model.formulas) {
-        const envWithFormulaOuts = { ...env, ...yearFormulaResults };
-        const hasAllVars = f.variables.every((v) => envWithFormulaOuts[v.toLowerCase()] !== undefined || envWithFormulaOuts[v] !== undefined);
-        if (!hasAllVars) {
-          if (pass === 1) formulasEvaluated[f.id] = null;
-          continue;
-        }
-        const ok = evalExpression(f.expression, envWithFormulaOuts);
-        if (ok.ok) {
-          formulasEvaluated[f.id] = ok.value;
-          yearFormulaResults[f.output] = ok.value;
-          env[f.output] = ok.value;
-          if (provenance[f.output] !== "fact") provenance[f.output] = "forecast";
-        } else {
-          if (pass === 1) {
-            formulasEvaluated[f.id] = null;
-            log.push(`${periodStr}: formula ${f.id} failed: ${ok.error}`);
-          }
-        }
-      }
-    }
-
-    // 4c. Build the statement year from evaluated values (never zero-fill).
-    const v: Record<string, number | undefined> = {
-      revenue: yearFormulaResults["revenue"] ?? env["revenue"],
-      grossProfit: yearFormulaResults["grossProfit"] ?? env["grossProfit"],
-      ebit: yearFormulaResults["ebit"] ?? env["ebit"] ?? env["operatingIncome"],
-      pbt: yearFormulaResults["pbt"] ?? env["pbt"] ?? env["pretaxIncome"],
-      netIncome: yearFormulaResults["netIncome"] ?? env["netIncome"],
-      totalAssets: env["totalAssets"],
-      totalLiabilities: env["totalLiabilities"],
-      totalEquity: env["totalEquity"] ?? env["stockholdersEquity"],
-      cash: env["cash"],
-      cfo: yearFormulaResults["cfo"] ?? env["operatingCashFlow"] ?? env["totalCashFromOperatingActivities"],
-      cfi: env["capitalExpenditures"] !== undefined ? -env["capitalExpenditures"] : env["totalCashflowsFromInvestingActivities"],
-      cff: env["financingCashFlow"] ?? env["totalCashFromFinancingActivities"],
-      cashOpen: env["cash"],
-      cashClose: yearFormulaResults["cashClose"],
-    };
-    // Effective tax from history when the AI did not model it explicitly.
-    if (v.pbt !== undefined && v.netIncome !== undefined && v.pbt !== 0) {
-      v.tax = v.pbt - v.netIncome;
-      provenance["tax"] = "derived";
-    }
-
-    years.push({
-      period: periodStr,
-      values: v,
-      provenance: { ...provenance },
-    });
-  }
-
-  // ── Step 5: enforce statement identities with labeled plugs ──
-  const identityResult = enforceStatementIdentities(years, { log });
-
   return {
-    forecast: {
-      incomeStatement: identityResult.years,
-      balanceSheet: identityResult.years,
-      cashFlow: identityResult.years,
-      identityChecks: identityResult.identityChecks,
-    },
+    forecast,
     formulasEvaluated,
-    identityChecks: identityResult.identityChecks,
-    provenance,
-    plugs: identityResult.plugs.map((p) => `${p.variable}=${p.computedValue} (${p.kind})`),
+    identityChecks: identity.identityChecks,
+    provenance: compiled.provenance,
+    plugs: [],
+    validation,
+    architecture,
+    status: forecast.status === "ready" ? "ready" : "blocked",
+    blockers: forecast.blockers ?? [],
+    publicationBlocked: forecast.publicationBlocked === true,
   };
 }
 
-/** Extract fiscal year number from a period string like "FY2024" or "2024-03-31". */
-function extractFiscalYear(period: string): number {
-  const fy = period.match(/FY\s*(\d{4})/i);
-  if (fy) return parseInt(fy[1], 10);
-  const date = period.match(/(\d{4})/);
-  if (date) return parseInt(date[1], 10);
-  return new Date().getFullYear();
-}
-
-/**
- * Render a compact forecast context package for a downstream agent
- * (Principle 33 — each agent receives only what it needs).
- */
-export function renderForecastContext(
-  forecast: ForecastResult,
-  agentKind: "valuation" | "scenarios" | "risks" | "thesis"
-): string {
-  const lines: string[] = [
-    `FORECAST CONTEXT — ${agentKind.toUpperCase()}`,
-    `Horizon: ${forecast.incomeStatement.length} years`,
-    "",
-  ];
-  for (const y of forecast.incomeStatement) {
-    const v = y.values;
-    const num = (x: number | undefined) => (x !== undefined ? String(Math.round(x * 100) / 100) : "N/A");
-    lines.push(
-      `  ${y.period}: Revenue ${num(v.revenue)} | EBIT ${num(v.ebit)} | NI ${num(v.netIncome)} | Equity ${num(v.totalEquity)} | CFO ${num(v.cfo)}`
-    );
+export function renderForecastContext(forecast: ForecastResult, agentKind: "valuation" | "scenarios" | "risks" | "thesis"): string {
+  const lines: string[] = [`FORECAST CONTEXT — ${agentKind.toUpperCase()}`, `Horizon: ${forecast.incomeStatement.length} years`, `Status: ${forecast.status ?? "unknown"}`];
+  if (forecast.blockers?.length) lines.push(`Blockers: ${forecast.blockers.join(" | ")}`);
+  lines.push("");
+  for (const year of forecast.incomeStatement) {
+    const values = year.values;
+    const format = (value: number | undefined): string => value === undefined ? "N/A" : String(Math.round(value * 100) / 100);
+    lines.push(`  ${year.period}: Revenue ${format(values.revenue)} | EBIT ${format(values.ebit)} | NI ${format(values.netIncome)} | Equity ${format(valueForYear(forecast, "balanceSheet", "totalEquity"))} | CFO ${format(valueForYear(forecast, "cashFlow", "cfo"))}`);
   }
-  const failed = forecast.identityChecks.filter((c) => !c.pass);
+  const failed = forecast.identityChecks.filter((check) => !check.pass);
   if (failed.length > 0) {
-    lines.push("", "IDENTITY REPAIRS (labeled plugs applied):");
-    for (const c of failed) lines.push(`  - ${c.check}: ${c.detail || "repaired"}`);
+    lines.push("", "IDENTITY BLOCKERS:");
+    for (const check of failed) lines.push(`  - ${check.check}: ${check.detail ?? "failed"}`);
   }
   return lines.join("\n");
 }

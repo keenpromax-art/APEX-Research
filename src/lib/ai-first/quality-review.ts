@@ -30,6 +30,9 @@ import type {
 } from "./types";
 import type { ProvenanceTier } from "./types";
 import { QA_GATES_ENABLED } from "../qa-gates";
+import { runCanonicalQa } from "../canonical-qa/decision";
+import { runBoundedRegeneration } from "../canonical-qa/regeneration";
+import type { CanonicalQaResult } from "../canonical-qa/types";
 
 /** Reviewer severity levels */
 export type ReviewSeverity = "blocker" | "major" | "minor";
@@ -1052,4 +1055,26 @@ export function adjudicateRegeneration(
   return { regenerate, keep, errors };
 }
 
-export default { runQualityReview, adjudicateRegeneration };
+export async function runCanonicalQualityGate(
+  report: ResearchReport,
+  pack: FactPack,
+  context: Record<string, unknown> = {},
+  options: { generatedAt?: string; maxAttempts?: number; transport?: ((opts: { system: string; user: string; temperature?: number; maxTokens?: number; jsonMode?: boolean }) => Promise<string>) | null; reproducibilityHash?: string | null } = {}
+): Promise<{ qa: CanonicalQaResult; report: ResearchReport; regeneratedStages: string[] }> {
+  const baseQa = runCanonicalQa(report, pack, context, { ...(options.generatedAt ? { generatedAt: options.generatedAt } : {}), ...(options.reproducibilityHash !== undefined ? { reproducibilityHash: options.reproducibilityHash } : {}) });
+  if (baseQa.decision === "READY" || (options.maxAttempts ?? 2) <= 0) {
+    return { qa: baseQa, report, regeneratedStages: [] };
+  }
+  const outcome = await runBoundedRegeneration(report, pack, context, { ...(options.generatedAt ? { generatedAt: options.generatedAt } : {}), maxAttempts: options.maxAttempts ?? 2, ...(options.transport ? { transport: options.transport } : {}) });
+  const mergedAttempts = [...baseQa.attempts, ...outcome.attempts];
+  const finalQa = runCanonicalQa(outcome.report, pack, context, { ...(options.generatedAt ? { generatedAt: options.generatedAt } : {}), attempts: mergedAttempts, ...(options.reproducibilityHash !== undefined ? { reproducibilityHash: options.reproducibilityHash } : {}) });
+  const nextReport = { ...(outcome.report as unknown as ResearchReport), canonicalQa: finalQa, qaDecision: finalQa.decision, regenerationAttempts: mergedAttempts } as ResearchReport;
+  return { qa: finalQa, report: nextReport, regeneratedStages: outcome.regeneratedStages };
+}
+export function canonicalQaContextForReport(report: ResearchReport, pack: FactPack): Record<string, unknown> {
+  const currentPrice = pack.market.facts.find((f) => f.metric === "currentPrice")?.value;
+  const retrievalTimestamp = pack.retrievalTimestamp;
+  const now = report.generationTimestamp;
+  return { ...(currentPrice !== undefined ? { currentPrice } : {}), retrievalTimestamp, now, generatedAt: now };
+}
+export default { runQualityReview, adjudicateRegeneration, runCanonicalQualityGate, canonicalQaContextForReport };

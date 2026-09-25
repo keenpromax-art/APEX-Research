@@ -2,15 +2,19 @@ import assert from "node:assert/strict";
 import {
   InMemoryResearchLedgerRepository,
   RunIdCollisionError,
+  adaptGuidanceReconciliationToRevisions,
+  buildGuidanceRevisionHistory,
   classifyThesisBreak,
   createResearchEvent,
   createResearchRunEnvelope,
   createUnknownRegistry,
   diffThesisFields,
+  guidanceTrackStatus,
   issueCanonicalForecast,
   issueForecast,
   rankAnalogueEvents,
   registerUnknown,
+  scoreAdaptedGuidance,
   scoreForecastActual,
   scoreForecastActuals,
   sha256,
@@ -23,6 +27,7 @@ import {
   type ResearchRunInput,
   type ThesisSnapshot,
 } from "../src/lib/research-ledger";
+import { buildGuidanceReconciliation } from "../src/lib/guidance-reconciliation";
 import type { CanonicalForecast } from "../src/lib/canonical-forecast";
 
 let passed = 0;
@@ -287,6 +292,43 @@ check("same-company analogue ranking refuses insufficient samples", () => {
   assert.equal(ranked.sameCompanySampleCount, 3);
   assert.equal(ranked.rankings[0]?.event.eventId, "EVT-1");
   assert.equal(JSON.stringify(ranked), JSON.stringify(reversed));
+});
+
+check("canonical guidance reconciliation persists through the ledger revision adapters", () => {
+  const reconciliation = buildGuidanceReconciliation({
+    subjectId: "IN:RELIANCE",
+    generatedAt: "2026-09-25T12:00:00.000Z",
+    points: [
+      { track: "historical", metric: "revenue", period: "FY2026", value: 900, unit: "money", issuedAt: "2026-01-01", source: "factpack", evidenceIds: ["EV-H"] },
+      { track: "management", metric: "revenue", period: "FY2027", value: 1_000, unit: "money", issuedAt: "2026-01-15", source: "FY2027 guidance", evidenceIds: ["EV-M1"] },
+      { track: "management", metric: "revenue", period: "FY2027", value: 1_120, unit: "money", issuedAt: "2026-04-15", source: "FY2027 guidance revision", supersedesId: "GP-1", evidenceIds: ["EV-M2"] },
+      { track: "consensus", metric: "revenue", period: "FY2027", low: 1_050, high: 1_180, unit: "money", issuedAt: "2026-06-01", source: "Street" },
+    ],
+    actuals: [{ metric: "revenue", period: "FY2026", actual: 905, source: "factpack" }],
+  });
+  assert.equal(reconciliation.status, "insufficient", "three of four tracks is not a full reconciliation");
+  const revisions = adaptGuidanceReconciliationToRevisions({ reconciliation, runId: "RUN-LEDGER" });
+  assert.equal(revisions.length, 4);
+  assert.equal(revisions.every((revision) => revision.companyId === "IN:RELIANCE"), true);
+  assert.equal(revisions.every((revision) => revision.contentHash.length === 64), true);
+  assert.equal(revisions.every((revision) => Object.isFrozen(revision)), true);
+  const tracks = guidanceTrackStatus(revisions);
+  assert.equal(tracks.historical, "ready");
+  assert.equal(tracks.management, "ready");
+  assert.equal(tracks.consensus, "ready");
+  assert.equal(tracks.apex, "unavailable");
+  const history = buildGuidanceRevisionHistory(revisions);
+  assert.equal(history.length, 4);
+  assert.deepEqual(history.filter((link) => link.track === "management").map((link) => link.kind), ["initial", "supersession"]);
+  assert.deepEqual(history.filter((link) => link.track !== "management").map((link) => link.kind), ["initial", "initial"]);
+  const scores = scoreAdaptedGuidance(reconciliation);
+  assert.equal(scores.length, 1);
+  assert.equal(scores[0]?.track, "historical");
+  assert.equal(scores[0]?.status, "missed");
+  assert.equal(scores[0]?.variancePct, 0.005556);
+  assert.equal(scores.every((score) => score.priorGuidanceId !== null), true);
+  const unverified = scoreAdaptedGuidance({ scores: [] });
+  assert.equal(unverified.length, 0);
 });
 
 console.log(`RESULT: ${passed} passed, ${failed} failed`);

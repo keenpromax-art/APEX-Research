@@ -7,6 +7,7 @@ import type { ResearchEvent, ResearchRunEnvelope } from "@/lib/research-ledger/t
 import {
   RESEARCH_RUN_MANIFEST_VERSION,
   assertCanonicalResearchRunId,
+  deriveServerProvenance,
   normalizeResearchRunListQuery,
   researchRunManifestFromEnvelope,
   serializeResearchRun,
@@ -14,6 +15,7 @@ import {
   type ResearchRunListQuery,
   type ResearchRunListQueryInput,
   type ResearchRunPayloadV1,
+  type ResearchRunPayloadV2,
 } from "./manifest";
 
 export interface ResearchRunAppendResult {
@@ -241,4 +243,29 @@ export function assertRunPayloadVersion(run: ResearchRunEnvelope<ResearchRunPayl
     throw new TypeError("Research run payload version is unsupported");
   }
   serializeResearchRun(run);
+}
+
+export function serverProvenanceForV2Payload(payload: ResearchRunPayloadV2): ResearchRunPayloadV2["provenance"] {
+  return deriveServerProvenance({
+    summaryStatement: payload.summary.thesis.statement,
+    forecastRows: payload.summary.forecast.rows,
+    reportArtifact: payload.reportArtifact,
+    canonicalPackageHash: payload.provenance.canonicalPackageHash,
+    packageHash: payload.provenance.packageHash,
+    pdfHash: payload.provenance.pdfHash,
+    qaDecision: payload.provenance.qaDecision,
+  });
+}
+
+export function assertV2ServerProvenance(payload: ResearchRunPayloadV2): void {
+  const derived = serverProvenanceForV2Payload(payload);
+  if (
+    derived.accessibilityHashes.summary !== payload.provenance.accessibilityHashes.summary ||
+    derived.accessibilityHashes.forecastRows !== payload.provenance.accessibilityHashes.forecastRows ||
+    derived.artifactStatus !== payload.provenance.artifactStatus ||
+    derived.packageStatus !== payload.provenance.packageStatus ||
+    derived.pdfStatus !== payload.provenance.pdfStatus
+  ) {
+    throw new TypeError("V2 provenance must be server-derived and must not trust client statuses");
+  }
 }

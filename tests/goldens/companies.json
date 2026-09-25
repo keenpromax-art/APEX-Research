@@ -1,0 +1,89 @@
+{
+  "version": "structural-goldens-v1",
+  "companies": [
+    {
+      "ticker": "SBIN.NS",
+      "label": "Depository bank",
+      "economicEvidence": "Commercial bank taking deposits and making advances. Net interest income from interest income minus interest expense. Net interest margin and credit cost drive returns.",
+      "expectedArchitecture": "depository",
+      "abstractionPattern": "net interest income",
+      "minimumKpis": ["netInterestIncome", "deposits", "advances"],
+      "forbiddenConcepts": ["same-store sales", "foot traffic", "advertiser bidding", "custom silicon"],
+      "minimumForecastOutputs": ["netInterestIncome"],
+      "valuationConstraints": {
+        "applicable": ["Residual Income", "P/B", "P/E"],
+        "notApplicable": ["FCFF DCF", "EV/EBITDA"]
+      }
+    },
+    {
+      "ticker": "INFY.NS",
+      "label": "Corporate IT services",
+      "economicEvidence": "Information technology services company selling consulting volume times price. Revenue from billable volume and realization with gross profit and operating income margins.",
+      "expectedArchitecture": "corporate",
+      "abstractionPattern": "volume",
+      "minimumKpis": ["revenue", "grossProfit", "ebit"],
+      "forbiddenConcepts": ["deposits", "net interest margin", "combined ratio", "occupancy"],
+      "minimumForecastOutputs": ["revenue", "netIncome"],
+      "valuationConstraints": {
+        "applicable": ["FCFF DCF", "FCFE", "P/E", "EV/EBITDA"],
+        "notApplicable": []
+      }
+    },
+    {
+      "ticker": "LICI.NS",
+      "label": "Insurance underwriter",
+      "economicEvidence": "Life insurance company underwriting insurance policies. Premiums collected and claims paid with underwriting result and loss ratio plus combined ratio.",
+      "expectedArchitecture": "insurance",
+      "abstractionPattern": "underwriting",
+      "minimumKpis": ["premiums", "claims", "underwritingIncome"],
+      "forbiddenConcepts": ["deposits", "same-store sales", "advertiser bidding", "occupancy"],
+      "minimumForecastOutputs": ["netIncome"],
+      "valuationConstraints": {
+        "applicable": ["Residual Income", "P/E", "P/B"],
+        "notApplicable": ["FCFF DCF", "EV/EBITDA"]
+      }
+    },
+    {
+      "ticker": "EMBASSY.NS",
+      "label": "Office REIT",
+      "economicEvidence": "Real estate investment trust earning rental income from office properties. Occupancy and lease expiry drive net operating income and funds from operations.",
+      "expectedArchitecture": "reit",
+      "abstractionPattern": "rental",
+      "minimumKpis": ["rentalIncome", "occupancy", "noi"],
+      "forbiddenConcepts": ["deposits", "net interest margin", "combined ratio", "advertiser bidding"],
+      "minimumForecastOutputs": ["revenue", "netIncome"],
+      "valuationConstraints": {
+        "applicable": ["FCFF DCF", "P/E", "NAV", "EV/EBITDA"],
+        "notApplicable": []
+      }
+    },
+    {
+      "ticker": "HDFCAMC.NS",
+      "label": "Fee-based asset manager",
+      "economicEvidence": "Asset management company earning management fees on assets under management. Fee rate times average AUM drives advisory fee revenue with operating margin.",
+      "expectedArchitecture": "fee_based",
+      "abstractionPattern": "fee",
+      "minimumKpis": ["aum", "feeRevenue", "operatingIncome"],
+      "forbiddenConcepts": ["deposits", "combined ratio", "occupancy", "same-store sales"],
+      "minimumForecastOutputs": ["revenue", "netIncome"],
+      "valuationConstraints": {
+        "applicable": ["FCFF DCF", "P/E", "EV/EBITDA"],
+        "notApplicable": []
+      }
+    },
+    {
+      "ticker": "RELIANCE.NS",
+      "label": "Diversified conglomerate",
+      "economicEvidence": "Diversified conglomerate with a portfolio of businesses across energy retail and digital segments. Several distinct multi-segment operations require segmented revenue.",
+      "expectedArchitecture": "conglomerate",
+      "abstractionPattern": "segment",
+      "minimumKpis": ["revenue", "segmentRevenue", "netIncome"],
+      "forbiddenConcepts": ["deposits", "combined ratio", "advertiser bidding"],
+      "minimumForecastOutputs": ["revenue", "netIncome"],
+      "valuationConstraints": {
+        "applicable": ["SOTP", "FCFF DCF", "P/E"],
+        "notApplicable": []
+      }
+    }
+  ]
+}

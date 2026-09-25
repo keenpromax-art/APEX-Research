@@ -1,6 +1,8 @@
 import type { AssumptionsLedger, DCFResult } from "@/types/report";
 import type { CanonicalForecast } from "@/lib/canonical-forecast";
 import type { ResearchReport } from "@/lib/ai-first/types";
+import type { CanonicalResearchPackage } from "@/lib/research-package/types";
+import { verifyCanonicalResearchPackage } from "@/lib/research-package/hash";
 
 export interface ForecastCompatibilityInput {
   profileTicker?: string | null;
@@ -8,6 +10,7 @@ export interface ForecastCompatibilityInput {
   assumptionsLedger?: AssumptionsLedger | null;
   canonicalValuation?: DCFResult | null;
   researchReport?: ResearchReport | null;
+  canonicalPackage?: CanonicalResearchPackage | null;
   fairValueTolerancePct?: number;
   upsideTolerancePct?: number;
 }
@@ -21,6 +24,7 @@ export interface ForecastCompatibilityCheck {
 export interface ForecastCompatibilityResult {
   compatible: boolean;
   qualitativeCompatible: boolean;
+  retired?: boolean;
   checks: ForecastCompatibilityCheck[];
   issues: string[];
 }
@@ -39,6 +43,10 @@ export function checkForecastCompatibility(input: ForecastCompatibilityInput): F
   const upsideTolerancePct = input.upsideTolerancePct ?? 0.01;
   const checks: ForecastCompatibilityCheck[] = [];
   const add = (id: string, passed: boolean, detail: string) => checks.push({ id, passed, detail });
+  if (input.canonicalPackage && verifyCanonicalResearchPackage(input.canonicalPackage, { requireImmutable: false })) {
+    add("canonical-authority", true, "Canonical package supersedes legacy forecast-number parity.");
+    return { compatible: true, qualitativeCompatible: true, retired: true, checks, issues: [] };
+  }
   const report = input.researchReport;
 
   if (!report) {

@@ -1,6 +1,6 @@
 import { deepFreeze } from "@/lib/research-ledger/immutable";
 import { assertResearchRunEnvelope, createResearchRunEnvelope } from "@/lib/research-ledger/run-envelope";
-import { compareStableStrings, stableStringify } from "@/lib/research-ledger/stable";
+import { compareStableStrings, stableHash, stableStringify } from "@/lib/research-ledger/stable";
 import { RESEARCH_RUN_VERSION, type ResearchRunEnvelope } from "@/lib/research-ledger/types";
 import { validateReportArtifactV1 } from "@/lib/report-artifact";
 import type { ReportArtifactV1 } from "@/lib/report-artifact";
@@ -814,4 +814,181 @@ export function assertCanonicalResearchRunId(value: unknown): asserts value is s
   if (typeof value !== "string" || !/^RUN-[A-F0-9]{64}$/.test(value)) {
     throw new ResearchRunQueryValidationError("runId", "runId must be a canonical ResearchRunEnvelope.runId");
   }
+}
+export const RESEARCH_RUN_MANIFEST_V2 = "research-run-manifest-v2" as const;
+export type CanonicalQaDecisionV2 = "BLOCK" | "REVIEW" | "QUALIFIED" | "READY";
+export type DurableArtifactStatus = "ready" | "missing" | "invalid" | "blocked";
+export interface ResearchRunAccessibilityHashesV2 {
+  readonly summary: string;
+  readonly forecastRows: string;
+}
+export interface ResearchRunDurableProvenanceV2 {
+  readonly canonicalPackageHash: string | null;
+  readonly artifactHash: string | null;
+  readonly packageHash: string | null;
+  readonly pdfHash: string | null;
+  readonly accessibilityHashes: ResearchRunAccessibilityHashesV2;
+  readonly qaDecision: CanonicalQaDecisionV2 | null;
+  readonly artifactStatus: DurableArtifactStatus;
+  readonly packageStatus: DurableArtifactStatus;
+  readonly pdfStatus: DurableArtifactStatus;
+}
+export interface ResearchRunManifestV2 extends Omit<ResearchRunManifestV1, "version"> {
+  readonly version: typeof RESEARCH_RUN_MANIFEST_V2;
+  readonly provenance: ResearchRunDurableProvenanceV2;
+}
+export interface ResearchRunPayloadV2 extends Omit<ResearchRunPayloadV1, "manifestVersion"> {
+  readonly manifestVersion: typeof RESEARCH_RUN_MANIFEST_V2;
+  readonly provenance: ResearchRunDurableProvenanceV2;
+}
+const v2QaDecisions = new Set<CanonicalQaDecisionV2>(["BLOCK", "REVIEW", "QUALIFIED", "READY"]);
+const v2Statuses = new Set<DurableArtifactStatus>(["ready", "missing", "invalid", "blocked"]);
+const v2ManifestKeys = new Set([...manifestKeys, "provenance"]);
+const v2PayloadKeys = new Set([...payloadKeys, "provenance"]);
+const v2ProvenanceKeys = new Set(["canonicalPackageHash", "artifactHash", "packageHash", "pdfHash", "accessibilityHashes", "qaDecision", "artifactStatus", "packageStatus", "pdfStatus"]);
+const v2AccessibilityKeys = new Set(["summary", "forecastRows"]);
+function readOptionalHash(value: unknown, path: string, issues: ResearchRunValidationIssue[]): string | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== "string") {
+    addIssue(issues, path, "HASH", "expected a hex hash or null");
+    return null;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (!/^[a-f0-9]{64}$/.test(normalized) && !/^ra1_[a-f0-9]{8}$/.test(normalized)) {
+    addIssue(issues, path, "HASH", "expected a SHA-256 hash, report-artifact hash, or null");
+    return null;
+  }
+  return normalized;
+}
+function readOptionalPdfHash(value: unknown, path: string, issues: ResearchRunValidationIssue[]): string | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== "string") {
+    addIssue(issues, path, "HASH", "expected a hash or null");
+    return null;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (!/^[a-f0-9]{32,64}$/.test(normalized) && !/^ra1_[a-f0-9]{8}$/.test(normalized)) {
+    addIssue(issues, path, "HASH", "expected a content hash or null");
+    return null;
+  }
+  return normalized;
+}
+function readV2Status(value: unknown, path: string, issues: ResearchRunValidationIssue[]): DurableArtifactStatus {
+  if (typeof value !== "string" || !v2Statuses.has(value as DurableArtifactStatus)) {
+    addIssue(issues, path, "STATUS", "unsupported durable status");
+    return "invalid";
+  }
+  return value as DurableArtifactStatus;
+}
+function readV2QaDecision(value: unknown, path: string, issues: ResearchRunValidationIssue[]): CanonicalQaDecisionV2 | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== "string" || !v2QaDecisions.has(value as CanonicalQaDecisionV2)) {
+    addIssue(issues, path, "QA_DECISION", "unsupported QA decision");
+    return null;
+  }
+  return value as CanonicalQaDecisionV2;
+}
+function readV2Accessibility(value: unknown, issues: ResearchRunValidationIssue[]): ResearchRunAccessibilityHashesV2 {
+  const record = inspectRecord(value, "$.provenance.accessibilityHashes", v2AccessibilityKeys, issues);
+  const summary = typeof record.summary === "string" && /^[a-f0-9]{64}$/.test(record.summary.trim().toLowerCase()) ? record.summary.trim().toLowerCase() : (() => { addIssue(issues, "$.provenance.accessibilityHashes.summary", "HASH", "expected a SHA-256 hash"); return "0".repeat(64); })();
+  const forecastRows = typeof record.forecastRows === "string" && /^[a-f0-9]{64}$/.test(record.forecastRows.trim().toLowerCase()) ? record.forecastRows.trim().toLowerCase() : (() => { addIssue(issues, "$.provenance.accessibilityHashes.forecastRows", "HASH", "expected a SHA-256 hash"); return "0".repeat(64); })();
+  return { summary, forecastRows };
+}
+function readV2Provenance(value: unknown, issues: ResearchRunValidationIssue[]): ResearchRunDurableProvenanceV2 {
+  const record = inspectRecord(value, "$.provenance", v2ProvenanceKeys, issues);
+  return {
+    canonicalPackageHash: readOptionalHash(record.canonicalPackageHash, "$.provenance.canonicalPackageHash", issues),
+    artifactHash: readOptionalHash(record.artifactHash, "$.provenance.artifactHash", issues),
+    packageHash: readOptionalHash(record.packageHash, "$.provenance.packageHash", issues),
+    pdfHash: readOptionalPdfHash(record.pdfHash, "$.provenance.pdfHash", issues),
+    accessibilityHashes: readV2Accessibility(record.accessibilityHashes, issues),
+    qaDecision: readV2QaDecision(record.qaDecision, "$.provenance.qaDecision", issues),
+    artifactStatus: readV2Status(record.artifactStatus, "$.provenance.artifactStatus", issues),
+    packageStatus: readV2Status(record.packageStatus, "$.provenance.packageStatus", issues),
+    pdfStatus: readV2Status(record.pdfStatus, "$.provenance.pdfStatus", issues),
+  };
+}
+export function deriveServerProvenance(input: {
+  summaryStatement?: unknown;
+  forecastRows?: unknown;
+  reportArtifact?: unknown;
+  canonicalPackageHash?: unknown;
+  packageHash?: unknown;
+  pdfHash?: unknown;
+  qaDecision?: unknown;
+}): ResearchRunDurableProvenanceV2 {
+  const summaryText = typeof input.summaryStatement === "string" ? input.summaryStatement : "";
+  const rowsValue = input.forecastRows ?? [];
+  const summary = stableHash(summaryText, "research-runs/accessibility-summary/v1");
+  const forecastRows = stableHash(rowsValue, "research-runs/accessibility-rows/v1");
+  const artifactHash = input.reportArtifact !== null && input.reportArtifact !== undefined ? stableHash(input.reportArtifact, "research-runs/artifact/v1") : null;
+  const canonicalPackageHash = typeof input.canonicalPackageHash === "string" && /^[a-f0-9]{64}$/.test(input.canonicalPackageHash.trim().toLowerCase()) ? input.canonicalPackageHash.trim().toLowerCase() : null;
+  const packageHash = typeof input.packageHash === "string" && /^[a-f0-9]{64}$/.test(input.packageHash.trim().toLowerCase()) ? input.packageHash.trim().toLowerCase() : canonicalPackageHash;
+  const pdfHash = typeof input.pdfHash === "string" && /^[a-f0-9]{32,64}$/.test(input.pdfHash.trim().toLowerCase()) ? input.pdfHash.trim().toLowerCase() : null;
+  const qaDecision = typeof input.qaDecision === "string" && v2QaDecisions.has(input.qaDecision as CanonicalQaDecisionV2) ? (input.qaDecision as CanonicalQaDecisionV2) : null;
+  return deepFreeze({
+    canonicalPackageHash,
+    artifactHash,
+    packageHash,
+    pdfHash,
+    accessibilityHashes: { summary, forecastRows },
+    qaDecision,
+    artifactStatus: artifactHash ? "ready" : "missing",
+    packageStatus: packageHash ? "ready" : "missing",
+    pdfStatus: pdfHash ? "ready" : "missing",
+  }) as ResearchRunDurableProvenanceV2;
+}
+export function parseResearchRunManifestV2(value: unknown): ResearchRunManifestV2 {
+  let serialized: string;
+  try {
+    serialized = stableStringify(value) ?? "";
+  } catch {
+    throw new ResearchRunManifestValidationError([{ path: "$", code: "JSON", message: "expected plain JSON data" }]);
+  }
+  assertManifestSize(serialized);
+  const issues: ResearchRunValidationIssue[] = [];
+  const record = inspectRecord(value, "$", v2ManifestKeys, issues);
+  if (record.version !== RESEARCH_RUN_MANIFEST_V2) {
+    addIssue(issues, "$.version", "VERSION", "unsupported research run manifest version");
+  }
+  const v1Record = { ...(record as Record<string, unknown>) } as Record<string, unknown>;
+  delete v1Record.provenance;
+  v1Record.version = RESEARCH_RUN_MANIFEST_VERSION;
+  const v1 = parseResearchRunManifest(v1Record);
+  const provenance = readV2Provenance((record as Record<string, unknown>).provenance, issues);
+  const serverDerived = deriveServerProvenance({ summaryStatement: v1.summary.thesis.statement, forecastRows: v1.summary.forecast.rows, reportArtifact: v1.reportArtifact, canonicalPackageHash: provenance.canonicalPackageHash, packageHash: provenance.packageHash, pdfHash: provenance.pdfHash, qaDecision: provenance.qaDecision });
+  if (provenance.accessibilityHashes.summary !== serverDerived.accessibilityHashes.summary || provenance.accessibilityHashes.forecastRows !== serverDerived.accessibilityHashes.forecastRows) {
+    addIssue(issues, "$.provenance.accessibilityHashes", "SERVER_DERIVED", "accessibility hashes must match server-derived values");
+  }
+  if (provenance.artifactStatus !== serverDerived.artifactStatus || provenance.packageStatus !== serverDerived.packageStatus || provenance.pdfStatus !== serverDerived.pdfStatus) {
+    addIssue(issues, "$.provenance", "SERVER_DERIVED", "artifact statuses are server-derived and must not be client-trusted");
+  }
+  if (issues.length > 0) throw new ResearchRunManifestValidationError(issues);
+  return deepFreeze({ ...v1, version: RESEARCH_RUN_MANIFEST_V2, provenance: serverDerived });
+}
+export function manifestV2Payload(manifest: ResearchRunManifestV2): ResearchRunPayloadV2 {
+  return { manifestVersion: manifest.version, caseId: manifest.caseId, report: manifest.report, status: manifest.status, reportArtifact: manifest.reportArtifact, summary: manifest.summary, evidence: manifest.evidence, sourceRunIds: manifest.sourceRunIds, idempotencyKey: manifest.idempotencyKey, provenance: manifest.provenance };
+}
+export function createResearchRunFromManifestV2(value: unknown): ResearchRunEnvelope<ResearchRunPayloadV2> {
+  const manifest = parseResearchRunManifestV2(value);
+  const run = createResearchRunEnvelope<ResearchRunPayloadV2>({
+    company: { id: manifest.company.id, ticker: manifest.company.ticker, ...(manifest.company.name === null ? {} : { name: manifest.company.name }), ...(manifest.company.exchange === null ? {} : { exchange: manifest.company.exchange }) },
+    occurredAt: manifest.occurredAt,
+    dataCutoff: manifest.dataCutoff,
+    schemaVersion: manifest.schemaVersion,
+    pipelineVersion: manifest.pipelineVersion,
+    modelVersion: manifest.modelVersion,
+    promptVersion: manifest.promptVersion,
+    payload: manifestV2Payload(manifest),
+    metadata: {},
+  });
+  const serialized = stableStringify(run);
+  if (!serialized || byteLength(serialized) > RESEARCH_RUN_MAX_STORED_BYTES) {
+    throw new ResearchRunPayloadTooLargeError(RESEARCH_RUN_MAX_STORED_BYTES);
+  }
+  assertResearchRunEnvelope(run);
+  return run;
+}
+export function isResearchRunManifestV2(value: unknown): value is ResearchRunManifestV2 {
+  return !!value && typeof value === "object" && (value as Record<string, unknown>).version === RESEARCH_RUN_MANIFEST_V2;
 }

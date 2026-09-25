@@ -8,6 +8,8 @@ import type { ResearchEvent } from "./types";
 import { stableHash } from "./stable";
 import { buildExpectationsGap, buildOperatingModelProfile, buildRiskValueMap, buildThesisTree } from "@/lib/research-core";
 import type { ResearchLedgerPayload, ResearchRunEnvelope } from "./types";
+import { appendLongitudinalMemory, buildWhatChangedReport, deriveUpdateMode, snapshotForMemory, verifyLongitudinalMemoryEntry } from "@/lib/canonical-qa/memory";
+import type { LongitudinalMemoryEntry, ResearchUpdateMode, WhatChangedReport } from "@/lib/canonical-qa/types";
 
 export interface ResearchMemorySnapshot {
   version: "research-memory-v1";
@@ -22,6 +24,11 @@ export interface ResearchMemorySnapshot {
   expectationsGap: ReturnType<typeof buildExpectationsGap>;
   riskValueMap: ReturnType<typeof buildRiskValueMap>;
   operatingModel: ReturnType<typeof buildOperatingModelProfile>;
+  updateMode?: ResearchUpdateMode;
+  whatChanged?: WhatChangedReport | null;
+  longitudinalEntry?: LongitudinalMemoryEntry | null;
+  lineage?: string[];
+  serverStatus?: string;
 }
 
 function thesisOf(report: ReportData): ThesisSnapshot {
@@ -111,9 +118,36 @@ function eventHistoryOf(report: ReportData, companyId: string, runId: string): R
   return events;
 }
 
+export function snapshotForLongitudinalMemory(report: ReportData): Record<string, unknown> {
+  return snapshotForMemory({
+    thesis: thesisOf(report),
+    valuation: report.researchReport?.valuation ?? report.dcf ?? null,
+    forecast: report.canonicalForecast ?? report.researchReport?.forecast ?? null,
+    assumptions: report.assumptionsLedger ?? null,
+    risks: report.researchReport?.risks ?? [],
+    catalysts: (report.researchReport as unknown as { catalysts?: unknown })?.catalysts ?? [],
+    guidance: report.researchReport?.guidanceReconciliation ?? null,
+    unknowns: report.researchCase?.unknowns ?? [],
+    evidence: report.evidenceRegistry ?? null,
+  });
+}
+export function deriveMemoryUpdateMode(previous: ResearchMemorySnapshot | null | undefined, deepDive: boolean, eventIds: string[]): ResearchUpdateMode {
+  return deriveUpdateMode({ previousRunId: previous?.run.runId ?? null, thesisBreak: previous ? classifyThesisBreak({ previous: previous.thesis, current: previous.thesis }) : null, eventIds, deepDive });
+}
+export function buildWhatChangedDeltas(previous: ResearchMemorySnapshot | null | undefined, current: ReportData, toRunId: string, mode: ResearchUpdateMode): WhatChangedReport {
+  const previousSnapshot = previous ? snapshotForLongitudinalMemory({ generatedAt: previous.run.occurredAt, profile: { ticker: previous.run.company.ticker } } as unknown as ReportData) : null;
+  void previousSnapshot;
+  const currentSnapshot = snapshotForLongitudinalMemory(current);
+  const priorSnapshot = previous?.longitudinalEntry?.snapshot ?? null;
+  return buildWhatChangedReport({ previousSnapshot: priorSnapshot, currentSnapshot, fromRunId: previous?.run.runId ?? null, toRunId, mode, generatedAt: current.generatedAt });
+}
+export function verifyServerMemoryEntry(entry: unknown): boolean {
+  return verifyLongitudinalMemoryEntry(entry);
+}
 export function buildResearchMemorySnapshot(
   report: ReportData,
   previous?: ResearchMemorySnapshot | null,
+  options: { updateMode?: ResearchUpdateMode; deepDive?: boolean; eventIds?: string[] } = {},
 ): ResearchMemorySnapshot {
   const company = companyOf(report);
   const thesis = thesisOf(report);
@@ -153,6 +187,14 @@ export function buildResearchMemorySnapshot(
     fromRunId: previous?.run.runId,
     toRunId: run.runId,
   });
+  const eventIds = options.eventIds ?? eventHistoryOf(report, company.id, run.runId).map((e) => e.eventId);
+  const updateMode = options.updateMode ?? deriveUpdateMode({ previousRunId: previous?.run.runId ?? null, thesisBreak, eventIds, deepDive: options.deepDive ?? false });
+  const currentSnapshot = snapshotForLongitudinalMemory(report);
+  const priorSnapshot = previous?.longitudinalEntry?.snapshot ?? null;
+  const whatChanged = buildWhatChangedReport({ previousSnapshot: priorSnapshot, currentSnapshot, fromRunId: previous?.run.runId ?? null, toRunId: run.runId, mode: updateMode, generatedAt: occurredAt });
+  const priorEntries = previous?.longitudinalEntry ? [previous.longitudinalEntry] : [];
+  const longitudinal = appendLongitudinalMemory({ store: priorEntries, companyId: company.id, runId: run.runId, mode: updateMode, occurredAt, dataCutoff, snapshot: currentSnapshot, generatedAt: occurredAt });
+  const serverStatus = longitudinal.entry.status;
   return {
     version: "research-memory-v1",
     run,
@@ -166,6 +208,11 @@ export function buildResearchMemorySnapshot(
     expectationsGap: buildExpectationsGap({ reverseValuation: report.researchReport?.reverseValuation, baselineReconciliation: report.baselineReconciliation }),
     riskValueMap: buildRiskValueMap({ risks: report.researchReport?.risks ?? [], scenarios: report.researchReport?.scenarios ?? [], currentPrice: report.cmp }),
     operatingModel: buildOperatingModelProfile({ understanding: report.researchReport?.companyUnderstanding, engine: report.researchReport?.economicEngine }),
+    updateMode,
+    whatChanged,
+    longitudinalEntry: longitudinal.entry,
+    lineage: longitudinal.entry.lineage,
+    serverStatus,
   };
 }
 

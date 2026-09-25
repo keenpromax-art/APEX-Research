@@ -22,5 +22,10 @@ export { fingerprintResearchDNA, compareResearchIdentities, detectCollisions } f
 export { checkFlavourCollision, FLAVOUR_COLLISION_THRESHOLD, FLAVOUR_COLLISION_WATCH_THRESHOLD } from "./collision-detector";
 export { runFlavourQa } from "./flavour-qa";
 export { buildResearchIdentity, serializeResearchIdentity } from "./build";
+export { buildIdentityCompanySnapshot, fingerprintIdentityCompany, buildCompanyIdentityRecord, isIdentityCompany, identityCompanyFromResearchCase, IDENTITY_KIND, IDENTITY_VERSION } from "./company-identity";
+export type { IdentityCompanySnapshot, CompanyIdentityRecord } from "./company-identity";
+export { persistResearchIdentity, loadStoredIdentities, loadBoundedPriors, clearStoredIdentities, storedIdentityCount, IDENTITY_PERSISTENCE_BOUND } from "./identity-store";
+export { identityPublicationFromQa, collisionStatusOf } from "./identity-publication";
+export type { IdentityPublicationState } from "./identity-publication";
 export { buildIdentityProposalPrompt, parseIdentityProposalResponse, identityProposalTaskList, IDENTITY_PROPOSAL_TASKS } from "./identity-tasks";
 export type { IdentityProposalTask } from "./identity-tasks";

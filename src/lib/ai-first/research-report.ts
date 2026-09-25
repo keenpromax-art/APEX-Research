@@ -35,6 +35,12 @@ import type {
   Debate,
   EvidenceMap,
   ResearchDiscoveryPack,
+  ValuationMatrix,
+  ScenarioSetValidation,
+  SensitivityAnalysis,
+  MonteCarloResult,
+  ReverseValuationPlan,
+  ReverseValuationResult,
 } from "./types";
 import type { ResearchPlan } from "./research-planner";
 
@@ -61,7 +67,14 @@ export interface ReportAssemblerInput {
   capitalAllocation: string;
   financialQuality: string;
   sensitivity: Array<Record<string, number | string>>;
+  sensitivityAnalysis?: SensitivityAnalysis;
+  monteCarlo?: MonteCarloResult;
+  valuationMatrix?: ValuationMatrix;
+  scenarioValidation?: ScenarioSetValidation;
   reverseValuation: { variable: string; requiredValue: number; interpretation: string } | null;
+  reverseValuationResult?: ReverseValuationResult | null;
+  reverseValuationPlan?: ReverseValuationPlan | null;
+  artifactIds?: ResearchReport["artifactIds"];
   conclusion: string;
   reviews: ReviewFinding[];
   reviewPassed: boolean;
@@ -72,6 +85,20 @@ export interface ReportAssemblerInput {
   evidenceMap?: EvidenceMap;
   researchDiscovery?: ResearchDiscoveryPack;
   researchPlan?: ResearchPlan;
+  /** Institutional research analytics artifacts. */
+  peerDiscovery?: ResearchReport["peerDiscovery"];
+  normalizedHistory?: ResearchReport["normalizedHistory"];
+  earningsQuality?: ResearchReport["earningsQuality"];
+  capitalAllocationLedger?: ResearchReport["capitalAllocationLedger"];
+  managementCredibility?: ResearchReport["managementCredibility"];
+  guidanceReconciliation?: ResearchReport["guidanceReconciliation"];
+  confidenceDecomposition?: ResearchReport["confidenceDecomposition"];
+  canonicalQa?: ResearchReport["canonicalQa"];
+  reproducibility?: ResearchReport["reproducibility"];
+  qaDecision?: ResearchReport["qaDecision"];
+  regenerationAttempts?: ResearchReport["regenerationAttempts"];
+  auditPackageHash?: ResearchReport["auditPackageHash"];
+  auditPackage?: ResearchReport["auditPackage"];
 }
 
 /**
@@ -98,7 +125,14 @@ export function assembleResearchReport(input: ReportAssemblerInput): ResearchRep
     capitalAllocation,
     financialQuality,
     sensitivity,
+    sensitivityAnalysis,
+    monteCarlo,
+    valuationMatrix,
+    scenarioValidation,
     reverseValuation,
+    reverseValuationResult,
+    reverseValuationPlan,
+    artifactIds,
     conclusion,
     reviews,
     reviewPassed,
@@ -108,6 +142,19 @@ export function assembleResearchReport(input: ReportAssemblerInput): ResearchRep
     evidenceMap,
     researchDiscovery,
     researchPlan,
+    peerDiscovery,
+    normalizedHistory,
+    earningsQuality,
+    capitalAllocationLedger,
+    managementCredibility,
+    guidanceReconciliation,
+    confidenceDecomposition,
+    canonicalQa,
+    reproducibility,
+    qaDecision,
+    regenerationAttempts,
+    auditPackageHash,
+    auditPackage,
   } = input;
 
   const researchRunId = `RUN-${factPack.ticker}-${new Date().toISOString().slice(0, 10)}-${String(Date.now()).slice(-6)}`;
@@ -150,7 +197,9 @@ export function assembleResearchReport(input: ReportAssemblerInput): ResearchRep
 
     forecast,
     valuation,
+    ...(valuationMatrix ? { valuationMatrix } : {}),
     scenarios,
+    ...(scenarioValidation ? { scenarioValidation } : {}),
     thesis,
     catalysts,
     risks,
@@ -161,7 +210,12 @@ export function assembleResearchReport(input: ReportAssemblerInput): ResearchRep
     capitalAllocation,
     financialQuality,
     sensitivity,
+    ...(sensitivityAnalysis ? { sensitivityAnalysis } : {}),
+    ...(monteCarlo ? { monteCarlo } : {}),
     reverseValuation,
+    ...(reverseValuationResult ? { reverseValuationResult } : {}),
+    ...(reverseValuationPlan ? { reverseValuationPlan } : {}),
+    ...(artifactIds ? { artifactIds } : {}),
     conclusion,
 
     economicEngine,
@@ -169,6 +223,19 @@ export function assembleResearchReport(input: ReportAssemblerInput): ResearchRep
     evidenceMap,
     researchDiscovery,
     researchPlan,
+    ...(peerDiscovery ? { peerDiscovery } : {}),
+    ...(normalizedHistory ? { normalizedHistory } : {}),
+    ...(earningsQuality ? { earningsQuality } : {}),
+    ...(capitalAllocationLedger ? { capitalAllocationLedger } : {}),
+    ...(managementCredibility ? { managementCredibility } : {}),
+    ...(guidanceReconciliation ? { guidanceReconciliation } : {}),
+    ...(confidenceDecomposition ? { confidenceDecomposition } : {}),
+    ...(canonicalQa ? { canonicalQa } : {}),
+    ...(reproducibility ? { reproducibility } : {}),
+    ...(qaDecision ? { qaDecision } : {}),
+    ...(regenerationAttempts ? { regenerationAttempts } : {}),
+    ...(auditPackageHash ? { auditPackageHash } : {}),
+    ...(auditPackage ? { auditPackage } : {}),
 
     reviews,
     reviewPassed,
@@ -191,15 +258,28 @@ export function renderReportSummary(report: ResearchReport): string {
     `  Company Understanding: ${report.companyUnderstanding?.whatItDoes ? "populated" : "empty"}`,
     `  Forecast Years: ${report.forecast?.incomeStatement?.length || 0}`,
     `  Valuation Method: ${report.valuation?.methodology || "not specified"}`,
-    `  Scenarios: ${report.scenarios?.length || 0} (Bear/Base/Bull)`,
+    `  Valuation Status: ${report.valuation?.status ?? "legacy/unknown"}`,
+    `  Valuation Matrix: ${report.valuationMatrix?.methods.filter((method) => method.status === "ready").length ?? 0} ready; primary=${report.valuationMatrix?.primaryMethod ?? "none"}`,
+    `  Cross-check Spread: ${report.valuationMatrix?.crossCheck.disagreement ? `${(report.valuationMatrix.crossCheck.disagreement.spreadPct * 100).toFixed(1)}%` : "N/A"}`,
+    `  Scenarios: ${report.scenarios?.length || 0} (Bear/Base/Bull); validation=${report.scenarioValidation?.status ?? "legacy/unknown"}`,
     `  Thesis: ${report.thesis?.thesis ? "present" : "empty"}`,
     `  Risks: ${report.risks?.length || 0} risks identified`,
     `  Catalysts: ${report.catalysts?.length || 0} catalysts identified`,
-    `  Moat: ${report.moat?.verdict || "not assessed"}`,
-    "",
+  `  Moat: ${report.moat?.verdict || "not assessed"}`,
+  `  Peers: ${report.peerDiscovery?.status ?? "unavailable"} (${report.peerDiscovery?.peerSets ? Object.values(report.peerDiscovery.peerSets).filter((set) => set.status === "ready").length : 0} set(s) ready)`,
+  `  History: ${report.normalizedHistory?.status ?? "unavailable"} (${report.normalizedHistory?.coverage.metricsReady ?? 0} metric(s) ready, ${report.normalizedHistory?.trendBreaks.length ?? 0} trend break(s))`,
+  `  Earnings Quality: ${report.earningsQuality?.status ?? "unavailable"}`,
+  `  Capital Allocation: ${report.capitalAllocationLedger?.status ?? "unavailable"}`,
+  `  Management Credibility: ${report.managementCredibility?.status ?? "UNVERIFIED"}`,
+  `  Guidance Reconciliation: ${report.guidanceReconciliation?.status ?? "unverified"}`,
+  `  Confidence Decomposition: ${report.confidenceDecomposition?.overall.score ?? "n/a"}`,
+  "",
     "VALUATION:",
     `  Fair Value per Share: ${report.valuation?.fairValuePerShare !== undefined ? report.valuation.fairValuePerShare : "N/A"}`,
     `  Upside: ${report.valuation?.upsidePct !== undefined ? `${report.valuation.upsidePct.toFixed(1)}%` : "N/A"}`,
+    `  Sensitivity Variables: ${report.sensitivityAnalysis?.rankedVariables.join(", ") || "N/A"}`,
+    `  Monte Carlo P50: ${report.monteCarlo?.status === "ready" ? report.monteCarlo.fairValue.p50.toFixed(2) : "N/A"}`,
+    `  Reverse Status: ${report.reverseValuationResult?.status ?? (report.reverseValuation ? "ready" : "unavailable")}`,
     "",
     "CONTAMINATION CHECK:",
     "  All content dynamically generated — no hardcoded sector templates",

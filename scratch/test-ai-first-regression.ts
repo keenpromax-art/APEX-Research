@@ -185,8 +185,8 @@ const dcfSpec: ValuationSpecification = {
   methodsConsidered: [{ method: "DCF", verdict: "selected", reason: "fixture" }],
 };
 const val = executeValuation(dcfSpec, fOut.forecast, pack);
-check("DCF executes to a fair value", val.fairValuePerShare !== undefined && isFinite(val.fairValuePerShare));
-check("upside computed vs yfinance price", val.upsidePct !== undefined && isFinite(val.upsidePct));
+check("DCF refuses net-income-only forecast", val.status === "blocked" && val.fairValuePerShare === undefined);
+check("upside stays unavailable without executable fair value", val.upsidePct === undefined);
 const unknownVal = executeValuation({ ...dcfSpec, methodology: "MADE_UP_METHOD" }, fOut.forecast, pack);
 check("unknown method stays unavailable (no fabrication)", unknownVal.fairValuePerShare === undefined);
 const noSharesPack = buildFactPack({}, "NODATA");
@@ -204,8 +204,8 @@ const scen = {
   targetProvenance: "forecast" as const,
 };
 const flowed = flowScenarioThroughModel(scen, demoSpec, pack, dcfSpec);
-check("scenario flows to a target price", flowed.scenario.targetPrice !== undefined);
-check("bull scenario exceeds base DCF", (flowed.scenario.targetPrice ?? 0) >= (val.fairValuePerShare ?? 0));
+check("blocked canonical forecast blocks scenario target", flowed.scenario.status === "blocked" && flowed.scenario.targetPrice === undefined);
+check("blocked scenario publishes no target", flowed.scenario.publicationBlocked === true);
 
 // ─────────────────────────────────────────────
 // 7. Reverse valuation
@@ -215,7 +215,7 @@ const understandingForReverse = {
   primaryEconomicAbstraction: "revenue growth",
 } as never;
 const chosen = chooseReverseVariable(understandingForReverse, val);
-check("reverse variable chosen", chosen !== null && !!chosen?.variable);
+check("reverse variable requires an AI plan rather than a heuristic", chosen === null);
 if (chosen && chosen.variable === "revenueCagr") {
   const solver = buildRevenueCagrSolver(pack, demoSpec, dcfSpec, ({ model, factPack: fp }) => ({ forecast: executeForecast({ model, factPack: fp }).forecast }), (s, f, p) => executeValuation(s, f, p));
   const solved = solveRequiredValue(chosen, 820, solver);
@@ -282,7 +282,7 @@ async function runMechanicalChecks(): Promise<void> {
   const blob = JSON.stringify(pipe.report).toLowerCase();
   const leaks = ["search index", "advertiser bidding", "custom silicon", "hyperscale infrastructure", "same-store sales", "foot traffic"].filter((s) => blob.includes(s));
   check("mechanical report has no cross-sector contamination", leaks.length === 0, leaks.join(", "));
-  check("sensitivity grid populated", pipe.report.sensitivity.length === 9);
+  check("blocked forecast produces no sensitivity cases", pipe.report.sensitivity.length === 0 && pipe.report.sensitivityAnalysis?.status === "blocked");
 
   // Research discovery (COLPAL fix — gaps identified, evidence collected, writers seeded)
   const disc = pipe.report.researchDiscovery;

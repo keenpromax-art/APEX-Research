@@ -37,6 +37,7 @@ export {
   ADVANCED_BLUEPRINTS,
 } from "./advanced-blueprints";
 export { resolveReportOutline } from "./resolve";
+export { BLUEPRINT_ROLE, BLUEPRINT_PRODUCTION_DRIVER, isBlueprintTemplate, blueprintAsTemplate, blueprintRoleOf } from "./template";
 export {
   DEFAULT_REPORT_TYPE,
   DEFAULT_RESEARCH_DEPTH,

@@ -29,10 +29,24 @@
  * never invents history, never hand-writes a target price.
  */
 
-import { buildFactPack } from "./fact-pack";
+import { buildFactPack, verifyFactPack } from "./fact-pack";
+import { buildResearchAnalytics } from "../research-package/analytics";
+import type { ResearchAnalytics } from "../research-package/analytics";
+import { decomposeResearchConfidence } from "../research-package/confidence";
+import type { ConfidenceDecomposition } from "../research-package/confidence";
+import type { PeerCandidateProvider, PeerProfileInput } from "../peer-discovery/types";
 import { buildHistoricalAnalysisPack, renderHistoricalAnalysisPack } from "./historical-analysis";
 import { buildAnalystBrief } from "./analyst-brief";
-import { buildResearchPlan, mechanicalResearchPlan, type ResearchPlan } from "./research-planner";
+import { buildResearchPlan, compileResearchRetrievalTasks, mechanicalResearchPlan, type ResearchPlan } from "./research-planner";
+import { executeResearchRetrieval } from "../research-retrieval/retrieval";
+import type { ExecuteResearchRetrievalOptions, ResearchRetrievalResult } from "../research-retrieval/types";
+import { buildCanonicalEvidenceRegistry } from "../research-retrieval/evidence";
+import type { CanonicalEvidenceRegistry } from "../research-retrieval/evidence";
+import { buildCanonicalResearchLineage } from "../research-lineage/builder";
+import { buildResearchLineageGraph, validateResearchLineageGraph } from "../research-lineage/graph";
+import { deepFreeze } from "../research-ledger/immutable";
+import { stableHash as ledgerStableHash } from "../research-ledger/stable";
+import type { ResearchLineageGraph } from "../research-lineage/types";
 import { buildDebatesEarly, mechanicalDebates } from "./debate-engine";
 import { buildEconomicEngine, mechanicalEconomicEngine } from "./economic-engine";
 import { buildEvidenceMap, mechanicalEvidenceMap } from "./evidence-mapper";
@@ -45,22 +59,35 @@ import {
 } from "./research-discovery";
 import { understandCompany } from "./company-understanding";
 import { buildModelSpec } from "./model-builder";
+import { ModelSpecValidationError, validateModelSpec, type ModelSpecValidationResult } from "./model-spec-validator";
+import { selectAccountingArchitecture } from "./accounting-architecture";
 import { executeForecast } from "./forecast-engine";
 import { buildValuationSpec } from "./valuation-builder";
-import { executeValuation } from "./valuation-engine";
+import { executeValuationMatrix } from "./valuation-engine";
 import {
   buildScenarios,
-  flowScenarioThroughModel,
+  executeScenarioSet,
 } from "./scenarios-builder";
 import {
-  chooseReverseVariable,
-  solveRequiredValue,
-  buildRevenueCagrSolver,
+  buildReverseValuationPlan,
+  validateReverseValuationPlan,
+} from "./reverse-planner";
+import {
   currentPriceOf,
+  solveReverseValuation,
 } from "./reverse-valuation";
+import { runValuationSensitivity, toLegacySensitivityGrid } from "./sensitivity-engine";
+import { runMonteCarlo } from "./monte-carlo";
+import { stableHash, stableId } from "./valuation-helpers";
 import { buildNarrative } from "./narrative-builders";
-import { runQualityReview, adjudicateRegeneration } from "./quality-review";
+import { runQualityReview, adjudicateRegeneration, canonicalQaContextForReport } from "./quality-review";
 import { assembleResearchReport } from "./research-report";
+import { runCanonicalQa } from "../canonical-qa/decision";
+import { runBoundedRegeneration } from "../canonical-qa/regeneration";
+import { buildReproducibilityMetadata, hashReproducibilityMetadata } from "../canonical-qa/reproducibility";
+import { buildMachineAuditPackage } from "../canonical-qa/audit-package";
+import { AI_FIRST_PROMPT_VERSION } from "./llm";
+import { globalStageCache, hashStageInput } from "../research-runs/stage-cache";
 import {
   resolveProviderRequestConfig,
   type CustomKeyConfig,
@@ -78,6 +105,15 @@ import type {
   EvidenceMap,
   Debate,
   ResearchDiscoveryPack,
+  ReviewFinding,
+  ValuationMatrix,
+  SensitivityAnalysis,
+  MonteCarloResult,
+  ReverseValuationPlan,
+  ReverseValuationResult,
+  ScenarioSetValidation,
+  Catalyst,
+  Risk,
 } from "./types";
 
 export type PipelineTransport = (opts: {
@@ -97,6 +133,18 @@ export interface RunAiFirstOptions {
   customKeyConfig?: CustomKeyConfig | null;
   /** Injected transport (tests / callers with their own LLM client). */
   transport?: PipelineTransport;
+  factPack?: FactPack;
+  retrievalProvider?: ExecuteResearchRetrievalOptions["provider"];
+  retrieval?: Omit<ExecuteResearchRetrievalOptions, "ticker" | "asOf" | "now">;
+  retrievalProviderAllowlist?: readonly string[];
+  retrievalLimits?: ExecuteResearchRetrievalOptions["limits"];
+  retrievalNow?: string;
+  retrievalSignal?: AbortSignal;
+  retrievalTimestamp?: string;
+  /** Optional broad candidate universe for economic peer discovery. */
+  peerUniverse?: readonly PeerProfileInput[] | null;
+  /** Optional candidate-universe provider for economic peer discovery. */
+  peerProvider?: PeerCandidateProvider | null;
   onProgress?: (p: AiFirstProgress) => void;
 }
 
@@ -149,22 +197,25 @@ export function makeProviderTransport(
 // no sector vocabulary, no invented peers/moat. Clearly labeled so the
 // quality reviewer and the report mark it as non-AI output.
 
+function periodScore(period: string | undefined): number {
+  if (!period) return Number.NEGATIVE_INFINITY;
+  const parsed = Date.parse(period);
+  if (Number.isFinite(parsed)) return parsed;
+  const year = period.match(/(?:19|20)\d{2}/)?.[0];
+  return year ? Number(year) : Number.NEGATIVE_INFINITY;
+}
+
 function latestMetric(pack: FactPack, re: RegExp): Fact | undefined {
-  const cands = pack.incomeStatement.facts.filter(
-    (f) => re.test(f.metric) && f.value !== undefined
-  );
-  return cands[cands.length - 1] ?? cands[0];
+  return pack.incomeStatement.facts
+    .filter((fact) => re.test(fact.metric) && fact.value !== undefined)
+    .sort((left, right) => periodScore(right.reportingPeriod ?? right.fiscalPeriod ?? right.period) - periodScore(left.reportingPeriod ?? left.fiscalPeriod ?? left.period) || (right.factId ?? "").localeCompare(left.factId ?? ""))[0];
 }
 
 function revenueSeries(pack: FactPack): number[] {
   return pack.incomeStatement.facts
-    .filter(
-      (f) =>
-        /revenue/i.test(f.metric) &&
-        f.value !== undefined &&
-        f.value > 0
-    )
-    .map((f) => f.value as number);
+    .filter((fact) => /revenue/i.test(fact.metric) && fact.value !== undefined && fact.value > 0)
+    .sort((left, right) => periodScore(left.reportingPeriod ?? left.fiscalPeriod ?? left.period) - periodScore(right.reportingPeriod ?? right.fiscalPeriod ?? right.period))
+    .map((fact) => fact.value as number);
 }
 
 /** Exported for content-depth tests (deterministic, no LLM). */
@@ -183,13 +234,13 @@ export function mechanicalUnderstanding(pack: FactPack): CompanyUnderstanding {
   const revs = revenueSeries(pack);
   const cagr = historicalCagr(revs);
   const revScale = revs.length ? revs[revs.length - 1] : 0;
-  const niHist = pack.incomeStatement.facts.filter((f) => /netIncome/i.test(f.metric) && f.value !== undefined).map((f) => f.value as number);
-  const lastNi = niHist.length ? niHist[niHist.length - 1] : 0;
+  const niHist = pack.incomeStatement.facts.filter((f) => /netIncome/i.test(f.metric) && f.value !== undefined).sort((left, right) => periodScore(right.reportingPeriod ?? right.fiscalPeriod ?? right.period) - periodScore(left.reportingPeriod ?? left.fiscalPeriod ?? left.period)).map((f) => f.value as number);
+  const lastNi = niHist.length ? niHist[0] : 0;
   const lastMargin = revScale > 0 ? lastNi / revScale : 0;
-  const ocfHist = pack.cashFlow.facts.filter((f) => /operatingCashFlow/i.test(f.metric) && f.value !== undefined).map((f) => f.value as number);
-  const lastOcf = ocfHist.length ? ocfHist[ocfHist.length - 1] : 0;
-  const debtNow = pack.balanceSheet.facts.filter((f) => /totalDebt/i.test(f.metric) && f.value !== undefined).map((f) => f.value as number).pop() ?? 0;
-  const eqNow = pack.balanceSheet.facts.filter((f) => /totalEquity/i.test(f.metric) && f.value !== undefined).map((f) => f.value as number).pop() ?? 0;
+  const ocfHist = pack.cashFlow.facts.filter((f) => /operatingCashFlow/i.test(f.metric) && f.value !== undefined).sort((left, right) => periodScore(right.reportingPeriod ?? right.fiscalPeriod ?? right.period) - periodScore(left.reportingPeriod ?? left.fiscalPeriod ?? left.period)).map((f) => f.value as number);
+  const lastOcf = ocfHist.length ? ocfHist[0] : 0;
+  const debtNow = pack.balanceSheet.facts.filter((f) => /totalDebt/i.test(f.metric) && f.value !== undefined).sort((left, right) => periodScore(right.reportingPeriod ?? right.fiscalPeriod ?? right.period) - periodScore(left.reportingPeriod ?? left.fiscalPeriod ?? left.period))[0]?.value ?? 0;
+  const eqNow = pack.balanceSheet.facts.filter((f) => /totalEquity/i.test(f.metric) && f.value !== undefined).sort((left, right) => periodScore(right.reportingPeriod ?? right.fiscalPeriod ?? right.period) - periodScore(left.reportingPeriod ?? left.fiscalPeriod ?? left.period))[0]?.value ?? 0;
   const where = [sector, industry].filter(Boolean).join(" / ") || "its disclosed market";
   return {
     ticker: pack.ticker,
@@ -300,32 +351,39 @@ function mechanicalModelSpec(pack: FactPack): ForecastSpecification {
   const currency =
     pack.market.facts.find((f) => f.metric === "currentPrice")?.currency ??
     "currency";
+  const revenueFactId = revFact?.factId;
+  const netIncomeFactId = latestMetric(pack, /netIncome/i)?.factId;
   return {
     horizonYears: 5,
     horizonRationale:
       "Mechanical preview horizon (5Y); AI horizon selection unavailable.",
     variables: [
       {
+        id: "V-revenue",
         name: "revenue",
         label: "Revenue",
-        baseValue: baseRevenue,
+        ...(baseRevenue !== undefined ? { baseValue: baseRevenue } : {}),
+        ...(revenueFactId ? { baseFactId: revenueFactId } : {}),
         unit: currency,
         kind: "input",
         statementLine: revFact?.metric,
       },
       {
+        id: "V-netMargin",
         name: "netMargin",
         label: "Net margin",
-        baseValue: margin,
+        ...(baseRevenue !== undefined && baseNI !== undefined ? { baseValue: margin } : {}),
         unit: "decimal",
         kind: "input",
       },
       {
+        id: "V-netIncome",
         name: "netIncome",
         label: "Net income",
-        baseValue: baseNI,
+        ...(baseNI !== undefined ? { baseValue: baseNI } : {}),
         unit: currency,
         kind: "computed",
+        statementLine: "netIncome",
       },
     ],
     formulas: [
@@ -337,7 +395,7 @@ function mechanicalModelSpec(pack: FactPack): ForecastSpecification {
         variables: ["revenue", "netMargin"],
         explanation:
           "Generic mechanical identity used only when AI model generation is unavailable.",
-        sourceFacts: ["totalRevenue", "netIncome"],
+        sourceFacts: [revenueFactId ?? revFact?.metric ?? "totalRevenue", netIncomeFactId ?? "netIncome"].filter((value): value is string => !!value),
         confidence: 0.3,
       },
     ],
@@ -349,8 +407,9 @@ function mechanicalModelSpec(pack: FactPack): ForecastSpecification {
         value: g,
         unit: "%",
         period: "Y1-Y5",
-        rationale: "Historical revenue CAGR from yfinance facts.",
-        historicalEvidence: "yfinance revenue history",
+        rationale: "Historical revenue CAGR from canonical facts.",
+        historicalEvidence: revenueFactId ?? "totalRevenue",
+        ...(revenueFactId ? { factIds: [revenueFactId], evidenceIds: [revenueFactId] } : {}),
         confidence: 0.3,
       },
       {
@@ -361,7 +420,8 @@ function mechanicalModelSpec(pack: FactPack): ForecastSpecification {
         unit: "decimal",
         period: "Y1-Y5",
         rationale: "Latest reported net margin held flat (mechanical).",
-        historicalEvidence: "yfinance net income / revenue",
+        historicalEvidence: [revenueFactId, netIncomeFactId].filter((value): value is string => !!value).join(" ") || "netIncome / revenue",
+        ...([revenueFactId, netIncomeFactId].filter((value): value is string => !!value).length > 0 ? { factIds: [revenueFactId, netIncomeFactId].filter((value): value is string => !!value), evidenceIds: [revenueFactId, netIncomeFactId].filter((value): value is string => !!value) } : {}),
         confidence: 0.3,
       },
     ],
@@ -461,6 +521,24 @@ export interface AiFirstRunResult {
   regenerationCandidates: string[];
   researchPlan: ResearchPlan;
   aiUsed: boolean;
+  modelValidation?: ModelSpecValidationResult;
+  forecastStatus?: "ready" | "blocked" | "incomplete";
+  valuationMatrix?: ValuationMatrix;
+  scenarioValidation?: ScenarioSetValidation;
+  sensitivityAnalysis?: SensitivityAnalysis;
+  monteCarlo?: MonteCarloResult;
+  reverseValuationPlan?: ReverseValuationPlan;
+  reverseValuationResult?: ReverseValuationResult;
+  retrieval?: ResearchRetrievalResult;
+  evidenceRegistry?: CanonicalEvidenceRegistry;
+  lineage?: ResearchLineageGraph;
+  artifactIds?: ResearchReport["artifactIds"];
+  researchAnalytics?: ResearchAnalytics;
+  confidenceDecomposition?: ConfidenceDecomposition;
+  canonicalQa?: ResearchReport["canonicalQa"];
+  reproducibility?: ResearchReport["reproducibility"];
+  auditPackage?: ResearchReport["auditPackage"];
+  regeneratedStages?: string[];
 }
 
 export async function runAiFirstResearch(
@@ -474,7 +552,7 @@ export async function runAiFirstResearch(
 
   // 1. Fact pack (deterministic, yfinance only)
   emit("fact-pack", "Normalizing yfinance payload");
-  const factPack = buildFactPack(rawQuoteSummary, t);
+  const factPack = opts.factPack ?? buildFactPack(rawQuoteSummary, t, { retrievalTimestamp: opts.retrievalTimestamp });
 
   // 2. Transport: injected (tests) > provider (live key) > mechanical fallback
   let transport: PipelineTransport | null = opts.transport ?? null;
@@ -507,6 +585,59 @@ export async function runAiFirstResearch(
       researchPlan = mechanicalResearchPlan(factPack, understanding);
     }
   }
+  const retrievalTasks = compileResearchRetrievalTasks(researchPlan, { asOf: researchPlan.asOf ?? factPack.retrievalTimestamp });
+  emit("retrieval", retrievalTasks.length > 0 ? "Executing injected retrieval tasks" : "No retrieval tasks");
+  let retrieval: ResearchRetrievalResult;
+  try {
+    retrieval = await executeResearchRetrieval(retrievalTasks, {
+      ticker: t,
+      asOf: researchPlan.asOf ?? factPack.retrievalTimestamp,
+      now: opts.retrievalNow ?? factPack.retrievalTimestamp,
+      provider: opts.retrievalProvider ?? opts.retrieval?.provider ?? null,
+      ...(opts.retrievalProviderAllowlist ? { providerAllowlist: opts.retrievalProviderAllowlist } : opts.retrieval?.providerAllowlist || opts.retrieval?.allowedProviders ? { providerAllowlist: opts.retrieval.providerAllowlist ?? opts.retrieval.allowedProviders } : {}),
+      ...(opts.retrievalLimits ? { limits: opts.retrievalLimits } : opts.retrieval?.limits ? { limits: opts.retrieval.limits } : {}),
+      ...(opts.retrieval?.maxBytes !== undefined ? { maxBytes: opts.retrieval.maxBytes } : {}),
+      ...(opts.retrieval?.maxDocumentBytes !== undefined ? { maxDocumentBytes: opts.retrieval.maxDocumentBytes } : {}),
+      ...(opts.retrieval?.maxTotalBytes !== undefined ? { maxTotalBytes: opts.retrieval.maxTotalBytes } : {}),
+      ...(opts.retrieval?.timeoutMs !== undefined ? { timeoutMs: opts.retrieval.timeoutMs } : {}),
+      ...(opts.retrievalSignal ? { signal: opts.retrievalSignal } : opts.retrieval?.signal ? { signal: opts.retrieval.signal } : {}),
+    });
+  } catch (error) {
+    const failedRetrievalBase = {
+      version: "research-retrieval-v1" as const,
+      status: "failed" as const,
+      retrievalStatus: "failed" as const,
+      available: true,
+      isAvailable: true,
+      providerConfigured: Boolean(opts.retrievalProvider ?? opts.retrieval?.provider),
+      providerId: (opts.retrievalProvider ?? opts.retrieval?.provider)?.id ?? null,
+      providerAllowlist: [...(opts.retrievalProviderAllowlist ?? opts.retrieval?.providerAllowlist ?? opts.retrieval?.allowedProviders ?? ["injected", "fixture", "test", "mock"])].sort(),
+      ticker: t,
+      asOf: researchPlan.asOf ?? factPack.retrievalTimestamp,
+      startedAt: opts.retrievalNow ?? factPack.retrievalTimestamp,
+      completedAt: opts.retrievalNow ?? factPack.retrievalTimestamp,
+      tasks: retrievalTasks.map((task) => ({ taskId: task.id, status: "failed" as const, attempts: 0, resultRefs: [], documentIds: [], evidenceIds: [], diagnostics: [error instanceof Error ? error.message : String(error)] })),
+      documents: [],
+      evidence: [],
+      diagnostics: ["RETRIEVAL_EXECUTION_FAILED"],
+      publicationBlocked: true,
+    };
+    retrieval = deepFreeze({ ...failedRetrievalBase, resultHash: ledgerStableHash(failedRetrievalBase, "research-retrieval/result/v1") }) as unknown as ResearchRetrievalResult;
+  }
+  const evidenceRegistry = buildCanonicalEvidenceRegistry({ factPack, retrieval, asOf: retrieval.asOf });
+  const retrievalTaskResults = new Map(retrieval.tasks.map((task) => [task.taskId, task]));
+  const executedRetrievalTasks = retrievalTasks.map((task) => {
+    const result = retrievalTaskResults.get(task.id);
+    return {
+      ...task,
+      status: result?.status ?? task.status,
+      attempts: result?.attempts ?? task.attempts,
+      resultRefs: result?.resultRefs ?? task.resultRefs,
+      ...(result?.error || result?.diagnostics.length ? { blocker: result?.error ?? result?.diagnostics.join("; ") } : {}),
+    };
+  });
+  researchPlan = { ...researchPlan, retrievalTasks: executedRetrievalTasks, retrievalTaskQueue: executedRetrievalTasks, taskQueue: executedRetrievalTasks, tasks: executedRetrievalTasks };
+  emit("evidence-registry", `Registered ${evidenceRegistry.items.length} canonical evidence items`);
 
   // 3c. Economic Engine — what physically determines revenue/margins/cash/capital
   emit("economic-engine", "Building economic engine + statement bindings");
@@ -608,22 +739,44 @@ export async function runAiFirstResearch(
 
   // 4. Model spec — receives economic engine + research debates so drivers encode the case
   emit("model", "Building financial model specification (debate-driven drivers)");
-  const forecastSpec: ForecastSpecification = aiUsed
-    ? await buildModelSpec(transport!, {
+  let forecastSpec: ForecastSpecification;
+  let modelValidation: ModelSpecValidationResult | undefined;
+  if (aiUsed) {
+    try {
+      forecastSpec = await buildModelSpec(transport!, {
         pack: factPack,
         understanding,
         engine: economicEngine,
         debates: debateOutput,
-      })
-    : mechanicalModelSpec(factPack);
+      });
+    } catch (error) {
+      if (error instanceof ModelSpecValidationError && error.spec) {
+        forecastSpec = error.spec;
+        modelValidation = error.validation;
+      } else {
+        forecastSpec = mechanicalModelSpec(factPack);
+      }
+    }
+  } else {
+    forecastSpec = mechanicalModelSpec(factPack);
+  }
+  if (!modelValidation) modelValidation = validateModelSpec(forecastSpec, factPack, { requireEvidence: true, enforceCanonicalBases: true, allowUnresolvedBaseValues: true });
+  forecastSpec = { ...forecastSpec, validation: { valid: modelValidation.valid, issues: modelValidation.issues.map((entry) => `${entry.code}: ${entry.message}`) } };
 
-  // 5. Deterministic forecast
   emit("forecast", "Executing forecast (deterministic arithmetic)");
-  const forecastOut = executeForecast({ model: forecastSpec, factPack });
+  const forecastArchitecture = selectAccountingArchitecture({ understanding, engine: economicEngine, factPack });
+  const modelId = forecastSpec.modelId ?? stableId("MODEL", [factPack.factPackId ?? factPack.contentHash ?? factPack.ticker, forecastArchitecture.id, forecastSpec.horizonYears, forecastSpec.variables.map((variable) => [variable.name, variable.baseValue])]);
+  forecastSpec = { ...forecastSpec, modelId, architecture: forecastArchitecture.id };
+  const rawForecastOut = executeForecast({ model: forecastSpec, factPack, architecture: forecastArchitecture, validation: modelValidation });
+  const forecastId = forecastSpec.forecastId ?? stableId("FCST", [modelId, factPack.factPackId ?? factPack.contentHash ?? factPack.ticker, rawForecastOut.forecast.status, rawForecastOut.forecast.incomeStatement.map((year) => year.values)]);
+  forecastSpec = { ...forecastSpec, forecastId };
+  const forecastOut = {
+    ...rawForecastOut,
+    forecast: { ...rawForecastOut.forecast, modelId, forecastId },
+  };
 
-  // 6. Valuation selection + execution — receives debates + evidence so method adjudicates central debate
-  emit("valuation", "Selecting + executing valuation (debate-informed)");
-  const valuationSpec: ValuationSpecification = aiUsed
+  emit("valuation", "Selecting + executing valuation matrix");
+  let valuationSpec: ValuationSpecification = aiUsed
     ? await buildValuationSpec(transport!, {
         pack: factPack,
         understanding,
@@ -633,54 +786,136 @@ export async function runAiFirstResearch(
         evidenceMap,
       })
     : mechanicalValuationSpec();
-  const valuation = executeValuation(
-    valuationSpec,
-    forecastOut.forecast,
-    factPack
-  );
+  valuationSpec = { ...valuationSpec, modelId, architecture: forecastArchitecture.id };
+  const valuationMatrix: ValuationMatrix = executeValuationMatrix({
+    specification: valuationSpec,
+    forecast: forecastOut.forecast,
+    factPack,
+    architecture: forecastArchitecture.id,
+    requireEvidence: true,
+    selectedMethod: valuationSpec.selectedMethod ?? valuationSpec.methodology,
+  });
+  const valuation = valuationMatrix.methods.find((entry) => entry.methodId === valuationMatrix.primaryMethod)
+    ?? valuationMatrix.methods.find((entry) => entry.methodId === valuationMatrix.selectedMethod)
+    ?? valuationMatrix.methods[0];
 
-  // 7. Scenarios (AI deltas; deterministic flow-through)
   emit("scenarios", "Generating Bear/Base/Bull scenarios");
-  let scenarios = mechanicalScenarios(forecastSpec);
-  if (aiUsed) {
+  let scenarioSpecs = mechanicalScenarios(forecastSpec, factPack);
+  if (aiUsed && forecastOut.forecast.status === "ready") {
     try {
-      const gen = await buildScenarios(transport!, factPack, understanding, forecastSpec);
-      scenarios = gen.scenarios;
-    } catch (e) {
-      console.warn("[ai-first] scenario generation failed, mechanical deltas:", e);
+      const generated = await buildScenarios(transport!, factPack, understanding, forecastSpec);
+      if (generated.validation.valid) scenarioSpecs = generated.scenarios;
+    } catch (error) {
+      console.warn("[ai-first] scenario generation failed, mechanical deltas:", error);
     }
   }
-  const flowed = scenarios.map((s) =>
-    flowScenarioThroughModel(s, forecastSpec, factPack, valuationSpec)
-  );
-  const finalScenarios = flowed.map((f) => f.scenario);
+  const scenarioValuationSpec = valuation?.executedFrom ?? valuationSpec;
+  const scenarioExecution = executeScenarioSet(scenarioSpecs, forecastSpec, forecastOut.forecast, factPack, scenarioValuationSpec, {
+    architecture: forecastArchitecture.id,
+    requireEvidence: true,
+  });
+  const finalScenarios = scenarioExecution.scenarios;
 
-  // 8. Reverse valuation (AI chooses variable; code solves)
-  emit("reverse", "Solving reverse valuation");
-  const chosen = chooseReverseVariable(understanding, valuation);
+  const sensitivityAnalysis: SensitivityAnalysis = runValuationSensitivity({
+    specification: scenarioValuationSpec,
+    forecast: forecastOut.forecast,
+    factPack,
+    forecastSpec,
+    architecture: forecastArchitecture.id,
+    requireEvidence: true,
+  });
+  const monteCarlo: MonteCarloResult = runMonteCarlo({
+    specification: scenarioValuationSpec,
+    forecast: forecastOut.forecast,
+    factPack,
+    forecastSpec,
+    architecture: forecastArchitecture.id,
+    requireEvidence: true,
+    seed: stableHash(`${factPack.factPackId ?? factPack.ticker}:${modelId}:${valuationMatrix.primaryMethod ?? valuationSpec.methodology}`),
+    sampleCount: 500,
+    variables: sensitivityAnalysis.runs.filter((run) => run.status === "ready" && run.lowValue < run.highValue).map((run) => ({
+      variable: run.variable,
+      source: run.source,
+      distribution: { type: "uniform", min: run.lowValue, max: run.highValue },
+    })),
+  });
+
+  emit("reverse", "Validating and solving AI reverse-valuation plan");
   const price = currentPriceOf(factPack);
-  let reverse: ResearchReport["reverseValuation"] = null;
-  if (chosen && price !== undefined) {
-    if (chosen.variable === "revenueCagr") {
-      const solver = buildRevenueCagrSolver(
-        factPack,
+  let reversePlan: ReverseValuationPlan = {
+    id: stableId("REVPLAN", [factPack.ticker, modelId, "forecast-blocked"]),
+    variable: "revenueCagr",
+    why: "No AI reverse plan was executed.",
+    unit: "decimal",
+    range: { min: Number.NaN, max: Number.NaN },
+    economicLinkage: "Unavailable",
+    forecastLinkage: "Unavailable",
+    modelVariable: "",
+    forecastLine: "",
+    method: valuation?.methodology ?? valuationSpec.methodology,
+    factIds: [],
+    evidenceIds: [],
+    status: forecastOut.forecast.status === "ready" ? "unavailable" : "invalid",
+    diagnostics: forecastOut.forecast.status === "ready" ? [] : [{ code: "FORECAST_BLOCKED", severity: "error", message: "Reverse valuation is blocked by forecast status." }],
+    blockers: forecastOut.forecast.status === "ready" ? ["No AI reverse-valuation plan is available without a transport."] : ["Forecast is blocked."],
+    publicationBlocked: true,
+  };
+  if (aiUsed && forecastOut.forecast.status === "ready" && valuation?.status === "ready") {
+    try {
+      reversePlan = await buildReverseValuationPlan(transport!, {
+        pack: factPack,
+        understanding,
         forecastSpec,
-        valuationSpec,
-        ({ model, factPack: fp }) => ({ forecast: executeForecast({ model, factPack: fp }).forecast }),
-        (spec, fc, fp) => executeValuation(spec, fc, fp)
-      );
-      reverse = solveRequiredValue(chosen, price, solver);
-    } else {
-      // Non-CAGR variables: report the implied-requirement framing without
-      // fabricating a solve path outside the deterministic engines.
-      reverse = {
-        variable: chosen.variable,
-        requiredValue: NaN,
-        interpretation: `${chosen.why} (Quantitative solve for '${chosen.variable}' beyond the revenue-CAGR solver is reported qualitatively in this run.)`,
+        valuation,
+        architecture: forecastArchitecture.id,
+      });
+    } catch (error) {
+      reversePlan = {
+        ...reversePlan,
+        status: "unavailable",
+        blockers: [`AI reverse plan unavailable: ${error instanceof Error ? error.message : String(error)}`],
+        publicationBlocked: true,
       };
-      if (!isFinite(reverse.requiredValue)) reverse = null;
     }
   }
+  reversePlan = validateReverseValuationPlan(reversePlan, {
+    pack: factPack,
+    understanding,
+    forecastSpec,
+    valuation,
+    architecture: forecastArchitecture.id,
+  });
+  let reverseResult: ReverseValuationResult;
+  if (forecastOut.forecast.status !== "ready") {
+    reverseResult = {
+      id: stableId("REV", [reversePlan.id, "forecast-blocked"]),
+      variable: reversePlan.variable,
+      status: "blocked",
+      interpretation: "Reverse valuation is unavailable because the canonical forecast is blocked.",
+      plan: reversePlan,
+      targetPrice: price,
+      diagnostics: reversePlan.diagnostics ?? [],
+      blockers: ["Forecast is blocked."],
+      publicationBlocked: true,
+    };
+  } else if (reversePlan.status === "viable") {
+    reverseResult = solveReverseValuation({ plan: reversePlan, forecastSpec, factPack, valuationSpec: scenarioValuationSpec, architecture: forecastArchitecture.id, requireEvidence: true, canonicalForecast: forecastOut.forecast }, price);
+  } else {
+    reverseResult = {
+      id: stableId("REV", [reversePlan.id, "unavailable"]),
+      variable: reversePlan.variable,
+      status: "unavailable",
+      interpretation: reversePlan.blockers?.join(" ") ?? "Reverse valuation is unavailable.",
+      plan: reversePlan,
+      targetPrice: price,
+      diagnostics: reversePlan.diagnostics ?? [],
+      blockers: reversePlan.blockers ?? ["Reverse valuation is unavailable."],
+      publicationBlocked: true,
+    };
+  }
+  const reverse: ResearchReport["reverseValuation"] = reverseResult.status === "ready" && typeof reverseResult.requiredValue === "number" && isFinite(reverseResult.requiredValue)
+    ? { variable: reverseResult.variable, requiredValue: reverseResult.requiredValue as number, interpretation: reverseResult.interpretation }
+    : null;
 
   // 8b. Enhance discovery with model outputs (margin path, valuation, reverse gap)
   // Deterministic merge — keeps AI enrichment, adds post-valuation evidence.
@@ -742,6 +977,10 @@ export async function runAiFirstResearch(
     for (const item of evidenceMap.items.slice(0, 12)) {
       analystBrief.evidenceLines.push(`EVIDENCE [${item.direction}/T${item.tier}/c${item.confidence.toFixed(2)}]: ${item.claim} — ${item.evidence.slice(0, 140)} ${item.factIds.join(" ")}`);
     }
+    analystBrief.evidenceLines.push(`RETRIEVAL STATUS: ${retrieval.status}; provider=${retrieval.providerId ?? "unavailable"}; documents=${retrieval.documents.length}; evidence=${retrieval.evidence.length}.`);
+    for (const document of retrieval.documents.slice(0, 10)) {
+      analystBrief.evidenceLines.push(`RETRIEVED DOCUMENT [${document.documentId}]: ${document.title}; source=${document.sourceId}; type=${document.sourceType}; status=${document.status}.`);
+    }
     analystBrief.evidenceLines.push(renderResearchDiscovery(researchDiscovery).slice(0, 6000));
     const discMissing = researchDiscovery.gaps.filter((g) => g.status === "missing");
     for (const g of discMissing.slice(0, 6)) {
@@ -790,9 +1029,42 @@ export async function runAiFirstResearch(
   // 9b. Guarantee non-empty writer sections from discovery seeds (COLPAL fix:
   // no blank catalysts/risks/moat/thesis when evidence seeds exist)
   narrative = applyDiscoverySeeds(narrative, researchDiscovery);
+  const sensitivity = toLegacySensitivityGrid(sensitivityAnalysis);
+  const artifactIds: NonNullable<ResearchReport["artifactIds"]> = {
+    ...(factPack.factPackId ? { factPackId: factPack.factPackId } : {}),
+    modelIds: [modelId],
+    forecastIds: [forecastId],
+    valuationIds: valuationMatrix.methods.flatMap((entry) => entry.id ? [entry.id] : []),
+    scenarioIds: finalScenarios.flatMap((scenario) => scenario.id ? [scenario.id] : []),
+    sensitivityIds: sensitivityAnalysis.runs.flatMap((run) => [run.id]),
+    monteCarloIds: monteCarlo.id ? [monteCarlo.id] : [],
+    reverseIds: [reverseResult.id],
+    retrievalIds: [retrieval.resultHash],
+    documentIds: retrieval.documents.map((document) => document.documentId),
+    evidenceIds: evidenceRegistry.items.map((item) => item.id),
+  };
+  narrative = linkNarrativeContracts(narrative, researchDiscovery, artifactIds, forecastOut.forecast, valuationMatrix.primaryMethod ?? valuationSpec.methodology);
 
-  // 10. Sensitivity (deterministic grid around the executed valuation)
-  const sensitivity = buildSensitivity(valuationSpec, forecastOut.forecast, factPack);
+  // 10b. Institutional research analytics — deterministic, built from the fact
+  // pack, the canonical evidence registry and the already-retrieved documents.
+  // No additional live source fetch happens here: an absent provider yields an
+  // explicit unavailable status rather than a fabricated peer or promise.
+  emit("research-analytics", "Building peer, history, earnings-quality and capital-allocation artifacts");
+  const analytics = await buildResearchAnalytics({
+    factPack,
+    understanding,
+    retrieval,
+    evidenceRegistry,
+    researchDiscovery,
+    factPackVerified: verifyFactPack(factPack),
+    forecastSpec,
+    forecast: forecastOut.forecast,
+    valuation,
+    retrievalStatus: retrieval.status,
+    lineageTraceable: true,
+    ...(opts.peerUniverse !== undefined ? { peerUniverse: opts.peerUniverse } : {}),
+    ...(opts.peerProvider !== undefined ? { peerProvider: opts.peerProvider } : {}),
+  });
 
   // 11. Assemble (pre-review) for quality gates
   const historicalAnalysis = buildHistoricalAnalysis(factPack);
@@ -808,7 +1080,9 @@ export async function runAiFirstResearch(
     forecast: forecastOut.forecast,
     valuationSpec,
     valuation,
+    valuationMatrix,
     scenarios: finalScenarios,
+    scenarioValidation: scenarioExecution.validation,
     thesis: narrative.thesis,
     risks: narrative.risks,
     catalysts: narrative.catalysts,
@@ -821,9 +1095,14 @@ export async function runAiFirstResearch(
     capitalAllocation: aiUsed
       ? "AI capital-allocation assessment embedded in narrative; dedicated schedule pending."
       : "Capital allocation unavailable in mechanical preview.",
-    financialQuality: `Forecast identities: ${forecastOut.identityChecks.filter((c) => c.pass).length}/${forecastOut.identityChecks.length} checks pass (${forecastOut.plugs.join("; ") || "no plugs"}).`,
+    financialQuality: `Forecast status: ${forecastOut.forecast.status ?? "blocked"}; identities: ${forecastOut.identityChecks.filter((check) => check.pass).length}/${forecastOut.identityChecks.length} critical checks pass (${forecastOut.plugs.join("; ") || "no plugs"}); blockers: ${forecastOut.blockers.join("; ") || "none"}.`,
     sensitivity,
+    sensitivityAnalysis,
+    monteCarlo,
     reverseValuation: reverse,
+    reverseValuationResult: reverseResult,
+    reverseValuationPlan: reversePlan,
+    artifactIds,
     conclusion: aiUsed
       ? `${understanding.companyName} (${t}): ${valuation.methodology} fair value ${valuation.fairValuePerShare !== undefined ? valuation.fairValuePerShare.toFixed(2) : "N/A"} vs current ${price ?? "N/A"} (${upside} upside). See thesis/risks/scenarios for the full AI case.`
       : `Mechanical preview for ${t}: ${valuation.methodology} fair value ${valuation.fairValuePerShare !== undefined ? valuation.fairValuePerShare.toFixed(2) : "N/A"} (${upside}). Supply an AI key for company-specific research.`,
@@ -835,6 +1114,12 @@ export async function runAiFirstResearch(
     evidenceMap,
     researchDiscovery,
     researchPlan,
+    peerDiscovery: analytics.peerDiscovery,
+    normalizedHistory: analytics.normalizedHistory,
+    earningsQuality: analytics.earningsQuality,
+    capitalAllocationLedger: analytics.capitalAllocation,
+    managementCredibility: analytics.managementCredibility,
+    guidanceReconciliation: analytics.guidanceReconciliation,
   });
 
   // 12. Quality review (deterministic gates) + adjudication
@@ -845,17 +1130,132 @@ export async function runAiFirstResearch(
     review.perReviewer,
     preReport
   );
+  const forecastReviewFindings: ReviewFinding[] = forecastOut.forecast.status === "ready" ? [] : [{
+    reviewer: "Forecast architecture gate",
+    severity: "blocker",
+    component: "forecast",
+    finding: `Forecast is not publication-ready: ${forecastOut.forecast.blockers?.join("; ") || "critical identity checks did not pass"}`,
+    recommendation: "Resolve model validation and integrated statement identity blockers before publication.",
+  }];
   const report: ResearchReport = {
     ...preReport,
-    reviews: review.allFindings.map((f) => ({ ...f })),
-    reviewPassed: review.passed,
+    reviews: [...review.allFindings.map((finding) => ({ ...finding })), ...forecastReviewFindings],
+    reviewPassed: review.passed && forecastOut.forecast.status === "ready",
     regenerationLog: [
       ...preReport.regenerationLog,
       `review score ${review.overallScore}; candidates: ${adjudicated.regenerate.join(", ") || "none"}`,
+      `forecast status ${forecastOut.forecast.status ?? "blocked"}`,
     ],
   };
+  report.retrieval = retrieval;
+  report.evidenceRegistry = evidenceRegistry;
+  let lineage: ResearchLineageGraph;
+  try {
+    lineage = buildCanonicalResearchLineage({
+      subjectId: t,
+      factPack,
+      sourceDocuments: retrieval.documents,
+      retrieval,
+      evidenceRegistry,
+      forecastSpec: forecastSpec as unknown as Record<string, unknown>,
+      valuationSpec: valuationSpec as unknown as Record<string, unknown>,
+      executedForecast: forecastOut.forecast as unknown as Record<string, unknown>,
+      valuationMatrix: valuationMatrix as unknown as Record<string, unknown>,
+      report,
+      researchPlan,
+      extraBlockers: retrieval.diagnostics,
+    });
+  } catch (error) {
+    lineage = buildResearchLineageGraph({ subjectId: t, nodes: [], edges: [] });
+  }
+  report.lineage = lineage;
+  const lineageValidation = validateResearchLineageGraph(lineage);
+  if (retrieval.status === "unavailable" || retrieval.status === "failed") {
+    report.reviews.push({ reviewer: "Research retrieval gate", severity: "blocker", component: "retrieval", finding: `Retrieval is ${retrieval.status}.`, recommendation: "Configure an allowlisted retrieval provider and resolve failed tasks before publication." });
+    report.reviewPassed = false;
+  }
+  if (!lineageValidation.materialClaimsTraceable) {
+    report.reviews.push({ reviewer: "Research lineage gate", severity: "blocker", component: "lineage", finding: lineageValidation.blockers.join("; ") || "Material claim lineage is incomplete.", recommendation: "Provide source-to-claim paths or explicit reviewed blockers for every material claim." });
+    report.reviewPassed = false;
+  }
 
-  emit("done", `Review ${review.passed ? "passed" : "flagged"} (${review.overallScore}/100)`);
+  emit("confidence", "Decomposing confidence across data, model, assumption, forecast and valuation");
+  const confidenceDecomposition = decomposeResearchConfidence({
+    subjectId: t,
+    generatedAt: analytics.generatedAt,
+    report,
+    assumptionCount: forecastSpec.assumptions.length,
+    factPackVerified: verifyFactPack(factPack),
+    currencyBlocked: false,
+    retrievalStatus: retrieval.status,
+    lineageTraceable: lineageValidation.materialClaimsTraceable,
+    peerDiscovery: analytics.peerDiscovery,
+    history: analytics.normalizedHistory,
+    earningsQuality: analytics.earningsQuality,
+    capitalAllocation: analytics.capitalAllocation,
+    managementCredibility: analytics.managementCredibility,
+    guidanceReconciliation: analytics.guidanceReconciliation,
+    evidenceIds: evidenceRegistry.items.map((item) => item.id),
+  });
+  report.confidenceDecomposition = confidenceDecomposition;
+  for (const note of analytics.diagnostics) {
+    report.regenerationLog.push(`research-analytics ${note}`);
+  }
+  const qaGeneratedAt = factPack.retrievalTimestamp || analytics.generatedAt;
+  const reproducibility = buildReproducibilityMetadata({
+    provider: aiUsed ? "ai-transport" : "mechanical",
+    model: aiUsed ? "ai-pipeline-model" : "mechanical-preview",
+    temperature: 0.3,
+    maxTokens: 3000,
+    tokenBudget: 3000,
+    promptVersion: report.promptVersion || AI_FIRST_PROMPT_VERSION,
+    promptText: report.promptVersion || AI_FIRST_PROMPT_VERSION,
+    pipelineVersion: "apex-ai-first-pipeline-v1",
+    factPackVersion: factPack.version,
+    factPack,
+    modelSpec: forecastSpec,
+    assumptions: forecastSpec.assumptions,
+    forecast: report.forecast,
+    valuation: report.valuation,
+    report,
+    generatedAt: qaGeneratedAt,
+  });
+  const reproducibilityHash = hashReproducibilityMetadata(reproducibility);
+  const qaContext = { ...canonicalQaContextForReport(report, factPack), retrievalStatus: retrieval.status, retrievalTimestamp: factPack.retrievalTimestamp, now: qaGeneratedAt, generatedAt: qaGeneratedAt };
+  const initialCanonicalQa = runCanonicalQa(report, factPack, qaContext, { generatedAt: qaGeneratedAt, reproducibilityHash });
+  const bounded = await runBoundedRegeneration(report, factPack, qaContext, { generatedAt: qaGeneratedAt, maxAttempts: 2, ...(transport ? { transport } : {}) });
+  const mergedAttempts = [...initialCanonicalQa.attempts, ...bounded.attempts];
+  const canonicalQa = bounded.attempts.length > 0 ? runCanonicalQa(bounded.report, factPack, qaContext, { generatedAt: qaGeneratedAt, attempts: mergedAttempts, reproducibilityHash }) : { ...initialCanonicalQa, attempts: mergedAttempts };
+  const regeneratedStages: string[] = [...bounded.regeneratedStages];
+  if (bounded.attempts.some((a) => a.status === "fixed")) {
+    const fixedReport = bounded.report as unknown as ResearchReport;
+    if (fixedReport.forecast) report.forecast = fixedReport.forecast;
+    if (fixedReport.valuation) report.valuation = fixedReport.valuation;
+    if (fixedReport.scenarios) report.scenarios = fixedReport.scenarios;
+    report.regenerationLog.push(`canonical-qa regeneration: ${regeneratedStages.join(",") || "none"}`);
+  }
+  report.canonicalQa = canonicalQa;
+  report.qaDecision = canonicalQa.decision;
+  report.reproducibility = reproducibility;
+  report.regenerationAttempts = mergedAttempts;
+  const auditPackage = buildMachineAuditPackage({
+    report,
+    evidenceRegistry,
+    model: forecastSpec,
+    forecast: report.forecast,
+    valuation: report.valuation,
+    assumptions: forecastSpec.assumptions,
+    qa: canonicalQa,
+    researchPlan,
+    lineage,
+    reproducibility,
+    generatedAt: qaGeneratedAt,
+  });
+  report.auditPackage = auditPackage;
+  report.auditPackageHash = auditPackage.packageHash;
+  const stageInputHash = hashStageInput({ ticker: t, factPackHash: factPack.contentHash ?? t, modelId, forecastId });
+  globalStageCache.set({ stage: "ai-first-report", inputHash: stageInputHash, pipelineVersion: "apex-ai-first-pipeline-v1", modelVersion: modelId, promptVersion: report.promptVersion, dataVersion: factPack.contentHash ?? t }, { reportHash: auditPackage.reportHash, qaDecision: canonicalQa.decision }, { factPackHash: factPack.contentHash ?? t }, qaGeneratedAt);
+  emit("done", `Review ${report.reviewPassed ? "passed" : "flagged"} (${review.overallScore}/100)`);
   return {
     report,
     factPack,
@@ -865,25 +1265,50 @@ export async function runAiFirstResearch(
     regenerationCandidates: adjudicated.regenerate,
     researchPlan,
     aiUsed,
+    modelValidation,
+    forecastStatus: forecastOut.forecast.status,
+    valuationMatrix,
+    scenarioValidation: scenarioExecution.validation,
+    sensitivityAnalysis,
+    monteCarlo,
+    reverseValuationPlan: reversePlan,
+    reverseValuationResult: reverseResult,
+    retrieval,
+    evidenceRegistry,
+    lineage,
+    artifactIds,
+    researchAnalytics: analytics,
+    confidenceDecomposition,
+    canonicalQa,
+    reproducibility,
+    auditPackage,
+    regeneratedStages,
   };
 }
 
-function mechanicalScenarios(spec: ForecastSpecification): ScenarioSpecification[] {
-  const g = spec.driverPaths["revenue"]?.[0] ?? 0.08;
-  return (["bear", "base", "bull"] as const).map((name) => ({
-    name,
-    changedVariables: [
-      {
-        variable: "revenue",
-        baseValue: g,
-        scenarioValue: name === "bear" ? g - 0.03 : name === "bull" ? g + 0.03 : g,
-        rationale:
-          "Mechanical ±3pp revenue-growth delta (AI scenario generation unavailable).",
-      },
-    ],
-    targetPrice: undefined as number | undefined,
-    targetProvenance: "forecast" as const,
-  }));
+function mechanicalScenarios(spec: ForecastSpecification, pack?: FactPack): ScenarioSpecification[] {
+  const revenueKey = Object.keys(spec.driverPaths).find((key) => key.toLowerCase() === "revenue" && spec.driverPaths[key].length === spec.horizonYears);
+  const path = revenueKey ? [...spec.driverPaths[revenueKey]] : [];
+  const baseValue = path[0] ?? 0;
+  const probabilities = { bear: 0.25, base: 0.5, bull: 0.25 } as const;
+  return (["bear", "base", "bull"] as const).map((name) => {
+    const delta = name === "bear" ? -0.03 : name === "bull" ? 0.03 : 0;
+    const changedVariables = revenueKey ? [{
+      variable: revenueKey,
+      baseValue,
+      scenarioValue: baseValue + delta,
+      path: path.map((value) => value + delta),
+      rationale: "Mechanical revenue-growth scenario; deterministic execution still validates every result.",
+    }] : [];
+    return {
+      name,
+      changedVariables,
+      probability: probabilities[name],
+      targetPrice: undefined,
+      targetProvenance: "forecast" as const,
+      id: stableId("SCEN", [pack?.ticker ?? "mechanical", spec.modelId, name, changedVariables.map((change) => [change.variable, change.path])]),
+    };
+  });
 }
 
 function mechanicalNarrative(
@@ -931,43 +1356,85 @@ function mechanicalNarrative(
   };
 }
 
-function buildSensitivity(
-  spec: ValuationSpecification,
+function linkNarrativeContracts<T extends { catalysts: Catalyst[]; risks: Risk[] }>(
+  narrative: T,
+  discovery: ResearchDiscoveryPack,
+  artifactIds: NonNullable<ResearchReport["artifactIds"]>,
   forecast: ResearchReport["forecast"],
-  pack: FactPack
-): Array<Record<string, number | string>> {
-  const baseKe = spec.discountRate ?? 0.1;
-  const baseG = spec.terminalAssumptions?.growth ?? 0.04;
-  const out: Array<Record<string, number | string>> = [];
-  for (const dKe of [-0.02, 0, 0.02]) {
-    for (const dG of [-0.01, 0, 0.01]) {
-      const trial: ValuationSpecification = {
-        ...spec,
-        discountRate: baseKe + dKe,
-        terminalAssumptions: spec.terminalAssumptions
-          ? { ...spec.terminalAssumptions, growth: baseG + dG }
-          : { growth: baseG + dG, rationale: "sensitivity grid" },
-      };
-      try {
-        const r = executeValuation(trial, forecast, pack);
-        out.push({
-          discountRate: Math.round((baseKe + dKe) * 1000) / 10,
-          terminalGrowth: Math.round((baseG + dG) * 1000) / 10,
-          fairValue:
-            r.fairValuePerShare !== undefined
-              ? Math.round(r.fairValuePerShare * 100) / 100
-              : "N/A",
-        });
-      } catch {
-        out.push({
-          discountRate: baseKe + dKe,
-          terminalGrowth: baseG + dG,
-          fairValue: "N/A",
-        });
-      }
-    }
-  }
-  return out;
+  methodId: string,
+): T {
+  const validFactIds = new Set<string>([
+    ...discovery.evidenceItems.flatMap((item) => item.factIds),
+    ...discovery.catalystSeeds.flatMap((seed) => seed.factIds),
+    ...discovery.riskSeeds.flatMap((seed) => seed.factIds),
+  ].filter((id): id is string => typeof id === "string"));
+  const lineFor = (variable: string): { statement: "incomeStatement" | "balanceSheet" | "cashFlow"; line: string } => {
+    const text = variable.toLowerCase();
+    const statement = /cash|capex|workingcapital|cfo|depreciation|dividend/.test(text)
+      ? "cashFlow"
+      : /equity|debt|asset|liabil|book/.test(text)
+        ? "balanceSheet"
+        : "incomeStatement";
+    return { statement, line: variable || (statement === "cashFlow" ? "cfo" : statement === "balanceSheet" ? "totalEquity" : "revenue") };
+  };
+  const baseTrace = {
+    modelIds: [...artifactIds.modelIds],
+    scenarioIds: [...artifactIds.scenarioIds],
+    sensitivityIds: [...artifactIds.sensitivityIds],
+    valuationIds: [...artifactIds.valuationIds],
+  };
+  const catalysts = narrative.catalysts.map((catalyst, index) => {
+    const variable = String(catalyst.financialVariable ?? "revenue");
+    const impact = lineFor(variable);
+    const matchingSeed = discovery.catalystSeeds.find((seed) => seed.catalyst === catalyst.catalyst || seed.catalyst.includes(String(catalyst.catalyst).slice(0, 20)));
+    const factIds = [...new Set(matchingSeed?.factIds ?? [])].filter((id) => validFactIds.has(id));
+    return {
+      ...catalyst,
+      id: String(catalyst.id ?? stableId("CAT", [artifactIds.modelIds, index, catalyst.catalyst])),
+      traceability: { factIds, ...baseTrace },
+      financialImpactContract: {
+        ...impact,
+        direction: catalyst.direction ?? "mixed",
+        unit: forecast.incomeStatement[0]?.values?.[variable] !== undefined ? "currency" : "ratio_or_count",
+        scenarioIds: [...artifactIds.scenarioIds],
+        description: catalyst.forecastImpact,
+      },
+      valuationImpactContract: {
+        methodId,
+        metric: "fair_value_per_share",
+        direction: catalyst.direction ?? "mixed",
+        sensitivityIds: [...artifactIds.sensitivityIds],
+        scenarioIds: [...artifactIds.scenarioIds],
+        description: catalyst.valuationImpact,
+      },
+    };
+  });
+  const risks = narrative.risks.map((risk, index) => {
+    const impact = lineFor(String(risk.affectedKpi ?? "revenue"));
+    const matchingSeed = discovery.riskSeeds.find((seed) => seed.risk === risk.risk || seed.risk.includes(String(risk.risk).slice(0, 20)));
+    const factIds = [...new Set(matchingSeed?.factIds ?? [])].filter((id) => validFactIds.has(id));
+    return {
+      ...risk,
+      id: String(risk.id ?? stableId("RISK", [artifactIds.modelIds, index, risk.risk])),
+      traceability: { factIds, ...baseTrace },
+      financialImpactContract: {
+        ...impact,
+        direction: "negative",
+        unit: "currency_or_ratio",
+        scenarioIds: [...artifactIds.scenarioIds],
+        description: risk.financialConsequence,
+      },
+      valuationImpactContract: {
+        methodId,
+        metric: "fair_value_per_share",
+        direction: "negative",
+        sensitivityIds: [...artifactIds.sensitivityIds],
+        scenarioIds: [...artifactIds.scenarioIds],
+        description: risk.valuationConsequence,
+      },
+    };
+  });
+  return { ...narrative, catalysts, risks } as T;
 }
 
 export default { runAiFirstResearch, makeProviderTransport };

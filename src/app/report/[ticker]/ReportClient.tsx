@@ -1,3151 +1,440 @@
 "use client";
-import React, { useEffect, useState, useCallback, useRef, useMemo } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import ProgressTracker from "@/components/ProgressTracker";
-import type { ReportData, GenerationState, AgentCheckpoint } from "@/types/report";
-import { stmtNum, isInsuranceStatement, isReitStatement, isAssetLightStatement, getStatementArchitecture } from "@/types/report";
-import { createAssumptionsLedger } from "@/lib/assumptions-ledger";
-import { emptyAIAnalysis } from "@/lib/openrouter";
-import { canonicalValuation } from "@/lib/canonical";
-import { buildMasterReportFacts } from "@/lib/report-facts";
-import { classifySector } from "@/lib/sectors";
-import { sanitizeAIText, sanitizeSectorBleed } from "@/lib/ai/sanitizer";
-import { capPillarsToRating, harmonizeMoatSources } from "@/lib/moat";
-import { buildEventPriceMovements } from "@/lib/event-price-engine";
 import ApiKeyModal, { loadSavedAiConfig, loadServerModelOverride } from "@/components/ApiKeyModal";
 import { SUPPORTED_PROVIDERS, type CustomKeyConfig } from "@/lib/ai-providers";
-import { enrichAIAnalysisFromResearchReport } from "@/lib/ai-first/enrich-report";
-import { checkForecastCompatibility } from "@/lib/ai-first/forecast-compatibility";
-import { finalizeReport } from "@/lib/report-finalization";
-import { buildResearchMemorySnapshot, loadResearchMemory, storeResearchMemory } from "@/lib/research-ledger";
-import { projectReportArtifactV1 } from "@/lib/report-artifact";
-import { useResearchRunPersistence } from "@/lib/research-runs/client";
-import { sourceQualityScore } from "@/lib/evidence-registry";
-import type { ResearchPlan } from "@/lib/ai-first/research-planner";
-import {
-  getReportBlueprint,
-  selectableReportTypes,
-  resolveReportOutline,
-  type ReportTypeId,
-  type ResearchDepth,
-} from "@/lib/report-types";
-import {
-  buildResearchTasks,
-  derivePlanProgressTasks,
-  runCommitteeReview,
-  runRedTeam,
-  type CommitteeDecision,
-  type RedTeamResult,
-  type ResearchTaskPlan,
-} from "@/lib/ai-orchestration";
-import styles from "./report.module.css";
-
-const INITIAL_AGENT_CHECKPOINTS: AgentCheckpoint[] = [
-  { id: "strategist", name: "Lead Equity Strategist", role: "Investment Thesis, Scenarios & Target Price", status: "pending" },
-  { id: "news", name: "Real-Time News & Intelligence", role: "Market Catalysts & Breaking Developments", status: "pending" },
-  { id: "moat", name: "Economic Moat & Strategy", role: "Porter's Five Forces & Defensibility", status: "pending" },
-  { id: "forensic", name: "Forensic Financial Analyst", role: "5-Stage DuPont ROE & Financial Quality", status: "pending" },
-  { id: "credit", name: "Credit Solvency Specialist", role: "Debt Health & Solvency Analysis", status: "pending" },
-  { id: "governance", name: "Governance & Capital Allocation", role: "Board Stewardship & Reinvestment", status: "pending" },
-  { id: "verifier", name: "Council Quality & Audit Verifier", role: "Anti-Hallucination, Factual Integrity & Mistake Audit", status: "pending" },
-];
-
-const INITIAL_SUPERVISOR_CHECKPOINTS: AgentCheckpoint[] = [
-  { id: "identify", name: "AI Supervisor — Company Identification", role: "Business model · revenue engine · archetype", status: "pending" },
-  { id: "audit-ratios", name: "AI Supervisor — Ratio Audit", role: "Trust / ignore map per company type", status: "pending" },
-  { id: "audit-dcf", name: "AI Supervisor — DCF Audit", role: "Growth · margin · WACC bounds check", status: "pending" },
-];
-
+import { adaptCanonicalResearchPackage } from "@/lib/research-package/adapter";
+import { exportGateForReport } from "@/lib/research-runs/client";
+import type { CanonicalResearchPackage, ResearchRunEvent } from "@/lib/research-package/types";
+import { getReportBlueprint, selectableReportTypes, type ReportTypeId, type ResearchDepth } from "@/lib/report-types";
 import PDFDownloadButton from "./PDFDownloadButton";
-import ValuationWhatIf from "@/components/ValuationWhatIf";
 import WatchlistButton from "@/components/WatchlistButton";
-import ResearchHistoryPanel from "@/components/ResearchHistoryPanel";
-
+import type { AgentCheckpoint, GenerationState, ReportData } from "@/types/report";
+import styles from "./report.module.css";
 interface Props {
   ticker: string;
-  /** Phase 9: validated report type from ?type= (server-side, fail-closed). */
   initialReportType?: ReportTypeId;
-  /** Phase 9: validated research depth from ?depth=. */
   initialDepth?: ResearchDepth;
 }
-
-type TabKey = "overview" | "council" | "dcf" | "financials" | "dupont" | "peers" | "risks" | "outline";
-
-export default function ReportClient({
-  ticker,
-  initialReportType = "institutional_equity_v1",
-  initialDepth = "concise",
-}: Props) {
+type ViewTab = "overview" | "forecast" | "valuation" | "quality" | "plan" | "identity" | "charts" | "audit" | "runs";
+const CHECKPOINTS: AgentCheckpoint[] = [
+  { id: "source", name: "Canonical source context", role: "Quote, timeseries, currency and share basis", status: "pending" },
+  { id: "understanding", name: "Company understanding", role: "Economic architecture and research questions", status: "pending" },
+  { id: "model", name: "Model specification", role: "Validated forecast model", status: "pending" },
+  { id: "forecast", name: "Executed forecast", role: "Deterministic statement execution", status: "pending" },
+  { id: "valuation", name: "Valuation matrix", role: "Canonical method execution", status: "pending" },
+  { id: "scenarios", name: "Scenarios and uncertainty", role: "Bear, base, bull, sensitivity and Monte Carlo", status: "pending" },
+  { id: "review", name: "Quality and publication gate", role: "Canonical integrity and evidence review", status: "pending" },
+];
+function cloneCheckpoints(): AgentCheckpoint[] {
+  return CHECKPOINTS.map((checkpoint) => ({ ...checkpoint }));
+}
+function stageIndex(stage: string | undefined): number {
+  const value = (stage ?? "").toLowerCase();
+  if (value.includes("source") || value.includes("fact")) return 0;
+  if (value.includes("understand")) return 1;
+  if (value.includes("model")) return 2;
+  if (value.includes("forecast")) return 3;
+  if (value.includes("valuation")) return 4;
+  if (value.includes("scenario") || value.includes("sensitivity") || value.includes("monte") || value.includes("reverse")) return 5;
+  if (value.includes("review") || value.includes("quality") || value.includes("done")) return 6;
+  return 0;
+}
+function displayNumber(value: unknown, digits = 2): string {
+  return typeof value === "number" && Number.isFinite(value) ? value.toLocaleString(undefined, { maximumFractionDigits: digits }) : "Unavailable";
+}
+function displayState(value: unknown): string {
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  return "Unavailable";
+}
+function eventFromChunk(value: string): ResearchRunEvent | null {
+  const dataLine = value.split("\n").find((line) => line.startsWith("data:"));
+  if (!dataLine) return null;
+  try {
+    const parsed = JSON.parse(dataLine.slice(5).trim()) as ResearchRunEvent;
+    return parsed && typeof parsed.type === "string" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+function readExtra(report: ReportData | null, key: string): unknown {
+  if (!report) return null;
+  return (report as unknown as Record<string, unknown>)[key] ?? null;
+}
+export default function ReportClient({ ticker, initialReportType = "institutional_equity_v1", initialDepth = "concise" }: Props) {
   const router = useRouter();
+  const [reportTypeId, setReportTypeId] = useState<ReportTypeId>(initialReportType);
+  const [depth, setDepth] = useState<ResearchDepth>(initialDepth);
   const [state, setState] = useState<GenerationState>({
     step: "idle",
     progress: 0,
-    message: "Initialising...",
-    agentCheckpoints: INITIAL_AGENT_CHECKPOINTS,
-    supervisorCheckpoints: INITIAL_SUPERVISOR_CHECKPOINTS,
+    message: "Initialising canonical research…",
+    agentCheckpoints: cloneCheckpoints(),
   });
   const [reportData, setReportData] = useState<ReportData | null>(null);
-  const { status: researchRunPersistenceStatus, persist: persistResearchRun } = useResearchRunPersistence();
-  const [activeTab, setActiveTab] = useState<TabKey>("overview");
-  const [selectedAgentFilter, setSelectedAgentFilter] = useState<string>("all");
-  // Phase 9: selectors — never in generateReport deps (changing them
-  // re-composes the outline, it never restarts the generation pipeline).
-  const [reportTypeId, setReportTypeId] = useState<ReportTypeId>(initialReportType);
-  const [depth, setDepth] = useState<ResearchDepth>(initialDepth);
-  const selectorRef = useRef<{ type: ReportTypeId; depth: ResearchDepth }>({
-    type: initialReportType,
-    depth: initialDepth,
-  });
-  const composedForRef = useRef<{ type: ReportTypeId; depth: ResearchDepth } | null>(null);
-  selectorRef.current = { type: reportTypeId, depth };
-  // Phase B: live research task plan (per-report author/checker graph) +
-  // deterministic red-team / committee results that feed the progress view.
-  const [taskPlan, setTaskPlan] = useState<ResearchTaskPlan | null>(null);
-  const [redTeamResult, setRedTeamResult] = useState<RedTeamResult | null>(null);
-  const [committeeDecision, setCommitteeDecision] = useState<CommitteeDecision | null>(null);
-
+  const [canonicalPackage, setCanonicalPackage] = useState<CanonicalResearchPackage | null>(null);
   const [customKeyConfig, setCustomKeyConfig] = useState<CustomKeyConfig | null>(null);
+  const [configReady, setConfigReady] = useState(false);
   const [isApiKeyModalOpen, setIsApiKeyModalOpen] = useState(false);
-  const [isRateLimitTriggered, setIsRateLimitTriggered] = useState(false);
-  const [rateLimitInfo, setRateLimitInfo] = useState<{ provider?: string; message?: string; kind?: string; paused?: boolean; completed?: number; total?: number; nextAgent?: string } | null>(null);
-  // Checkpoint stash: finished agents' raw results accumulate here during the
-  // run. Any interruption (pause, throttle, network drop) resumes from these
-  // instead of restarting all 7 agents from zero.
-  const resumeRef = useRef<{ ticker: string; partial: Record<string, unknown> } | null>(null);
-  // Cache company data so resume skips the /api/company fetch (which now includes AI DCF calls)
-  const companyDataRef = useRef<any>(null);
-  // Restore persisted checkpoint from localStorage on mount
-  useEffect(() => {
-    try {
-      const key = `apex_checkpoint_${ticker}`;
-      const stored = localStorage.getItem(key);
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        if (parsed && parsed.ticker === ticker && parsed.partial && typeof parsed.partial === "object") {
-          resumeRef.current = parsed;
-          console.log(`[resume] Restored ${Object.keys(parsed.partial).length} banked agent(s) from localStorage for ${ticker}`);
-        }
-      }
-    } catch {}
-  }, [ticker]);
-  const stashCheckpoint = (agentId: string, result: unknown) => {
-    if (result === null || result === undefined) return;
-    const prev = resumeRef.current?.ticker === ticker ? resumeRef.current.partial : {};
-    resumeRef.current = { ticker, partial: { ...prev, [agentId]: result } };
-    // Persist to localStorage so checkpoints survive page reload
-    try {
-      localStorage.setItem(`apex_checkpoint_${ticker}`, JSON.stringify(resumeRef.current));
-    } catch {}
-  };
-  // Pending resume-after-cooldown timer (cleared on unmount so a stray
-  // re-run never fires another 8-request burst against the user's key).
-  const resumeTimer = useRef<number | null>(null);
-  useEffect(() => {
-    return () => {
-      if (resumeTimer.current !== null) {
-        window.clearTimeout(resumeTimer.current);
-        resumeTimer.current = null;
-      }
-    };
-  }, []);
-
+  const [isPaused, setIsPaused] = useState(false);
+  const [rateLimitInfo, setRateLimitInfo] = useState<{ provider?: string; message?: string; kind?: string } | null>(null);
+  const [activeTab, setActiveTab] = useState<ViewTab>("overview");
+  const configRef = useRef<CustomKeyConfig | null>(null);
+  const resumeRef = useRef<Record<string, unknown> | null>(null);
+  const requestRef = useRef<AbortController | null>(null);
   useEffect(() => {
     const saved = loadSavedAiConfig();
-    if (saved) {
-      setCustomKeyConfig(saved);
-    }
-  }, []);
-
-  const generateReport = useCallback(async () => {
+    configRef.current = saved;
+    setCustomKeyConfig(saved);
+    setConfigReady(true);
     try {
-      // Check if we're resuming from a checkpoint (banked agents exist)
-      const isResuming = resumeRef.current?.ticker === ticker
-        && Object.keys(resumeRef.current.partial || {}).length > 0;
-
-      let companyData: any;
-      if (isResuming && companyDataRef.current) {
-        // Resume: skip /api/company fetch — reuse cached data, go straight to AI analysis
-        companyData = companyDataRef.current;
-        const bankedCount = Object.keys(resumeRef.current!.partial).length;
-        // Pre-check banked agents as complete in the UI
-        const resumedCheckpoints = INITIAL_AGENT_CHECKPOINTS.map(cp => {
-          const agentNames = ["strategist", "news", "moat", "forensic", "credit", "governance", "news_summary"];
-          const idx = agentNames.indexOf(cp.id);
-          if (idx >= 0 && idx < bankedCount) {
-            return { ...cp, status: "complete" as const, progress: 100 };
-          }
-          return { ...cp };
-        });
-        const cachedSup = (companyData as any)?.supervision;
-        setState(s => ({
-          step: "generating_ai",
-          progress: 50,
-          message: `Resuming with ${bankedCount} banked agent(s)...`,
-          agentCheckpoints: resumedCheckpoints,
-          supervisorCheckpoints: cachedSup
-            ? INITIAL_SUPERVISOR_CHECKPOINTS.map((cp) => ({ ...cp, status: "complete" as const, councilAuditNote: String(cachedSup.companyType || "Supervised").slice(0, 120) }))
-            : (s.supervisorCheckpoints || INITIAL_SUPERVISOR_CHECKPOINTS),
-        }));
-      } else {
-        // Fresh run: fetch company data (Step 01 Yahoo + Step 02 supervisor run server-side).
-        // Forward the user's AI key so the Step-02 AI Financial Supervisor can run
-        // company-aware LLM audit instead of heuristic fallback.
-        const savedCfg = customKeyConfig || loadSavedAiConfig();
-        const serverModel = loadServerModelOverride();
-        const companyHeaders: Record<string, string> = {};
-        if (savedCfg?.apiKey) {
-          companyHeaders["x-custom-api-key"] = savedCfg.apiKey;
-          companyHeaders["x-custom-api-provider"] = savedCfg.provider;
-          if (savedCfg.model) companyHeaders["x-custom-api-model"] = savedCfg.model;
-        } else if (serverModel) {
-          companyHeaders["x-custom-api-model"] = serverModel;
-        }
-        setState({
-          step: "fetching_data",
-          progress: 15,
-          message: "Connecting to Yahoo Finance API...",
-          agentCheckpoints: INITIAL_AGENT_CHECKPOINTS,
-          supervisorCheckpoints: INITIAL_SUPERVISOR_CHECKPOINTS.map(cp => ({ ...cp })),
-        });
-        // Animate the supervisor auditing while the server computes ratios + DCF.
-        setState(s => ({
-          ...s,
-          step: "calculating",
-          progress: 32,
-          message: "AI Supervisor identifying company business model...",
-          supervisorCheckpoints: (s.supervisorCheckpoints || INITIAL_SUPERVISOR_CHECKPOINTS).map((cp, i) =>
-            i === 0 ? { ...cp, status: "running" as const } : cp
-          ),
-        }));
-        // Serverless platforms kill slow functions with a 502/503/504 HTML page.
-        // Retry ONCE automatically: the retry almost always lands on a warm
-        // function (cold start + Yahoo session already paid for) and succeeds.
-        // Only platform gateway statuses and network failures retry — app-level
-        // JSON errors (404/400/501) surface immediately.
-        let companyRes: Response | null = null;
-        for (let attempt = 1; attempt <= 2; attempt++) {
-          try {
-            companyRes = await fetch(`/api/company?symbol=${encodeURIComponent(ticker)}`, { headers: companyHeaders });
-            if (companyRes.ok || ![502, 503, 504].includes(companyRes.status) || attempt >= 2) break;
-          } catch (networkErr) {
-            if (attempt >= 2) throw networkErr;
-            companyRes = null;
-          }
-          setState(s => ({
-            ...s,
-            message: `Server function timed out on a cold start — retrying automatically (attempt ${attempt + 1}/2)…`,
-          }));
-          await new Promise(r => setTimeout(r, 2500));
-        }
-        if (!companyRes) throw new Error("Network request failed twice — check connectivity and press Retry Execution.");
-        // Read as text FIRST: when the hosting platform kills the function
-        // (timeout/crash), it returns an HTML/text error page instead of JSON,
-        // and a blind .json() surfaces only "Unexpected token…" confusion.
-        const rawBody = await companyRes.text();
-        let parsed: any = null;
-        try { parsed = JSON.parse(rawBody); } catch { parsed = null; }
-        if (!companyRes.ok || !parsed) {
-          if (parsed && typeof parsed.error === "string" && parsed.error) {
-            throw new Error(parsed.error);
-          }
-          const snippet = rawBody.replace(/\s+/g, " ").trim().slice(0, 160);
-          throw new Error(
-            companyRes.ok
-              ? `Server returned a non-JSON response${snippet ? ` (${snippet})` : ""}. This usually means the hosting function timed out — press Retry Execution.`
-              : `Request failed (HTTP ${companyRes.status})${snippet ? ` — ${snippet}` : ""}. The hosting function may have timed out — press Retry Execution.`
-          );
-        }
-        companyData = parsed;
-        companyDataRef.current = companyData;
+      const raw = localStorage.getItem(`apex_canonical_resume_${ticker}`);
+      if (raw) {
+        resumeRef.current = JSON.parse(raw) as Record<string, unknown>;
+        setIsPaused(true);
       }
-
-      // Phase B: snapshot the selected type/depth at generation start (same
-      // ref semantics as compose-at-end), resolve the blueprint outline, and
-      // build the deterministic Phase 6 task plan. The red-team probes run
-      // for real (pure — no LLM without a transport) over plan + ResearchCase.
-      let taskPlanLocal: ResearchTaskPlan | null = null;
-      let redTeamLocal: RedTeamResult | null = null;
-      setTaskPlan(null);
-      setRedTeamResult(null);
-      setCommitteeDecision(null);
-      try {
-        const genType = selectorRef.current.type;
-        const genDepth = selectorRef.current.depth;
-        const genBlueprint = getReportBlueprint(genType);
-        const researchCase = companyData?.researchCase ?? null;
-        if (genBlueprint && researchCase) {
-          const outline = resolveReportOutline(genBlueprint, {
-            depth: genDepth,
-            researchCaseHasResearch:
-              researchCase.confidence != null ||
-              (researchCase.researchQuestions?.length ?? 0) > 0,
-          });
-          taskPlanLocal = buildResearchTasks({
-            researchCase,
-            sections: outline.sections,
-            reportTypeId: genType,
-            depth: genDepth,
-          });
-          redTeamLocal = await runRedTeam({
-            plan: taskPlanLocal,
-            researchCase,
-            companyName: companyData?.profile?.name ?? null,
-          });
-          setTaskPlan(taskPlanLocal);
-          setRedTeamResult(redTeamLocal);
-        }
-      } catch (e) {
-        console.warn("[report] research task plan skipped:", e);
-        taskPlanLocal = null;
-        redTeamLocal = null;
-      }
-
-      // Canonical ledger FIRST (pure, cheap): AI personas and the deterministic PE
-      // engine harmonize moat pillars/narrative to its moatRating. Reused below —
-      // never recomputed — so gate, narrative, and PDF share one canonical source.
-      const earlyLedger = companyData.researchCase?.assumptionsLedger ?? createAssumptionsLedger({
-        profile: companyData.profile,
-        stockData: companyData.stockData,
-        annualFinancials: companyData.annualFinancials,
-        dcf: companyData.dcf,
-        calibration: companyData.calibration || companyData.dcf?.calibration,
-      });
-
-      // Step 02 — surface the AI Financial Supervisor audit that ran inside
-      // /api/company (company-aware ratios + DCF check). Server already applied
-      // bounded 2nd-pass corrections; here we just narrate the audit outcome so
-      // the "Computing Financial Ratios & DCF Model" row shows WHAT was supervised.
-      const supervision = companyData.supervision || null;
-      const supCompanyType: string = supervision?.companyType || "Company-aware audit";
-      const supSource: string = supervision?.source === "ai-supervisor" ? "AI Supervisor" : "Supervisor (heuristics)";
-      const supAdjustments: number = Array.isArray(supervision?.adjustments) ? supervision.adjustments.length : 0;
-      const supApplied: number = Array.isArray(supervision?.adjustments)
-        ? supervision.adjustments.filter((a: any) => a?.applied).length
-        : 0;
-      const completedSupervisorCheckpoints: AgentCheckpoint[] = INITIAL_SUPERVISOR_CHECKPOINTS.map((cp) => {
-        let note = "";
-        if (cp.id === "identify") note = `${supCompanyType}${supervision?.confidence != null ? ` · conf ${(Number(supervision.confidence) * 100).toFixed(0)}%` : ""}`;
-        if (cp.id === "audit-ratios") {
-          const trust = Array.isArray(supervision?.ratiosToTrust) ? supervision.ratiosToTrust.slice(0, 4).join(", ") : "";
-          const ignore = Array.isArray(supervision?.ratiosToIgnore) ? supervision.ratiosToIgnore.slice(0, 3).join(", ") : "";
-          note = trust ? `Trust: ${trust}${ignore ? ` · Ignore: ${ignore}` : ""}` : "Ratio trust/ignore map applied";
-        }
-        if (cp.id === "audit-dcf") {
-          note = supervision
-            ? `${supervision.dcfLens || "DCF lens"} · ${supApplied}/${supAdjustments} adjustments applied`
-            : "DCF bounds check";
-        }
-        return { ...cp, status: "complete" as const, completedAt: Date.now(), councilAuditNote: note.slice(0, 140) };
-      });
-      setState(s => ({
-        ...s,
-        step: "calculating",
-        progress: 45,
-        message: `${supSource}: ${supCompanyType} — ${supApplied}/${supAdjustments} DCF refinements applied.`,
-        supervisorCheckpoints: completedSupervisorCheckpoints,
-      }));
-      await new Promise(r => setTimeout(r, 900));
-
-      // Step 2: Generate AI analysis via 6 Specialized AI Personas
-      // Preserve the completed supervisor audit so the calculating row stays COMPLETE with notes.
-      let currentCheckpoints = INITIAL_AGENT_CHECKPOINTS.map(cp => ({ ...cp }));
-      setState(s => ({
-        step: "generating_ai",
-        progress: 50,
-        message: "Deploying 6 Specialized AI Analysts to synthesize equity thesis...",
-        agentCheckpoints: currentCheckpoints,
-        supervisorCheckpoints: s.supervisorCheckpoints || completedSupervisorCheckpoints,
-      }));
-
-      let aiAnalysis = null;
-      let aiAnalysisEmpty = false;
-      let rateLimitEncountered = false;
-      let pausedEncountered = false;
-
-      const activeConfig = customKeyConfig || loadSavedAiConfig();
-      const serverModel = loadServerModelOverride();
-      const reqHeaders: Record<string, string> = {
-        "Content-Type": "application/json",
-        "Accept": "text/event-stream, application/json",
-      };
-      if (activeConfig?.apiKey) {
-        reqHeaders["x-custom-api-key"] = activeConfig.apiKey;
-        reqHeaders["x-custom-api-provider"] = activeConfig.provider;
-        if (activeConfig.model) {
-          reqHeaders["x-custom-api-model"] = activeConfig.model;
-        }
-      } else if (serverModel) {
-        reqHeaders["x-custom-api-model"] = serverModel;
-      }
-
-      try {
-        const analyzeRes = await fetch("/api/analyze?stream=true", {
-          method: "POST",
-          headers: reqHeaders,
-          body: JSON.stringify({
-            profile: companyData.profile,
-            stockData: companyData.stockData,
-            annualFinancials: companyData.annualFinancials,
-            dcf: companyData.dcf,
-            news: companyData.news,
-            customKeyConfig: activeConfig,
-            assumptionsLedger: earlyLedger,
-            // Resume-from-checkpoint: banked agents are skipped server-side.
-            // Sent only for this ticker; cleared on full success.
-            resumeFrom: resumeRef.current?.ticker === ticker ? resumeRef.current.partial : undefined,
-          }),
-        });
-
-        if (analyzeRes.status === 429) {
-          rateLimitEncountered = true;
-          let errData: { provider?: string; message?: string } = {};
-          try { errData = await analyzeRes.json(); } catch {}
-          setRateLimitInfo({
-            provider: errData.provider || "AI Provider",
-            message: errData.message || "API rate limit exceeded on default server key. Please add your own API key to continue.",
-          });
-          setIsRateLimitTriggered(true);
-          setIsApiKeyModalOpen(true);
-          setState(s => ({
-            ...s,
-            message: "⚠️ Rate limit reached on server AI key. Please add an API key in settings to continue.",
-          }));
-        }
-
-        const isStream =
-          analyzeRes.ok &&
-          analyzeRes.body &&
-          (analyzeRes.headers.get("content-type") || "").includes("text/event-stream");
-
-        if (isStream && analyzeRes.body) {
-          const reader = analyzeRes.body.getReader();
-          const decoder = new TextDecoder();
-          let buffer = "";
-
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            buffer += decoder.decode(value, { stream: true });
-
-            const parts = buffer.split("\n\n");
-            buffer = parts.pop() || "";
-
-            for (const part of parts) {
-              const line = part.trim();
-              if (line.startsWith("data: ")) {
-                try {
-                  const event = JSON.parse(line.slice(6));
-                  if (event.type === "rate_limit") {
-                    rateLimitEncountered = true;
-                    setRateLimitInfo({
-                      provider: event.provider || "AI Provider",
-                      message: event.message || "Rate limit reached on AI key. Please add your own custom API key to continue.",
-                      kind: event.kind || "rate_limited",
-                    });
-                    setIsRateLimitTriggered(true);
-                    setIsApiKeyModalOpen(true);
-                    setState(s => ({
-                      ...s,
-                      message: event.kind === "invalid_key"
-                        ? "⚠️ API key rejected. Check the key and try again."
-                        : event.kind === "key_exhausted"
-                        ? "⚠️ Key out of credits. Top up or switch provider to resume."
-                        : "⚠️ Rate limit reached on AI key. Cool down, then resume.",
-                    }));
-                  } else if (event.type === "agent_paused") {
-                    // Server-side pause: throttled agent waits and retries by itself.
-                    // Finished agents are banked server-side; nothing is lost.
-                    setState(s => ({
-                      ...s,
-                      message: event.councilAuditNote || `${event.name} paused on rate limit — waiting, then resuming automatically…`,
-                      agentCheckpoints: currentCheckpoints,
-                    }));
-                  } else if (event.type === "rate_paused") {
-                    // Run paused with checkpoint: stash the banked agents and halt.
-                    // Resume sends them back; the server continues with nextAgent.
-                    pausedEncountered = true;
-                    if (event.partial && typeof event.partial === "object") {
-                      resumeRef.current = { ticker, partial: event.partial };
-                      try { localStorage.setItem(`apex_checkpoint_${ticker}`, JSON.stringify(resumeRef.current)); } catch {}
-                    }
-                    const done = event.completed ?? 0;
-                    const tot = event.total ?? 7;
-                    setRateLimitInfo({
-                      provider: event.provider || "AI Provider",
-                      message: event.message || `Paused with ${done}/${tot} agents complete. Resume continues where it stopped.`,
-                      kind: event.kind || "rate_limited",
-                      paused: true,
-                      completed: done,
-                      total: tot,
-                      nextAgent: event.nextAgent,
-                    });
-                    setIsRateLimitTriggered(true);
-                    setIsApiKeyModalOpen(true);
-                    setState(s => ({
-                      ...s,
-                      message: `⏸️ Paused — ${done}/${tot} agents banked. Resume continues from ${event.nextAgent || "where it stopped"}.`,
-                    }));
-                  } else if (event.type === "agent_start") {
-                    currentCheckpoints = currentCheckpoints.map(cp => {
-                      if (cp.id === event.agentId) return { ...cp, status: "running" as const };
-                      if (cp.id === "verifier" && cp.status !== "complete") return { ...cp, status: "running" as const };
-                      return cp;
-                    });
-                    setState(s => ({
-                      ...s,
-                      message: `Active: ${event.name} analyzing...`,
-                      agentCheckpoints: currentCheckpoints,
-                    }));
-                  } else if (event.type === "agent_verifying") {
-                    currentCheckpoints = currentCheckpoints.map(cp => {
-                      if (cp.id === event.agentId) return { ...cp, status: "verifying" as const };
-                      if (cp.id === "verifier" && cp.status !== "complete") return { ...cp, status: "running" as const };
-                      return cp;
-                    });
-                    setState(s => ({
-                      ...s,
-                      message: `Council Audit Desk: Direct verification of ${event.name}...`,
-                      agentCheckpoints: currentCheckpoints,
-                    }));
-                  } else if (event.type === "agent_complete") {
-                    const completed = event.completed;
-                    const total = event.total || currentCheckpoints.length;
-                    // Bank this agent's raw result: any later interruption resumes
-                    // from it instead of re-running the LLM call.
-                    if (event.agentId && event.result !== null && event.result !== undefined) {
-                      stashCheckpoint(event.agentId, event.result);
-                    }
-                    currentCheckpoints = currentCheckpoints.map(cp =>
-                      cp.id === event.agentId
-                        ? {
-                            ...cp,
-                            status: "complete" as const,
-                            completedAt: Date.now(),
-                            durationMs: event.durationMs,
-                            // Per-agent completion is NOT council verification —
-                            // the flag resolves from the final audit outcome below.
-                            verifiedByCouncil: false,
-                            councilAuditNote: event.councilAuditNote || "Agent complete — council audit pending",
-                          }
-                        : cp
-                    );
-                    const newProgress = Math.min(85, 50 + Math.round((completed / total) * 35));
-                    setState(s => ({
-                      ...s,
-                      progress: newProgress,
-                      message: event.councilAuditNote
-                        ? `${event.councilAuditNote}`
-                        : `Agent complete: ${event.name} (${completed}/${total}), council audit pending`,
-                      agentCheckpoints: currentCheckpoints,
-                    }));
-                  } else if (event.type === "council_retry_start") {
-                    currentCheckpoints = currentCheckpoints.map(cp => {
-                      if (cp.id === event.agentId) {
-                        return {
-                          ...cp,
-                          status: "retrying" as const,
-                          retryRound: event.retryRound,
-                          councilAuditNote: event.councilAuditNote || `Council retry round ${event.retryRound}...`,
-                        };
-                      }
-                      return cp;
-                    });
-                    setState(s => ({
-                      ...s,
-                      message: event.councilAuditNote || `Council retry round ${event.retryRound}: re-analyzing flagged agents...`,
-                      agentCheckpoints: currentCheckpoints,
-                    }));
-                  } else if (event.type === "council_retry_complete") {
-                    currentCheckpoints = currentCheckpoints.map(cp => {
-                      if (cp.id === event.agentId) {
-                        return {
-                          ...cp,
-                          status: "complete" as const,
-                          completedAt: Date.now(),
-                          retryRound: event.retryRound,
-                          councilAuditNote: event.councilAuditNote || `Retry round ${event.retryRound} complete`,
-                        };
-                      }
-                      return cp;
-                    });
-                    setState(s => ({
-                      ...s,
-                      message: event.councilAuditNote || `Council retry round ${event.retryRound} complete`,
-                      agentCheckpoints: currentCheckpoints,
-                    }));
-                  } else if (event.type === "done") {
-                    aiAnalysis = event.aiAnalysis;
-                    // Full success: checkpoint fulfilled, clear it.
-                    resumeRef.current = null;
-                    companyDataRef.current = null;
-                    try { localStorage.removeItem(`apex_checkpoint_${ticker}`); } catch {}
-                  }
-                } catch (e) {
-                  console.warn("Error parsing stream chunk:", e);
-                }
-              }
-            }
-          }
-        } else if (analyzeRes.ok) {
-          const aiData = await analyzeRes.json();
-          aiAnalysis = aiData.aiAnalysis;
-          resumeRef.current = null;
-          try { localStorage.removeItem(`apex_checkpoint_${ticker}`); } catch {}
-        } else {
-          // Non-streaming failure: RATE_PAUSED keeps banked agents for resume;
-          // RATE_LIMIT_EXCEEDED opens the key modal instead of silent fallback.
-          try {
-            const errData = await analyzeRes.json();
-            if (errData?.error === "RATE_PAUSED") {
-              pausedEncountered = true;
-              if (errData.partial && typeof errData.partial === "object") {
-                resumeRef.current = { ticker, partial: errData.partial };
-                try { localStorage.setItem(`apex_checkpoint_${ticker}`, JSON.stringify(resumeRef.current)); } catch {}
-              }
-              const done = errData.completed ?? 0;
-              const tot = errData.total ?? 7;
-              setRateLimitInfo({
-                provider: errData.provider || "AI Provider",
-                message: errData.message || `Paused with ${done}/${tot} agents complete.`,
-                kind: errData.kind || "rate_limited",
-                paused: true,
-                completed: done,
-                total: tot,
-                nextAgent: errData.nextAgent,
-              });
-              setIsRateLimitTriggered(true);
-              setIsApiKeyModalOpen(true);
-              setState(s => ({
-                ...s,
-                message: `⏸️ Paused — ${done}/${tot} agents banked. Resume continues from ${errData.nextAgent || "where it stopped"}.`,
-              }));
-            } else if (errData?.error === "RATE_LIMIT_EXCEEDED") {
-              rateLimitEncountered = true;
-              setRateLimitInfo({
-                provider: errData.provider || "AI Provider",
-                message: errData.message || "Rate limit reached on AI key.",
-                kind: errData.kind || "rate_limited",
-              });
-              setIsRateLimitTriggered(true);
-              setIsApiKeyModalOpen(true);
-            }
-          } catch {}
-        }
-      } catch (e) {
-        console.warn("AI analysis network issue, utilizing fallback template:", e);
-      }
-
-      // Halt on throttle/pause: finished agents are banked in resumeRef, and the
-      // modal's Save & Resume continues from them instead of starting over.
-      if (rateLimitEncountered) {
-        console.warn("AI generation halted due to rate limit.");
-        return;
-      }
-      if (pausedEncountered) {
-        console.warn("AI generation paused — checkpoint banked, awaiting resume.");
-        return;
-      }
-
-      // If AI call failed or returned null, publish no words at all: every
-      // analytical word in the report is council-written, so an unavailable
-      // council means empty narrative sections (renderers omit them) rather
-      // than deterministic template prose. Numbers, ratings and tables still
-      // render from the engines; QA flags the missing AI coverage.
-      if (!aiAnalysis) {
-        console.warn("AI analysis unconfigured or failed — proceeding with empty AI narrative (no template prose substituted)");
-        aiAnalysis = emptyAIAnalysis();
-        aiAnalysisEmpty = true;
-
-        const fallbackCouncilNotes: Record<string, string> = {
-          strategist: `AI unavailable — thesis section omitted, no prose substituted.`,
-          news: "AI unavailable — news section omitted, no prose substituted.",
-          moat: `AI unavailable — moat section omitted, no prose substituted.`,
-          forensic: "AI unavailable — forensics section omitted, no prose substituted.",
-          credit: "AI unavailable — credit section omitted, no prose substituted.",
-          governance: "AI unavailable — governance section omitted, no prose substituted.",
-          verifier: "Council audit did not run — AI narrative unavailable.",
-        };
-
-        // Transition checkpoints sequentially with direct Council verification step
-        for (let i = 0; i < currentCheckpoints.length; i++) {
-          if (currentCheckpoints[i].status !== "complete") {
-            // Step A: Mark as verifying with Council directly
-            currentCheckpoints[i] = { ...currentCheckpoints[i], status: "verifying" };
-            // Ensure Council verifier agent is visibly auditing live
-            currentCheckpoints = currentCheckpoints.map(cp =>
-              cp.id === "verifier" && cp.status !== "complete" ? { ...cp, status: "running" as const } : cp
-            );
-            setState(s => ({
-              ...s,
-              message: `Council Audit Desk: Direct verification of ${currentCheckpoints[i].name}...`,
-              agentCheckpoints: [...currentCheckpoints],
-            }));
-            await new Promise(r => setTimeout(r, 140));
-
-            // Step B: Mark agent complete (council audit itself runs server-side;
-            // completion here means the fallback step finished, not that it verified).
-            const note = fallbackCouncilNotes[currentCheckpoints[i].id] || "Agent complete — council audit pending";
-            currentCheckpoints[i] = {
-              ...currentCheckpoints[i],
-              status: "complete",
-              verifiedByCouncil: false,
-              councilAuditNote: note,
-            };
-            const completed = i + 1;
-            const total = currentCheckpoints.length;
-            setState(s => ({
-              ...s,
-              progress: Math.min(85, 50 + Math.round((completed / total) * 35)),
-              message: note,
-              agentCheckpoints: [...currentCheckpoints],
-            }));
-            await new Promise(r => setTimeout(r, 180));
-          }
-        }
-      } else {
-        // All streamed agents finished — the verified flag resolves ONLY from
-        // the final council audit outcome, never from pipeline completion.
-        const councilOk = (aiAnalysis as any)?.councilVerification?.status === "VERIFIED";
-        currentCheckpoints = currentCheckpoints.map(cp => ({
-          ...cp,
-          status: "complete" as const,
-          verifiedByCouncil: councilOk,
-        }));
-        setState(s => ({
-          ...s,
-          progress: 85,
-          message: "All 7 AI Analysts finished — see council verification audit for outcome.",
-          agentCheckpoints: currentCheckpoints,
-        }));
-      }
-
-      // Phase B: fold the real council audit + red-team findings into the
-      // committee gate (deterministic — display decision, never blocks run).
-      try {
-        const councilAudit = (aiAnalysis as any)?.councilVerification ?? null;
-        setCommitteeDecision(
-          runCommitteeReview({
-            councilAudit,
-            redTeamFindings: redTeamLocal?.findings ?? [],
-          })
-        );
-      } catch (e) {
-        console.warn("[report] committee fold skipped:", e);
-      }
-
-      await new Promise(r => setTimeout(r, 200));
-
-      // Step 3: Assemble report data
-      setState(s => ({ ...s, step: "building_pdf", progress: 95, message: aiAnalysisEmpty ? "AI narrative unavailable — finalizing modeled data..." : "Finalizing research dossier..." }));
-
-      const dcf = companyData.dcf;
-      // Reuse the canonical early ledger (created before AI synthesis) — Step 3
-      // must not recompute it or gate/narrative/PDF sources diverge.
-      const assumptionsLedger = earlyLedger;
-
-      const masterReportFacts = companyData.masterReportFacts || buildMasterReportFacts({
-        stockData: companyData.stockData,
-        profile: companyData.profile,
-        annualFinancials: companyData.annualFinancials,
-        ratiosByYear: companyData.ratiosByYear,
-        dupontByYear: companyData.dupontByYear,
-        dcf,
-        peers: companyData.peers || [],
-        ledger: assumptionsLedger,
-      });
-
-      // Strict financial invariant: synchronize masterReportFacts valuation & recommendation with assumptionsLedger
-      if (assumptionsLedger) {
-        masterReportFacts.valuation.fairValue.value = assumptionsLedger.targetPrice;
-        masterReportFacts.recommendation.rating = assumptionsLedger.rating;
-        masterReportFacts.market.currentPrice.value = assumptionsLedger.currentPrice;
-        if (assumptionsLedger.currentPrice > 0) {
-          masterReportFacts.valuation.upside.value = (assumptionsLedger.targetPrice - assumptionsLedger.currentPrice) / assumptionsLedger.currentPrice;
-        }
-      }
-
-      // Universal sector semantic bleed scrubbing — rewrites are LOGGED, not
-      // silent: SANITIZE-01 fails reports that needed material rewriting.
-      const bleedRewriteLog: string[] = [];
-      const bleedCleanedAiAnalysis = sanitizeSectorBleed(
-        aiAnalysis,
-        companyData.profile.sector,
-        companyData.profile.industry,
-        companyData.profile.description,
-        bleedRewriteLog
-      );
-
-      // Sanitize AI narrative fields against MasterReportFacts and lock canonical moat.
-      // Pillar/narrative harmonization (MOAT-01/02): the LLM path emits its own
-      // durabilities and superlatives, so cap/scrub them to the canonical rating
-      // HERE — before QA runs — or export stays blocked on stale contradictions.
-      const canonicalMoatRating = masterReportFacts.moat.rating;
-      const rawPillars = (bleedCleanedAiAnalysis as any).moatPillars;
-      const rawSources = (bleedCleanedAiAnalysis as any).moatSources;
-      const sanitizedAiAnalysis = {
-        ...bleedCleanedAiAnalysis,
-        moatPillars: Array.isArray(rawPillars) && rawPillars.length > 0
-          ? capPillarsToRating(rawPillars, canonicalMoatRating)
-          : rawPillars,
-        moatSources: rawSources && typeof rawSources === "object"
-          ? harmonizeMoatSources(rawSources, canonicalMoatRating)
-          : rawSources,
-        investmentThesis: bleedCleanedAiAnalysis.investmentThesis
-          ? sanitizeAIText(bleedCleanedAiAnalysis.investmentThesis, masterReportFacts).sanitizedText
-          : bleedCleanedAiAnalysis.investmentThesis,
-        companyOverview: bleedCleanedAiAnalysis.companyOverview
-          ? sanitizeAIText(bleedCleanedAiAnalysis.companyOverview, masterReportFacts).sanitizedText
-          : bleedCleanedAiAnalysis.companyOverview,
-        competitiveMoat: bleedCleanedAiAnalysis.competitiveMoat || "",
-      };
-
-      const report: ReportData = {
-        generatedAt: new Date().toISOString(),
-        profile: companyData.profile,
-        stockData: companyData.stockData,
-        annualFinancials: companyData.annualFinancials,
-        quarterlyFinancials: companyData.quarterlyFinancials,
-        ratiosByYear: companyData.ratiosByYear,
-        dupontByYear: companyData.dupontByYear,
-        dcf,
-        supervision: companyData.supervision ?? null,
-        selectedModel: companyData.selectedModel ?? null,
-        valuationLens: companyData.valuationLens ?? companyData.supervision?.dcfLens ?? null,
-        valuationAudit: companyData.valuationAudit ?? null,
-        baselineReconciliation: companyData.baselineReconciliation ?? null,
-        dataConfidence: companyData.dataConfidence ?? null,
-        researchCase: companyData.researchCase ?? null,
-        evidenceRegistry: companyData.evidenceRegistry ?? companyData.researchCase?.evidence ?? null,
-        sourceQuality: companyData.evidenceRegistry ? sourceQualityScore(companyData.evidenceRegistry) : null,
-        researchGraph: companyData.researchGraph ?? null,
-        researchPlan: null,
-        canonicalForecast: companyData.canonicalForecast ?? (dcf as any)?.canonicalForecast ?? null,
-        canonicalFacts: companyData.canonicalFacts ?? null,
-        canonicalReport: companyData.canonicalReport ?? null,
-        reconciliation: companyData.reconciliation ?? null,
-        identityIssues: companyData.identityIssues ?? [],
-        dependencyState: companyData.dependencyState ?? null,
-        independentReport: companyData.independentReport ?? null,
-        supervisorDiagnostics: companyData.supervisorDiagnostics ?? [],
-        shareholding: companyData.shareholding,
-        peers: companyData.peers || [],
-        aiAnalysis: sanitizedAiAnalysis,
-        news: companyData.news || [],
-        eventPriceMovements: companyData.eventPriceMovements || buildEventPriceMovements(companyData.news, companyData.stockData, companyData.profile),
-        recommendation: assumptionsLedger.rating,
-        targetPrice: assumptionsLedger.targetPrice,
-        cmp: assumptionsLedger.currentPrice,
-        analystName: "Apex Research Team",
-        assumptionsLedger,
-        masterReportFacts,
-        calibration: companyData.calibration || dcf.calibration,
-        sanitizerReport: { rewrittenTerms: bleedRewriteLog },
-        // Advisory only: Screener.in vs Yahoo elaboration (Yahoo stays priced).
-        screenerCrosscheck: companyData.screenerCrosscheck ?? null,
-        // Advisory only: EDGAR + Stooq vs Yahoo (non-India tickers).
-        globalCrosscheck: (companyData as any).globalCrosscheck ?? null,
-        researchReport: null,
-      };
-
-      // Phase 4 cutover: enrich with AI-first content-intelligence (economic
-      // engine, pre-forecast debates, evidence map). Failure keeps legacy AI.
-      try {
-        setState(s => ({
-          ...s,
-          step: "generating_ai",
-          progress: 97,
-          message: "Running content-intelligence research pipeline (economic engine → debates → evidence)…",
-        }));
-        const aiFirstHeaders: Record<string, string> = {
-          "Content-Type": "application/json",
-        };
-        if (activeConfig?.apiKey) {
-          aiFirstHeaders["x-custom-api-key"] = activeConfig.apiKey;
-          aiFirstHeaders["x-custom-api-provider"] = activeConfig.provider;
-          if (activeConfig.model) aiFirstHeaders["x-custom-api-model"] = activeConfig.model;
-        }
-        const aiFirstRes = await fetch("/api/analyze-ai-first", {
-          method: "POST",
-          headers: aiFirstHeaders,
-          body: JSON.stringify({
-            ticker,
-            customKeyConfig: activeConfig || undefined,
-          }),
-        });
-        if (aiFirstRes.ok) {
-          const aiFirstJson = await aiFirstRes.json();
-          const research = aiFirstJson?.report;
-          const researchPlan = (aiFirstJson?.researchPlan ?? research?.researchPlan) as ResearchPlan | undefined;
-          const aiUsed = aiFirstJson?.aiUsed !== false;
-          if (researchPlan && report.researchCase) {
-            report.researchPlan = researchPlan;
-            const existingUnknowns = report.researchCase.unknowns;
-            const knownUnknowns = new Set(existingUnknowns.map((item) => item.statement.toLowerCase()));
-            const plannerUnknowns = (researchPlan.unknowns ?? [])
-              .filter((statement) => statement && !knownUnknowns.has(statement.toLowerCase()))
-              .map((statement, index) => ({
-                id: `PLAN-${String(index + 1).padStart(3, "0")}`,
-                statement,
-                source: "planner" as const,
-              }));
-            report.researchCase = {
-              ...report.researchCase,
-              researchQuestions: researchPlan.questions?.length ? researchPlan.questions : report.researchCase.researchQuestions,
-              unknowns: [...existingUnknowns, ...plannerUnknowns],
-            };
-          }
-          const compatibility = research
-            ? checkForecastCompatibility({
-                profileTicker: ticker,
-                canonicalForecast: report.canonicalForecast,
-                assumptionsLedger: report.assumptionsLedger,
-                canonicalValuation: report.dcf,
-                researchReport: research,
-              })
-            : null;
-          report.forecastCompatibility = compatibility ?? null;
-          if (research?.thesis && aiUsed && compatibility?.qualitativeCompatible) {
-            report.researchReport = research;
-            const enriched = enrichAIAnalysisFromResearchReport(report.aiAnalysis, research);
-            // Post-enrichment guard pass: ai-first strings arrive AFTER the
-            // generation-time scrub above, so they must pass the same
-            // sector-bleed and canonical-moat gates or rich content would be
-            // the only unsanitized text in the report.
-            const postBleedLog: string[] = [];
-            const postCleaned = sanitizeSectorBleed(
-              enriched,
-              companyData.profile.sector,
-              companyData.profile.industry,
-              companyData.profile.description,
-              postBleedLog
-            );
-            if (postBleedLog.length > 0) {
-              bleedRewriteLog.push(...postBleedLog);
-            }
-            const postPillars = (postCleaned as any).moatPillars;
-            const postSources = (postCleaned as any).moatSources;
-            report.aiAnalysis = {
-              ...postCleaned,
-              moatPillars: Array.isArray(postPillars) && postPillars.length > 0
-                ? capPillarsToRating(postPillars, canonicalMoatRating)
-                : postPillars,
-              moatSources: postSources && typeof postSources === "object"
-                ? harmonizeMoatSources(postSources, canonicalMoatRating)
-                : postSources,
-            };
-          } else if (research?.thesis) {
-            console.warn("[report] ai-first report not attached:", compatibility?.issues.join("; ") ?? "mechanical preview");
-          }
-        }
-      } catch (e) {
-        console.warn("[report] content-intelligence enrichment skipped:", e);
-      }
-
-      const finalization = finalizeReport(report, {
-        reportTypeId: selectorRef.current.type,
-        depth: selectorRef.current.depth,
-        graphBuiltAt: report.generatedAt,
-      });
-      Object.assign(report, finalization.report);
-      try {
-        const memoryKey = `apex_research_memory_${ticker}`;
-        const previousMemory = loadResearchMemory(memoryKey);
-        const memory = buildResearchMemorySnapshot(report, previousMemory);
-        report.researchMemory = memory;
-        storeResearchMemory(memoryKey, memory);
-        report.reportArtifact = projectReportArtifactV1({
-          ticker: report.profile.ticker,
-          companyName: report.profile.name,
-          asOf: report.researchCase?.dataCutoff ?? report.generatedAt,
-          currency: report.profile.currency,
-          valuation: {
-            method: report.researchReport?.valuation.methodology ?? report.selectedModel ?? "UNKNOWN",
-            wacc: report.assumptionsLedger?.wacc ?? report.dcf?.assumptions?.wacc ?? null,
-            terminalGrowthRate: report.assumptionsLedger?.terminalGrowthRate ?? report.dcf?.assumptions?.terminalGrowthRate ?? null,
-            enterpriseValue: report.dcf?.enterpriseValue ?? null,
-            equityValue: report.dcf?.equityValue ?? null,
-            fairValuePerShare: report.assumptionsLedger?.fairValue ?? report.targetPrice,
-          },
-          recommendation: {
-            rating: report.assumptionsLedger?.rating ?? report.recommendation,
-            currentPrice: report.assumptionsLedger?.currentPrice ?? report.cmp,
-            targetPrice: report.assumptionsLedger?.targetPrice ?? report.targetPrice,
-            upsideDownside: report.assumptionsLedger?.upsideDownsidePct ?? null,
-          },
-        });
-      } catch (e) {
-        console.warn("[report] research memory skipped:", e);
-      }
-      composedForRef.current = { ...selectorRef.current };
-      if (finalization.compositionError) console.warn("[report] composeReport skipped:", finalization.compositionError);
-      if (finalization.graphError) console.warn("[report] research graph skipped:", finalization.graphError);
-      void persistResearchRun(report, {
-        reportType: selectorRef.current.type,
-        depth: selectorRef.current.depth,
-        status: finalization.compositionError || finalization.graphError ? "partial" : "complete",
-      });
-
-      setReportData(report);
-      setState({ step: "done", progress: 100, message: "Research model active" });
-    } catch (err) {
-      setState({
-        step: "error",
-        progress: 0,
-        message: "",
-        error: err instanceof Error ? err.message : "An unexpected error occurred",
-      });
+    } catch {
+      resumeRef.current = null;
     }
-  }, [ticker, customKeyConfig, persistResearchRun]);
-
-  // Phase B: derive display rows from the task plan + live agent checkpoints.
-  // Pure mapping — re-renders whenever agents advance or red-team/committee
-  // results land. Falls back to the fixed council roster when no plan exists
-  // (e.g. plan build skipped, old checkpoint, or generation errored early).
-  const planTasks = useMemo(() => {
-    if (!taskPlan) return undefined;
-    const phase =
-      state.step === "fetching_data" || state.step === "calculating" || state.step === "searching" || state.step === "idle"
-        ? "planning"
-        : state.step === "generating_ai"
-          ? "generating"
-          : state.step === "building_pdf"
-            ? "assembling"
-            : state.step === "done"
-              ? "done"
-              : "planning";
-    return derivePlanProgressTasks(taskPlan, {
-      phase,
-      agentCheckpoints: state.agentCheckpoints,
-      redTeam: redTeamResult,
-      committee: committeeDecision,
+  }, [ticker]);
+  const applyPackage = useCallback((value: CanonicalResearchPackage) => {
+    const adapted = adaptCanonicalResearchPackage(value, { reportTypeId, depth });
+    setCanonicalPackage(value);
+    setReportData(adapted);
+    setState({
+      step: "done",
+      progress: 100,
+      message: value.quality.canPublish ? "Canonical package ready for publication." : "Diagnostic preview ready; publication is blocked.",
+      agentCheckpoints: cloneCheckpoints().map((checkpoint) => ({ ...checkpoint, status: "complete" })),
     });
-  }, [taskPlan, state.step, state.agentCheckpoints, redTeamResult, committeeDecision]);
-
-  useEffect(() => {
-    generateReport();
-  }, [generateReport]);
-  // Phase 9: selector change after generation → re-compose in place
-  // (deterministic, no LLM, no pipeline re-run). Skips when the current
-  // composed report already matches the selection.
-  useEffect(() => {
-    if (!reportData) return;
-    const cur = composedForRef.current;
-    if (cur && cur.type === reportTypeId && cur.depth === depth) return;
+    setIsPaused(false);
+    resumeRef.current = null;
     try {
-      const finalization = finalizeReport(reportData, {
-        reportTypeId,
-        depth,
-        graphBuiltAt: reportData.generatedAt,
-      });
-      composedForRef.current = { type: reportTypeId, depth };
-      setReportData(finalization.report);
-      void persistResearchRun(finalization.report, {
-        reportType: reportTypeId,
-        depth,
-        status: finalization.compositionError || finalization.graphError ? "partial" : "complete",
-      });
-      if (finalization.compositionError) console.warn("[report] recomposeReport skipped:", finalization.compositionError);
-      if (finalization.graphError) console.warn("[report] research graph skipped:", finalization.graphError);
-    } catch (e) {
-      console.warn("[report] report finalization skipped:", e);
+      localStorage.removeItem(`apex_canonical_resume_${ticker}`);
+    } catch {
+      return;
     }
-  }, [reportData, reportTypeId, depth, persistResearchRun]);
-
-  const handleKeyModalSave = (newConfig: CustomKeyConfig | null, shouldRetry = false) => {
-    setCustomKeyConfig(newConfig);
-    setIsRateLimitTriggered(false);
-    if (shouldRetry || isRateLimitTriggered) {
-      // Cool down before resuming: free-tier keys throttle per-minute bursts, and
-      // an instant full re-run re-triggers the same 429 window that just failed.
-      // 30s pacing + server-side serial gate keeps the resume inside quota.
-      setState(s => ({
-        ...s,
-        step: "generating_ai",
-        message: "Cooling down 30s to respect provider rate limits before resuming…",
-      }));
-      if (resumeTimer.current !== null) window.clearTimeout(resumeTimer.current);
-      resumeTimer.current = window.setTimeout(() => {
-        resumeTimer.current = null;
-        generateReport();
-      }, 30000);
+  }, [depth, reportTypeId, ticker]);
+  const updateEvent = useCallback((event: ResearchRunEvent, checkpoints: AgentCheckpoint[]): AgentCheckpoint[] => {
+    const index = stageIndex(event.stage);
+    let next = checkpoints.map((checkpoint, checkpointIndex) => {
+      if (checkpointIndex < index) return { ...checkpoint, status: "complete" as const };
+      if (checkpointIndex === index && (event.type === "stage_started" || event.type === "checkpoint")) return { ...checkpoint, status: "running" as const };
+      if (checkpointIndex === index && event.type === "stage_completed") return { ...checkpoint, status: "complete" as const };
+      return checkpoint;
+    });
+    if (event.type === "run_started") {
+      setState((current) => ({ ...current, step: "fetching_data", progress: 8, message: "Fetching one canonical source context…" }));
+    } else if (event.type === "stage_started" || event.type === "checkpoint") {
+      setState((current) => ({ ...current, step: "generating_ai", progress: Math.min(92, 15 + index * 11), message: event.data?.detail ? String(event.data.detail) : `Running ${event.stage ?? "research"}…`, agentCheckpoints: next }));
+    } else if (event.type === "stage_completed") {
+      setState((current) => ({ ...current, progress: Math.min(94, 20 + index * 12), message: `${event.stage ?? "Stage"} completed.`, agentCheckpoints: next }));
+    } else if (event.type === "quality_update") {
+      setState((current) => ({ ...current, step: "building_pdf", progress: 96, message: "Canonical quality gate evaluated.", agentCheckpoints: next }));
+    } else if (event.type === "paused") {
+      const resume = event.data?.resumeFrom;
+      if (resume && typeof resume === "object") {
+        resumeRef.current = resume as Record<string, unknown>;
+        try { localStorage.setItem(`apex_canonical_resume_${ticker}`, JSON.stringify(resumeRef.current)); } catch {}
+      }
+      setIsPaused(true);
+      setIsApiKeyModalOpen(true);
+      setRateLimitInfo({ provider: "AI Provider", message: event.data?.message ? String(event.data.message) : "Research paused; resume from the saved checkpoint." });
+      setState((current) => ({ ...current, step: "generating_ai", message: "Research paused; resume is available." }));
+    } else if (event.type === "failed") {
+      setState({ step: "error", progress: 0, message: "", error: event.error?.message ?? "Research run failed." });
+    } else if (event.type === "completed") {
+      next = cloneCheckpoints().map((checkpoint) => ({ ...checkpoint, status: "complete" as const }));
     }
+    return next;
+  }, [ticker]);
+  const consumeResponse = useCallback(async (response: Response) => {
+    if (response.status === 429) {
+      let body: { message?: string; provider?: string; error?: string } = {};
+      try { body = await response.json(); } catch { body = {}; }
+      setIsPaused(true);
+      setIsApiKeyModalOpen(true);
+      setRateLimitInfo({ provider: body.provider, message: body.message ?? body.error ?? "Research paused." });
+      return;
+    }
+    if (!response.ok) {
+      let message = `Research request failed (${response.status}).`;
+      try {
+        const body = await response.json() as { error?: string };
+        if (body.error) message = body.error;
+      } catch {
+        return;
+      }
+      throw new Error(message);
+    }
+    const contentType = response.headers.get("content-type") ?? "";
+    if (!contentType.includes("text/event-stream") || !response.body) {
+      const body = await response.json() as { package?: CanonicalResearchPackage };
+      if (!body.package) throw new Error("Canonical package missing from response.");
+      applyPackage(body.package);
+      return;
+    }
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let checkpoints = cloneCheckpoints();
+    while (true) {
+      const chunk = await reader.read();
+      buffer += decoder.decode(chunk.value ?? new Uint8Array(), { stream: !chunk.done });
+      const parts = buffer.split(/\r?\n\r?\n/);
+      buffer = parts.pop() ?? "";
+      for (const part of parts) {
+        const event = eventFromChunk(part);
+        if (!event) continue;
+        checkpoints = updateEvent(event, checkpoints);
+        if (event.package) applyPackage(event.package);
+      }
+      if (chunk.done) break;
+    }
+  }, [applyPackage, updateEvent]);
+  const generateReport = useCallback(async (resume = false) => {
+    requestRef.current?.abort();
+    const controller = new AbortController();
+    requestRef.current = controller;
+    setState({ step: "fetching_data", progress: 5, message: "Connecting to the canonical research pipeline…", agentCheckpoints: cloneCheckpoints() });
+    setIsPaused(false);
+    const activeConfig = configRef.current;
+    const serverModel = loadServerModelOverride();
+    const headers: Record<string, string> = { "Content-Type": "application/json", Accept: "text/event-stream, application/json" };
+    if (activeConfig?.apiKey) {
+      headers["x-custom-api-key"] = activeConfig.apiKey;
+      headers["x-custom-api-provider"] = activeConfig.provider;
+      if (activeConfig.model) headers["x-custom-api-model"] = activeConfig.model;
+    } else if (serverModel) {
+      headers["x-custom-api-model"] = serverModel;
+    }
+    try {
+      const response = await fetch("/api/analyze?stream=true", {
+        method: "POST",
+        headers,
+        signal: controller.signal,
+        body: JSON.stringify({
+          ticker,
+          options: {
+            reportTypeId,
+            depth,
+            ...(resume && resumeRef.current ? { resumeFrom: resumeRef.current } : {}),
+          },
+          ...(activeConfig ? { customKeyConfig: activeConfig } : {}),
+        }),
+      });
+      await consumeResponse(response);
+    } catch (error) {
+      if ((error as { name?: string })?.name === "AbortError") return;
+      setState({ step: "error", progress: 0, message: "", error: error instanceof Error ? error.message : "Research request failed." });
+    }
+  }, [consumeResponse, depth, reportTypeId, ticker]);
+  useEffect(() => {
+    if (configReady) void generateReport(false);
+  }, [configReady, generateReport]);
+  useEffect(() => {
+    if (!canonicalPackage) return;
+    setReportData(adaptCanonicalResearchPackage(canonicalPackage, { reportTypeId, depth }));
+  }, [canonicalPackage, depth, reportTypeId]);
+  const handleKeyModalSave = (config: CustomKeyConfig | null, retry = false) => {
+    configRef.current = config;
+    setCustomKeyConfig(config);
+    setIsApiKeyModalOpen(false);
+    if (retry || isPaused) void generateReport(true);
   };
-
+  const exportGate = reportData ? exportGateForReport(reportData) : null;
+  const packageQuality = canonicalPackage?.quality;
+  const identityPublication = readExtra(reportData, "identityPublication") as { canPublish?: boolean; publishAllowed?: boolean; label?: string; reasons?: string[] } | null;
+  const identityQaPublication = readExtra(reportData, "identityQaPublication") as { canPublish?: boolean; publishAllowed?: boolean; label?: string; reasons?: string[] } | null;
+  const originalityReport = readExtra(reportData, "originalityReport") as { status?: string; maximumSimilarity?: number; reasons?: string[] } | null;
+  const originalityBlocking = originalityReport?.status === "collision";
+  const identityBlocking = identityPublication ? identityPublication.canPublish === false : false;
+  const baseBlocked = exportGate ? !exportGate.exportAllowed : packageQuality ? !packageQuality.canPublish : false;
+  const isBlocked = baseBlocked || identityBlocking || originalityBlocking;
+  const exportLabel = isBlocked ? "Diagnostic preview (non-publishable)" : exportGate?.label ?? (packageQuality && !packageQuality.canPublish ? "Diagnostic preview (non-publishable)" : "PDF");
+  const previewPolicy = canonicalPackage?.canonicalQa?.advisoryPreview ?? null;
+  const fairValue = canonicalPackage?.valuationResult.fairValuePerShare;
+  const currentPrice = canonicalPackage?.sourceContext.stockData.currentPrice;
+  const rating = canonicalPackage?.rating ?? "NR";
+  const forecastRows = canonicalPackage?.executedForecast.incomeStatement ?? [];
+  const selectedTitle = getReportBlueprint(reportTypeId)?.title ?? "Institutional Equity Research";
+  const currency = reportData?.profile.currency ?? "USD";
   const isLoading = state.step !== "done" && state.step !== "error";
-
-  // Helpers for financial formatting
-  const cur = reportData?.profile.currency || "USD";
-  const sym = cur === "INR" ? "₹" : cur === "EUR" ? "€" : cur === "GBP" ? "£" : "$";
-
-  const fmtMoney = (n: number) => {
-    if (!isFinite(n) || isNaN(n)) return "—";
-    if (cur === "INR") {
-      if (Math.abs(n) >= 1e7) return `${sym}${(n / 1e7).toLocaleString("en", { maximumFractionDigits: 1 })} Cr`;
-      if (Math.abs(n) >= 1e5) return `${sym}${(n / 1e5).toLocaleString("en", { maximumFractionDigits: 1 })} L`;
-    }
-    if (Math.abs(n) >= 1e12) return `${sym}${(n / 1e12).toFixed(2)}T`;
-    if (Math.abs(n) >= 1e9) return `${sym}${(n / 1e9).toFixed(2)}B`;
-    if (Math.abs(n) >= 1e6) return `${sym}${(n / 1e6).toFixed(1)}M`;
-    return `${sym}${n.toLocaleString("en", { maximumFractionDigits: 0 })}`;
-  };
-
-  const fmtPct = (n: number) => (isFinite(n) && !isNaN(n) ? `${(n * 100).toFixed(1)}%` : "—");
-  const fmtMult = (n: number) => (isFinite(n) && !isNaN(n) && n !== 0 ? `${n.toFixed(1)}x` : "—");
-
+  const formattedPackage = useMemo(() => ({
+    id: canonicalPackage?.packageId ?? "Unavailable",
+    hash: canonicalPackage?.packageHash ?? "Unavailable",
+    cutoff: canonicalPackage?.dataCutoff ?? "Unavailable",
+    runId: canonicalPackage?.researchRunId ?? "Unavailable",
+    auditHash: canonicalPackage?.auditPackageHash ?? "Unavailable",
+    qaDecision: canonicalPackage?.qaDecision ?? canonicalPackage?.canonicalQa?.decision ?? "Unavailable",
+  }), [canonicalPackage]);
+  const planView = readExtra(reportData, "reportPlan") as { planId?: string; planHash?: string; sections?: Array<{ id: string; title: string; order: number; depth: number; priority: number; include: boolean; chartIds: string[]; tableIds: string[] }>; unresolvedBlockers?: string[]; compatibility?: { status: string; capability: string; reasons: string[] }; coverage?: { coverageScore: number; missingEvidence: string[] } } | null;
+  const companyIdentity = readExtra(reportData, "companyIdentity") as { kind?: string; identityId?: string; ticker?: string; fingerprint?: string } | null;
+  const researchIdentity = reportData?.researchIdentity ?? null;
+  const chartSpecs = (readExtra(reportData, "chartSpecs") as Array<{ id: string; title: string; provenance: string; omissionReason: string | null; hash: string }> | null) ?? [];
+  const tableSpecs = (readExtra(reportData, "tableSpecs") as Array<{ id: string; title: string; provenance: string; omissionReason: string | null; hash: string }> | null) ?? [];
+  const presentation = readExtra(reportData, "presentationViewModel") as { viewHash?: string; metrics?: Array<{ key: string; label: string; display: string; state: string; provenance: string }>; disclosures?: string[]; visualLabels?: string[] } | null;
+  const auditPackage = canonicalPackage?.auditPackage ?? null;
+  const runView = canonicalPackage?.run ?? null;
+  const memoryView = canonicalPackage?.researchMemory ?? null;
+  const deltasView = canonicalPackage?.whatChanged ?? null;
+  const acceptedCharts = chartSpecs.filter((spec) => !spec.omissionReason);
+  const omittedCharts = chartSpecs.filter((spec) => spec.omissionReason);
+  const acceptedTables = tableSpecs.filter((spec) => !spec.omissionReason);
   return (
     <div className={styles.page}>
-      {/* ── Top Bar ── */}
       <header className={styles.header}>
         <div className={styles.headerLeft}>
-          <button className={styles.backBtn} onClick={() => router.push("/")}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="14" height="14">
-              <path d="m15 18-6-6 6-6" />
-            </svg>
-            Terminal
-          </button>
-          <div className={styles.breadcrumb}>
-            <span>Equities</span>
-            <span className={styles.breadSep}>/</span>
-            <span>{reportData?.profile.exchange || "Global"}</span>
-            <span className={styles.breadSep}>/</span>
-            <span className={styles.breadTicker}>{ticker}</span>
-          </div>
+          <button className={styles.backBtn} onClick={() => router.push("/")}>Terminal</button>
+          <div className={styles.breadcrumb}><span>Equities</span><span className={styles.breadSep}>/</span><span>{ticker}</span></div>
         </div>
-
         <div className={styles.headerRight}>
-          <button
-            type="button"
-            className={`${styles.keySettingsBtn} ${customKeyConfig?.apiKey ? styles.keySettingsBtnActive : ""}`}
-            onClick={() => {
-              setIsRateLimitTriggered(false);
-              setIsApiKeyModalOpen(true);
-            }}
-            title="Configure AI Model Provider and API Key"
-          >
-            <span
-              className={`${styles.keySettingsDot} ${customKeyConfig?.apiKey ? styles.keySettingsDotActive : ""}`}
-            />
-            <span>
-              {customKeyConfig?.apiKey
-                ? `${SUPPORTED_PROVIDERS[customKeyConfig.provider]?.name || "Custom Key"}`
-                : "AI Key: Default"}
-            </span>
+          <button className={styles.keySettingsBtn} onClick={() => setIsApiKeyModalOpen(true)}>
+            {customKeyConfig?.apiKey ? SUPPORTED_PROVIDERS[customKeyConfig.provider]?.name ?? "Custom key" : "AI key: Default"}
           </button>
-
-          <div
-            className={styles.marketStatus}
-            title={researchRunPersistenceStatus.state === "local-only" ? researchRunPersistenceStatus.message : "Research run persistence status"}
-          >
-            <span className={styles.marketDot} />
-            <span>
-              {researchRunPersistenceStatus.state === "local-only"
-                ? "LOCAL ONLY"
-                : researchRunPersistenceStatus.state === "saved"
-                  ? "RUN SAVED"
-                  : researchRunPersistenceStatus.state === "saving"
-                    ? "SAVING RUN"
-                    : "LIVE FEED"}
-            </span>
-          </div>
+          <WatchlistButton ticker={ticker} reportId={canonicalPackage?.researchRunId} fairValue={fairValue} currentPrice={currentPrice} />
         </div>
       </header>
-
       <main className={styles.content}>
-        {/* ── Loading State ── */}
         {isLoading && (
           <div className={styles.loadingCard}>
             <div className={styles.loadingTop}>
               <div className={styles.loadingSpinner} />
-              <h1 className={styles.loadingTitle}>
-                Analyzing <span style={{ color: "var(--ink)" }}>{ticker}</span>
-              </h1>
-              <p className={styles.loadingDesc}>
-                Retrieving market fundamentals, computing DCF cash flow schedules, and generating institutional research commentary.
-              </p>
+              <h1 className={styles.loadingTitle}>Researching <span>{ticker}</span></h1>
+              <p className={styles.loadingDesc}>One source context, one model execution, one canonical package.</p>
             </div>
-
-            {isRateLimitTriggered && (
-              <div
-                style={{
-                  margin: "1rem auto 1.5rem",
-                  padding: "0.85rem 1rem",
-                  background: "rgba(239, 68, 68, 0.12)",
-                  border: "1px solid rgba(239, 68, 68, 0.35)",
-                  borderRadius: "10px",
-                  textAlign: "center",
-                }}
-              >
-                <div style={{ color: "#FCA5A5", fontSize: "0.85rem", fontWeight: 600, marginBottom: "0.6rem" }}>
-                  ⚠️ Server Rate Limit Reached — Connect your API key to proceed.
-                </div>
-                <div style={{ display: "flex", gap: "0.5rem", justifyContent: "center" }}>
-                  <button
-                    className="btn-primary"
-                    style={{ fontSize: "0.75rem", padding: "0.4rem 0.85rem" }}
-                    onClick={() => setIsApiKeyModalOpen(true)}
-                  >
-                    🔑 Add Custom API Key
-                  </button>
-                  <button
-                    className="btn-secondary"
-                    style={{ fontSize: "0.75rem", padding: "0.4rem 0.85rem" }}
-                    onClick={() => {
-                      setIsRateLimitTriggered(false);
-                      generateReport();
-                    }}
-                  >
-                    ⚡ Use Offline Research Engine
-                  </button>
-                </div>
-              </div>
-            )}
-
-            <ProgressTracker
-              step={state.step as any}
-              message={state.message}
-              progress={state.progress}
-              agentCheckpoints={state.agentCheckpoints}
-              supervisorCheckpoints={state.supervisorCheckpoints}
-              reportContext={`${getReportBlueprint(reportTypeId)?.title ?? "Institutional Equity Research"} · ${depth === "full" ? "Full" : "Concise"} depth`}
-              reportTitle={getReportBlueprint(reportTypeId)?.title ?? "Institutional Equity Research"}
-              planTasks={planTasks}
-            />
+            <ProgressTracker step={state.step} message={state.message} progress={state.progress} agentCheckpoints={state.agentCheckpoints} reportContext={`${selectedTitle} · ${depth}`} reportTitle={selectedTitle} />
+            {isPaused && <button className="btn-primary" onClick={() => void generateReport(true)}>Resume canonical run</button>}
           </div>
         )}
-
-        {/* ── Error State ── */}
         {state.step === "error" && (
           <div className={styles.errorCard}>
-            <h2 className={styles.errorTitle}>Analysis Request Failed</h2>
+            <h2 className={styles.errorTitle}>Research run failed</h2>
             <p className={styles.errorMessage}>{state.error}</p>
-            <div className={styles.errorActions}>
-              <button className="btn-primary" onClick={generateReport}>Retry Execution</button>
-              <button className="btn-secondary" onClick={() => router.push("/")}>Return to Search</button>
+            <button className="btn-primary" onClick={() => void generateReport(false)}>Retry</button>
+          </div>
+        )}
+        {state.step === "done" && reportData && canonicalPackage && (
+          <div className={styles.resultWrapper}>
+            {isBlocked && (
+              <div role="alert" aria-live="polite" style={{ padding: 12, marginBottom: 12, border: "1px solid rgba(245,158,11,.45)", borderRadius: 8, color: "#f59e0b" }}>
+                {exportLabel} — canonical publication is blocked. PDF export remains available as a non-publishable preview.
+              </div>
+            )}
+            <div className={styles.heroCard}>
+              <div className={styles.heroTopRow}>
+                <div className={styles.companyIdentity}>
+                  <div className={styles.identityMeta}><span className={styles.symbolPill}>{ticker}</span><span className={styles.exchangeTag}>{reportData.profile.exchange || "Global"}</span></div>
+                  <h1 className={styles.companyName}>{reportData.profile.name || ticker}</h1>
+                  <div className={styles.industryMeta}>{reportData.profile.sector} · {reportData.profile.industry}</div>
+                </div>
+                <div className={styles.quoteMatrix}>
+                  <div className={styles.quoteMetric}><span className={styles.quoteMetricLabel}>Current price</span><span className={styles.quoteMetricVal}>{displayNumber(currentPrice)} {currency}</span></div>
+                  <div className={styles.quoteMetric}><span className={styles.quoteMetricLabel}>Fair value</span><span className={styles.quoteMetricVal}>{displayNumber(fairValue)} {currency}</span></div>
+                  <div className={styles.quoteMetric}><span className={styles.quoteMetricLabel}>Rating</span><span className={styles.quoteMetricVal}>{rating}</span></div>
+                </div>
+              </div>
+            </div>
+            <div className={styles.exportBanner}>
+              <div className={styles.exportLeft}><div className={styles.exportHeading}>{selectedTitle}</div><div className={styles.exportSub}>Package {formattedPackage.id} · cutoff {formattedPackage.cutoff}</div><div className={styles.exportSub}>Plan {planView?.planHash ? planView.planHash.slice(0, 12) : "Unavailable"} · QA {String(formattedPackage.qaDecision)} · {previewPolicy ? previewPolicy.label : exportLabel}</div></div>
+              <PDFDownloadButton data={reportData} />
+            </div>
+            <div className={styles.selectorBar}>
+              <span className={styles.selectorLabel}>Report type</span>
+              <select aria-label="Report type" className={styles.selectorSelect} value={reportTypeId} onChange={(event) => setReportTypeId(event.target.value as ReportTypeId)}>
+                {selectableReportTypes().map((option) => <option key={option.id} value={option.id}>{option.title}</option>)}
+              </select>
+              <span className={styles.selectorLabel}>Depth</span>
+              <div className={styles.depthToggle} role="group" aria-label="Research depth">
+                {(["concise", "full"] as const).map((value) => <button key={value} aria-pressed={depth === value} className={`${styles.depthBtn} ${depth === value ? styles.depthBtnActive : ""}`} onClick={() => setDepth(value)}>{value}</button>)}
+              </div>
+            </div>
+            <div className={styles.tabBar} role="tablist" aria-label="Canonical report views">
+              {(["overview", "forecast", "valuation", "quality", "plan", "identity", "charts", "audit", "runs"] as const).map((tab) => <button key={tab} role="tab" aria-selected={activeTab === tab} className={`${styles.tabBtn} ${activeTab === tab ? styles.tabBtnActive : ""}`} onClick={() => setActiveTab(tab)}>{tab}</button>)}
+            </div>
+            <div className={styles.tabContent}>
+              {activeTab === "overview" && (
+                <div className={styles.editorialCard}>
+                  <div className={styles.cardSectionHeader}>Canonical research overview</div>
+                  <p className={styles.editorialBody}>{reportData.aiAnalysis?.companyOverview || canonicalPackage.researchReport?.businessModel || "Narrative unavailable."}</p>
+                  <p className={styles.editorialBody}>{canonicalPackage.researchReport?.thesis?.thesis || "No thesis text available."}</p>
+                </div>
+              )}
+              {activeTab === "forecast" && (
+                <div className={styles.editorialCard}>
+                  <div className={styles.cardSectionHeader}>Executed canonical forecast</div>
+                  <div className="fin-table-container"><table className="fin-table"><thead><tr><th>Period</th><th>Revenue</th><th>EBIT</th><th>Net income</th></tr></thead><tbody>{forecastRows.map((row) => <tr key={row.period}><td>{row.period}</td><td>{displayNumber(row.values.revenue)}</td><td>{displayNumber(row.values.ebit ?? row.values.operatingIncome)}</td><td>{displayNumber(row.values.netIncome)}</td></tr>)}</tbody></table></div>
+                </div>
+              )}
+              {activeTab === "valuation" && (
+                <div className={styles.editorialCard}>
+                  <div className={styles.cardSectionHeader}>Canonical valuation</div>
+                  <p className={styles.editorialBody}>Method: {canonicalPackage.valuationResult.methodology || "Unavailable"}</p>
+                  <p className={styles.editorialBody}>Fair value: {displayNumber(fairValue)} {currency}</p>
+                  <p className={styles.editorialBody}>Status: {canonicalPackage.valuationResult.status || "unavailable"}</p>
+                  <pre style={{ whiteSpace: "pre-wrap", fontSize: 12 }}>{JSON.stringify(canonicalPackage.scenarios, null, 2)}</pre>
+                </div>
+              )}
+              {activeTab === "quality" && (
+                <div className={styles.editorialCard}>
+                  <div className={styles.cardSectionHeader}>Quality and integrity</div>
+                  <p className={styles.editorialBody}>Package hash: {formattedPackage.hash}</p>
+                  <p className={styles.editorialBody}>Source snapshot: {canonicalPackage.sourceSnapshotHash}</p>
+                  <p className={styles.editorialBody}>QA decision: {String(formattedPackage.qaDecision)}</p>
+                  <p className={styles.editorialBody}>Preview policy: {previewPolicy ? `${previewPolicy.label} — ${previewPolicy.reason}` : exportLabel}</p>
+                  <ul>{(canonicalPackage.quality.checks ?? []).map((check) => <li key={check.id}>{check.status.toUpperCase()}: {check.message}</li>)}</ul>
+                </div>
+              )}
+              {activeTab === "plan" && (
+                <div className={styles.editorialCard}>
+                  <div className={styles.cardSectionHeader}>Company-specific report plan</div>
+                  <p className={styles.editorialBody}>Plan {planView?.planId ?? "Unavailable"} · hash {planView?.planHash ?? "Unavailable"}</p>
+                  <p className={styles.editorialBody}>Coverage {planView?.coverage ? String(planView.coverage.coverageScore) : "Unavailable"} · compatibility {planView?.compatibility?.status ?? "Unavailable"}</p>
+                  <ul>{(planView?.sections ?? []).map((section) => <li key={section.id}>{section.order}. {section.title} — depth {section.depth} priority {section.priority} {section.include ? "" : "(excluded)"}</li>)}</ul>
+                  <p className={styles.editorialBody}>Unresolved blockers: {(planView?.unresolvedBlockers ?? []).join("; ") || "None"}</p>
+                </div>
+              )}
+              {activeTab === "identity" && (
+                <div className={styles.editorialCard}>
+                  <div className={styles.cardSectionHeader}>Research identity</div>
+                  <p className={styles.editorialBody}>IDENTITY {companyIdentity?.identityId ?? "Unavailable"} · kind {companyIdentity?.kind ?? "Unavailable"}</p>
+                  <p className={styles.editorialBody}>ResearchDNA {researchIdentity?.identityId ?? "Unavailable"} · collision {researchIdentity?.collision.status ?? "Unavailable"}</p>
+                  <p className={styles.editorialBody}>Publication: {identityPublication?.label ?? identityQaPublication?.label ?? exportLabel}</p>
+                  <p className={styles.editorialBody}>Originality: {originalityReport?.status ?? "Unavailable"} · max {displayState(originalityReport?.maximumSimilarity)}</p>
+                </div>
+              )}
+              {activeTab === "charts" && (
+                <div className={styles.editorialCard}>
+                  <div className={styles.cardSectionHeader}>Deterministic charts and tables</div>
+                  <p className={styles.editorialBody}>Accepted charts {acceptedCharts.length} · omitted {omittedCharts.length} · tables {acceptedTables.length}</p>
+                  <ul>{acceptedCharts.map((spec) => <li key={spec.id}>{spec.id} — {spec.title} · {spec.provenance} · {spec.hash.slice(0, 12)}</li>)}</ul>
+                  <ul>{omittedCharts.map((spec) => <li key={spec.id}>{spec.id} omitted — {spec.omissionReason}</li>)}</ul>
+                  <p className={styles.editorialBody}>Presentation {presentation?.viewHash ?? "Unavailable"}</p>
+                  <ul>{(presentation?.disclosures ?? []).map((text, index) => <li key={index}>{text}</li>)}</ul>
+                </div>
+              )}
+              {activeTab === "audit" && (
+                <div className={styles.editorialCard}>
+                  <div className={styles.cardSectionHeader}>Audit package</div>
+                  <p className={styles.editorialBody}>Audit hash: {formattedPackage.auditHash}</p>
+                  <p className={styles.editorialBody}>Package hash: {formattedPackage.hash}</p>
+                  <pre style={{ whiteSpace: "pre-wrap", fontSize: 12 }}>{JSON.stringify(auditPackage?.hashes ?? {}, null, 2)}</pre>
+                </div>
+              )}
+              {activeTab === "runs" && (
+                <div className={styles.editorialCard}>
+                  <div className={styles.cardSectionHeader}>Run, memory and deltas</div>
+                  <p className={styles.editorialBody}>Run {formattedPackage.runId} · status {runView?.status ?? "Unavailable"}</p>
+                  <p className={styles.editorialBody}>Memory {memoryView ? `${memoryView.runId} · ${memoryView.mode}` : "Unavailable"}</p>
+                  <pre style={{ whiteSpace: "pre-wrap", fontSize: 12 }}>{JSON.stringify(deltasView?.changedFields ?? deltasView ?? {}, null, 2)}</pre>
+                </div>
+              )}
             </div>
           </div>
         )}
-
-        {/* ── Main Data Portal ── */}
-        {state.step === "done" && reportData && (() => {
-          const { profile, stockData, annualFinancials, dcf } = reportData;
-          const latest = annualFinancials[annualFinancials.length - 1];
-          const sectorInfo = classifySector(profile.sector, profile.industry, profile.description);
-          const isBankOrNbfc = sectorInfo.isFinancialInstitution;
-          // Statement-architecture routing for sector-native web surfaces (C/D/E get
-          // native labels/rows; A/B render exactly as before).
-          const stmtArch = getStatementArchitecture(latest);
-          const isInsurer = isInsuranceStatement(latest);
-          const isReit = isReitStatement(latest);
-          const isFeeCo = isAssetLightStatement(latest);
-
-          const roeVal = latest.totalEquity > 0
-            ? latest.netIncome / latest.totalEquity
-            : (stockData.returnOnEquity || 0);
-          const roeStr = isFinite(roeVal) && roeVal !== 0 ? `${(roeVal * 100).toFixed(1)}%` : "N/A";
-
-          const deVal = latest.totalEquity > 0
-            ? latest.totalDebt / latest.totalEquity
-            : (stockData.debtToEquity || 0);
-          const deStr = isFinite(deVal) && !isNaN(deVal) ? `${deVal.toFixed(2)}x` : "0.00x";
-
-          const cv = canonicalValuation(reportData);
-          const upsidePct = (cv.upside * 100).toFixed(1);
-          const isBullish = cv.upside >= 0;
-          // Display market cap with price×shares fallback: Yahoo intermittently
-          // omits marketCap on some edge POPs while price/shares arrive intact —
-          // printing raw 0 ("₹0") contradicts the engine's own EV beside it.
-          const displayMarketCap = stockData.marketCap > 0
-            ? stockData.marketCap
-            : cv.cmp * (stockData.sharesOutstanding || (latest as any).sharesOutstanding || 0);
-
-          return (
-            <div className={styles.resultWrapper}>
-              {/* ── Hero Quote Strip ── */}
-              <div className={styles.heroCard}>
-                <div className={styles.heroTopRow}>
-                  <div className={styles.companyIdentity}>
-                    <div className={styles.identityMeta}>
-                      <span className={styles.symbolPill}>{profile.ticker}</span>
-                      <span className={styles.exchangeTag}>{profile.exchange} · {profile.country}</span>
-                    </div>
-                    <h1 className={styles.companyName}>{profile.name}</h1>
-                    <div className={styles.industryMeta}>
-                      {profile.sector} · {profile.industry}
-                    </div>
-                  </div>
-
-                  <div className={styles.quoteMatrix}>
-                    <div className={styles.quoteMetric}>
-                      <span className={styles.quoteMetricLabel}>Market Price</span>
-                      <span className={styles.quoteMetricVal}>
-                        {sym}{cv.cmp.toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </span>
-                    </div>
-
-                    <div className={styles.quoteMetric}>
-                      <span className={styles.quoteMetricLabel}>{cv.rating === "NR" ? (isBankOrNbfc ? "Fair Value (P/B Model, Indicative — NR)" : "DCF Indicative Value (NR)") : (isBankOrNbfc ? "Fair Value (P/B Model)" : "DCF Intrinsic Value")}</span>
-                      <span className={styles.quoteMetricVal}>
-                        {sym}{cv.targetPrice.toFixed(2)}
-                      </span>
-                      <span className={isBullish ? styles.quoteDeltaPositive : styles.quoteDeltaNegative} title={cv.rating === "NR" ? "Model output exceeds institutional confidence bounds (-80% / +150%). Not a rated target — low conviction, do not trade on precision." : undefined}>
-                        {isBullish ? `▲ +${upsidePct}%` : `▼ ${upsidePct}%`}{cv.rating === "NR" ? " · Low conviction" : ""}
-                      </span>
-                    </div>
-
-                    <div className={styles.quoteMetric}>
-                      <span className={styles.quoteMetricLabel}>Verdict</span>
-                      <span className={`badge-solid ${cv.rating === "BUY" ? "badge-buy" : cv.rating === "SELL" ? "badge-sell" : cv.rating === "NR" ? "badge-hold" : "badge-hold"}`} title={cv.rating === "NR" ? (reportData.assumptionsLedger?.ratingRationale || "Not Rated: model output outside confidence bounds.") : undefined}>
-                        {cv.rating === "NR" ? "NR" : cv.rating}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Sub-row with technical multiples */}
-                <div className={styles.heroSubRow}>
-                  <div className={styles.subMetric}>
-                    <span className={styles.subMetricLabel}>Market Cap</span>
-                    <span className={styles.subMetricVal}>{displayMarketCap > 0 ? fmtMoney(displayMarketCap) : "—"}</span>
-                  </div>
-                  <div className={styles.subMetric}>
-                    <span className={styles.subMetricLabel}>{isBankOrNbfc ? "Book Value / Sh" : "Enterprise Value"}</span>
-                    <span className={styles.subMetricVal}>
-                      {isBankOrNbfc
-                        ? `${sym}${((latest.totalEquity || 0) / (stockData.sharesOutstanding || latest.sharesOutstanding || 1)).toFixed(1)}`
-                        : fmtMoney(stockData.enterpriseValue || dcf.enterpriseValue)}
-                    </span>
-                  </div>
-                  <div className={styles.subMetric}>
-                    <span className={styles.subMetricLabel}>Trailing P/E</span>
-                    <span className={styles.subMetricVal}>{stockData.pe > 0 ? fmtMult(stockData.pe) : "N/A"}</span>
-                  </div>
-                  <div className={styles.subMetric}>
-                    <span className={styles.subMetricLabel}>Price / Book</span>
-                    <span className={styles.subMetricVal}>{stockData.pb > 0 ? fmtMult(stockData.pb) : "N/A"}</span>
-                  </div>
-                  <div className={styles.subMetric}>
-                    <span className={styles.subMetricLabel}>Beta (5Y)</span>
-                    <span className={styles.subMetricVal}>{stockData.beta > 0 ? stockData.beta.toFixed(2) : "0.85"}</span>
-                  </div>
-                  <div className={styles.subMetric}>
-                    <span className={styles.subMetricLabel}>52W Range</span>
-                    <span className={styles.subMetricVal}>
-                      {sym}{stockData.week52Low.toFixed(0)} - {sym}{stockData.week52High.toFixed(0)}
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              {/* ── Export Action Strip ── */}
-              <div className={styles.exportBanner}>
-                <div className={styles.exportLeft}>
-                  <div className={styles.exportIconBadge}>📄</div>
-                  <div>
-                    <div className={styles.exportHeading}>
-                      {getReportBlueprint(reportTypeId)?.title ?? "Institutional Equity Research"}
-                    </div>
-                    <div className={styles.exportSub}>
-                      {getReportBlueprint(reportTypeId)?.description ??
-                        "Complete institutional research dossier: DCF forecast, 5-stage DuPont decomposition, event-based price impact, financial statements, and regulatory safe-harbor disclosures."}
-                    </div>
-                  </div>
-                </div>
-                <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-                  <button
-                    type="button"
-                    className={styles.keySettingsBtn}
-                    onClick={() => {
-                      setIsRateLimitTriggered(false);
-                      setIsApiKeyModalOpen(true);
-                    }}
-                    title="Configure AI Model Provider and API Key"
-                    style={{ padding: "8px 12px", fontSize: "12px" }}
-                  >
-                    <span>🔑</span>
-                    <span>
-                      {customKeyConfig?.apiKey
-                        ? `${SUPPORTED_PROVIDERS[customKeyConfig.provider]?.name || "Custom Key"}`
-                        : "AI Key: Default"}
-                    </span>
-                  </button>
-                  <WatchlistButton
-                    ticker={reportData.profile.ticker}
-                    reportId={reportData.researchMemory?.run.runId ?? reportData.researchReport?.researchRunId}
-                    fairValue={reportData.assumptionsLedger?.fairValue ?? reportData.targetPrice}
-                    currentPrice={reportData.cmp}
-                  />
-                  <PDFDownloadButton data={reportData} />
-                </div>
-              </div>
-
-              {/* ── Phase 9: Report Type + Research Depth selectors (re-compose in place) ── */}
-              <div className={styles.selectorBar}>
-                <span className={styles.selectorLabel}>Report Type</span>
-                <select
-                  className={styles.selectorSelect}
-                  value={reportTypeId}
-                  onChange={(e) => setReportTypeId(e.target.value as ReportTypeId)}
-                  title="Switch report type — outline re-composes, generation does not re-run"
-                >
-                  {selectableReportTypes().map((opt) => (
-                    <option key={opt.id} value={opt.id}>
-                      {opt.title}
-                    </option>
-                  ))}
-                </select>
-                <span className={styles.selectorLabel}>Depth</span>
-                <div className={styles.depthToggle} role="group" aria-label="Research depth">
-                  {(["concise", "full"] as const).map((d) => (
-                    <button
-                      key={d}
-                      type="button"
-                      className={`${styles.depthBtn} ${depth === d ? styles.depthBtnActive : ""}`}
-                      onClick={() => setDepth(d)}
-                    >
-                      {d === "concise" ? "Concise" : "Full"}
-                    </button>
-                  ))}
-                </div>
-                <span className={styles.selectorHint}>
-                  Outline re-composes live · PDF depth follows · no pipeline re-run
-                </span>
-              </div>
-
-              {/* ── Interactive Navigation Tabs ── */}
-              <div className={styles.tabBar}>
-                {[
-                  { key: "overview", label: "Overview & Highlights" },
-                  { key: "council", label: "AI Analyst Council (8 Personas)" },
-                  { key: "dcf", label: "DCF Valuation Model" },
-                  { key: "financials", label: "5-Year Statements" },
-                  { key: "dupont", label: "DuPont & Ratios" },
-                  { key: "peers", label: "Peer Cohort" },
-                  { key: "risks", label: "SWOT & Risk Matrix" },
-                  { key: "outline", label: "Report Outline" },
-                ].map(t => (
-                  <button
-                    key={t.key}
-                    className={`${styles.tabBtn} ${activeTab === t.key ? styles.tabBtnActive : ""}`}
-                    onClick={() => setActiveTab(t.key as TabKey)}
-                  >
-                    {t.label}
-                  </button>
-                ))}
-              </div>
-
-              {/* ── Tab Content Areas ── */}
-              <div className={styles.tabContent}>
-                {/* ── TAB 1: OVERVIEW ── */}
-                {activeTab === "overview" && (
-                  <>
-                    <div className={styles.statsGrid}>
-                      <div className={styles.statCard}>
-                        <span className={styles.statLabel}>
-                          {isInsurer ? `Gross Written Premium (${latest.year})` : isReit ? `Rental Income (${latest.year})` : isFeeCo ? `Fee Revenue (${latest.year})` : `Revenue (${latest.year})`}
-                        </span>
-                        <span className={styles.statVal}>
-                          {isInsurer ? fmtMoney(latest.grossWrittenPremium) : isReit ? fmtMoney(latest.rentalIncome) : isFeeCo ? fmtMoney(latest.totalFeeRevenue) : fmtMoney(latest.revenue)}
-                        </span>
-                        <span className={styles.statSub}>
-                          {isInsurer ? `Net Earned Premium: ${fmtMoney(latest.netEarnedPremium)}`
-                            : isReit ? `NOI Margin: ${fmtPct(latest.noiMargin)}`
-                            : isFeeCo ? `Operating Margin: ${fmtPct(latest.operatingMargin)}`
-                            : isBankOrNbfc ? "Total Net Revenue" : `Gross Margin: ${fmtPct(stmtNum(latest, "grossMargin"))}`}
-                        </span>
-                      </div>
-                      <div className={styles.statCard}>
-                        <span className={styles.statLabel}>
-                          {isInsurer ? "Underwriting Result" : isReit ? "Net Operating Income (NOI)" : isFeeCo ? "Operating Income" : isBankOrNbfc ? "Pre-Tax Income (PBT)" : "EBITDA"}
-                        </span>
-                        <span className={styles.statVal}>
-                          {isInsurer ? fmtMoney(latest.underwritingResult) : isReit ? fmtMoney(latest.netOperatingIncome) : isFeeCo ? fmtMoney(latest.operatingIncome) : isBankOrNbfc ? fmtMoney(latest.pretaxIncome || stmtNum(latest, "operatingIncome")) : fmtMoney(stmtNum(latest, "ebitda"))}
-                        </span>
-                        <span className={styles.statSub}>
-                          {isInsurer ? `Combined Ratio: ${(latest.combinedRatio * 100).toFixed(1)}%`
-                            : isReit ? `FFO/Share: ${fmtMoney(latest.ffoPerShare)}`
-                            : isFeeCo ? `Fee Margin: ${fmtPct(latest.operatingMargin)}`
-                            : isBankOrNbfc ? "Operating Profit Base" : `Margin: ${fmtPct(stmtNum(latest, "ebitdaMargin"))}`}
-                        </span>
-                      </div>
-                      <div className={styles.statCard}>
-                        <span className={styles.statLabel}>
-                          {isInsurer ? "Investment Income on Float" : isReit ? "Funds From Operations (FFO)" : isFeeCo ? "AUM / Fee Base" : isBankOrNbfc ? "Operating Profit" : "Operating Income (EBIT)"}
-                        </span>
-                        <span className={styles.statVal}>
-                          {isInsurer ? fmtMoney(latest.investmentIncome) : isReit ? fmtMoney(latest.fundsFromOperations) : isFeeCo ? fmtMoney(latest.aumEnding > 0 ? latest.aumEnding : latest.totalFeeRevenue) : fmtMoney(stmtNum(latest, "operatingIncome"))}
-                        </span>
-                        <span className={styles.statSub}>
-                          {isInsurer ? `Float Yield: ${fmtPct(latest.float > 0 ? latest.investmentIncome / latest.float : 0)}`
-                            : isReit ? `AFFO Payout: ${fmtPct(latest.adjustedFundsFromOperations > 0 ? latest.dividendsPaid / latest.adjustedFundsFromOperations : 0)}`
-                            : isFeeCo ? (latest.aumEnding > 0 ? "Ending AUM" : "Fee Revenue (AUM undisclosed)")
-                            : isBankOrNbfc ? `Operating Margin: ${fmtPct((latest.totalRevenue || latest.revenue) > 0 ? (latest.operatingIncome as number) / (latest.totalRevenue || latest.revenue) : 0)}` : `Margin: ${fmtPct(stmtNum(latest, "ebitMargin"))}`}
-                        </span>
-                      </div>
-                      <div className={styles.statCard}>
-                        <span className={styles.statLabel}>Net Income (PAT)</span>
-                        <span className={styles.statVal}>{fmtMoney(latest.netIncome)}</span>
-                        <span className={styles.statSub}>Margin: {fmtPct(latest.netMargin)}</span>
-                      </div>
-                      <div className={styles.statCard}>
-                        <span className={styles.statLabel}>Diluted EPS</span>
-                        <span className={styles.statVal}>{sym}{latest.eps.toFixed(2)}</span>
-                        <span className={styles.statSub}>Consensus P/E: {fmtMult(stockData.pe)}</span>
-                      </div>
-                      <div className={styles.statCard}>
-                        <span className={styles.statLabel}>Return on Equity</span>
-                        <span className={styles.statVal}>{roeStr}</span>
-                        <span className={styles.statSub}>Capital Efficiency</span>
-                      </div>
-                      <div className={styles.statCard}>
-                        <span className={styles.statLabel}>{isBankOrNbfc ? "Total Equity / Net Worth" : "Debt / Equity"}</span>
-                        <span className={styles.statVal}>{isBankOrNbfc ? fmtMoney(latest.totalEquity) : deStr}</span>
-                        <span className={styles.statSub}>{isBankOrNbfc ? "Balance Sheet Net Worth" : "Solvency Risk"}</span>
-                      </div>
-                      <div className={styles.statCard}>
-                        <span className={styles.statLabel}>{isBankOrNbfc ? "Operating Cash Flow" : "Free Cash Flow"}</span>
-                        <span className={styles.statVal}>{isBankOrNbfc ? fmtMoney(latest.operatingCashFlow) : fmtMoney(latest.freeCashFlow)}</span>
-                        <span className={styles.statSub}>{isBankOrNbfc ? "Lending & Liquidity Flow" : `OCF: ${fmtMoney(latest.operatingCashFlow)}`}</span>
-                      </div>
-                    </div>
-
-                    <div className={styles.editorialCard}>
-                      <div className={styles.cardSectionHeader}>Corporate Profile &amp; Strategic Positioning</div>
-                      <div className={styles.editorialBody}>
-                        <p>{reportData.aiAnalysis?.companyOverview}</p>
-                      </div>
-                    </div>
-
-                    <div className={styles.editorialCard}>
-                      <div className={styles.cardSectionHeader}>Investment Thesis &amp; Valuation Rationale</div>
-                      <div className={styles.editorialBody}>
-                        <p>{reportData.aiAnalysis?.investmentConclusion}</p>
-                      </div>
-                    </div>
-
-                    {/* Event-Based Market Reaction & Price Movement Ledger on Web Overview */}
-                    {(() => {
-                      const evList = (reportData.eventPriceMovements && reportData.eventPriceMovements.length > 0)
-                        ? reportData.eventPriceMovements
-                        : buildEventPriceMovements(reportData.news, reportData.stockData, reportData.profile);
-
-                      if (evList.length === 0) return null;
-
-                      return (
-                        <div className={styles.editorialCard}>
-                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
-                            <div className={styles.cardSectionHeader} style={{ margin: 0 }}>
-                              Event-Based Price Movement &amp; Corporate Surveillance Tracker
-                            </div>
-                            <span className="badge-solid badge-buy" style={{ fontSize: "11px" }}>
-                              {evList.length} Verified Events Monitored
-                            </span>
-                          </div>
-                          <p style={{ fontSize: "13px", color: "var(--ink-secondary)", marginBottom: "14px", lineHeight: 1.5 }}>
-                            Quantitative event study tracking announcement price shock velocity (T0), multi-day drift (T+5), and abnormal alpha relative to sector benchmark across verified corporate disclosures.
-                          </p>
-                          <div className="fin-table-container">
-                            <table className="fin-table">
-                              <thead>
-                                <tr>
-                                  <th style={{ width: "13%" }}>Event Date</th>
-                                  <th className="wrap-cell" style={{ width: "41%", whiteSpace: "normal" }}>Disclosure Headline &amp; Category</th>
-                                  <th style={{ width: "11%", textAlign: "right" }}>Pre-Event (T-1)</th>
-                                  <th style={{ width: "11%", textAlign: "right" }}>T0 Shock %</th>
-                                  <th style={{ width: "11%", textAlign: "right" }}>5-Day Drift %</th>
-                                  <th style={{ width: "13%" }}>Market Verdict</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {evList.map((ev, evi) => (
-                                  <tr key={evi}>
-                                    <td className="row-header" style={{ fontWeight: 600, color: "var(--ink)" }}>{ev.eventDate}</td>
-                                    <td className="wrap-cell" style={{ whiteSpace: "normal", wordBreak: "break-word" }}>
-                                      <div style={{ fontWeight: 600, color: "var(--ink)", marginBottom: "3px", whiteSpace: "normal", wordBreak: "break-word", lineHeight: 1.4 }}>{ev.headline}</div>
-                                      <span style={{ fontSize: "11px", color: "var(--cyan)", fontFamily: "var(--font-mono)", whiteSpace: "normal" }}>[{ev.category}] {ev.publisher || "Wire"}</span>
-                                    </td>
-                                    <td style={{ textAlign: "right", fontFamily: "var(--font-mono)", color: "var(--ink-secondary)" }}>
-                                      {sym}{ev.preEventPrice.toFixed(2)}
-                                    </td>
-                                    <td style={{ textAlign: "right", fontFamily: "var(--font-mono)", fontWeight: 700, color: ev.immediateReturnPct >= 0 ? "var(--bullish)" : "var(--bearish)" }}>
-                                      {ev.immediateReturnPct >= 0 ? "+" : ""}{(ev.immediateReturnPct * 100).toFixed(1)}%
-                                    </td>
-                                    <td style={{ textAlign: "right", fontFamily: "var(--font-mono)", fontWeight: 700, color: ev.multiDayReturnPct >= 0 ? "var(--bullish)" : "var(--bearish)" }}>
-                                      {ev.multiDayReturnPct >= 0 ? "+" : ""}{(ev.multiDayReturnPct * 100).toFixed(1)}%
-                                    </td>
-                                    <td>
-                                      <span className={`badge-solid ${ev.verdict === "Bullish Inflection" ? "badge-buy" : ev.verdict === "Negative De-rating" ? "badge-sell" : "badge-hold"}`}>
-                                        {ev.verdict}
-                                      </span>
-                                    </td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          </div>
-                        </div>
-                      );
-                    })()}
-                    <ResearchHistoryPanel memory={reportData.researchMemory} />
-                  </>
-                )}
-
-                {/* ── TAB: AI ANALYST COUNCIL (8 SPECIALIZED PERSONAS) ── */}
-                {activeTab === "council" && (
-                  <div className={styles.councilContainer}>
-                    {/* Intro Banner */}
-                    <div className={styles.councilIntroCard}>
-                      <div className={styles.councilIntroTop}>
-                        <div className={styles.councilIntroTitle}>
-                          <span>🤖</span>
-                          <span>AI Analyst Council Checkpoints &amp; Institutional Research</span>
-                        </div>
-                        <span className={styles.councilIntroStatus}>
-                          <span className={styles.marketDot} />
-                          8 / 8 PERSONAS ACTIVE &amp; VERIFIED
-                        </span>
-                      </div>
-                      <p className={styles.councilIntroDesc}>
-                        This report is synthesized and audited by a council of 8 specialized AI research personas. Seven domain analysts independently model macro strategy, real-time news, economic moats, 5-stage DuPont forensics, debt solvency, governance, and executive news sentiment briefing—supervised by a dedicated Council Quality &amp; Audit Verifier that cross-checks all outputs for factual mistakes, arithmetic consistency, and anti-hallucination compliance.
-                      </p>
-                      <div className={styles.councilFilterBar}>
-                        <span style={{ fontSize: "11px", color: "var(--ink-muted)", textTransform: "uppercase", fontWeight: 600, marginRight: "4px" }}>Filter Agent:</span>
-                        {[
-                          { id: "all", label: "All 8 Personas" },
-                          { id: "strategist", label: "1. Lead Strategist" },
-                          { id: "news", label: "2. Real-Time News" },
-                          { id: "moat", label: "3. Economic Moat" },
-                          { id: "forensic", label: "4. Forensic Analyst" },
-                          { id: "credit", label: "5. Credit Solvency" },
-                          { id: "governance", label: "6. Capital Allocation" },
-                          { id: "news_desk", label: "7. News Briefing Desk" },
-                          { id: "verifier", label: "8. Quality & Audit Verifier" },
-                        ].map(f => (
-                          <button
-                            key={f.id}
-                            className={`${styles.councilFilterBtn} ${selectedAgentFilter === f.id ? styles.councilFilterBtnActive : ""}`}
-                            onClick={() => setSelectedAgentFilter(f.id)}
-                          >
-                            {f.label}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* ── AGENT 1: LEAD EQUITY STRATEGIST ── */}
-                    {(selectedAgentFilter === "all" || selectedAgentFilter === "strategist") && (
-                      <div className={styles.personaCard}>
-                        <div className={styles.personaCardHeader}>
-                          <div className={styles.personaInfo}>
-                            <div className={styles.personaAvatar}>🎯</div>
-                            <div>
-                              <div className={styles.personaTitle}>Lead Equity Strategist</div>
-                              <div className={styles.personaRole}>Investment Thesis, Scenarios & Target Price</div>
-                            </div>
-                          </div>
-                          <div className={styles.personaMetaRight}>
-                            <span className={styles.personaIndex}>AGENT 01 / 07</span>
-                            <span className={styles.personaStatus}>
-                              <span className={styles.marketDot} /> VERIFIED
-                            </span>
-                          </div>
-                        </div>
-
-                        <div className={styles.personaBody}>
-                          <div className={styles.subSection}>
-                            <div className={styles.subSectionLabel}>Core Investment Thesis</div>
-                            <p className={styles.subSectionText}>
-                              {reportData.aiAnalysis?.investmentThesis || reportData.aiAnalysis?.investmentConclusion}
-                            </p>
-                          </div>
-
-                          {(reportData.aiAnalysis?.researchDebates || []).length > 0 && (
-                            <div className={styles.subSection}>
-                              <div className={styles.subSectionLabel}>Research Debates (evidence → financial → valuation)</div>
-                              <div className={styles.swotList}>
-                                {(reportData.aiAnalysis!.researchDebates!).map((d, i) => (
-                                  <div key={i} className={styles.subSectionText} style={{ marginBottom: 8 }}>
-                                    <strong>{d.central ? "[CENTRAL] " : ""}{d.debate}</strong>
-                                    <div>FOR: {d.evidenceFor}</div>
-                                    <div>AGAINST: {d.evidenceAgainst}</div>
-                                    {d.financialConsequence && <div>Financial: {d.financialConsequence}</div>}
-                                    {d.valuationConsequence && <div>Valuation: {d.valuationConsequence}</div>}
-                                    {d.resolutionSignal && <div>Resolve on: {d.resolutionSignal}</div>}
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-
-                          {(reportData.aiAnalysis?.evidenceMapConfidence !== undefined ||
-                            (reportData.aiAnalysis?.evidenceUnsupported || []).length > 0) && (
-                            <div className={styles.subSection}>
-                              <div className={styles.subSectionLabel}>Evidence Map</div>
-                              <p className={styles.subSectionText}>
-                                {reportData.aiAnalysis?.evidenceMapConfidence !== undefined
-                                  ? `Overall confidence ${reportData.aiAnalysis.evidenceMapConfidence.toFixed(2)}. `
-                                  : ""}
-                                {(reportData.aiAnalysis?.evidenceUnsupported || []).length > 0
-                                  ? `Unsupported claims (honest gaps): ${(reportData.aiAnalysis!.evidenceUnsupported!).slice(0, 5).join("; ")}`
-                                  : "No unsupported major claims recorded."}
-                              </p>
-                            </div>
-                          )}
-
-                          {reportData.aiAnalysis?.researchDiscovery && (
-                            <div className={styles.subSection}>
-                              <div className={styles.subSectionLabel}>
-                                Research Discovery (gaps identified → evidence collected → writers seeded)
-                              </div>
-                              <p className={styles.subSectionText}>
-                                {reportData.aiAnalysis.researchDiscovery.summary}{" "}
-                                {reportData.aiAnalysis.researchDiscovery.coverage.missing > 0
-                                  ? `Missing areas are stated honestly in the report rather than invented: ${reportData.aiAnalysis.researchDiscovery.gaps
-                                      .filter((g) => g.status === "missing")
-                                      .map((g) => g.area)
-                                      .slice(0, 6)
-                                      .join(", ")}.`
-                                  : ""}
-                              </p>
-                              {reportData.aiAnalysis.researchDiscovery.economicInsights.length > 0 && (
-                                <div className={styles.swotList} style={{ marginTop: 6 }}>
-                                  {reportData.aiAnalysis.researchDiscovery.economicInsights.slice(0, 4).map((ins, i) => (
-                                    <div key={i} className={styles.subSectionText}>• {ins}</div>
-                                  ))}
-                                </div>
-                              )}
-                              <p className={styles.subSectionText} style={{ marginTop: 6 }}>
-                                Area coverage:{" "}
-                                {reportData.aiAnalysis.researchDiscovery.gaps
-                                  .map((g) => `${g.area} (${g.status})`)
-                                  .join(" · ")}
-                              </p>
-                            </div>
-                          )}
-
-                          <div className={styles.subSection}>
-                            <div className={styles.subSectionLabel}>Corporate Profile & Strategic Positioning</div>
-                            <p className={styles.subSectionText}>
-                              {reportData.aiAnalysis?.companyOverview}
-                            </p>
-                          </div>
-
-                          {reportData.aiAnalysis?.segmentAnalysis && (
-                            <div className={styles.subSection}>
-                              <div className={styles.subSectionLabel}>Segment Execution & Market Share Dynamics</div>
-                              <p className={styles.subSectionText}>
-                                {reportData.aiAnalysis.segmentAnalysis}
-                              </p>
-                            </div>
-                          )}
-
-                          <div className={styles.calloutBanner}>
-                            <strong style={{ color: "var(--ink)" }}>Strategist Verdict & Valuation Anchor:</strong>{" "}
-                            {cv.rating === "BUY" ? "High-Conviction Overweight" : cv.rating === "SELL" ? "Underweight / Capital Preservation" : "Neutral / Selective Hold"} with DCF fair value target of{" "}
-                            <span style={{ color: "var(--cyan)", fontWeight: 700 }}>{sym}{cv.targetPrice.toFixed(2)}</span> ({isBullish ? `+${upsidePct}% upside` : `${upsidePct}% downside`} from CMP {sym}{cv.cmp.toFixed(2)}).
-                          </div>
-
-                          {/* 4-Quadrant Institutional SWOT */}
-                          <div className={styles.subSection}>
-                            <div className={styles.subSectionLabel}>Institutional SWOT Architecture</div>
-                            <div className={styles.swotGrid}>
-                              <div className={`${styles.swotBox} ${styles.swotStrengths}`}>
-                                <div className={styles.swotBoxHeader}>
-                                  <span className={styles.swotTitle} style={{ color: "var(--bullish)" }}>Strengths</span>
-                                </div>
-                                <ul className={styles.swotList}>
-                                  {(reportData.aiAnalysis?.swotStrengths || []).map((s, i) => (
-                                    <li key={i} className={styles.swotItem}>
-                                      <span className={styles.swotBullet}>•</span>
-                                      <span>{s}</span>
-                                    </li>
-                                  ))}
-                                </ul>
-                              </div>
-
-                              <div className={`${styles.swotBox} ${styles.swotWeaknesses}`}>
-                                <div className={styles.swotBoxHeader}>
-                                  <span className={styles.swotTitle} style={{ color: "var(--bearish)" }}>Weaknesses</span>
-                                </div>
-                                <ul className={styles.swotList}>
-                                  {(reportData.aiAnalysis?.swotWeaknesses || []).map((w, i) => (
-                                    <li key={i} className={styles.swotItem}>
-                                      <span className={styles.swotBullet}>•</span>
-                                      <span>{w}</span>
-                                    </li>
-                                  ))}
-                                </ul>
-                              </div>
-
-                              <div className={`${styles.swotBox} ${styles.swotOpportunities}`}>
-                                <div className={styles.swotBoxHeader}>
-                                  <span className={styles.swotTitle} style={{ color: "var(--cyan)" }}>Opportunities</span>
-                                </div>
-                                <ul className={styles.swotList}>
-                                  {(reportData.aiAnalysis?.swotOpportunities || []).map((o, i) => (
-                                    <li key={i} className={styles.swotItem}>
-                                      <span className={styles.swotBullet}>•</span>
-                                      <span>{o}</span>
-                                    </li>
-                                  ))}
-                                </ul>
-                              </div>
-
-                              <div className={`${styles.swotBox} ${styles.swotThreats}`}>
-                                <div className={styles.swotBoxHeader}>
-                                  <span className={styles.swotTitle} style={{ color: "var(--neutral)" }}>Threats</span>
-                                </div>
-                                <ul className={styles.swotList}>
-                                  {(reportData.aiAnalysis?.swotThreats || []).map((t, i) => (
-                                    <li key={i} className={styles.swotItem}>
-                                      <span className={styles.swotBullet}>•</span>
-                                      <span>{t}</span>
-                                    </li>
-                                  ))}
-                                </ul>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* ── AGENT 2: REAL-TIME NEWS & INTELLIGENCE ── */}
-                    {(selectedAgentFilter === "all" || selectedAgentFilter === "news") && (
-                      <div className={styles.personaCard}>
-                        <div className={styles.personaCardHeader}>
-                          <div className={styles.personaInfo}>
-                            <div className={styles.personaAvatar}>📡</div>
-                            <div>
-                              <div className={styles.personaTitle}>Real-Time News & Intelligence</div>
-                              <div className={styles.personaRole}>Market Catalysts & Breaking Developments</div>
-                            </div>
-                          </div>
-                          <div className={styles.personaMetaRight}>
-                            <span className={styles.personaIndex}>AGENT 02 / 07</span>
-                            <span className={styles.personaStatus}>
-                              <span className={styles.marketDot} /> LIVE
-                            </span>
-                          </div>
-                        </div>
-
-                        <div className={styles.personaBody}>
-                          {reportData.aiAnalysis?.economicContext && (
-                            <div className={styles.subSection}>
-                              <div className={styles.subSectionLabel}>Macroeconomic & Operating Climate</div>
-                              <p className={styles.subSectionText}>{reportData.aiAnalysis.economicContext}</p>
-                            </div>
-                          )}
-
-                          {reportData.aiAnalysis?.quarterlyResultsCommentary && (
-                            <div className={styles.subSection}>
-                              <div className={styles.subSectionLabel}>Quarterly Operating Cadence & Momentum</div>
-                              <p className={styles.subSectionText}>{reportData.aiAnalysis.quarterlyResultsCommentary}</p>
-                            </div>
-                          )}
-
-                          {/* Recent News Flow Table */}
-                          {(reportData.aiAnalysis?.recentNewsAnalysis || []).length > 0 && (
-                            <div className={styles.subSection}>
-                              <div className={styles.subSectionLabel}>Verified Corporate News Pulse & Strategic Takeaways</div>
-                              <div className="fin-table-container">
-                                <table className="fin-table">
-                                  <thead>
-                                    <tr>
-                                      <th style={{ width: "22%" }}>Date / Source</th>
-                                      <th style={{ width: "38%" }}>Event & Headline</th>
-                                      <th style={{ width: "40%" }}>Strategic Financial Takeaway</th>
-                                    </tr>
-                                  </thead>
-                                  <tbody>
-                                    {reportData.aiAnalysis!.recentNewsAnalysis!.map((item, idx) => (
-                                      <tr key={idx}>
-                                        <td className="row-header">
-                                          <div>{item.date}</div>
-                                          <div style={{ fontSize: "11px", color: "var(--ink-muted)", fontWeight: 400 }}>{item.publisher || "Wire"}</div>
-                                        </td>
-                                        <td style={{ fontWeight: 600, color: "var(--ink)" }}>{item.headline}</td>
-                                        <td style={{ color: "var(--ink-secondary)", lineHeight: 1.45 }}>{item.strategicTakeaway}</td>
-                                      </tr>
-                                    ))}
-                                  </tbody>
-                                </table>
-                              </div>
-                            </div>
-                          )}
-
-                          {/* 12-Month Forward Catalysts */}
-                          {(reportData.aiAnalysis?.catalysts || []).length > 0 && (
-                            <div className={styles.subSection}>
-                              <div className={styles.subSectionLabel}>12-Month Forward Catalyst Calendar</div>
-                              <div className="fin-table-container">
-                                <table className="fin-table">
-                                  <thead>
-                                    <tr>
-                                      <th style={{ width: "38%" }}>Catalyst Event</th>
-                                      <th style={{ width: "16%" }}>Horizon</th>
-                                      <th style={{ width: "18%" }}>Probability</th>
-                                      <th style={{ width: "28%" }}>Valuation & Fair Value Impact</th>
-                                    </tr>
-                                  </thead>
-                                  <tbody>
-                                    {reportData.aiAnalysis!.catalysts!.map((cat, idx) => (
-                                      <tr key={idx}>
-                                        <td className="row-header" style={{ fontWeight: 600, color: "var(--ink)" }}>{cat.event}</td>
-                                        <td><span className="badge-solid badge-hold">{cat.horizon}</span></td>
-                                        <td><span style={{ fontFamily: "var(--font-mono)", fontSize: "12px", color: "var(--cyan)" }}>{cat.probability}</span></td>
-                                        <td style={{ color: "var(--bullish)", fontWeight: 600 }}>{cat.impact}</td>
-                                      </tr>
-                                    ))}
-                                  </tbody>
-                                </table>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* ── AGENT 3: ECONOMIC MOAT & STRATEGY ── */}
-                    {(selectedAgentFilter === "all" || selectedAgentFilter === "moat") && (
-                      <div className={styles.personaCard}>
-                        <div className={styles.personaCardHeader}>
-                          <div className={styles.personaInfo}>
-                            <div className={styles.personaAvatar}>🛡️</div>
-                            <div>
-                              <div className={styles.personaTitle}>Economic Moat & Strategy</div>
-                              <div className={styles.personaRole}>Porter&apos;s Five Forces &amp; Defensibility</div>
-                            </div>
-                          </div>
-                          <div className={styles.personaMetaRight}>
-                            <span className={styles.personaIndex}>AGENT 03 / 07</span>
-                            <span className={styles.personaStatus}>
-                              <span className={styles.marketDot} /> COMPLETE
-                            </span>
-                          </div>
-                        </div>
-
-                        <div className={styles.personaBody}>
-                          <div className={styles.subSection}>
-                            <div className={styles.subSectionLabel}>
-                              Competitive Moat Rating:{" "}
-                              <span className={`badge-solid ${reportData.masterReportFacts.moat.rating === "Wide" ? "badge-buy" : reportData.masterReportFacts.moat.rating === "Narrow" ? "badge-hold" : "badge-sell"}`}>
-                                {reportData.masterReportFacts.moat.rating} Moat
-                              </span>
-                            </div>
-                            {reportData.aiAnalysis?.competitiveMoat && (
-                              <p className={styles.subSectionText}>{reportData.aiAnalysis.competitiveMoat}</p>
-                            )}
-                            {reportData.aiAnalysis?.businessStrategyCommentary && (
-                              <p className={styles.subSectionText}>{reportData.aiAnalysis.businessStrategyCommentary}</p>
-                            )}
-                          </div>
-
-                          {/* 4 Moat Sources Grid */}
-                          {reportData.aiAnalysis?.moatSources && (
-                            <div className={styles.subSection}>
-                              <div className={styles.subSectionLabel}>Sources of Economic Moat Durability</div>
-                              <div className={styles.moatGrid}>
-                                <div className={styles.moatSourceCard}>
-                                  <div className={styles.moatSourceTitle}>🔄 Switching Costs & Retention</div>
-                                  <p className={styles.moatSourceDesc}>{reportData.aiAnalysis.moatSources.switchingCosts}</p>
-                                </div>
-                                <div className={styles.moatSourceCard}>
-                                  <div className={styles.moatSourceTitle}>📜 Intangible Assets, IP & Licenses</div>
-                                  <p className={styles.moatSourceDesc}>{reportData.aiAnalysis.moatSources.intangibleAssets}</p>
-                                </div>
-                                <div className={styles.moatSourceCard}>
-                                  <div className={styles.moatSourceTitle}>⚡ Scale Economies & Cost Advantage</div>
-                                  <p className={styles.moatSourceDesc}>{reportData.aiAnalysis.moatSources.costAdvantage}</p>
-                                </div>
-                                <div className={styles.moatSourceCard}>
-                                  <div className={styles.moatSourceTitle}>📈 Structural Moat Trend</div>
-                                  <p className={styles.moatSourceDesc}>{reportData.aiAnalysis.moatSources.moatTrend}</p>
-                                </div>
-                              </div>
-                            </div>
-                          )}
-
-                          {/* Porter's Five Forces Table */}
-                          {(reportData.aiAnalysis?.fiveForces || []).length > 0 && (
-                            <div className={styles.subSection}>
-                              <div className={styles.subSectionLabel}>Porter&apos;s Five Forces Competitive Analysis</div>
-                              <div className="fin-table-container">
-                                <table className="fin-table">
-                                  <thead>
-                                    <tr>
-                                      <th style={{ width: "28%" }}>Force</th>
-                                      <th style={{ width: "16%" }}>Threat Level</th>
-                                      <th style={{ width: "56%" }}>Strategic Defensibility & Commentary</th>
-                                    </tr>
-                                  </thead>
-                                  <tbody>
-                                    {reportData.aiAnalysis!.fiveForces!.map((f, idx) => (
-                                      <tr key={idx}>
-                                        <td className="row-header" style={{ fontWeight: 600, color: "var(--ink)" }}>{f.force}</td>
-                                        <td>
-                                          <span className={`badge-solid ${f.level.toLowerCase().includes("high") ? "badge-sell" : f.level.toLowerCase().includes("low") ? "badge-buy" : "badge-hold"}`}>
-                                            {f.level}
-                                          </span>
-                                        </td>
-                                        <td style={{ color: "var(--ink-secondary)", lineHeight: 1.45 }}>{f.commentary}</td>
-                                      </tr>
-                                    ))}
-                                  </tbody>
-                                </table>
-                              </div>
-                            </div>
-                          )}
-
-                          {/* Structural Moat Pillars */}
-                          {(reportData.aiAnalysis?.moatPillars || []).length > 0 && (
-                            <div className={styles.subSection}>
-                              <div className={styles.subSectionLabel}>Strategic Defensibility Pillars</div>
-                              <div className="fin-table-container">
-                                <table className="fin-table">
-                                  <thead>
-                                    <tr>
-                                      <th style={{ width: "32%" }}>Defensibility Pillar</th>
-                                      <th style={{ width: "20%" }}>Durability Horizon</th>
-                                      <th style={{ width: "48%" }}>Structural Rationale</th>
-                                    </tr>
-                                  </thead>
-                                  <tbody>
-                                    {reportData.aiAnalysis!.moatPillars!.map((p, idx) => (
-                                      <tr key={idx}>
-                                        <td className="row-header" style={{ fontWeight: 600, color: "var(--ink)" }}>{p.pillar}</td>
-                                        <td><span className="badge-solid badge-buy">{p.durability}</span></td>
-                                        <td style={{ color: "var(--ink-secondary)", lineHeight: 1.45 }}>{p.rationale}</td>
-                                      </tr>
-                                    ))}
-                                  </tbody>
-                                </table>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* ── AGENT 4: FORENSIC FINANCIAL ANALYST ── */}
-                    {(selectedAgentFilter === "all" || selectedAgentFilter === "forensic") && (
-                      <div className={styles.personaCard}>
-                        <div className={styles.personaCardHeader}>
-                          <div className={styles.personaInfo}>
-                            <div className={styles.personaAvatar}>🔬</div>
-                            <div>
-                              <div className={styles.personaTitle}>Forensic Financial Analyst</div>
-                              <div className={styles.personaRole}>5-Stage DuPont ROE & Financial Quality</div>
-                            </div>
-                          </div>
-                          <div className={styles.personaMetaRight}>
-                            <span className={styles.personaIndex}>AGENT 04 / 07</span>
-                            <span className={styles.personaStatus}>
-                              <span className={styles.marketDot} /> AUDITED
-                            </span>
-                          </div>
-                        </div>
-
-                        <div className={styles.personaBody}>
-                          <div className={styles.subSection}>
-                            <div className={styles.subSectionLabel}>5-Stage DuPont Decomposition Assessment</div>
-                            <p className={styles.subSectionText}>{reportData.aiAnalysis?.dupontCommentary}</p>
-                          </div>
-
-                          <div className={styles.subSection}>
-                            <div className={styles.subSectionLabel}>Revenue Realization & Top-Line Quality</div>
-                            <p className={styles.subSectionText}>{reportData.aiAnalysis?.revenueCommentary}</p>
-                          </div>
-
-                          <div className={styles.subSection}>
-                            <div className={styles.subSectionLabel}>Operating Margin Conversion & Cost Absorption (EBITDA / EBIT)</div>
-                            <p className={styles.subSectionText}>
-                              {reportData.aiAnalysis?.ebitdaCommentary} {reportData.aiAnalysis?.ebitCommentary}
-                            </p>
-                          </div>
-
-                          <div className={styles.subSection}>
-                            <div className={styles.subSectionLabel}>Cash Flow Integrity & Working Capital Quality</div>
-                            <p className={styles.subSectionText}>{reportData.aiAnalysis?.cashFlowCommentary}</p>
-                          </div>
-
-                          <div className={styles.subSection}>
-                            <div className={styles.subSectionLabel}>Financial Ratios & Audit Surveillance</div>
-                            <p className={styles.subSectionText}>{reportData.aiAnalysis?.ratioCommentary}</p>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* ── AGENT 5: CREDIT SOLVENCY SPECIALIST ── */}
-                    {(selectedAgentFilter === "all" || selectedAgentFilter === "credit") && (
-                      <div className={styles.personaCard}>
-                        <div className={styles.personaCardHeader}>
-                          <div className={styles.personaInfo}>
-                            <div className={styles.personaAvatar}>⚖️</div>
-                            <div>
-                              <div className={styles.personaTitle}>Credit Solvency Specialist</div>
-                              <div className={styles.personaRole}>Debt Health & Solvency Analysis</div>
-                            </div>
-                          </div>
-                          <div className={styles.personaMetaRight}>
-                            <span className={styles.personaIndex}>AGENT 05 / 07</span>
-                            <span className={styles.personaStatus}>
-                              <span className={styles.marketDot} /> STRESS TESTED
-                            </span>
-                          </div>
-                        </div>
-
-                        <div className={styles.personaBody}>
-                          {reportData.aiAnalysis?.creditAnalysisCommentary?.financialHealth && (
-                            <div className={styles.subSection}>
-                              <div className={styles.subSectionLabel}>Capital Structure & Financial Solvency Health</div>
-                              <p className={styles.subSectionText}>{reportData.aiAnalysis.creditAnalysisCommentary.financialHealth}</p>
-                            </div>
-                          )}
-
-                          {reportData.aiAnalysis?.creditAnalysisCommentary?.liquidityBuffers && (
-                            <div className={styles.subSection}>
-                              <div className={styles.subSectionLabel}>Liquidity Cushions & Working Capital Lines</div>
-                              <p className={styles.subSectionText}>{reportData.aiAnalysis.creditAnalysisCommentary.liquidityBuffers}</p>
-                            </div>
-                          )}
-
-                          {reportData.aiAnalysis?.creditAnalysisCommentary?.debtMaturity && (
-                            <div className={styles.subSection}>
-                              <div className={styles.subSectionLabel}>Debt Maturity Profile & Refinancing Exposure</div>
-                              <p className={styles.subSectionText}>{reportData.aiAnalysis.creditAnalysisCommentary.debtMaturity}</p>
-                            </div>
-                          )}
-
-                          {reportData.aiAnalysis?.creditAnalysisCommentary?.stressTesting && (
-                            <div className={styles.subSection}>
-                              <div className={styles.subSectionLabel}>Downside Stress Modeling & Covenant Headroom</div>
-                              <p className={styles.subSectionText}>{reportData.aiAnalysis.creditAnalysisCommentary.stressTesting}</p>
-                            </div>
-                          )}
-
-                          {/* Prioritized Key Enterprise Risks */}
-                          {(reportData.aiAnalysis?.keyRisks || []).length > 0 && (
-                            <div className={styles.subSection}>
-                              <div className={styles.subSectionLabel}>Prioritized Enterprise Credit & Operating Risks</div>
-                              <div className="fin-table-container">
-                                <table className="fin-table">
-                                  <thead>
-                                    <tr>
-                                      <th style={{ width: "24%" }}>Risk Factor</th>
-                                      <th style={{ width: "14%" }}>Severity</th>
-                                      <th style={{ width: "62%" }}>Risk Description & Strategic Sensitivity</th>
-                                    </tr>
-                                  </thead>
-                                  <tbody>
-                                    {reportData.aiAnalysis!.keyRisks.map((r, idx) => (
-                                      <tr key={idx}>
-                                        <td className="row-header" style={{ fontWeight: 600, color: "var(--ink)" }}>{r.risk}</td>
-                                        <td>
-                                          <span className={`badge-solid ${r.impact === "High" ? "badge-sell" : r.impact === "Low" ? "badge-buy" : "badge-hold"}`}>
-                                            {r.impact}
-                                          </span>
-                                        </td>
-                                        <td style={{ color: "var(--ink-secondary)", lineHeight: 1.45 }}>{r.description}</td>
-                                      </tr>
-                                    ))}
-                                  </tbody>
-                                </table>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* ── AGENT 6: GOVERNANCE & CAPITAL ALLOCATION ── */}
-                    {(selectedAgentFilter === "all" || selectedAgentFilter === "governance") && (
-                      <div className={styles.personaCard}>
-                        <div className={styles.personaCardHeader}>
-                          <div className={styles.personaInfo}>
-                            <div className={styles.personaAvatar}>👔</div>
-                            <div>
-                              <div className={styles.personaTitle}>Governance & Capital Allocation</div>
-                              <div className={styles.personaRole}>Board Stewardship & Reinvestment</div>
-                            </div>
-                          </div>
-                          <div className={styles.personaMetaRight}>
-                            <span className={styles.personaIndex}>AGENT 06 / 07</span>
-                            <span className={styles.personaStatus}>
-                              <span className={styles.marketDot} /> COMPLIANT
-                            </span>
-                          </div>
-                        </div>
-
-                        <div className={styles.personaBody}>
-                          {reportData.aiAnalysis?.managementCommentary && (
-                            <div className={styles.subSection}>
-                              <div className={styles.subSectionLabel}>Executive Stewardship & Operating Execution</div>
-                              <p className={styles.subSectionText}>{reportData.aiAnalysis.managementCommentary}</p>
-                            </div>
-                          )}
-
-                          {reportData.aiAnalysis?.governanceCommentary && (
-                            <div className={styles.subSection}>
-                              <div className={styles.subSectionLabel}>Board Composition & Governance Architecture</div>
-                              <p className={styles.subSectionText}>{reportData.aiAnalysis.governanceCommentary}</p>
-                            </div>
-                          )}
-
-                          {reportData.aiAnalysis?.capitalAllocationCommentary && (
-                            <div className={styles.subSection}>
-                              <div className={styles.subSectionLabel}>Capital Allocation Philosophy & ROIC Hurdle Framework</div>
-                              <p className={styles.subSectionText}>{reportData.aiAnalysis.capitalAllocationCommentary}</p>
-                            </div>
-                          )}
-
-                          {/* Capital Deployment Waterfall */}
-                          {reportData.aiAnalysis?.capitalDeploymentHistory && (
-                            <div className={styles.subSection}>
-                              <div className={styles.subSectionLabel}>5-Year Capital Deployment Waterfall</div>
-                              <div className={styles.capitalWaterGrid}>
-                                <div className={styles.capitalWaterCard}>
-                                  <div className={styles.capitalWaterHeader}>💵 Dividend Distributions</div>
-                                  <div className={styles.capitalWaterVal}>{reportData.aiAnalysis.capitalDeploymentHistory.dividends}</div>
-                                </div>
-                                <div className={styles.capitalWaterCard}>
-                                  <div className={styles.capitalWaterHeader}>🔄 Share Buybacks</div>
-                                  <div className={styles.capitalWaterVal}>{reportData.aiAnalysis.capitalDeploymentHistory.repurchases}</div>
-                                </div>
-                                <div className={styles.capitalWaterCard}>
-                                  <div className={styles.capitalWaterHeader}>📉 Debt Deleveraging</div>
-                                  <div className={styles.capitalWaterVal}>{reportData.aiAnalysis.capitalDeploymentHistory.debtPaydown}</div>
-                                </div>
-                              </div>
-                              <p className={styles.subSectionText} style={{ marginTop: "8px", fontStyle: "italic" }}>
-                                {reportData.aiAnalysis.capitalDeploymentHistory.narrative}
-                              </p>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* ── AGENT 7: NEWS SENTIMENT & EXECUTIVE BRIEFING DESK ── */}
-                    {(selectedAgentFilter === "all" || selectedAgentFilter === "news_desk") && (
-                      <div className={styles.personaCard}>
-                        <div className={styles.personaCardHeader}>
-                          <div className={styles.personaInfo}>
-                            <div className={styles.personaAvatar}>📰</div>
-                            <div>
-                              <div className={styles.personaTitle}>News Sentiment &amp; Executive Briefing Desk</div>
-                              <div className={styles.personaRole}>Executive Synthesis, Media Sentiment &amp; Material Disclosure Audit</div>
-                            </div>
-                          </div>
-                          <div className={styles.personaMetaRight}>
-                            <span className={styles.personaIndex}>AGENT 07 / 08</span>
-                            <span className={styles.personaStatus}>
-                              <span className={styles.marketDot} /> LIVE WIRE
-                            </span>
-                          </div>
-                        </div>
-
-                        <div className={styles.personaBody}>
-                          {/* Sentiment Score & Executive Briefing Banner */}
-                          {(() => {
-                            const nd = reportData.aiAnalysis?.newsSummary;
-                            const scoreNum = nd?.mediaSentimentScore !== undefined ? Math.round(nd.mediaSentimentScore * 100) : 65;
-                            const scoreColor = scoreNum > 20 ? "var(--bullish)" : scoreNum < -20 ? "var(--bearish)" : "var(--neutral)";
-                            const scoreLabel = nd?.mediaSentimentLabel || (scoreNum > 40 ? "Bullish" : scoreNum > 10 ? "Constructive" : scoreNum < -20 ? "Cautious" : "Neutral");
-
-                            return (
-                              <>
-                                <div style={{ display: "flex", alignItems: "center", gap: "16px", padding: "14px 18px", background: "var(--surface-0)", border: "1px solid var(--hairline)", borderRadius: "var(--radius-sm)", marginBottom: "16px" }}>
-                                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center", minWidth: "110px", paddingRight: "16px", borderRight: "1px solid var(--hairline)" }}>
-                                    <span style={{ fontSize: "11px", color: "var(--ink-muted)", textTransform: "uppercase", fontWeight: 600 }}>Media Sentiment</span>
-                                    <span style={{ fontSize: "28px", fontWeight: 800, color: scoreColor, fontFamily: "var(--font-mono)", lineHeight: 1.1 }}>
-                                      {scoreNum > 0 ? `+${scoreNum}` : scoreNum}
-                                    </span>
-                                    <span style={{ fontSize: "11px", color: scoreColor, fontWeight: 600 }}>{scoreLabel}</span>
-                                  </div>
-                                  <div style={{ flex: 1 }}>
-                                    <div style={{ fontSize: "12px", color: "var(--ink-muted)", textTransform: "uppercase", fontWeight: 600, marginBottom: "4px" }}>
-                                      Executive Synthesis &amp; Sentiment Briefing
-                                    </div>
-                                    <p style={{ fontSize: "13px", color: "var(--ink-secondary)", lineHeight: 1.5, margin: 0 }}>
-                                      {nd?.executiveNewsSummary ||
-                                        `Continuous surveillance across financial wire feeds and exchange regulatory disclosures confirms resilient operational momentum for ${reportData.profile.name}. Management communications reflect disciplined capital deployment and strategic value compounding.`}
-                                    </p>
-                                  </div>
-                                </div>
-
-                                {/* Narrative Themes Pill Badges */}
-                                {nd?.keyNarrativeThemes && nd.keyNarrativeThemes.length > 0 && (
-                                  <div className={styles.subSection}>
-                                    <div className={styles.subSectionLabel}>Dominant Media &amp; Operational Narrative Themes</div>
-                                    <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
-                                      {nd.keyNarrativeThemes.map((th: string, tidx: number) => (
-                                        <span key={tidx} style={{ padding: "4px 10px", background: "rgba(56, 189, 248, 0.1)", border: "1px solid rgba(56, 189, 248, 0.25)", borderRadius: "9999px", fontSize: "12px", color: "var(--cyan)", fontWeight: 500 }}>
-                                          🏷️ {th}
-                                        </span>
-                                      ))}
-                                    </div>
-                                  </div>
-                                )}
-
-                                {/* Material Disclosures Table */}
-                                {nd?.topDisclosures && nd.topDisclosures.length > 0 && (
-                                  <div className={styles.subSection}>
-                                    <div className={styles.subSectionLabel}>Material Disclosures &amp; Fundamental Earnings Impact</div>
-                                    <div className="fin-table-container">
-                                      <table className="fin-table">
-                                        <thead>
-                                          <tr>
-                                            <th style={{ width: "16%" }}>Date / Source</th>
-                                            <th className="wrap-cell" style={{ width: "36%", whiteSpace: "normal" }}>Disclosure Headline</th>
-                                            <th style={{ width: "12%" }}>Risk Impact</th>
-                                            <th className="wrap-cell" style={{ width: "36%", whiteSpace: "normal" }}>Valuation Transmission</th>
-                                          </tr>
-                                        </thead>
-                                        <tbody>
-                                          {nd.topDisclosures.map((md, mdi: number) => (
-                                            <tr key={mdi}>
-                                              <td className="row-header">
-                                                <div>{md.date}</div>
-                                                <div style={{ fontSize: "11px", color: "var(--ink-muted)", fontWeight: 400 }}>{md.source || "Regulatory Filing"}</div>
-                                              </td>
-                                              <td className="wrap-cell" style={{ fontWeight: 600, color: "var(--ink)", whiteSpace: "normal", wordBreak: "break-word", lineHeight: 1.4 }}>{md.headline}</td>
-                                              <td>
-                                                <span className={`badge-solid ${md.riskRating === "LOW" ? "badge-buy" : md.riskRating === "HIGH" ? "badge-sell" : "badge-hold"}`}>
-                                                  {md.riskRating}
-                                                </span>
-                                              </td>
-                                              <td className="wrap-cell" style={{ color: "var(--ink-secondary)", lineHeight: 1.45, whiteSpace: "normal", wordBreak: "break-word" }}>{md.valuationTransmission}</td>
-                                            </tr>
-                                          ))}
-                                        </tbody>
-                                      </table>
-                                    </div>
-                                  </div>
-                                )}
-
-                                {/* Macro & Earnings Transmission Insights */}
-                                {(nd?.macroIndustryTransmission || nd?.earningsTransmissionVerdict) && (
-                                  <div className={styles.subSection}>
-                                    <div className={styles.subSectionLabel}>Macro &amp; Earnings Transmission Verdict</div>
-                                    <p className={styles.subSectionText}>
-                                      {nd?.macroIndustryTransmission} {nd?.earningsTransmissionVerdict}
-                                    </p>
-                                  </div>
-                                )}
-                              </>
-                            );
-                          })()}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* ── AGENT 8: COUNCIL QUALITY & AUDIT VERIFIER ── */}
-                    {(selectedAgentFilter === "all" || selectedAgentFilter === "verifier") && (
-                      <div className={styles.personaCard} style={{ border: "1px solid rgba(56, 189, 248, 0.4)", boxShadow: "0 0 20px rgba(56, 189, 248, 0.08)" }}>
-                        <div className={styles.personaCardHeader}>
-                          <div className={styles.personaInfo}>
-                            <div className={styles.personaAvatar} style={{ background: "rgba(56, 189, 248, 0.15)", borderColor: "var(--cyan)" }}>🔍</div>
-                            <div>
-                              <div className={styles.personaTitle} style={{ color: "var(--cyan)" }}>Council Quality &amp; Audit Verifier</div>
-                              <div className={styles.personaRole}>Anti-Hallucination, Factual Integrity &amp; Mistake Audit</div>
-                            </div>
-                          </div>
-                          <div className={styles.personaMetaRight}>
-                            <span className={styles.personaIndex} style={{ background: "rgba(34, 197, 94, 0.15)", color: "var(--bullish)", borderColor: "rgba(34, 197, 94, 0.3)" }}>AGENT 08 / 08</span>
-                            <span className={styles.personaStatus}>
-                              <span className={styles.marketDot} /> {reportData.aiAnalysis?.councilVerification ? `${reportData.aiAnalysis.councilVerification.status} & AUDITED` : "AUDIT NOT PERFORMED"}
-                            </span>
-                          </div>
-                        </div>
-
-                        <div className={styles.personaBody}>
-                          {/* Integrity Score Banner */}
-                          <div className={styles.auditScoreBanner}>
-                            <div className={styles.auditScoreLeft}>
-                              <div className={styles.auditScoreVal}>
-                                {reportData.aiAnalysis?.councilVerification ? <>{reportData.aiAnalysis.councilVerification.integrityScore}<span>/100</span></> : "—"}
-                              </div>
-                              <div className={styles.auditScoreDesc}>
-                                <div className={styles.auditScoreBadge}>
-                                  STATUS: {reportData.aiAnalysis?.councilVerification?.status || "FLAGGED (audit not performed)"}
-                                </div>
-                                <div style={{ fontSize: "12px", color: "var(--ink-secondary)", marginTop: "4px" }}>
-                                  Council Anti-Hallucination & Mathematical Integrity Score
-                                </div>
-                              </div>
-                            </div>
-                            <div className={styles.auditTimestamp}>
-                              <div>Auditor: {reportData.aiAnalysis?.councilVerification?.auditorSignature || "Council Supervisory Verification Desk"}</div>
-                              <div style={{ fontSize: "11px", color: "var(--ink-muted)", marginTop: "2px" }}>
-                                Protocol: CFA Institute & Institutional Fiduciary Standards
-                              </div>
-                            </div>
-                          </div>
-
-                          <div className={styles.subSection}>
-                            <div className={styles.subSectionLabel}>Verification Audit Summary</div>
-                            <p className={styles.subSectionText}>
-                              {reportData.aiAnalysis?.councilVerification?.summary ||
-                                "Council verification did not complete for this report. Narrative claims below are unverified drafts — no anti-hallucination audit was performed."}
-                            </p>
-                          </div>
-
-                          {/* 5-Point Cross-Check Table */}
-                          {(reportData.aiAnalysis?.councilVerification?.checks || []).length > 0 && (
-                            <div className={styles.subSection}>
-                              <div className={styles.subSectionLabel}>Supervisory Cross-Verification Checklist</div>
-                              <div className="fin-table-container">
-                                <table className="fin-table">
-                                  <thead>
-                                    <tr>
-                                      <th style={{ width: "26%" }}>Verification Check</th>
-                                      <th style={{ width: "18%" }}>Category</th>
-                                      <th style={{ width: "12%" }}>Status</th>
-                                      <th style={{ width: "44%" }}>Audit Observation & Cross-Verification Findings</th>
-                                    </tr>
-                                  </thead>
-                                  <tbody>
-                                    {reportData.aiAnalysis!.councilVerification!.checks.map((check, idx) => (
-                                      <tr key={idx}>
-                                        <td className="row-header" style={{ fontWeight: 600, color: "var(--ink)" }}>{check.name}</td>
-                                        <td>
-                                          <span style={{ fontSize: "11px", fontFamily: "var(--font-mono)", color: "var(--ink-muted)" }}>
-                                            {check.category}
-                                          </span>
-                                        </td>
-                                        <td>
-                                          <span className={`badge-solid ${check.status === "PASS" ? "badge-buy" : check.status === "ADJUSTED" ? "badge-hold" : "badge-sell"}`}>
-                                            {check.status}
-                                          </span>
-                                        </td>
-                                        <td style={{ color: "var(--ink-secondary)", lineHeight: 1.45 }}>{check.observation}</td>
-                                      </tr>
-                                    ))}
-                                  </tbody>
-                                </table>
-                              </div>
-                            </div>
-                          )}
-
-                          {/* Applied Corrections & Safeguards */}
-                          {(reportData.aiAnalysis?.councilVerification?.correctionsApplied || []).length > 0 && (
-                            <div className={styles.subSection}>
-                              <div className={styles.subSectionLabel}>Rectifications & Consistency Safeguards Applied</div>
-                              <ul className={styles.swotList}>
-                                {reportData.aiAnalysis!.councilVerification!.correctionsApplied.map((corr, idx) => (
-                                  <li key={idx} className={styles.swotItem}>
-                                    <span className={styles.swotBullet} style={{ color: "var(--bullish)" }}>✓</span>
-                                    <span>{corr}</span>
-                                  </li>
-                                ))}
-                              </ul>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* ── TAB 2: DCF MODEL ── */}
-                {activeTab === "dcf" && (
-                  <>
-                    <div className={styles.editorialCard}>
-                      <div className={styles.cardSectionHeader}>5-Year Free Cash Flow Projections (FCFF)</div>
-                      <div className="fin-table-container">
-                        <table className="fin-table">
-                          <thead>
-                            <tr>
-                              <th>Metric ({cur})</th>
-                              {dcf.projections.map(p => (
-                                <th key={p.year} className="align-right">{p.year}</th>
-                              ))}
-                            </tr>
-                          </thead>
-                          <tbody>
-                            <tr>
-                              <td className="row-header">Projected Revenue</td>
-                              {dcf.projections.map(p => (
-                                <td key={p.year} className="align-right">{fmtMoney(p.revenue)}</td>
-                              ))}
-                            </tr>
-                            <tr>
-                              <td className="row-header">Revenue Growth Rate</td>
-                              {dcf.projections.map(p => (
-                                <td key={p.year} className="align-right">{fmtPct(p.revenueGrowth)}</td>
-                              ))}
-                            </tr>
-                            <tr>
-                              <td className="row-header">EBIT Margin %</td>
-                              {dcf.projections.map(p => (
-                                <td key={p.year} className="align-right">{fmtPct(p.ebitMargin)}</td>
-                              ))}
-                            </tr>
-                            <tr>
-                              <td className="row-header">Operating Income (EBIT)</td>
-                              {dcf.projections.map(p => (
-                                <td key={p.year} className="align-right">{fmtMoney(p.ebit)}</td>
-                              ))}
-                            </tr>
-                            <tr>
-                              <td className="row-header">Less: Adjusted Taxes ({fmtPct(dcf.assumptions.marginalTaxRate)})</td>
-                              {dcf.projections.map(p => (
-                                <td key={p.year} className="align-right">({fmtMoney(p.taxPayment)})</td>
-                              ))}
-                            </tr>
-                            <tr>
-                              <td className="row-header">NOPAT</td>
-                              {dcf.projections.map(p => (
-                                <td key={p.year} className="align-right" style={{ color: "var(--ink)", fontWeight: 600 }}>
-                                  {fmtMoney(p.nopat)}
-                                </td>
-                              ))}
-                            </tr>
-                            <tr>
-                              <td className="row-header">Add: Depreciation & Amortization</td>
-                              {dcf.projections.map(p => (
-                                <td key={p.year} className="align-right">{fmtMoney(p.depreciation)}</td>
-                              ))}
-                            </tr>
-                            <tr>
-                              <td className="row-header">Less: Capital Expenditures</td>
-                              {dcf.projections.map(p => (
-                                <td key={p.year} className="align-right">({fmtMoney(p.capex)})</td>
-                              ))}
-                            </tr>
-                            <tr>
-                              <td className="row-header">Less: Change in Net Working Capital</td>
-                              {dcf.projections.map(p => (
-                                <td key={p.year} className="align-right">({fmtMoney(p.changeInWorkingCapital)})</td>
-                              ))}
-                            </tr>
-                            <tr style={{ background: "var(--surface-0)" }}>
-                              <td className="row-header" style={{ fontWeight: 700, color: "var(--bullish)" }}>
-                                Free Cash Flow to Firm (FCFF)
-                              </td>
-                              {dcf.projections.map(p => (
-                                <td key={p.year} className="align-right" style={{ fontWeight: 700, color: "var(--bullish)" }}>
-                                  {fmtMoney(p.fcff)}
-                                </td>
-                              ))}
-                            </tr>
-                            <tr>
-                              <td className="row-header">Discount Factor @ WACC</td>
-                              {dcf.projections.map(p => (
-                                <td key={p.year} className="align-right">{p.discountFactor.toFixed(3)}</td>
-                              ))}
-                            </tr>
-                            <tr>
-                              <td className="row-header">Present Value of FCFF</td>
-                              {dcf.projections.map(p => (
-                                <td key={p.year} className="align-right" style={{ fontWeight: 600 }}>
-                                  {fmtMoney(p.pvFcff)}
-                                </td>
-                              ))}
-                            </tr>
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-
-                    {/* Valuation Bridge */}
-                    <div className={styles.statsGrid}>
-                      <div className={styles.statCard}>
-                        <span className={styles.statLabel}>WACC</span>
-                        <span className={styles.statVal}>{fmtPct(dcf.assumptions.wacc)}</span>
-                        <span className={styles.statSub}>Beta: {dcf.assumptions.beta.toFixed(2)}</span>
-                      </div>
-                      <div className={styles.statCard}>
-                        <span className={styles.statLabel}>Terminal Growth Rate</span>
-                        <span className={styles.statVal}>{fmtPct(dcf.assumptions.terminalGrowthRate)}</span>
-                        <span className={styles.statSub}>Long-term nominal GDP</span>
-                      </div>
-                      <div className={styles.statCard}>
-                        <span className={styles.statLabel}>Enterprise Value</span>
-                        <span className={styles.statVal}>{fmtMoney(dcf.enterpriseValue)}</span>
-                        <span className={styles.statSub}>PV FCFF + Terminal PV</span>
-                      </div>
-                      <div className={styles.statCard}>
-                        <span className={styles.statLabel}>Net Debt / (Cash)</span>
-                        <span className={styles.statVal} style={{ color: dcf.plusCash > 0 ? "var(--bullish)" : "var(--bearish)" }}>
-                          {dcf.plusCash > 0 ? `+${fmtMoney(dcf.plusCash)}` : `-${fmtMoney(dcf.lessDebt)}`}
-                        </span>
-                         <span className={styles.statSub}>{dcf.plusCash > 0 ? "Net Cash Position" : "Net Debt Position"}</span>
-                       </div>
-                     </div>
-                     <ValuationWhatIf data={reportData} />
-                   </>
-                 )}
-
-                {/* ── TAB 3: 5-YEAR FINANCIALS ── */}
-                {activeTab === "financials" && (
-                  <div className={styles.editorialCard}>
-                    <div className={styles.cardSectionHeader}>5-Year Audited Financial Trajectory</div>
-                    <div className="fin-table-container">
-                      <table className="fin-table">
-                        <thead>
-                          <tr>
-                            <th>Line Item ({cur})</th>
-                            {annualFinancials.map(f => (
-                              <th key={f.year} className="align-right">{f.year}</th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          <tr>
-                            <td className="row-header">{stmtArch === "C" ? "Total Income (NEP + Investments)" : stmtArch === "D" ? "Total Rental Income" : stmtArch === "E" ? "Total Fee Revenue" : "Total Revenue"}</td>
-                            {annualFinancials.map(f => <td key={f.year} className="align-right">{fmtMoney(f.revenue)}</td>)}
-                          </tr>
-                          {stmtArch === "C" ? (<>
-                            <tr>
-                              <td className="row-header">Gross Written Premium</td>
-                              {annualFinancials.map(f => <td key={f.year} className="align-right">{fmtMoney(stmtNum(f, "grossWrittenPremium"))}</td>)}
-                            </tr>
-                            <tr>
-                              <td className="row-header">Net Earned Premium</td>
-                              {annualFinancials.map(f => <td key={f.year} className="align-right">{fmtMoney(stmtNum(f, "netEarnedPremium"))}</td>)}
-                            </tr>
-                            <tr>
-                              <td className="row-header">Claims Incurred</td>
-                              {annualFinancials.map(f => <td key={f.year} className="align-right">{fmtMoney(stmtNum(f, "claimsIncurred"))}</td>)}
-                            </tr>
-                            <tr>
-                              <td className="row-header">Underwriting Expenses</td>
-                              {annualFinancials.map(f => <td key={f.year} className="align-right">{fmtMoney(stmtNum(f, "underwritingExpenses"))}</td>)}
-                            </tr>
-                            <tr>
-                              <td className="row-header">Underwriting Result</td>
-                              {annualFinancials.map(f => <td key={f.year} className="align-right">{fmtMoney(stmtNum(f, "underwritingResult"))}</td>)}
-                            </tr>
-                            <tr>
-                              <td className="row-header">Combined Ratio %</td>
-                              {annualFinancials.map(f => <td key={f.year} className="align-right">{fmtPct(stmtNum(f, "combinedRatio"))}</td>)}
-                            </tr>
-                            <tr>
-                              <td className="row-header">Investment Income on Float</td>
-                              {annualFinancials.map(f => <td key={f.year} className="align-right">{fmtMoney(stmtNum(f, "investmentIncome"))}</td>)}
-                            </tr>
-                            <tr>
-                              <td className="row-header">Policyholder Float</td>
-                              {annualFinancials.map(f => <td key={f.year} className="align-right">{fmtMoney(stmtNum(f, "float"))}</td>)}
-                            </tr>
-                          </>) : stmtArch === "D" ? (<>
-                            <tr>
-                              <td className="row-header">Rental Income</td>
-                              {annualFinancials.map(f => <td key={f.year} className="align-right">{fmtMoney(stmtNum(f, "rentalIncome"))}</td>)}
-                            </tr>
-                            <tr>
-                              <td className="row-header">Property Operating Expenses</td>
-                              {annualFinancials.map(f => <td key={f.year} className="align-right">{fmtMoney(stmtNum(f, "propertyOperatingExpenses"))}</td>)}
-                            </tr>
-                            <tr>
-                              <td className="row-header">Net Operating Income (NOI)</td>
-                              {annualFinancials.map(f => <td key={f.year} className="align-right">{fmtMoney(stmtNum(f, "netOperatingIncome"))}</td>)}
-                            </tr>
-                            <tr>
-                              <td className="row-header">NOI Margin %</td>
-                              {annualFinancials.map(f => <td key={f.year} className="align-right">{fmtPct(stmtNum(f, "noiMargin"))}</td>)}
-                            </tr>
-                            <tr>
-                              <td className="row-header">Funds From Operations (FFO)</td>
-                              {annualFinancials.map(f => <td key={f.year} className="align-right">{fmtMoney(stmtNum(f, "fundsFromOperations"))}</td>)}
-                            </tr>
-                            <tr>
-                              <td className="row-header">Adjusted FFO (AFFO)</td>
-                              {annualFinancials.map(f => <td key={f.year} className="align-right">{fmtMoney(stmtNum(f, "adjustedFundsFromOperations"))}</td>)}
-                            </tr>
-                            <tr>
-                              <td className="row-header">FFO / Share</td>
-                              {annualFinancials.map(f => <td key={f.year} className="align-right">{sym}{stmtNum(f, "ffoPerShare").toFixed(2)}</td>)}
-                            </tr>
-                            <tr>
-                              <td className="row-header">AFFO / Share</td>
-                              {annualFinancials.map(f => <td key={f.year} className="align-right">{sym}{stmtNum(f, "affoPerShare").toFixed(2)}</td>)}
-                            </tr>
-                          </>) : stmtArch === "E" ? (<>
-                            <tr>
-                              <td className="row-header">Management / Advisory Fees</td>
-                              {annualFinancials.map(f => <td key={f.year} className="align-right">{fmtMoney(stmtNum(f, "managementFees"))}</td>)}
-                            </tr>
-                            <tr>
-                              <td className="row-header">Performance Fees</td>
-                              {annualFinancials.map(f => <td key={f.year} className="align-right">{fmtMoney(stmtNum(f, "performanceFees"))}</td>)}
-                            </tr>
-                            <tr>
-                              <td className="row-header">Technology / Platform Services</td>
-                              {annualFinancials.map(f => <td key={f.year} className="align-right">{fmtMoney(stmtNum(f, "technologyServicesRevenue"))}</td>)}
-                            </tr>
-                            <tr>
-                              <td className="row-header">Total Fee Revenue</td>
-                              {annualFinancials.map(f => <td key={f.year} className="align-right">{fmtMoney(stmtNum(f, "totalFeeRevenue"))}</td>)}
-                            </tr>
-                            <tr>
-                              <td className="row-header">Operating Expenses</td>
-                              {annualFinancials.map(f => <td key={f.year} className="align-right">{fmtMoney(stmtNum(f, "operatingExpenses"))}</td>)}
-                            </tr>
-                            <tr>
-                              <td className="row-header">Operating Income</td>
-                              {annualFinancials.map(f => <td key={f.year} className="align-right">{fmtMoney(stmtNum(f, "operatingIncome"))}</td>)}
-                            </tr>
-                            <tr>
-                              <td className="row-header">Operating Margin %</td>
-                              {annualFinancials.map(f => <td key={f.year} className="align-right">{fmtPct(stmtNum(f, "operatingMargin"))}</td>)}
-                            </tr>
-                            <tr>
-                              <td className="row-header">Revenue as % of AUM</td>
-                              {annualFinancials.map(f => <td key={f.year} className="align-right">{stmtNum(f, "aumEnding") > 0 ? fmtPct(stmtNum(f, "revenueAsPctOfAum", Number.NaN)) : "N/M"}</td>)}
-                            </tr>
-                          </>) : (<>
-                          <tr>
-                            <td className="row-header">Gross Profit</td>
-                            {annualFinancials.map(f => <td key={f.year} className="align-right">{fmtMoney(stmtNum(f, "grossProfit"))}</td>)}
-                          </tr>
-                          <tr>
-                            <td className="row-header">Gross Margin %</td>
-                            {annualFinancials.map(f => <td key={f.year} className="align-right">{fmtPct(stmtNum(f, "grossMargin"))}</td>)}
-                          </tr>
-                          <tr>
-                            <td className="row-header">EBITDA</td>
-                            {annualFinancials.map(f => <td key={f.year} className="align-right">{fmtMoney(stmtNum(f, "ebitda"))}</td>)}
-                          </tr>
-                          <tr>
-                            <td className="row-header">EBITDA Margin %</td>
-                            {annualFinancials.map(f => <td key={f.year} className="align-right">{fmtPct(stmtNum(f, "ebitdaMargin"))}</td>)}
-                          </tr>
-                          <tr>
-                            <td className="row-header">Operating Income (EBIT)</td>
-                            {annualFinancials.map(f => <td key={f.year} className="align-right">{fmtMoney(stmtNum(f, "operatingIncome"))}</td>)}
-                          </tr>
-                          <tr>
-                            <td className="row-header">Depreciation & Amortization</td>
-                            {annualFinancials.map(f => <td key={f.year} className="align-right">{fmtMoney(stmtNum(f, "depreciation", stmtNum(f, "depreciationAmortization")))}</td>)}
-                          </tr>
-                          </>)}
-                          <tr>
-                            <td className="row-header">Net Income (PAT)</td>
-                            {annualFinancials.map(f => (
-                              <td key={f.year} className="align-right" style={{ fontWeight: 600, color: "var(--ink)" }}>
-                                {fmtMoney(f.netIncome)}
-                              </td>
-                            ))}
-                          </tr>
-                          <tr>
-                            <td className="row-header">Diluted EPS</td>
-                            {annualFinancials.map(f => <td key={f.year} className="align-right">{sym}{f.eps.toFixed(2)}</td>)}
-                          </tr>
-                          <tr>
-                            <td className="row-header">Total Assets</td>
-                            {annualFinancials.map(f => <td key={f.year} className="align-right">{fmtMoney(f.totalAssets)}</td>)}
-                          </tr>
-                          <tr>
-                            <td className="row-header">Goodwill &amp; Intangibles</td>
-                            {annualFinancials.map(f => (
-                              <td key={f.year} className="align-right">
-                                {fmtMoney(stmtNum(f, "goodwill") + stmtNum(f, "otherIntangibles"))}
-                              </td>
-                            ))}
-                          </tr>
-                          <tr>
-                            <td className="row-header">Total Equity</td>
-                            {annualFinancials.map(f => <td key={f.year} className="align-right">{fmtMoney(f.totalEquity)}</td>)}
-                          </tr>
-                          <tr>
-                            <td className="row-header">Tangible Book Value (Ex-Goodwill)</td>
-                            {annualFinancials.map(f => (
-                              <td key={f.year} className="align-right">
-                                {fmtMoney(stmtNum(f, "tangibleBookValue", Number.NaN) >= 0 ? stmtNum(f, "tangibleBookValue") : Math.max(0, (f.totalEquity || 0) - stmtNum(f, "goodwill") - stmtNum(f, "otherIntangibles")))}
-                              </td>
-                            ))}
-                          </tr>
-                          <tr>
-                            <td className="row-header">Total Debt</td>
-                            {annualFinancials.map(f => <td key={f.year} className="align-right">{fmtMoney(f.totalDebt)}</td>)}
-                          </tr>
-                          <tr>
-                            <td className="row-header">Cash & Liquid Investments</td>
-                            {annualFinancials.map(f => <td key={f.year} className="align-right">{fmtMoney(f.cash)}</td>)}
-                          </tr>
-                          <tr>
-                            <td className="row-header">Operating Cash Flow</td>
-                            {annualFinancials.map(f => <td key={f.year} className="align-right">{fmtMoney(f.operatingCashFlow)}</td>)}
-                          </tr>
-                          <tr>
-                            <td className="row-header">Capital Expenditures</td>
-                            {annualFinancials.map(f => <td key={f.year} className="align-right">({fmtMoney(f.capitalExpenditures)})</td>)}
-                          </tr>
-                          <tr>
-                            <td className="row-header">Free Cash Flow</td>
-                            {annualFinancials.map(f => (
-                              <td key={f.year} className="align-right" style={{ color: f.freeCashFlow >= 0 ? "var(--bullish)" : "var(--bearish)" }}>
-                                {fmtMoney(f.freeCashFlow)}
-                              </td>
-                            ))}
-                          </tr>
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                )}
-
-                {/* ── TAB 4: DUPONT & RATIOS ── */}
-                {activeTab === "dupont" && (
-                  <div className={styles.editorialCard}>
-                    <div className={styles.cardSectionHeader}>DuPont Analysis (ROE Decomposition)</div>
-                    <div className="fin-table-container" style={{ marginBottom: 20 }}>
-                      <table className="fin-table">
-                        <thead>
-                          <tr>
-                            <th>DuPont Component</th>
-                            {annualFinancials.map(f => <th key={f.year} className="align-right">{f.year}</th>)}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          <tr>
-                            <td className="row-header">Net Profit Margin (A)</td>
-                            {annualFinancials.map(f => <td key={f.year} className="align-right">{fmtPct(f.netMargin)}</td>)}
-                          </tr>
-                          <tr>
-                            <td className="row-header">Asset Turnover Ratio (B)</td>
-                            {annualFinancials.map(f => (
-                              <td key={f.year} className="align-right">
-                                {f.totalAssets > 0 ? `${(f.revenue / f.totalAssets).toFixed(2)}x` : "—"}
-                              </td>
-                            ))}
-                          </tr>
-                          <tr>
-                            <td className="row-header">Financial Equity Multiplier (C)</td>
-                            {annualFinancials.map(f => (
-                              <td key={f.year} className="align-right">
-                                {f.totalEquity > 0 ? `${(f.totalAssets / f.totalEquity).toFixed(2)}x` : "—"}
-                              </td>
-                            ))}
-                          </tr>
-                          <tr style={{ background: "var(--surface-0)" }}>
-                            <td className="row-header" style={{ fontWeight: 700, color: "var(--bullish)" }}>
-                              Return on Equity (A × B × C)
-                            </td>
-                            {annualFinancials.map(f => (
-                              <td key={f.year} className="align-right" style={{ fontWeight: 700, color: "var(--bullish)" }}>
-                                {f.totalEquity > 0 ? fmtPct(f.netIncome / f.totalEquity) : "—"}
-                              </td>
-                            ))}
-                          </tr>
-                          <tr>
-                            <td className="row-header">Return on Assets (A × B)</td>
-                            {annualFinancials.map(f => (
-                              <td key={f.year} className="align-right">
-                                {f.totalAssets > 0 ? fmtPct(f.netIncome / f.totalAssets) : "—"}
-                              </td>
-                            ))}
-                          </tr>
-                        </tbody>
-                      </table>
-                    </div>
-
-                    <div className={styles.cardSectionHeader}>Analytical Commentary</div>
-                    <div className={styles.editorialBody}>
-                      <p>{reportData.aiAnalysis?.dupontCommentary}</p>
-                    </div>
-                  </div>
-                )}
-
-                {/* ── TAB 5: PEER BENCHMARK ── */}
-                {activeTab === "peers" && (
-                  <div className={styles.editorialCard}>
-                    <div className={styles.cardSectionHeader}>Sector Peer Group Comparison</div>
-                    <div className="fin-table-container">
-                      <table className="fin-table">
-                        <thead>
-                          <tr>
-                            <th>Company</th>
-                            <th className="align-right">Market Price</th>
-                            <th className="align-right">Market Cap</th>
-                            <th className="align-right">P/E (x)</th>
-                            <th className="align-right">EV/EBITDA</th>
-                            <th className="align-right">P/B (x)</th>
-                            <th className="align-right">ROE %</th>
-                            <th className="align-right">Net Margin</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          <tr style={{ background: "var(--primary-subtle)" }}>
-                            <td className="row-header" style={{ fontWeight: 700, color: "var(--ink)" }}>
-                              ★ {profile.name} ({profile.ticker})
-                            </td>
-                            <td className="align-right">{sym}{stockData.currentPrice.toFixed(2)}</td>
-                            <td className="align-right">{displayMarketCap > 0 ? fmtMoney(displayMarketCap) : "—"}</td>
-                            <td className="align-right">{stockData.pe > 0 ? fmtMult(stockData.pe) : "—"}</td>
-                            <td className="align-right">{stockData.enterpriseValue && stmtNum(latest, "ebitda") > 0 ? fmtMult(stockData.enterpriseValue / stmtNum(latest, "ebitda")) : "—"}</td>
-                            <td className="align-right">{stockData.pb > 0 ? fmtMult(stockData.pb) : "—"}</td>
-                            <td className="align-right">{roeStr}</td>
-                            <td className="align-right">{fmtPct(latest.netMargin)}</td>
-                          </tr>
-                          {(reportData.peers || []).map(p => {
-                            const pPe = p.pe != null && p.pe > 0 ? p.pe : null;
-                            const pEvEbitda = p.evToEbitda != null && p.evToEbitda > 0 ? p.evToEbitda : (pPe ? pPe * 0.72 : 14.5);
-                            const pPb = p.pb != null && p.pb > 0 ? p.pb : (pPe ? pPe * 0.12 : 2.8);
-                            const pRoe = p.roe != null ? p.roe : (pPb && pPe ? pPb / pPe : 0.115);
-                            const pNetMargin = p.netMargin != null ? p.netMargin : (pRoe ? pRoe * 0.45 : 0.085);
-                            return (
-                              <tr key={p.ticker}>
-                                <td className="row-header">{p.name || p.ticker}</td>
-                                <td className="align-right">{p.cmp != null ? `${sym}${p.cmp.toFixed(2)}` : "—"}</td>
-                                <td className="align-right">{p.marketCap != null ? fmtMoney(p.marketCap) : "—"}</td>
-                                <td className="align-right">{pPe ? fmtMult(pPe) : `${fmtMult(pEvEbitda * 1.35)}`}</td>
-                                <td className="align-right">{fmtMult(pEvEbitda)}</td>
-                                <td className="align-right">{fmtMult(pPb)}</td>
-                                <td className="align-right">{fmtPct(pRoe)}</td>
-                                <td className="align-right">{fmtPct(pNetMargin)}</td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                )}
-
-                {/* ── TAB 6: SWOT & RISKS ── */}
-                {activeTab === "risks" && (
-                  <>
-                    <div className={styles.swotGrid}>
-                      <div className={`${styles.swotBox} ${styles.swotStrengths}`}>
-                        <div className={styles.swotBoxHeader}>
-                          <span className={styles.swotTitle} style={{ color: "var(--bullish)" }}>Key Strengths</span>
-                        </div>
-                        <ul className={styles.swotList}>
-                          {(reportData.aiAnalysis?.swotStrengths || []).map((s, i) => (
-                            <li key={i} className={styles.swotItem}>
-                              <span className={styles.swotBullet}>•</span>
-                              <span>{s}</span>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-
-                      <div className={`${styles.swotBox} ${styles.swotWeaknesses}`}>
-                        <div className={styles.swotBoxHeader}>
-                          <span className={styles.swotTitle} style={{ color: "var(--bearish)" }}>Weaknesses & Constraints</span>
-                        </div>
-                        <ul className={styles.swotList}>
-                          {(reportData.aiAnalysis?.swotWeaknesses || []).map((w, i) => (
-                            <li key={i} className={styles.swotItem}>
-                              <span className={styles.swotBullet}>•</span>
-                              <span>{w}</span>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-
-                      <div className={`${styles.swotBox} ${styles.swotOpportunities}`}>
-                        <div className={styles.swotBoxHeader}>
-                          <span className={styles.swotTitle} style={{ color: "var(--cyan)" }}>Growth Opportunities</span>
-                        </div>
-                        <ul className={styles.swotList}>
-                          {(reportData.aiAnalysis?.swotOpportunities || []).map((o, i) => (
-                            <li key={i} className={styles.swotItem}>
-                              <span className={styles.swotBullet}>•</span>
-                              <span>{o}</span>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-
-                      <div className={`${styles.swotBox} ${styles.swotThreats}`}>
-                        <div className={styles.swotBoxHeader}>
-                          <span className={styles.swotTitle} style={{ color: "var(--neutral)" }}>External Threats</span>
-                        </div>
-                        <ul className={styles.swotList}>
-                          {(reportData.aiAnalysis?.swotThreats || []).map((t, i) => (
-                            <li key={i} className={styles.swotItem}>
-                              <span className={styles.swotBullet}>•</span>
-                              <span>{t}</span>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    </div>
-
-                    <div className={styles.editorialCard}>
-                      <div className={styles.cardSectionHeader}>Risk Factor Assessment</div>
-                      <div className="fin-table-container">
-                        <table className="fin-table">
-                          <thead>
-                            <tr>
-                              <th style={{ width: "24%" }}>Risk Factor</th>
-                              <th style={{ width: "12%" }}>Impact</th>
-                              <th>Description & Strategic Exposure</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {(reportData.aiAnalysis?.keyRisks || []).map((r, i) => (
-                              <tr key={i}>
-                                <td className="row-header">{r.risk}</td>
-                                <td>
-                                  <span className={`badge-solid ${r.impact === "High" ? "badge-sell" : r.impact === "Low" ? "badge-buy" : "badge-hold"}`}>
-                                    {r.impact}
-                                  </span>
-                                </td>
-                                <td style={{ fontFamily: "var(--font-sans)" }}>{r.description}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  </>
-                )}
-
-                {/* ── TAB 8: REPORT OUTLINE (Phase 9 — composed structure) ── */}
-                {activeTab === "outline" && (
-                  <>
-                    {reportData.composedReport ? (
-                      <>
-                        <div className={styles.outlineHeaderRow}>
-                          <div className={styles.cardSectionHeader}>Composed Report Outline</div>
-                          <div className={styles.outlineBadges}>
-                            <span className={styles.outlineBadge}>
-                              {getReportBlueprint(reportData.composedReport.blueprintId)?.title ??
-                                reportData.composedReport.blueprintId}
-                            </span>
-                            <span
-                              className={`${styles.outlineBadge} ${
-                                reportData.composedReport.depth === "full"
-                                  ? styles.outlineBadgeFull
-                                  : styles.outlineBadgeConcise
-                              }`}
-                            >
-                              {reportData.composedReport.depth === "full" ? "FULL DEPTH" : "CONCISE"}
-                            </span>
-                          </div>
-                        </div>
-
-                        <div className={styles.editorialCard}>
-                          <div className={styles.cardSectionHeader}>Cover TOC</div>
-                          <div className="fin-table-container">
-                            <table className="fin-table">
-                              <thead>
-                                <tr>
-                                  <th style={{ width: "8%" }}>#</th>
-                                  <th style={{ width: "62%" }}>Title</th>
-                                  <th>Depth</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {reportData.composedReport.toc.map((t) => (
-                                  <tr key={`${t.index}-${t.title}`}>
-                                    <td className="row-header">{t.index}</td>
-                                    <td style={{ fontFamily: "var(--font-sans)" }}>{t.title}</td>
-                                    <td>
-                                      <span className="badge-solid badge-hold">
-                                        {t.depth === "both" ? "Both" : t.depth === "full" ? "Full only" : "Concise only"}
-                                      </span>
-                                    </td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          </div>
-                        </div>
-
-                        <div className={styles.editorialCard}>
-                          <div className={styles.cardSectionHeader}>
-                            Sections in Render Order ({reportData.composedReport.sections.length})
-                          </div>
-                          <div className="fin-table-container">
-                            <table className="fin-table">
-                              <thead>
-                                <tr>
-                                  <th style={{ width: "6%" }}>#</th>
-                                  <th style={{ width: "34%" }}>Section</th>
-                                  <th style={{ width: "14%" }}>Depth</th>
-                                  <th>Research Modules</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {reportData.composedReport.sections.map((s) => (
-                                  <tr key={s.id}>
-                                    <td className="row-header">{s.index}</td>
-                                    <td style={{ fontFamily: "var(--font-sans)" }}>{s.title}</td>
-                                    <td>
-                                      <span
-                                        className={`badge-solid ${
-                                          s.depth === "full" ? "badge-buy" : "badge-hold"
-                                        }`}
-                                      >
-                                        {s.depth === null ? "Both" : s.depth === "full" ? "Full only" : "Concise only"}
-                                      </span>
-                                    </td>
-                                    <td style={{ fontFamily: "var(--font-mono)", fontSize: 11 }}>
-                                      {s.modules.join(", ")}
-                                      {s.unavailableModules.length > 0 && (
-                                        <span style={{ color: "var(--bearish)" }}>
-                                          {" "}
-                                          · unavailable: {s.unavailableModules.join(", ")}
-                                        </span>
-                                      )}
-                                    </td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          </div>
-                        </div>
-
-                        <div className={styles.editorialCard}>
-                          <div className={styles.cardSectionHeader}>
-                            Composition Unknowns ({reportData.composedReport.unknowns.length})
-                          </div>
-                          {reportData.composedReport.unknowns.length === 0 ? (
-                            <p style={{ fontFamily: "var(--font-sans)", fontSize: 13, color: "var(--ink-muted)" }}>
-                              None — every selected module produced a usable slice.
-                            </p>
-                          ) : (
-                            <ul className={styles.swotList}>
-                              {reportData.composedReport.unknowns.map((u, i) => (
-                                <li key={i} className={styles.swotItem}>
-                                  <span className={styles.swotBullet}>•</span>
-                                  <span>{u}</span>
-                                </li>
-                              ))}
-                            </ul>
-                          )}
-                        </div>
-                      </>
-                    ) : (
-                      <div className={styles.editorialCard}>
-                        <div className={styles.cardSectionHeader}>Composed Report Outline</div>
-                        <p style={{ fontFamily: "var(--font-sans)", fontSize: 13, color: "var(--ink-muted)" }}>
-                          Outline unavailable — no ComposedReport was produced for this run (missing ResearchCase
-                          or composition failed). The PDF keeps its legacy structure.
-                        </p>
-                      </div>
-                    )}
-                  </>
-                )}
-
-              </div>
-
-              {/* Bottom Generate Another Report */}
-              <div className={styles.bottomAction}>
-                <button className="btn-secondary" onClick={() => router.push("/")}>
-                  ← Search Another Company
-                </button>
-              </div>
-            </div>
-          );
-        })()}
       </main>
-
-      <ApiKeyModal
-        isOpen={isApiKeyModalOpen}
-        onClose={() => setIsApiKeyModalOpen(false)}
-        onSave={handleKeyModalSave}
-        isRateLimitTriggered={isRateLimitTriggered}
-        rateLimitInfo={rateLimitInfo}
-        currentConfig={customKeyConfig}
-      />
+      <ApiKeyModal isOpen={isApiKeyModalOpen} onClose={() => setIsApiKeyModalOpen(false)} onSave={handleKeyModalSave} isRateLimitTriggered={isPaused} rateLimitInfo={rateLimitInfo} currentConfig={customKeyConfig} />
     </div>
   );
 }

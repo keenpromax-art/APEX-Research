@@ -88,6 +88,37 @@ import type {
   QualityModuleData,
   ThesisModuleData,
 } from "@/lib/research-modules";
+import { presentationForData, CanonicalPresentationCover, CanonicalPresentationStatements, CanonicalPresentationSensitivity, CanonicalPresentationEvents, CanonicalPresentationCharts, CanonicalPresentationTables } from "./presentation-view";
+function reportTitleForCanonical(composed: unknown, data: { profile: { name: string } }): string {
+  void composed;
+  void data;
+  return "Institutional Equity Research";
+}
+function renderCanonicalPresentation(data: import("@/types/report").ReportData, view: import("@/lib/report-plan/presentation").PresentationViewModel, reportTitle: string): React.ReactElement {
+  return (
+    <Document title={`${data.profile.name} - ${reportTitle} Report`} author={data.analystName} subject={`${reportTitle}: ${data.profile.ticker}`} keywords={`equity research, ${data.profile.ticker}`} creator={`${reportTitle} Desk`} producer={`${reportTitle} Desk`}>
+      <Page size="A4" style={{ fontFamily: "Helvetica", backgroundColor: "#ffffff", paddingTop: 36, paddingBottom: 32, paddingLeft: 34, paddingRight: 34, fontSize: 8.5 }}>
+        <CanonicalPresentationCover view={view} companyName={data.profile.name} reportTitle={reportTitle} />
+      </Page>
+      <Page size="A4" style={{ fontFamily: "Helvetica", backgroundColor: "#ffffff", paddingTop: 36, paddingBottom: 32, paddingLeft: 34, paddingRight: 34, fontSize: 8.5 }}>
+        <CanonicalPresentationStatements view={view} />
+      </Page>
+      <Page size="A4" style={{ fontFamily: "Helvetica", backgroundColor: "#ffffff", paddingTop: 36, paddingBottom: 32, paddingLeft: 34, paddingRight: 34, fontSize: 8.5 }}>
+        <CanonicalPresentationSensitivity view={view} />
+      </Page>
+      <Page size="A4" style={{ fontFamily: "Helvetica", backgroundColor: "#ffffff", paddingTop: 36, paddingBottom: 32, paddingLeft: 34, paddingRight: 34, fontSize: 8.5 }}>
+        <CanonicalPresentationEvents view={view} />
+      </Page>
+      <Page size="A4" style={{ fontFamily: "Helvetica", backgroundColor: "#ffffff", paddingTop: 36, paddingBottom: 32, paddingLeft: 34, paddingRight: 34, fontSize: 8.5 }}>
+        <CanonicalPresentationCharts view={view} />
+      </Page>
+      <Page size="A4" style={{ fontFamily: "Helvetica", backgroundColor: "#ffffff", paddingTop: 36, paddingBottom: 32, paddingLeft: 34, paddingRight: 34, fontSize: 8.5 }}>
+        <CanonicalPresentationTables view={view} />
+      </Page>
+    </Document>
+  );
+}
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // HELPER FORMATTERS
@@ -8588,6 +8619,11 @@ export const ReportDocument = ({
   composed?: ComposedReport | null;
 }) => {
   const composed = composedProp ?? data.composedReport ?? null;
+  const canonicalView = presentationForData(data) ?? composed?.presentation ?? null;
+  if (canonicalView) {
+    const canonicalTitle = reportTitleForCanonical(composed, data);
+    return renderCanonicalPresentation(data, canonicalView, canonicalTitle);
+  }
   const depthConcise = composed ? composed.depth === "concise" : concise;
   const reportTitle =
     (composed && composedPdfReportTitle(composed)) ||

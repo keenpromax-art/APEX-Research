@@ -1292,6 +1292,9 @@ export interface ReportData {
   supervisorDiagnostics?: unknown[];
   /** AI-first content-intelligence ResearchReport (economic engine, debates, evidence map). */
   researchReport?: import("@/lib/ai-first/types").ResearchReport | null;
+  canonicalPackage?: import("@/lib/research-package/types").CanonicalResearchPackage | null;
+  canonicalQuality?: import("@/lib/research-package/types").ResearchQualityState | null;
+  diagnosticPreview?: boolean;
   forecastCompatibility?: import("@/lib/ai-first/forecast-compatibility").ForecastCompatibilityResult | null;
   /**
    * Screener.in advisory cross-check (India-only, Yahoo stays authoritative).

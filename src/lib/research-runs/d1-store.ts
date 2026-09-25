@@ -13,12 +13,14 @@ import {
   ResearchRunIdempotencyConflictError,
   ResearchRunStoreUnavailableError,
   assertRunPayloadVersion,
+  assertV2ServerProvenance,
   rehydrateResearchRunEvent,
   researchRunEventJson,
   type ResearchRunAppendResult,
   type ResearchRunPage,
   type ResearchRunStore,
 } from "./store";
+import type { ResearchRunPayloadV2 } from "./manifest";
 import { RunIdCollisionError } from "@/lib/research-ledger/repository";
 import type { ResearchEvent, ResearchRunEnvelope } from "@/lib/research-ledger/types";
 
@@ -102,7 +104,11 @@ export class D1ResearchRunStore implements ResearchRunStore {
 
   async appendRun(run: ResearchRunEnvelope<ResearchRunPayloadV1>): Promise<ResearchRunAppendResult> {
     assertCanonicalResearchRunId(run.runId);
-    assertRunPayloadVersion(run);
+    if ((run.payload as unknown as { manifestVersion?: string }).manifestVersion === "research-run-manifest-v2") {
+      assertV2ServerProvenance(run.payload as unknown as ResearchRunPayloadV2);
+    } else {
+      assertRunPayloadVersion(run);
+    }
     const manifest = researchRunManifestFromEnvelope(run);
     const envelopeJson = serializeResearchRun(run);
     const eventJson = researchRunEventJson(run);

@@ -183,9 +183,9 @@ console.log("\n[C/D] Renderer content delivery");
   check("no template bank loan boilerplate", !/disciplined loan compounding across prime retail and corporate books/.test(pdf));
   check("no template asset-mgmt ARR boilerplate", !/baseline AUM organic net inflows/.test(pdf));
   const client = fs.readFileSync(path.join(process.cwd(), "src", "app", "report", "[ticker]", "ReportClient.tsx"), "utf8");
-  check("post-enrichment sanitize applied", /postCleaned = sanitizeSectorBleed/.test(client));
-  check("post-enrichment moat recapped", /capPillarsToRating\(postPillars/.test(client));
-  check("mechanical preview rejected", /aiUsed/.test(client));
+  check("canonical adapter projection applied", /adaptCanonicalResearchPackage/.test(client));
+  check("canonical package authority retained", /canonicalPackage/.test(client) && /isBlocked/.test(client));
+  check("publication quality gates rendering", /quality\.canPublish/.test(client));
 }
 
 // ── E. Salvage wired into the live path ───────────────────────────────

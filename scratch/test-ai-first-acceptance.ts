@@ -192,8 +192,8 @@ async function main() {
   check("SBIN model uses NII formula", sbin.forecastSpec.formulas.some((f) => /interestIncome/i.test(f.expression)));
   check("GOOG model uses queries x monetization", goog.forecastSpec.formulas.some((f) => /queries/i.test(f.expression) && /monetization/i.test(f.expression)));
   check("BYD model uses volume x ASP", byd.forecastSpec.formulas.some((f) => /volume/i.test(f.expression) && /asp/i.test(f.expression)));
-  check("SBIN valuation is Residual Income (not EV/EBITDA)", sbin.report.valuation.methodology === "Residual Income");
-  check("GOOG valuation is DCF (not bank Residual Income)", goog.report.valuation.methodology === "DCF");
+  check("SBIN valuation is Residual Income (not EV/EBITDA)", sbin.report.valuation.methodology === "Residual Income", `${sbin.report.valuation.methodology}; selected=${sbin.report.valuationMatrix?.selectedMethod}; primary=${sbin.report.valuationMatrix?.primaryMethod}`);
+  check("GOOG valuation is DCF (not bank Residual Income)", goog.report.valuation.methodology === "DCF", `${goog.report.valuation.methodology}; selected=${goog.report.valuationMatrix?.selectedMethod}; primary=${goog.report.valuationMatrix?.primaryMethod}`);
 
   const sbinBlob = JSON.stringify(sbin.report).toLowerCase();
   check("SBIN avoids platform concepts", !/search index|advertiser bidding|custom silicon|hyperscale/.test(sbinBlob));

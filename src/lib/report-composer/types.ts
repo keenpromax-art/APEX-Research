@@ -68,46 +68,39 @@ export interface ComposedReport {
   caseId: string;
   blueprintId: ReportTypeId;
   depth: ResearchDepth;
-  /** Injectable in tests; defaults to wall-clock at compose time. */
   composedAt: string;
-  /** Cover TOC rows (titles/order; page numbers stay presentation-only). */
   toc: ResolvedTocEntry[];
-  /** Page-sections in render order. */
   sections: ComposedSection[];
-  /** Phase 3 runner bundle for `moduleIds` (reference, not a copy). */
   modules: ModuleRunBundle;
-  /** Unique module ids used by this composition (stable order). */
   moduleIds: ResearchModuleId[];
-  /** Aggregated unknowns across modules (never invented into sections). */
   unknowns: string[];
   evidenceGraph?: import("@/lib/evidence-graph").EvidenceGraph | null;
-  /**
-   * Adaptive research identity (ResearchDNA). Present when the caller composed
-   * with an identity; absent on the legacy/institutional path (golden-safe).
-   * Referenced, never recomputed; the renderer stays presentation-only.
-   */
   researchIdentity?: import("@/lib/research-identity").ResearchDNA | null;
+  reportPlan?: import("@/lib/report-plan/types").ReportPlan | null;
+  presentation?: import("@/lib/report-plan/presentation").PresentationViewModel | null;
+  chartSpecs?: import("@/lib/report-charts/builder").ChartSpec[] | null;
+  tableSpecs?: import("@/lib/report-charts/builder").TableSpec[] | null;
+  companyIdentity?: import("@/lib/report-plan/identity-wiring").CompanyIdentity | null;
+  originality?: import("@/lib/report-originality/collision").OriginalityReport | null;
 }
 
 export interface ComposeReportInput {
-  /** Required ResearchCase + optional pipeline context (referenced as-is). */
   context: ModuleContext;
-  /** Defaults to `institutional_equity_v1`. */
   reportTypeId?: ReportTypeId;
-  /** Defaults to the blueprint default depth (`concise`). */
   depth?: ResearchDepth;
-  /** ResearchReport for `"researchDebates"` gates (falls back to context). */
   researchReport?: unknown | null;
-  /** True when debates exist on aiAnalysis / researchReport. */
   hasResearchDebates?: boolean;
-  /** Secondary debates gate (case built with a research report). */
   researchCaseHasResearch?: boolean;
-  /** Deterministic stamp for tests. */
   composedAt?: string;
-  /**
-   * Optional adaptive identity. When supplied, section depths are refined from
-   * the identity section plan and identity-overview/signature sections are
-   * appended (generic pages). Absent = legacy golden path, byte-identical.
-   */
   researchIdentity?: import("@/lib/research-identity").ResearchDNA | null;
+  canonicalPackage?: import("@/lib/research-package/types").CanonicalResearchPackage | null;
+  reportPlan?: import("@/lib/report-plan/types").ReportPlan | null;
+  presentation?: import("@/lib/report-plan/presentation").PresentationViewModel | null;
+  chartSpecs?: import("@/lib/report-charts/builder").ChartSpec[] | null;
+  tableSpecs?: import("@/lib/report-charts/builder").TableSpec[] | null;
+  companyIdentity?: import("@/lib/report-plan/identity-wiring").CompanyIdentity | null;
+  originality?: import("@/lib/report-originality/collision").OriginalityReport | null;
+  proposedChartIds?: string[];
+  proposedTableIds?: string[];
+  priorIdentities?: import("@/lib/research-identity").ResearchDNA[];
 }
