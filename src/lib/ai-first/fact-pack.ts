@@ -14,7 +14,7 @@ import {
   type FactPackDiagnostics,
 } from "./types";
 
-export const FACT_PACK_VERSION = "2.0.0";
+export const FACT_PACK_VERSION = "2.0";
 export const YAHOO_FACT_SOURCE_ID = "market-data:provider:yahoo-finance";
 
 const FACT_PACK_SECTIONS = [
@@ -50,6 +50,7 @@ export interface CreateFactIdInput {
   metric: string;
   period: string;
   sourceId?: string;
+  sourcePath?: string;
   reportingPeriod?: string;
   fiscalPeriod?: string;
   periodType?: string;
@@ -288,6 +289,13 @@ function factHasValue(fact: Fact): boolean {
   return fact.value !== undefined || (fact.textValue !== undefined && fact.textValue.length > 0);
 }
 
+export function canonicalObservationRank(fact: Pick<Fact, "sourcePath">): number {
+  const path = fact.sourcePath ?? "";
+  if (path.startsWith("quote-summary/")) return 0;
+  if (path.startsWith("fundamentals-timeseries/")) return 1;
+  return path ? 2 : 0;
+}
+
 export function createFactId(input: CreateFactIdInput): string {
   const ticker = requiredText(input.ticker, "ticker").toUpperCase();
   const metric = requiredText(input.metric, "metric");
@@ -304,6 +312,7 @@ export function createFactId(input: CreateFactIdInput): string {
       fiscalPeriod,
       periodType: input.periodType ?? null,
       sourceId: input.sourceId ?? null,
+      sourcePath: input.sourcePath?.trim() ? input.sourcePath.trim() : null,
     },
     "ai-first/fact-id/v1",
   );
@@ -321,6 +330,7 @@ interface CreateNormalizedFactInput {
   unit?: string;
   source: FactSource;
   sourceId: string;
+  sourcePath?: string;
   sourceMetadata: CanonicalSourceMetadata;
   retrievalTimestamp: string;
   asOfTimestamp?: string;
@@ -380,6 +390,7 @@ function createNormalizedFact(input: CreateNormalizedFactInput): Fact {
     fiscalPeriod: input.fiscalPeriod,
     periodType: input.periodType,
     sourceId: input.sourceId,
+    ...(input.sourcePath ? { sourcePath: input.sourcePath } : {}),
   });
   return {
     metric: input.metric,
@@ -392,6 +403,7 @@ function createNormalizedFact(input: CreateNormalizedFactInput): Fact {
     unit: input.unit,
     source: input.source,
     sourceId: input.sourceId,
+    ...(input.sourcePath ? { sourcePath: input.sourcePath } : {}),
     sourceMetadata: input.sourceMetadata,
     factId,
     ticker: input.ticker,
@@ -429,6 +441,7 @@ interface YahooRow {
   values: Record<string, number | undefined>;
   rawValues: Record<string, unknown>;
   restated: boolean;
+  sourcePath?: string;
 }
 
 function readYahooRows(rows: RawRow[] | undefined | null): YahooRow[] {
@@ -462,6 +475,7 @@ export interface TimeseriesRow {
   values: Record<string, number | undefined>;
   rawValues: Record<string, unknown>;
   restated: boolean;
+  sourceType?: string;
   asOfTimestamp?: string;
 }
 
@@ -542,13 +556,14 @@ export function readTimeseriesRows(raw: unknown): TimeseriesRow[] {
         const value = finiteNumber(unwrapYahooRaw(rawValue));
         if (value === undefined) continue;
         const metric = timeseriesMetric(typeName);
-        const key = `${period}|${metric}|${String(entryRecord.periodType ?? "")}`;
+        const key = `${period}|${typeName}|${String(entryRecord.periodType ?? "")}`;
         const current = grouped.get(key) ?? {
           period,
           periodType: timeseriesPeriodType(entryRecord.periodType),
           values: {},
           rawValues: {},
           restated: entryRecord.restated === true || entryRecord.isRestated === true,
+          sourceType: typeName,
           asOfTimestamp: timestampFromValue(entryRecord.asOfDate).timestamp,
         };
         if (current.values[metric] !== undefined && current.values[metric] !== value) {
@@ -759,6 +774,7 @@ function numericFact(input: {
   unit?: string;
   source: FactSource;
   sourceId: string;
+  sourcePath?: string;
   sourceMetadata: CanonicalSourceMetadata;
   retrievalTimestamp: string;
   asOfTimestamp?: string;
@@ -811,11 +827,13 @@ function historyFacts(input: {
   currency?: string;
   source: FactSource;
   sourceId: string;
+  sourcePath: string;
   sourceMetadata: CanonicalSourceMetadata;
   retrievalTimestamp: string;
 }): Fact[] {
   const facts: Fact[] = [];
   for (const row of input.rows) {
+    const rowPath = "sourceType" in row && row.sourceType ? `${input.sourcePath}/${row.sourceType}` : input.sourcePath;
     const periodDateValue = periodDate(row.period);
     for (const metric of Object.keys(row.values).sort(compareStableStrings)) {
       facts.push(numericFact({
@@ -828,6 +846,7 @@ function historyFacts(input: {
         currency: input.currency,
         source: input.source,
         sourceId: input.sourceId,
+        sourcePath: rowPath,
         sourceMetadata: input.sourceMetadata,
         retrievalTimestamp: input.retrievalTimestamp,
         asOfTimestamp: "asOfTimestamp" in row ? row.asOfTimestamp : undefined,
@@ -973,6 +992,7 @@ function validFact(fact: Fact, pack: FactPack): boolean {
     metric: fact.metric,
     period: fact.period,
     sourceId: fact.sourceId,
+    ...(fact.sourcePath ? { sourcePath: fact.sourcePath } : {}),
     reportingPeriod: fact.reportingPeriod,
     fiscalPeriod: fact.fiscalPeriod,
     periodType: fact.periodType,
@@ -1127,13 +1147,13 @@ export function buildFactPack(
   const balanceHistory = readYahooRows(quote.balanceSheetHistory?.balanceSheetHistory);
   const cashflowHistory = readYahooRows(quote.cashflowStatementHistory?.cashflowStatementHistory);
   const timeseriesRows = readTimeseriesRows(quote.fundamentalsTimeseries);
-  const timeseriesFacts = historyFacts({ rows: timeseriesRows, ticker: normalizedTicker, currency, source, sourceId: sourceMetadata.sourceId, sourceMetadata, retrievalTimestamp });
+  const timeseriesFacts = historyFacts({ rows: timeseriesRows, ticker: normalizedTicker, currency, source, sourceId: sourceMetadata.sourceId, sourcePath: "fundamentals-timeseries", sourceMetadata, retrievalTimestamp });
   const isIncomeMetric = (metric: string): boolean => /revenue|income|profit|expense|ebit|eps|interest|tax|share|earnings/i.test(metric) && !/asset|liabil|equity|debt|cash|workingCapital|capitalExpenditure|freeCash/i.test(metric);
   const isBalanceMetric = (metric: string): boolean => /asset|liabil|equity|debt|cash|receivable|inventory|payable|workingCapital|capital/i.test(metric) && !/revenue|income|expense|ebit|eps|tax/i.test(metric);
   const isCashMetric = (metric: string): boolean => /operatingCash|investingCash|financingCash|capitalExpenditure|freeCash|dividend|changeInCash|cashFlow/i.test(metric);
-  const incomeFacts = canonicalizeFacts([...incomeHistory.flatMap((row) => historyFacts({ rows: [row], ticker: normalizedTicker, currency, source, sourceId: sourceMetadata.sourceId, sourceMetadata, retrievalTimestamp })), ...timeseriesFacts.filter((fact) => isIncomeMetric(fact.metric))]);
-  const balanceFacts = canonicalizeFacts([...balanceHistory.flatMap((row) => historyFacts({ rows: [row], ticker: normalizedTicker, currency, source, sourceId: sourceMetadata.sourceId, sourceMetadata, retrievalTimestamp })), ...timeseriesFacts.filter((fact) => isBalanceMetric(fact.metric))]);
-  const cashflowFacts = canonicalizeFacts([...cashflowHistory.flatMap((row) => historyFacts({ rows: [row], ticker: normalizedTicker, currency, source, sourceId: sourceMetadata.sourceId, sourceMetadata, retrievalTimestamp })), ...timeseriesFacts.filter((fact) => isCashMetric(fact.metric))]);
+  const incomeFacts = canonicalizeFacts([...incomeHistory.flatMap((row) => historyFacts({ rows: [row], ticker: normalizedTicker, currency, source, sourceId: sourceMetadata.sourceId, sourcePath: "quote-summary/income-statement-history", sourceMetadata, retrievalTimestamp })), ...timeseriesFacts.filter((fact) => isIncomeMetric(fact.metric))]);
+  const balanceFacts = canonicalizeFacts([...balanceHistory.flatMap((row) => historyFacts({ rows: [row], ticker: normalizedTicker, currency, source, sourceId: sourceMetadata.sourceId, sourcePath: "quote-summary/balance-sheet-history", sourceMetadata, retrievalTimestamp })), ...timeseriesFacts.filter((fact) => isBalanceMetric(fact.metric))]);
+  const cashflowFacts = canonicalizeFacts([...cashflowHistory.flatMap((row) => historyFacts({ rows: [row], ticker: normalizedTicker, currency, source, sourceId: sourceMetadata.sourceId, sourcePath: "quote-summary/cashflow-statement-history", sourceMetadata, retrievalTimestamp })), ...timeseriesFacts.filter((fact) => isCashMetric(fact.metric))]);
   const priceHistoryRows = readPriceHistoryRows(quote);
   const corporateActionRows = readCorporateActionRows(quote);
   const priceFacts = priceHistoryFacts({ rows: priceHistoryRows, ticker: normalizedTicker, currency, source, sourceId: sourceMetadata.sourceId, sourceMetadata, retrievalTimestamp });
@@ -1249,6 +1269,7 @@ function factPeriodTimestamp(fact: Fact): number {
 
 function compareLatestFacts(left: Fact, right: Fact): number {
   return factPeriodTimestamp(right) - factPeriodTimestamp(left)
+    || canonicalObservationRank(left) - canonicalObservationRank(right)
     || compareStableStrings(right.reportingPeriod ?? right.fiscalPeriod ?? right.period, left.reportingPeriod ?? left.fiscalPeriod ?? left.period)
     || compareStableStrings(left.factId ?? "", right.factId ?? "");
 }

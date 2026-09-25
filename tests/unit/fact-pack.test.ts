@@ -1,6 +1,6 @@
 import { createSuite, check, report } from "../helpers/assert";
 import { buildFactPack, verifyFactPack, hashFactPack, selectLatestFact } from "../../src/lib/ai-first/fact-pack";
-import { FIXED_TIMESTAMP, statementRow } from "../helpers/payloads";
+import { FIXED_TIMESTAMP, raw, statementRow } from "../helpers/payloads";
 
 const suite = createSuite();
 
@@ -41,5 +41,26 @@ check(suite, "tampering breaks hash", (() => {
   return hashFactPack(tampered) !== pack.contentHash;
 })());
 check(suite, "pack is frozen", Object.isFrozen(pack) && Object.isFrozen(pack.incomeStatement.facts));
+check(suite, "statement and timeseries observations do not share fact ids", (() => {
+  const conflicted = buildFactPack({
+    price: { longName: "Deterministic Industries", currency: "USD" },
+    incomeStatementHistory: { incomeStatementHistory: [statementRow("2024-12-31", { totalRevenue: 125 })] },
+    fundamentalsTimeseries: { timeseries: { result: [{ meta: { type: ["annualTotalRevenue"] }, annualTotalRevenue: [{ asOfDate: "2024-12-31", periodType: "12M", reportedValue: raw(126) }] }] } },
+  }, "DET", { retrievalTimestamp: FIXED_TIMESTAMP });
+  const statement = conflicted.incomeStatement.facts.find((f) => f.metric === "totalRevenue" && f.sourcePath === "quote-summary/income-statement-history");
+  const series = conflicted.incomeStatement.facts.find((f) => f.metric === "totalRevenue" && f.sourcePath === "fundamentals-timeseries/annualTotalRevenue");
+  return verifyFactPack(conflicted) === true && !!statement?.factId && !!series?.factId && statement.factId !== series.factId && selectLatestFact(conflicted, "totalRevenue")?.factId === statement.factId;
+})());
+check(suite, "same observation module still rejects conflicting duplicates", (() => {
+  try {
+    buildFactPack({
+      price: { longName: "Deterministic Industries", currency: "USD" },
+      incomeStatementHistory: { incomeStatementHistory: [statementRow("2024-12-31", { totalRevenue: 125 }), statementRow("2024-12-31", { totalRevenue: 126 })] },
+    }, "DET", { retrievalTimestamp: FIXED_TIMESTAMP });
+    return false;
+  } catch {
+    return true;
+  }
+})());
 
 report(suite, "unit/fact-pack");

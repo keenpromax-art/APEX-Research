@@ -166,6 +166,7 @@ export interface Fact {
   unit?: string;
   source: FactSource;
   sourceId?: string;
+  sourcePath?: string;
   sourceMetadata?: CanonicalSourceMetadata;
   factId?: string;
   ticker: string;

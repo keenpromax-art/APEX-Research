@@ -1,5 +1,6 @@
 import type { ExpressionNode } from "./model-runtime";
 import { expressionVariables, parseExpression } from "./model-runtime";
+import { canonicalObservationRank } from "./fact-pack";
 import type { Fact, FactPack, ForecastSpecification, ForecastVariable, Formula } from "./types";
 
 export type ModelSpecValidationSeverity = "error" | "warning";
@@ -152,7 +153,7 @@ function periodScore(period: string | undefined): number {
 function factSort(left: Fact, right: Fact): number {
   const leftPeriod = periodScore(left.reportingPeriod ?? left.fiscalPeriod ?? left.period);
   const rightPeriod = periodScore(right.reportingPeriod ?? right.fiscalPeriod ?? right.period);
-  return rightPeriod - leftPeriod || (right.factId ?? "").localeCompare(left.factId ?? "");
+  return rightPeriod - leftPeriod || canonicalObservationRank(left) - canonicalObservationRank(right) || (right.factId ?? "").localeCompare(left.factId ?? "");
 }
 
 function allFacts(pack: FactPack | undefined): Fact[] {
