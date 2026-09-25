@@ -1,5 +1,6 @@
 import { createSuite, check, report } from "../helpers/assert";
-import { runAiFirstResearch } from "../../src/lib/ai-first/pipeline";
+import { makeProviderTransport, runAiFirstResearch } from "../../src/lib/ai-first/pipeline";
+import { RateLimitError } from "../../src/lib/ai-providers";
 import { FIXED_TIMESTAMP, bankPayload, corporatePayload } from "../helpers/payloads";
 
 const suite = createSuite();
@@ -37,6 +38,41 @@ async function main(): Promise<void> {
   check(suite, "ads abstraction is advertising monetization", /advertising monetization/i.test(ads.understanding.primaryEconomicAbstraction));
   check(suite, "abstractions differ across companies", bank.understanding.primaryEconomicAbstraction !== ads.understanding.primaryEconomicAbstraction);
   check(suite, "bank report avoids platform concepts", !/advertiser bidding|custom silicon/.test(JSON.stringify(bank.report).toLowerCase()));
+
+  const originalFetch = globalThis.fetch;
+  let providerCalls = 0;
+  globalThis.fetch = (async () => {
+    providerCalls += 1;
+    if (providerCalls === 1) return new Response(JSON.stringify({ error: { message: "Rate limit reached" } }), { status: 429, headers: { "retry-after": "0" } });
+    return new Response(JSON.stringify({ choices: [{ message: { content: '{"ok":true}' } }] }), { status: 200 });
+  }) as typeof fetch;
+  try {
+    const transport = makeProviderTransport({ provider: "groq", apiKey: "test-key", model: "test-model" } as never);
+    const content = await transport({ system: "s", user: "u" });
+    check(suite, "provider transport retries a 429 once", providerCalls === 2 && content === '{"ok":true}');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  let exhaustedCalls = 0;
+  globalThis.fetch = (async () => {
+    exhaustedCalls += 1;
+    return new Response(JSON.stringify({ error: { message: "org_secret_123" } }), { status: 429, headers: { "retry-after": "0" } });
+  }) as typeof fetch;
+  try {
+    const transport = makeProviderTransport({ provider: "groq", apiKey: "test-key", model: "test-model" } as never);
+    await transport({ system: "s", user: "u" });
+    check(suite, "exhausted provider throttle throws", false);
+  } catch (error) {
+    check(suite, "exhausted provider throttle throws", error instanceof RateLimitError && error.statusCode === 429);
+    check(suite, "provider error body is not leaked", error instanceof Error && !error.message.includes("org_secret_123"));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  const throttled = async () => { throw new RateLimitError("groq", 429, "AI provider groq is rate limited (HTTP 429). Wait for quota reset, then resume.", "rate_limited"); };
+  await runAiFirstResearch("GOOG", corporatePayload(), { transport: throttled as never, retrievalTimestamp: FIXED_TIMESTAMP }).then(
+    () => check(suite, "pipeline pauses instead of failing on throttle", false),
+    (error) => check(suite, "pipeline pauses instead of failing on throttle", error instanceof RateLimitError && error.statusCode === 429),
+  );
 
   report(suite, "ai/ai-first");
 }

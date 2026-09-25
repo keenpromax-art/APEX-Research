@@ -89,8 +89,11 @@ import { buildMachineAuditPackage } from "../canonical-qa/audit-package";
 import { AI_FIRST_PROMPT_VERSION } from "./llm";
 import { globalStageCache, hashStageInput } from "../research-runs/stage-cache";
 import {
+  RateLimitError,
+  classifyLlmFailure,
   resolveProviderRequestConfig,
   type CustomKeyConfig,
+  type LlmFailureKind,
 } from "../ai-providers";
 import type {
   FactPack,
@@ -129,6 +132,10 @@ export interface AiFirstProgress {
   detail?: string;
 }
 
+function throwIfRateLimited(error: unknown): void {
+  if (error instanceof RateLimitError) throw error;
+}
+
 export interface RunAiFirstOptions {
   customKeyConfig?: CustomKeyConfig | null;
   /** Injected transport (tests / callers with their own LLM client). */
@@ -158,35 +165,63 @@ export function makeProviderTransport(
       "No AI API key configured (server OPENROUTER_API_KEY or custom key required)."
     );
   }
+  const maxAttempts = 3;
+  const baseDelayMs = 2000;
+  const maxDelayMs = 20000;
+  const retryAfterMs = (value: string | null): number | undefined => {
+    if (!value) return undefined;
+    const seconds = Number(value);
+    if (Number.isFinite(seconds)) return Math.max(0, Math.min(maxDelayMs, seconds * 1000));
+    const at = Date.parse(value);
+    if (Number.isFinite(at)) return Math.max(0, Math.min(maxDelayMs, at - Date.now()));
+    return undefined;
+  };
+  const wait = (ms: number): Promise<void> => new Promise((resolve) => { setTimeout(resolve, ms); });
+  const safeMessage = (status: number, kind: LlmFailureKind): string => {
+    if (kind === "rate_limited") return `AI provider ${cfg.provider} is rate limited (HTTP ${status}). Wait for quota reset, then resume.`;
+    if (kind === "key_exhausted") return `AI provider ${cfg.provider} quota is exhausted (HTTP ${status}). Add credit or use another key, then resume.`;
+    if (kind === "invalid_key") return `AI provider ${cfg.provider} rejected the API key (HTTP ${status}). Check the key, then resume.`;
+    return `AI provider ${cfg.provider} request failed (HTTP ${status}). Retry or switch provider.`;
+  };
   return async ({ system, user, temperature, maxTokens, jsonMode }) => {
-    const res = await fetch(cfg.endpointUrl, {
-      method: "POST",
-      headers: cfg.headers,
-      body: JSON.stringify({
-        model: cfg.model,
-        messages: [
-          { role: "system", content: system },
-          { role: "user", content: user },
-        ],
-        temperature: temperature ?? 0.3,
-        max_tokens: maxTokens ?? 3000,
-        ...(jsonMode ? { response_format: { type: "json_object" } } : {}),
-      }),
+    const body = JSON.stringify({
+      model: cfg.model,
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: user },
+      ],
+      temperature: temperature ?? 0.3,
+      max_tokens: maxTokens ?? 3000,
+      ...(jsonMode ? { response_format: { type: "json_object" } } : {}),
     });
-    const text = await res.text();
-    if (!res.ok) {
-      throw new Error(
-        `AI provider ${cfg.provider} HTTP ${res.status}: ${text.slice(0, 300)}`
-      );
+    let status = 0;
+    let kind: LlmFailureKind = "other";
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      let res: Response;
+      try {
+        res = await fetch(cfg.endpointUrl, { method: "POST", headers: cfg.headers, body });
+      } catch {
+        if (attempt >= maxAttempts) throw new RateLimitError(cfg.provider, 0, `AI provider ${cfg.provider} request failed before responding. Retry or switch provider.`, "other");
+        await wait(Math.min(maxDelayMs, baseDelayMs * 2 ** (attempt - 1)));
+        continue;
+      }
+      const text = await res.text();
+      if (res.ok) {
+        try {
+          const parsed = JSON.parse(text);
+          const content: string = parsed.choices?.[0]?.message?.content ?? parsed.content ?? text;
+          return typeof content === "string" ? content : JSON.stringify(content);
+        } catch {
+          return text;
+        }
+      }
+      status = res.status;
+      kind = classifyLlmFailure(res.status, text);
+      if (kind !== "rate_limited" && res.status < 500) throw new RateLimitError(cfg.provider, res.status, safeMessage(res.status, kind), kind);
+      if (attempt >= maxAttempts) break;
+      await wait(retryAfterMs(res.headers.get("retry-after")) ?? Math.min(maxDelayMs, baseDelayMs * 2 ** (attempt - 1)));
     }
-    try {
-      const parsed = JSON.parse(text);
-      const content: string =
-        parsed.choices?.[0]?.message?.content ?? parsed.content ?? text;
-      return typeof content === "string" ? content : JSON.stringify(content);
-    } catch {
-      return text;
-    }
+    throw new RateLimitError(cfg.provider, status, safeMessage(status, kind), kind);
   };
 }
 
@@ -581,6 +616,7 @@ export async function runAiFirstResearch(
     try {
       researchPlan = await buildResearchPlan(transport!, factPack, understanding);
     } catch (e) {
+      throwIfRateLimited(e);
       console.warn("[ai-first] research planner failed, using mechanical plan:", e);
       researchPlan = mechanicalResearchPlan(factPack, understanding);
     }
@@ -603,6 +639,7 @@ export async function runAiFirstResearch(
       ...(opts.retrievalSignal ? { signal: opts.retrievalSignal } : opts.retrieval?.signal ? { signal: opts.retrieval.signal } : {}),
     });
   } catch (error) {
+    throwIfRateLimited(error);
     const failedRetrievalBase = {
       version: "research-retrieval-v1" as const,
       status: "failed" as const,
@@ -646,6 +683,7 @@ export async function runAiFirstResearch(
     try {
       economicEngine = await buildEconomicEngine(transport!, factPack, understanding);
     } catch (e) {
+      throwIfRateLimited(e);
       console.warn("[ai-first] economic engine failed, mechanical fallback:", e);
       economicEngine = mechanicalEconomicEngine(factPack, understanding);
     }
@@ -670,6 +708,7 @@ export async function runAiFirstResearch(
         discoveryBaseOpts
       );
     } catch (e) {
+      throwIfRateLimited(e);
       console.warn("[ai-first] research discovery AI failed, mechanical fallback:", e);
       researchDiscovery = mechanicalResearchDiscovery(
         factPack,
@@ -700,6 +739,7 @@ export async function runAiFirstResearch(
         researchDiscovery
       );
     } catch (e) {
+      throwIfRateLimited(e);
       console.warn("[ai-first] early debate engine failed, building partial brief for fallback:", e);
       const partialBrief = buildAnalystBrief({ pack: factPack, understanding });
       debateOutput = mechanicalDebates(partialBrief, factPack);
@@ -720,6 +760,7 @@ export async function runAiFirstResearch(
         debates: debateOutput,
       });
     } catch (e) {
+      throwIfRateLimited(e);
       console.warn("[ai-first] evidence mapper failed, mechanical fallback:", e);
       evidenceMap = mechanicalEvidenceMap({
         pack: factPack,
@@ -750,6 +791,7 @@ export async function runAiFirstResearch(
         debates: debateOutput,
       });
     } catch (error) {
+      throwIfRateLimited(error);
       if (error instanceof ModelSpecValidationError && error.spec) {
         forecastSpec = error.spec;
         modelValidation = error.validation;
@@ -806,6 +848,7 @@ export async function runAiFirstResearch(
       const generated = await buildScenarios(transport!, factPack, understanding, forecastSpec);
       if (generated.validation.valid) scenarioSpecs = generated.scenarios;
     } catch (error) {
+      throwIfRateLimited(error);
       console.warn("[ai-first] scenario generation failed, mechanical deltas:", error);
     }
   }
@@ -870,6 +913,7 @@ export async function runAiFirstResearch(
         architecture: forecastArchitecture.id,
       });
     } catch (error) {
+      throwIfRateLimited(error);
       reversePlan = {
         ...reversePlan,
         status: "unavailable",
@@ -1018,6 +1062,7 @@ export async function runAiFirstResearch(
         }
       }
     } catch (e) {
+      throwIfRateLimited(e);
       console.warn("[ai-first] narrative generation failed, mechanical fallback:", e);
       narrative = mechanicalNarrative(factPack, valuation);
       aiUsed = false;

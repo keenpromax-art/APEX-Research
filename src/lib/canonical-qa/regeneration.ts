@@ -1,3 +1,4 @@
+import { RateLimitError } from "../ai-providers";
 import { deepFreeze } from "../research-ledger/immutable";
 import { stableStringify } from "../research-ledger/stable";
 import type { CanonicalQaDiagnostic, CanonicalQaResult, RegenerationAttempt } from "./types";
@@ -221,7 +222,8 @@ export async function runBoundedRegeneration(
         attempts.push({ attempt, stage: target.component, kind: "bounded-llm", triggerDiagnosticIds: [target.id], status: applied ? "fixed" : "unfixed", detail: applied ? "Bounded LLM stage re-executed and applied" : "Bounded LLM stage returned no applicable fix", at: generatedAt });
         qa = buildQa(report, pack, context, generatedAt, attempts, null);
         continue;
-      } catch {
+      } catch (error) {
+        if (error instanceof RateLimitError) throw error;
         attempts.push({ attempt, stage: llmFixable[0]?.component ?? "narrative", kind: "bounded-llm", triggerDiagnosticIds: llmFixable.map((d) => d.id).slice(0, 4), status: "unfixed", detail: "Bounded LLM stage failed", at: generatedAt });
         qa = buildQa(report, pack, context, generatedAt, attempts, null);
         break;

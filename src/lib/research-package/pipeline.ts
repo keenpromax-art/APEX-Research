@@ -1,6 +1,6 @@
 import { verifyFactPack } from "@/lib/ai-first/fact-pack";
 import { runAiFirstResearch, type PipelineTransport, type RunAiFirstOptions } from "@/lib/ai-first/pipeline";
-import type { CustomKeyConfig } from "@/lib/ai-providers";
+import { RateLimitError, type CustomKeyConfig } from "@/lib/ai-providers";
 import type { ExecuteResearchRetrievalOptions } from "@/lib/research-retrieval/types";
 import { stableHash } from "@/lib/research-ledger/stable";
 import {
@@ -433,7 +433,7 @@ export async function runCanonicalResearch(ticker: string, options: CanonicalRes
     return { package: sealed, run: sealed.run, sourceContext, pipelineResult };
   } catch (error) {
     completeActive();
-    const paused = error instanceof Error && error.name === "PausedForRateLimitError";
+    const paused = error instanceof RateLimitError || (error instanceof Error && error.name === "PausedForRateLimitError");
     run.status = paused ? "paused" : "failed";
     run.completedAt = new Date().toISOString();
     const message = error instanceof Error ? error.message : "Canonical research failed";

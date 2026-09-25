@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { PausedForRateLimitError } from "@/lib/ai-providers";
+import { PausedForRateLimitError, RateLimitError } from "@/lib/ai-providers";
 import { resolveSafeProviderConfig, validateRequestBodySize, validateTicker } from "@/lib/security/request-policy";
 import { normalizeTicker } from "@/lib/request-validation";
 import { runCanonicalResearch } from "./pipeline";
@@ -65,6 +65,14 @@ function pausedResponse(error: unknown): NextResponse {
       completed: error.completedAgents,
       total: error.totalAgents,
       nextAgent: error.nextAgentId,
+    }, { status: 429 });
+  }
+  if (error instanceof RateLimitError) {
+    return NextResponse.json({
+      error: "RATE_PAUSED",
+      provider: error.provider,
+      kind: error.kind,
+      message: error.message,
     }, { status: 429 });
   }
   const message = error instanceof Error ? error.message : "Research generation failed";
@@ -139,7 +147,8 @@ export async function handleAnalyzeRequest(request: NextRequest): Promise<Respon
       try {
         await runCanonicalResearch(ticker, { ...runOptions, onEvent: send });
       } catch (error) {
-        if (error instanceof PausedForRateLimitError && !sentTypes.has("paused")) {
+        if (error instanceof RateLimitError && !sentTypes.has("paused")) {
+          const paused = error instanceof PausedForRateLimitError ? error : null;
           send({
             schemaVersion: RESEARCH_RUN_EVENT_SCHEMA_VERSION,
             type: "paused",
@@ -147,7 +156,7 @@ export async function handleAnalyzeRequest(request: NextRequest): Promise<Respon
             ticker,
             sequence: 0,
             emittedAt: new Date().toISOString(),
-            data: { provider: error.provider, kind: error.kind, message: error.message, resumeFrom: error.partial },
+            data: { provider: error.provider, kind: error.kind, message: error.message, ...(paused ? { resumeFrom: paused.partial } : {}) },
           });
         } else if (!sentTypes.has("failed")) {
           send({
