@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Equity Research Engine</title>
+  <link rel="stylesheet" href="/styles.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📈</text></svg>" />
+</head>
+<body>
+  <div class="bg-glow" aria-hidden="true"></div>
+
+  <main class="container">
+    <header class="hero">
+      <div class="hero-top">
+        <div class="hero-badge">
+          <span class="pulse-dot"></span>
+          yfinance data · AI analysis
+        </div>
+        <button id="settings-btn" class="icon-btn" title="AI provider settings" aria-label="AI provider settings">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+        </button>
+      </div>
+      <h1>Equity Research <span class="gradient-text">Engine</span></h1>
+      <p class="subtitle">
+        Enter any public ticker. The engine retrieves Yahoo Finance data, computes
+        deterministic metrics, and lets AI reason over the numbers — no fixed report format.
+      </p>
+
+      <form id="analysis-form" class="search-bar">
+        <div class="search-wrap">
+          <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+          <input
+            id="ticker-input"
+            type="text"
+            placeholder="Ticker or tickers — e.g. RELIANCE.NS, AAPL, MSFT"
+            autocomplete="off"
+            autofocus
+            spellcheck="false"
+          />
+          <kbd>Enter</kbd>
+        </div>
+        <button id="analyze-btn" type="submit">
+          <span class="btn-label">Analyze</span>
+          <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+        </button>
+      </form>
+
+      <div class="quick-chips">
+        <button class="chip" data-ticker="RELIANCE.NS">RELIANCE.NS</button>
+        <button class="chip" data-ticker="AAPL">AAPL</button>
+        <button class="chip" data-ticker="NVDA">NVDA</button>
+        <button class="chip" data-ticker="MSFT">MSFT</button>
+        <button class="chip" data-ticker="TCS.NS">TCS.NS</button>
+        <button class="chip" data-ticker="AAPL, MSFT">Compare AAPL · MSFT</button>
+      </div>
+    </header>
+
+    <div id="status" class="status-panel" hidden>
+      <div class="status-steps" id="status-steps"></div>
+      <div class="status-bar"><div class="status-bar-fill" id="status-bar-fill"></div></div>
+    </div>
+
+    <div id="error" class="error-panel" hidden>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+      <div>
+        <strong>Analysis failed</strong>
+        <p id="error-message"></p>
+      </div>
+    </div>
+
+    <section id="result" hidden>
+      <div class="doc-header">
+        <div>
+          <h2 id="doc-title"></h2>
+          <p id="doc-summary" class="doc-summary"></p>
+        </div>
+        <div class="doc-meta" id="doc-meta"></div>
+      </div>
+      <div id="blocks"></div>
+      <footer class="doc-footer">
+        <span>Source: Yahoo Finance (yfinance)</span>
+        <span class="dot-sep"></span>
+        <span id="footer-tickers"></span>
+        <span class="dot-sep"></span>
+        <span id="footer-timestamp"></span>
+      </footer>
+    </section>
+  </main>
+
+  <div id="settings-modal" class="modal-overlay" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+      <div class="modal-header">
+        <h3 id="settings-title">AI Provider Settings</h3>
+        <button id="settings-close" class="icon-btn" aria-label="Close">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+        </button>
+      </div>
+      <p class="modal-hint">
+        Bring your own AI key. It is stored only in your browser (localStorage) and sent
+        with each analysis request. The server never persists it.
+      </p>
+      <label class="field-label" for="provider-select">Provider</label>
+      <select id="provider-select">
+        <option value="gemini">Google Gemini</option>
+        <option value="openrouter">OpenRouter</option>
+        <option value="groq">Groq</option>
+      </select>
+      <label class="field-label" for="api-key-input">API key</label>
+      <input id="api-key-input" type="password" placeholder="Paste your API key" autocomplete="off" />
+      <div class="modal-actions">
+        <button id="key-clear" class="btn-ghost">Clear saved key</button>
+        <button id="key-save" class="btn-primary">Save</button>
+      </div>
+      <p id="key-status" class="key-status"></p>
+    </div>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>
