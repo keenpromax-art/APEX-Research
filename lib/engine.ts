@@ -37,22 +37,51 @@ Block types (discriminate on "type"):
 Numeric integrity is machine-checked. Any number not traceable to the dataset causes rejection, so write only numbers you can see in the data. Years, counts of periods, and quarter labels are fine.
 `;
 
+export type Depth = "brief" | "standard" | "deep";
+
+const DEPTH_GUIDANCE: Record<Depth, string> = {
+  brief: `REPORT DEPTH: brief
+- Produce a concise note (roughly 6-12 blocks).
+- Lead with the few most decision-relevant findings. No filler, no repetition.
+- Use a metric grid for key numbers and at most one table or chart.`,
+  standard: `REPORT DEPTH: standard
+- Produce a focused analysis (roughly 12-22 blocks).
+- Cover the most material developments only; skip anything unremarkable.`,
+  deep: `REPORT DEPTH: deep
+- Produce a comprehensive, institutional-grade research document (roughly 25-45 blocks).
+- Work through every dimension the data supports, in the order that makes most sense for this
+  company and this request. Typical dimensions: the business and revenue base; multi-year growth
+  and any trend break; profitability and margin structure; returns on capital; balance-sheet
+  strength, liquidity and leverage; cash-flow quality and capital allocation; valuation and what
+  the current price implies; anomalies and risks; and an explicit statement of what the data
+  cannot answer.
+- Use tables for multi-period figures and charts for every trend worth seeing. Prefer showing
+  the underlying numbers over describing them.
+- Quantify each claim: state magnitude, direction, and the period it refers to.
+- Distinguish explicitly between what the numbers show and what they merely suggest.
+- Close with what cannot be concluded from Yahoo Finance data alone, and what would be needed.`,
+};
+
 export class AIEngine {
   constructor(
     private provider: AIProvider,
     private timeout = 120,
-    private maxOutputRetries = 1
+    private maxOutputRetries = 1,
+    private depth: Depth = "standard"
   ) {}
 
   async analyze(context: AnalysisContext): Promise<AnalysisDocument> {
     const validator = new OutputValidator(context);
+    // Long documents are more likely to be truncated or trip a check, so give
+    // deep reports an extra repair attempt.
+    const maxAttempts = this.depth === "deep" ? this.maxOutputRetries + 1 : this.maxOutputRetries;
     const messages: { role: string; content: string }[] = [
-      { role: "system", content: SYSTEM_PROMPT },
+      { role: "system", content: SYSTEM_PROMPT + "\n\n" + DEPTH_GUIDANCE[this.depth] },
       { role: "user", content: this.buildUserMessage(context) },
     ];
 
     let lastProblems: string[] = [];
-    for (let attempt = 0; attempt <= this.maxOutputRetries; attempt++) {
+    for (let attempt = 0; attempt <= maxAttempts; attempt++) {
       const raw = await this.provider.generate(messages, { timeout: this.timeout });
       try {
         const document = parseDocument(raw);
@@ -62,18 +91,31 @@ export class AIEngine {
         if (e instanceof ValidationFailure) {
           lastProblems = e.problems;
           messages.push({ role: "assistant", content: raw });
-          messages.push({
-            role: "user",
-            content:
-              "Your previous output was rejected. Fix these problems and respond with ONLY the corrected json object:\n" +
-              lastProblems.slice(0, 10).map((p) => `- ${p}`).join("\n"),
-          });
+          messages.push({ role: "user", content: this.retryInstruction(lastProblems) });
         } else {
           throw e;
         }
       }
     }
     throw new Error("AI produced an invalid analysis output: " + lastProblems.slice(0, 10).join("; "));
+  }
+
+  /**
+   * Long reports can be cut off by the provider's output-token limit, which
+   * surfaces as invalid JSON. Asking for compactness recovers the document
+   * instead of losing the whole analysis.
+   */
+  private retryInstruction(problems: string[]): string {
+    const truncated = problems.some(
+      (p) => /not valid JSON|Unexpected end|Unterminated|Unexpected token/i.test(p)
+    );
+    const header = truncated
+      ? "Your previous response was cut off before the JSON closed. Produce the corrected json object again, but make it COMPACT so it fits:\n" +
+        "- shorter paragraphs (2-3 sentences, no restating the same numbers twice)\n" +
+        "- tables limited to 3-4 rows and 4-5 columns\n" +
+        "- fewer blocks overall, but keep every section you planned\n"
+      : "Your previous output was rejected. Fix these problems and respond with ONLY the corrected json object:\n";
+    return header + problems.slice(0, 10).map((p) => `- ${p}`).join("\n");
   }
 
   private buildUserMessage(context: AnalysisContext): string {

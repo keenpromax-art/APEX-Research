@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { AnalysisPipeline, parseTickers } from "@/lib/pipeline";
 import { loadServerSettings, providerFor } from "@/lib/serverConfig";
 import type { ProviderName } from "@/lib/providers";
+import type { Depth } from "@/lib/engine";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -15,6 +16,9 @@ export async function GET(request: NextRequest) {
   const userRequest = params.get("request") ?? "Analyze this company.";
   const providerParam = params.get("provider");
   const keyParam = params.get("key") ?? "";
+  const depthParam = params.get("depth");
+  const depth: Depth =
+    depthParam === "brief" || depthParam === "deep" ? depthParam : "standard";
 
   let tickers: string[];
   try {
@@ -60,6 +64,7 @@ export async function GET(request: NextRequest) {
           apiKey,
           model,
           aiTimeout: settings.aiTimeout,
+          depth,
           fetchFn: async (ticker) => {
             const resp = await fetch(`${origin}/api/fetch/${encodeURIComponent(ticker)}`);
             const data = await resp.json();

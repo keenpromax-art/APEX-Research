@@ -141,6 +141,48 @@ export class GeminiProvider implements AIProvider {
 
 export type ProviderName = "gemini" | "openrouter" | "groq";
 
+export interface ProviderCandidate {
+  name: ProviderName;
+  key: string;
+  model: string;
+}
+
+const TRANSIENT = /HTTP (429|500|502|503|504)|timed out|rate-limit|ECONNRESET|fetch failed/i;
+
+export function isTransientError(message: string): boolean {
+  return TRANSIENT.test(message);
+}
+
+/**
+ * Tries the selected model first, then falls back through the same provider's
+ * other models when one is rate-limited or unavailable. A single unavailable
+ * model should never fail the whole analysis.
+ */
+export class FailoverProvider implements AIProvider {
+  constructor(private candidates: ProviderCandidate[]) {}
+
+  async generate(
+    messages: { role: string; content: string }[],
+    opts: { temperature?: number; timeout?: number } = {}
+  ): Promise<string> {
+    const unique = this.candidates.filter(
+      (c, i, arr) => c.model && arr.findIndex((x) => x.model === c.model) === i
+    );
+    let lastError: Error = new Error("No AI provider configured");
+    for (const candidate of unique) {
+      const provider = buildProvider(candidate.name, candidate.key, candidate.model);
+      if (!provider) continue;
+      try {
+        return await provider.generate(messages, opts);
+      } catch (e) {
+        lastError = e instanceof Error ? e : new Error(String(e));
+        if (!isTransientError(lastError.message)) throw lastError;
+      }
+    }
+    throw lastError;
+  }
+}
+
 export function buildProvider(
   name: ProviderName,
   apiKey: string | null,
@@ -151,6 +193,13 @@ export function buildProvider(
   if (name === "groq") return new GroqProvider(apiKey, model);
   return new OpenRouterProvider(apiKey, model);
 }
+
+/** Models to try, in order, when the primary is unavailable. */
+export const FALLBACK_MODELS: Record<ProviderName, string[]> = {
+  gemini: ["gemini-3.8-flash", "gemini-3-flash-preview", "gemini-3.1-flash-lite-preview", "gemma-4-26b-a4b-it"],
+  groq: ["openai/gpt-oss-120b", "openai/gpt-oss-20b"],
+  openrouter: ["google/gemini-3.8-flash", "google/gemini-flash-1.5", "openai/gpt-4o-mini"],
+};
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));

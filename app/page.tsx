@@ -19,6 +19,21 @@ interface AnalysisResult {
   meta: { generatedAt: string; tickers: string[]; dataSource: string };
 }
 
+const DEPTH_OPTIONS = [
+  { value: "brief", label: "Brief" },
+  { value: "standard", label: "Standard" },
+  { value: "deep", label: "Deep dive" },
+] as const;
+
+type DepthValue = (typeof DEPTH_OPTIONS)[number]["value"];
+
+function userRequestDefault(depth: DepthValue): string {
+  if (depth === "brief") return "Give a concise note on what matters most in this company's data.";
+  if (depth === "deep")
+    return "Produce a comprehensive institutional-grade equity research report covering every dimension the data supports.";
+  return "Analyze this company.";
+}
+
 function formatDate(iso: string | undefined): string {
   if (!iso) return "unknown";
   try {
@@ -30,6 +45,8 @@ function formatDate(iso: string | undefined): string {
 
 export default function Home() {
   const [tickers, setTickers] = useState("");
+  const [depth, setDepth] = useState<DepthValue>("standard");
+  const [focus, setFocus] = useState("");
   const [status, setStatus] = useState<string[]>([]);
   const [activeStep, setActiveStep] = useState(-1);
   const [error, setError] = useState<string | null>(null);
@@ -53,7 +70,10 @@ export default function Home() {
     setActiveStep(-1);
 
     const { provider, key, model } = getSavedKey();
-    let url = `/api/analyze?tickers=${encodeURIComponent(tickerList)}`;
+    const ask = focus.trim()
+      ? `${userRequestDefault(depth)} ${focus.trim()}`
+      : userRequestDefault(depth);
+    let url = `/api/analyze?tickers=${encodeURIComponent(tickerList)}&depth=${depth}&request=${encodeURIComponent(ask)}`;
     if (provider && key) {
       url += `&provider=${encodeURIComponent(provider)}&key=${encodeURIComponent(key)}`;
       if (model) url += `&model=${encodeURIComponent(model)}`;
@@ -141,6 +161,29 @@ export default function Home() {
             )}
           </button>
         </form>
+
+        <div className="controls">
+          <div className="seg" role="group" aria-label="Report depth">
+            {DEPTH_OPTIONS.map((o) => (
+              <button
+                key={o.value}
+                className={`seg-btn${depth === o.value ? " active" : ""}`}
+                onClick={() => setDepth(o.value)}
+                type="button"
+              >
+                {o.label}
+              </button>
+            ))}
+          </div>
+          <input
+            className="focus-input"
+            type="text"
+            placeholder="Optional focus — e.g. why did margins change?"
+            value={focus}
+            onChange={(e) => setFocus(e.target.value)}
+            spellCheck={false}
+          />
+        </div>
 
         <div className="quick-chips">
           {["RELIANCE.NS", "AAPL", "NVDA", "MSFT", "TCS.NS"].map((t) => (

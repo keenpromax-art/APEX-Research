@@ -192,6 +192,70 @@ body {
 
 .btn-icon { width: 16px; height: 16px; }
 
+/* ---------- Controls (depth + focus) ---------- */
+
+.controls {
+  display: flex;
+  gap: 0.5rem;
+  max-width: 640px;
+  margin: 0.6rem auto 0;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.seg {
+  display: inline-flex;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 2px;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.seg-btn {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 0.78rem;
+  font-weight: 600;
+  font-family: inherit;
+  padding: 0.4rem 0.75rem;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+
+.seg-btn:hover { color: var(--text); }
+
+.seg-btn.active {
+  background: linear-gradient(120deg, var(--accent), #4a6fe0);
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(91, 140, 255, 0.35);
+}
+
+.focus-input {
+  flex: 1;
+  min-width: 180px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text);
+  font-size: 0.82rem;
+  font-family: inherit;
+  padding: 0.5rem 0.8rem;
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.focus-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.focus-input::placeholder { color: var(--text-faint); }
+
 /* ---------- Quick chips ---------- */
 
 .quick-chips {
