@@ -70,6 +70,30 @@ def test_fetch_ticker_raises_for_empty_ticker(monkeypatch):
         fetch_ticker("NOPE")
 
 
+def test_fetch_ticker_raises_for_stub_info(monkeypatch):
+    """yfinance returns {'trailingPegRatio': None} for unknown symbols."""
+
+    class StubTicker(EmptyTicker):
+        def __init__(self, ticker):
+            super().__init__(ticker)
+            self.info = {"trailingPegRatio": None}
+
+    monkeypatch.setattr("adapter.yf.Ticker", StubTicker)
+    with pytest.raises(TickerNotFoundError):
+        fetch_ticker("NOPE")
+
+
+def test_fetch_ticker_accepts_valid_identity(monkeypatch):
+    class RealTicker(EmptyTicker):
+        def __init__(self, ticker):
+            super().__init__(ticker)
+            self.info = {"symbol": ticker, "shortName": "Real Co"}
+
+    monkeypatch.setattr("adapter.yf.Ticker", RealTicker)
+    data = fetch_ticker("REAL")
+    assert data["info"]["shortName"] == "Real Co"
+
+
 class NanTicker(FakeTicker):
     def __init__(self, ticker):
         super().__init__(ticker)

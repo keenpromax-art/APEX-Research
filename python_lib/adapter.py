@@ -104,6 +104,28 @@ def _holders_to_list(df: Any) -> list[dict[str, Any]] | None:
     return clean
 
 
+def _has_valid_identity(info: Any, ticker: str) -> bool:
+    """yfinance returns a non-empty stub like {'trailingPegRatio': None} for
+    unknown symbols, so a truthy dict is not proof the ticker exists."""
+    if not isinstance(info, dict) or not info:
+        return False
+    for key in (
+        "symbol",
+        "shortName",
+        "longName",
+        "quoteType",
+        "marketCap",
+        "regularMarketPrice",
+    ):
+        value = info.get(key)
+        if value in (None, ""):
+            continue
+        if key == "symbol" and str(value).upper() != ticker.upper():
+            continue
+        return True
+    return False
+
+
 def fetch_ticker(ticker: str) -> dict[str, Any]:
     tk = yf.Ticker(ticker)
     retrieved_at = datetime.now(timezone.utc).isoformat()
@@ -123,7 +145,7 @@ def fetch_ticker(ticker: str) -> dict[str, Any]:
     major_holders = _safe(lambda: tk.major_holders)
     institutional_holders = _safe(lambda: tk.institutional_holders)
 
-    has_any = bool(info) or any(
+    has_any = _has_valid_identity(info, ticker) or any(
         item is not None for item in [income, balance, cashflow]
     ) or (history is not None and len(history) > 0)
     if not has_any:

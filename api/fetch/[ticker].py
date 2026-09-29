@@ -1,14 +1,20 @@
 import json
 import os
+import re
 import sys
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "python_lib"))
-
 from http.server import BaseHTTPRequestHandler
 
-from adapter import TickerNotFoundError, fetch_ticker
+_HERE = os.path.dirname(os.path.abspath(__file__))
+for _candidate in (
+    os.path.join(_HERE, "..", "..", "python_lib"),
+    os.path.join(_HERE, "python_lib"),
+    os.path.join(_HERE, "..", "python_lib"),
+):
+    if os.path.isdir(_candidate):
+        sys.path.insert(0, os.path.abspath(_candidate))
+        break
 
-import re
+from adapter import TickerNotFoundError, fetch_ticker  # noqa: E402
 
 TICKER_RE = re.compile(r"^[A-Za-z0-9.\-^=]{1,25}$")
 
