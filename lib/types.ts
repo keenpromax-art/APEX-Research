@@ -116,7 +116,7 @@ export interface CompanyContext {
     cashFlow: unknown;
     quarterly: Record<string, unknown>;
   };
-  historical: { observations: number; dateRange: string | null; price: { date: string; close: number | null }[] };
+  historical: { observations: number; dateRange: string | null };
   derivedMetrics: Record<string, { label: string; value: number | null; unit: string; formula: string; inputs: string[]; byPeriod?: Record<string, number | null> }>;
   series: Record<string, { label: string; value: number }[]>;
   valuation: Record<string, unknown> | null;
