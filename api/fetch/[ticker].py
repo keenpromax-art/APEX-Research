@@ -1,14 +1,20 @@
 import json
 import os
+import re
 import sys
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "python_lib"))
 
 from http.server import BaseHTTPRequestHandler
 
-from adapter import TickerNotFoundError, fetch_ticker
-
-import re
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_PROJECT = os.path.dirname(os.path.dirname(_HERE))
+for _candidate in (
+    os.path.join(_PROJECT, "python_lib"),
+    os.path.join(_HERE, "python_lib"),
+    os.path.join(os.getcwd(), "python_lib"),
+):
+    _resolved = os.path.abspath(_candidate)
+    if os.path.isdir(_resolved) and _resolved not in sys.path:
+        sys.path.insert(0, _resolved)
 
 TICKER_RE = re.compile(r"^[A-Za-z0-9.\-^=]{1,25}$")
 
@@ -29,12 +35,26 @@ class handler(BaseHTTPRequestHandler):
             self._send(400, {"error": f"Invalid ticker format: '{ticker}'."})
             return
         try:
+            from adapter import (
+                DataUnavailableError,
+                TickerNotFoundError,
+                fetch_ticker,
+            )
+        except Exception as exc:
+            detail = f"{type(exc).__name__}: {str(exc)[:200]}"
+            self._send(502, {"error": f"Data layer failed to initialize: {detail}"})
+            return
+        try:
             data = fetch_ticker(ticker)
         except TickerNotFoundError:
             self._send(404, {"error": f"Unable to retrieve data for ticker '{ticker}'."})
             return
+        except DataUnavailableError as exc:
+            self._send(502, {"error": f"Data service unavailable for '{ticker}': {str(exc)[:200]}"})
+            return
         except Exception as exc:
-            self._send(502, {"error": f"Data retrieval failed for '{ticker}': {str(exc)[:200]}"})
+            detail = f"{type(exc).__name__}: {str(exc)[:140]}"
+            self._send(502, {"error": f"Data retrieval failed for '{ticker}': {detail}"})
             return
         self._send(200, data)
 

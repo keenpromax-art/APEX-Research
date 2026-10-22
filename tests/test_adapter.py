@@ -7,7 +7,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "python_lib"))
 
 import pandas as pd
 import pytest
-from adapter import TickerNotFoundError, fetch_ticker
+from adapter import DataUnavailableError, TickerNotFoundError, fetch_ticker
 
 
 def make_statement(rows: dict[str, list[float]]) -> pd.DataFrame:
@@ -50,8 +50,13 @@ class EmptyTicker(FakeTicker):
         self.income_stmt = pd.DataFrame()
         self.balance_sheet = pd.DataFrame()
         self.cashflow = pd.DataFrame()
-        self.history = pd.DataFrame()
         self.info = {}
+
+    def history(self, period=None, interval=None, auto_adjust=None):
+        return pd.DataFrame()
+
+    def get_shares_full(self, start=None):
+        return pd.Series(dtype=float)
 
 
 def test_fetch_ticker_returns_structured_data(monkeypatch):
@@ -80,3 +85,40 @@ def test_fetch_ticker_converts_nan_to_null(monkeypatch):
     monkeypatch.setattr("adapter.yf.Ticker", NanTicker)
     data = fetch_ticker("TEST")
     assert data["incomeStatement"]["lineItems"]["Total Revenue"]["2025-03-31"] is None
+
+
+def _raise_access(name):
+    def _raise(self):
+        raise RuntimeError("Too Many Requests. Rate limited.")
+    return property(_raise)
+
+
+class RateLimitedTicker:
+    info = _raise_access("info")
+    income_stmt = _raise_access("income_stmt")
+    quarterly_income_stmt = _raise_access("quarterly_income_stmt")
+    balance_sheet = _raise_access("balance_sheet")
+    quarterly_balance_sheet = _raise_access("quarterly_balance_sheet")
+    cashflow = _raise_access("cashflow")
+    quarterly_cashflow = _raise_access("quarterly_cashflow")
+    dividends = _raise_access("dividends")
+    splits = _raise_access("splits")
+    earnings_dates = _raise_access("earnings_dates")
+    major_holders = _raise_access("major_holders")
+    institutional_holders = _raise_access("institutional_holders")
+
+    def __init__(self, ticker):
+        pass
+
+    def history(self, period=None, interval=None, auto_adjust=None):
+        raise RuntimeError("Too Many Requests. Rate limited.")
+
+    def get_shares_full(self, start=None):
+        raise RuntimeError("Too Many Requests. Rate limited.")
+
+
+def test_rate_limited_source_raises_data_unavailable(monkeypatch):
+    monkeypatch.setattr("adapter.yf.Ticker", RateLimitedTicker)
+    with pytest.raises(DataUnavailableError) as excinfo:
+        fetch_ticker("TEST")
+    assert "Too Many Requests" in str(excinfo.value)

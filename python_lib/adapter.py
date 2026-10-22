@@ -13,10 +13,12 @@ from typing import Any
 import yfinance as yf
 
 
-def _safe(fn):
+def _safe(fn, errors=None):
     try:
         result = fn()
-    except Exception:
+    except Exception as exc:
+        if errors is not None:
+            errors.append(f"{type(exc).__name__}: {str(exc)[:200]}")
         return None
     if result is None:
         return None
@@ -108,25 +110,28 @@ def fetch_ticker(ticker: str) -> dict[str, Any]:
     tk = yf.Ticker(ticker)
     retrieved_at = datetime.now(timezone.utc).isoformat()
 
-    info = _safe(lambda: tk.info)
-    income = _safe(lambda: tk.income_stmt)
-    q_income = _safe(lambda: tk.quarterly_income_stmt)
-    balance = _safe(lambda: tk.balance_sheet)
-    q_balance = _safe(lambda: tk.quarterly_balance_sheet)
-    cashflow = _safe(lambda: tk.cashflow)
-    q_cashflow = _safe(lambda: tk.quarterly_cashflow)
-    history = _safe(lambda: tk.history(period="5y", interval="1d", auto_adjust=False))
-    dividends = _safe(lambda: tk.dividends)
-    splits = _safe(lambda: tk.splits)
-    shares = _safe(lambda: tk.get_shares_full(start="2015-01-01"))
-    earnings_dates = _safe(lambda: tk.earnings_dates)
-    major_holders = _safe(lambda: tk.major_holders)
-    institutional_holders = _safe(lambda: tk.institutional_holders)
+    errors: list[str] = []
+    info = _safe(lambda: tk.info, errors)
+    income = _safe(lambda: tk.income_stmt, errors)
+    q_income = _safe(lambda: tk.quarterly_income_stmt, errors)
+    balance = _safe(lambda: tk.balance_sheet, errors)
+    q_balance = _safe(lambda: tk.quarterly_balance_sheet, errors)
+    cashflow = _safe(lambda: tk.cashflow, errors)
+    q_cashflow = _safe(lambda: tk.quarterly_cashflow, errors)
+    history = _safe(lambda: tk.history(period="5y", interval="1d", auto_adjust=False), errors)
+    dividends = _safe(lambda: tk.dividends, errors)
+    splits = _safe(lambda: tk.splits, errors)
+    shares = _safe(lambda: tk.get_shares_full(start="2015-01-01"), errors)
+    earnings_dates = _safe(lambda: tk.earnings_dates, errors)
+    major_holders = _safe(lambda: tk.major_holders, errors)
+    institutional_holders = _safe(lambda: tk.institutional_holders, errors)
 
     has_any = bool(info) or any(
         item is not None for item in [income, balance, cashflow]
     ) or (history is not None and len(history) > 0)
     if not has_any:
+        if errors:
+            raise DataUnavailableError(errors[0])
         raise TickerNotFoundError(ticker)
 
     shares_list = None
@@ -157,4 +162,8 @@ def fetch_ticker(ticker: str) -> dict[str, Any]:
 
 
 class TickerNotFoundError(Exception):
+    pass
+
+
+class DataUnavailableError(Exception):
     pass

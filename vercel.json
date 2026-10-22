@@ -2,9 +2,8 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "functions": {
     "api/fetch/**/*.py": {
-      "runtime": "@vercel/python@4.2.0",
       "maxDuration": 60,
-      "includeFiles": "python_lib/**"
+      "excludeFiles": "tests/**"
     }
   }
 }
