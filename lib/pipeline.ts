@@ -28,6 +28,27 @@ export function parseTickers(raw: string): string[] {
   return tickers;
 }
 
+export async function fetchTickerData(ticker: string, baseUrl = ""): Promise<RawTickerData> {
+  const resp = await fetch(`${baseUrl}/api/fetch/${encodeURIComponent(ticker)}`);
+  const text = await resp.text();
+  let data: unknown = null;
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    data = null;
+  }
+  if (!resp.ok) {
+    const message = typeof data === "object" && data !== null
+      ? (data as { error?: string }).error
+      : undefined;
+    throw new Error(message || `Data service unavailable for '${ticker}' (HTTP ${resp.status}).`);
+  }
+  if (typeof data !== "object" || data === null) {
+    throw new Error(`Data service returned an invalid response for '${ticker}' (HTTP ${resp.status}).`);
+  }
+  return data as RawTickerData;
+}
+
 export interface PipelineOptions {
   fetchFn?: (ticker: string) => Promise<RawTickerData>;
   providerName?: ProviderName | null;
@@ -66,10 +87,7 @@ export class AnalysisPipeline {
 
   private async fetch(ticker: string): Promise<RawTickerData> {
     if (this.options.fetchFn) return this.options.fetchFn(ticker);
-    const resp = await fetch(`/api/fetch/${encodeURIComponent(ticker)}`);
-    const data = await resp.json();
-    if (!resp.ok) throw new Error(data.error || `Unable to retrieve data for '${ticker}'.`);
-    return data as RawTickerData;
+    return fetchTickerData(ticker);
   }
 
   private resolveProvider() {

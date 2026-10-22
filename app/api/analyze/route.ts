@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { AnalysisPipeline, parseTickers } from "@/lib/pipeline";
+import { AnalysisPipeline, fetchTickerData, parseTickers } from "@/lib/pipeline";
 import { loadServerSettings, providerFor } from "@/lib/serverConfig";
 import type { ProviderName } from "@/lib/providers";
 
@@ -60,12 +60,7 @@ export async function GET(request: NextRequest) {
           apiKey,
           model,
           aiTimeout: settings.aiTimeout,
-          fetchFn: async (ticker) => {
-            const resp = await fetch(`${origin}/api/fetch/${encodeURIComponent(ticker)}`);
-            const data = await resp.json();
-            if (!resp.ok) throw new Error(data.error || `Unable to retrieve data for '${ticker}'.`);
-            return data;
-          },
+          fetchFn: (ticker) => fetchTickerData(ticker, origin),
         });
         const result = await pipeline.run(tickers, userRequest, (s) => send("status", s));
         send("result", result);
