@@ -11,7 +11,7 @@ _RETRY_DELAYS = (5.0, 15.0)
 
 
 class AIProvider(ABC):
-    """Minimal provider interface. Implementations: OpenRouter, Groq, Gemini."""
+    """Minimal provider interface. Implementations: OpenRouter, Groq."""
 
     @abstractmethod
     def generate(
@@ -92,59 +92,7 @@ class GroqProvider(_OpenAICompatibleProvider):
         super().__init__(api_key, model, "https://api.groq.com/openai/v1")
 
 
-class GeminiProvider(AIProvider):
-    def __init__(self, api_key: str, model: str):
-        self._api_key = api_key
-        self._model = model
-
-    def generate(
-        self,
-        messages: list[dict[str, str]],
-        *,
-        temperature: float = 0.2,
-        timeout: float = 120.0,
-    ) -> str:
-        system_parts = [m["content"] for m in messages if m["role"] == "system"]
-        contents = [
-            {"role": "model" if m["role"] == "assistant" else "user", "parts": [{"text": m["content"]}]}
-            for m in messages
-            if m["role"] != "system"
-        ]
-        payload = {
-            "contents": contents,
-            "generationConfig": {
-                "temperature": temperature,
-                "responseMimeType": "application/json",
-            },
-        }
-        if system_parts:
-            payload["systemInstruction"] = {"parts": [{"text": "\n\n".join(system_parts)}]}
-
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self._model}:generateContent?key={self._api_key}"
-        last_error: Exception | None = None
-        for attempt in range(len(_RETRY_DELAYS) + 1):
-            try:
-                resp = httpx.post(url, json=payload, timeout=timeout)
-            except httpx.TimeoutException:
-                raise AITimeoutError(timeout)
-            except Exception as exc:
-                raise AIProviderError(str(exc))
-            if resp.status_code == 200:
-                try:
-                    data = resp.json()
-                    parts = data["candidates"][0]["content"]["parts"]
-                    return "".join(part.get("text", "") for part in parts)
-                except (KeyError, IndexError, TypeError, ValueError) as exc:
-                    raise AIProviderError(f"unexpected provider response: {str(exc)}")
-            last_error = AIProviderError(f"HTTP {resp.status_code}: {resp.text[:200]}")
-            if resp.status_code in (429, 500, 502, 503) and attempt < len(_RETRY_DELAYS):
-                time.sleep(_RETRY_DELAYS[attempt])
-                continue
-            raise last_error
-        raise last_error
-
-
-_PROVIDERS = ("gemini", "openrouter", "groq")
+_PROVIDERS = ("openrouter", "groq")
 
 
 def build_provider(settings: Any) -> AIProvider | None:
@@ -155,8 +103,6 @@ def build_provider(settings: Any) -> AIProvider | None:
     model = getattr(settings, f"{name}_model", None)
     if not api_key or not model:
         return None
-    if name == "gemini":
-        return GeminiProvider(api_key, model)
     if name == "groq":
         return GroqProvider(api_key, model)
     return OpenRouterProvider(api_key, model)

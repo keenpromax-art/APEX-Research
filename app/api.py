@@ -117,26 +117,27 @@ def create_app(settings: Settings, pipeline: AnalysisPipeline | None = None) -> 
     async def analyze(
         tickers: str = Query(..., description="One or more tickers, comma-separated"),
         request: str = Query("Analyze this company."),
-        provider: str | None = Query(None, description="AI provider override (gemini|openrouter|groq)"),
+        provider: str | None = Query(None, description="AI provider override (openrouter|groq)"),
         key: str | None = Query(None, description="AI provider API key for this request"),
+        model: str | None = Query(None, description="AI model override for this request"),
     ):
         parsed = parse_tickers(tickers)
-        return StreamingResponse(_stream_analysis(parsed, request, provider, key), media_type="text/event-stream")
+        return StreamingResponse(_stream_analysis(parsed, request, provider, key, model), media_type="text/event-stream")
 
-    def _ephemeral_pipeline(provider_name: str | None, api_key: str | None):
+    def _ephemeral_pipeline(provider_name: str | None, api_key: str | None, model_override: str | None = None):
         if not provider_name or not api_key:
             return None
-        from lib.ai.provider import GeminiProvider, GroqProvider, OpenRouterProvider
+        from lib.ai.provider import GroqProvider, OpenRouterProvider
 
         providers = {
-            "gemini": (GeminiProvider, settings.gemini_model),
             "groq": (GroqProvider, settings.groq_model),
             "openrouter": (OpenRouterProvider, settings.openrouter_model),
         }
         entry = providers.get(provider_name)
         if entry is None:
             raise AppError(f"Unknown AI provider '{provider_name}'.", status_code=400)
-        factory, model = entry
+        factory, default_model = entry
+        model = (model_override or default_model or "").strip()
         if not model:
             raise AppError(f"No model configured for provider '{provider_name}'.", status_code=400)
         engine = AIEngine(factory(api_key, model), timeout=settings.ai_timeout_seconds)
@@ -144,14 +145,14 @@ def create_app(settings: Settings, pipeline: AnalysisPipeline | None = None) -> 
         adapter = YFinanceAdapter(timeout=settings.yfinance_timeout_seconds, cache=cache)
         return AnalysisPipeline(adapter, engine)
 
-    async def _stream_analysis(parsed: list[str], request: str, provider_name: str | None = None, api_key: str | None = None):
+    async def _stream_analysis(parsed: list[str], request: str, provider_name: str | None = None, api_key: str | None = None, model: str | None = None):
         queue: asyncio.Queue = asyncio.Queue()
 
         def run() -> None:
             try:
                 active = pipeline
                 if provider_name and api_key:
-                    active = _ephemeral_pipeline(provider_name, api_key)
+                    active = _ephemeral_pipeline(provider_name, api_key, model)
                 if active is None:
                     raise AIProviderError("AI provider is not configured. Set an AI provider key in the UI or server env.")
                 result = active.run(parsed, request, lambda s: queue.put_nowait(("status", s)))

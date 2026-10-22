@@ -16,8 +16,6 @@ def _settings():
         openrouter_model="stub",
         groq_api_key=None,
         groq_model="stub",
-        gemini_api_key=None,
-        gemini_model="stub",
         cache_ttl_seconds=60,
         yfinance_timeout_seconds=5,
         ai_timeout_seconds=30,
@@ -74,21 +72,19 @@ def test_multi_ticker_input_accepted(valid_document):
 
 
 def test_provider_factory_selects_configured_provider():
-    from lib.ai.provider import GeminiProvider, GroqProvider, OpenRouterProvider, build_provider
+    from lib.ai.provider import GroqProvider, OpenRouterProvider, build_provider
 
     base = dict(
         openrouter_api_key="k",
         openrouter_model="m",
         groq_api_key="k",
         groq_model="m",
-        gemini_api_key="k",
-        gemini_model="m",
         cache_ttl_seconds=60,
         yfinance_timeout_seconds=5,
         ai_timeout_seconds=30,
     )
     assert isinstance(build_provider(Settings(ai_provider="openrouter", **base)), OpenRouterProvider)
     assert isinstance(build_provider(Settings(ai_provider="groq", **base)), GroqProvider)
-    assert isinstance(build_provider(Settings(ai_provider="gemini", **base)), GeminiProvider)
+    assert build_provider(Settings(ai_provider="gemini", **base)) is None
     assert build_provider(Settings(ai_provider="unknown", **base)) is None
     assert build_provider(Settings(ai_provider="groq", groq_api_key=None, **{k: v for k, v in base.items() if k != "groq_api_key"})) is None

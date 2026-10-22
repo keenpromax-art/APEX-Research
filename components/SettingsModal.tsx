@@ -7,11 +7,6 @@ const LS_KEY = "ere_key";
 const LS_MODEL = "ere_model";
 
 const MODEL_OPTIONS: Record<string, { value: string; label: string }[]> = {
-  gemini: [
-    { value: "gemini-3-flash-preview", label: "Gemini 3 Flash Preview" },
-    { value: "gemini-3.8-flash", label: "Gemini 3.8 Flash" },
-    { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
-  ],
   openrouter: [
     { value: "google/gemini-flash-1.5", label: "Gemini Flash 1.5" },
     { value: "google/gemini-3.8-flash", label: "Gemini 3.8 Flash" },
@@ -39,16 +34,16 @@ export function hasSavedKey(): boolean {
 }
 
 export default function SettingsModal({ onClose }: { onClose: () => void }) {
-  const [provider, setProvider] = useState(getSavedKey().provider || "gemini");
+  const [provider, setProvider] = useState(getSavedKey().provider || "openrouter");
   const [key, setKey] = useState(getSavedKey().key);
-  const [model, setModel] = useState(getSavedKey().model || MODEL_OPTIONS[provider][0].value);
+  const [model, setModel] = useState(getSavedKey().model || (MODEL_OPTIONS[provider]?.[0]?.value ?? ""));
   const [status, setStatus] = useState<{ text: string; ok: boolean } | null>(null);
 
   const models = MODEL_OPTIONS[provider] ?? [];
 
   const onProviderChange = (next: string) => {
     setProvider(next);
-    setModel(MODEL_OPTIONS[next][0].value);
+    setModel(MODEL_OPTIONS[next]?.[0]?.value ?? "");
   };
 
   const save = () => {
@@ -58,7 +53,7 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
     }
     window.localStorage.setItem(LS_PROVIDER, provider);
     window.localStorage.setItem(LS_KEY, key.trim());
-    window.localStorage.setItem(LS_MODEL, model);
+    window.localStorage.setItem(LS_MODEL, model.trim());
     setStatus({ text: `Saved. Analyses will use ${provider} / ${model} with your key.`, ok: true });
   };
 
@@ -85,16 +80,33 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
         </p>
         <label className="field-label" htmlFor="provider-select">Provider</label>
         <select id="provider-select" value={provider} onChange={(e) => onProviderChange(e.target.value)}>
-          <option value="gemini">Google Gemini</option>
           <option value="openrouter">OpenRouter</option>
           <option value="groq">Groq</option>
         </select>
-        <label className="field-label" htmlFor="model-select">Model</label>
-        <select id="model-select" value={model} onChange={(e) => setModel(e.target.value)}>
-          {models.map((m) => (
-            <option key={m.value} value={m.value}>{m.label}</option>
-          ))}
-        </select>
+        <label className="field-label" htmlFor="model-input">Model</label>
+        {provider === "openrouter" ? (
+          <>
+            <input
+              id="model-input"
+              type="text"
+              list="openrouter-models"
+              value={model}
+              placeholder="e.g. openai/gpt-4o-mini (any OpenRouter model id)"
+              onChange={(e) => setModel(e.target.value)}
+            />
+            <datalist id="openrouter-models">
+              {models.map((m) => (
+                <option key={m.value} value={m.value}>{m.label}</option>
+              ))}
+            </datalist>
+          </>
+        ) : (
+          <select id="model-select" value={model} onChange={(e) => setModel(e.target.value)}>
+            {models.map((m) => (
+              <option key={m.value} value={m.value}>{m.label}</option>
+            ))}
+          </select>
+        )}
         <label className="field-label" htmlFor="api-key-input">API key</label>
         <input
           id="api-key-input"

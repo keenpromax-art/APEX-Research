@@ -60,7 +60,7 @@ stored only in your browser and never persisted server-side).
 | calculator | `lib/calculator.ts` | deterministic metrics (code calculates, AI interprets) |
 | context | `lib/context.ts` | one coherent AI context package + data quality |
 | AI engine | `lib/engine.ts` | the single analysis call |
-| providers | `lib/providers.ts` | `AIProvider` interface: Gemini, OpenRouter, Groq |
+| providers | `lib/providers.ts` | `AIProvider` interface: OpenRouter, Groq |
 | validator | `lib/validator.ts` | block schema + no-hallucinated-numbers guarantee |
 | types | `lib/types.ts` | the rendering protocol (not a report template) |
 | analysis API | `app/api/analyze/route.ts` | orchestration + SSE status streaming |
@@ -72,11 +72,10 @@ Set in `.env.local` (or per-request via the in-app settings modal):
 
 | Provider | Env vars | Default model |
 |---|---|---|
-| Gemini | `GEMINI_API_KEY`, `GEMINI_MODEL` | `gemini-3-flash-preview` |
-| OpenRouter | `OPENROUTER_API_KEY`, `OPENROUTER_MODEL` | `google/gemini-flash-1.5` |
+| OpenRouter | `OPENROUTER_API_KEY`, `OPENROUTER_MODEL` | `google/gemini-flash-1.5` (any OpenRouter model id) |
 | Groq | `GROQ_API_KEY`, `GROQ_MODEL` | `qwen/qwen3.8-27b` |
 
-Select with `AI_PROVIDER=gemini|openrouter|groq`.
+Select with `AI_PROVIDER=openrouter|groq`.
 
 ## Numerical integrity
 
@@ -116,7 +115,7 @@ output schema, ticker parsing, and the yfinance adapter (valid/empty/NaN data).
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `AI_PROVIDER` | `gemini` | which AI provider to use |
+| `AI_PROVIDER` | `openrouter` | which AI provider to use |
 | `AI_TIMEOUT_SECONDS` | `120` | AI call timeout |
 
 ## Principles

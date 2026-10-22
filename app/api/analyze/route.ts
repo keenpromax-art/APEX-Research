@@ -7,7 +7,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
-const VALID_PROVIDERS: ProviderName[] = ["gemini", "openrouter", "groq"];
+const VALID_PROVIDERS: ProviderName[] = ["openrouter", "groq"];
 
 export async function GET(request: NextRequest) {
   const params = request.nextUrl.searchParams;

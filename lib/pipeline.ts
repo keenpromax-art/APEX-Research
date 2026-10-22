@@ -78,7 +78,7 @@ export class AnalysisPipeline {
     const model = this.options.model;
     if (name && key) return buildProvider(name, key, model ?? null);
     if (!name || !key) {
-      const envName = (process.env.AI_PROVIDER as ProviderName) ?? "gemini";
+      const envName = (process.env.AI_PROVIDER as ProviderName) ?? "openrouter";
       const envKey = process.env[`${envName.toUpperCase()}_API_KEY`] ?? null;
       const envModel = process.env[`${envName.toUpperCase()}_MODEL`] ?? null;
       if (!envKey) return null;

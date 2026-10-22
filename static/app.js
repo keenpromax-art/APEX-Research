@@ -17,6 +17,7 @@ const settingsBtn = document.getElementById("settings-btn");
 const settingsModal = document.getElementById("settings-modal");
 const settingsClose = document.getElementById("settings-close");
 const providerSelect = document.getElementById("provider-select");
+const modelInput = document.getElementById("model-input");
 const apiKeyInput = document.getElementById("api-key-input");
 const keySave = document.getElementById("key-save");
 const keyClear = document.getElementById("key-clear");
@@ -24,9 +25,10 @@ const keyStatus = document.getElementById("key-status");
 
 const LS_PROVIDER = "ere_provider";
 const LS_KEY = "ere_key";
+const LS_MODEL = "ere_model";
 
 function getSavedKey() {
-  return { provider: localStorage.getItem(LS_PROVIDER) || "", key: localStorage.getItem(LS_KEY) || "" };
+  return { provider: localStorage.getItem(LS_PROVIDER) || "", key: localStorage.getItem(LS_KEY) || "", model: localStorage.getItem(LS_MODEL) || "" };
 }
 
 function refreshKeyIndicator() {
@@ -35,8 +37,9 @@ function refreshKeyIndicator() {
 }
 
 settingsBtn.addEventListener("click", () => {
-  const { provider, key } = getSavedKey();
-  providerSelect.value = provider || "gemini";
+  const { provider, key, model } = getSavedKey();
+  providerSelect.value = provider || "openrouter";
+  modelInput.value = model;
   apiKeyInput.value = key;
   keyStatus.textContent = "";
   keyStatus.className = "key-status";
@@ -51,6 +54,7 @@ document.addEventListener("keydown", (e) => { if (e.key === "Escape") settingsMo
 keySave.addEventListener("click", () => {
   const provider = providerSelect.value;
   const key = apiKeyInput.value.trim();
+  const model = modelInput.value.trim();
   if (!key) {
     keyStatus.textContent = "Please enter an API key.";
     keyStatus.className = "key-status";
@@ -58,6 +62,7 @@ keySave.addEventListener("click", () => {
   }
   localStorage.setItem(LS_PROVIDER, provider);
   localStorage.setItem(LS_KEY, key);
+  if (model) localStorage.setItem(LS_MODEL, model); else localStorage.removeItem(LS_MODEL);
   keyStatus.textContent = `Saved. Analyses will use ${provider} with your key.`;
   keyStatus.className = "key-status ok";
   refreshKeyIndicator();
@@ -66,7 +71,9 @@ keySave.addEventListener("click", () => {
 keyClear.addEventListener("click", () => {
   localStorage.removeItem(LS_PROVIDER);
   localStorage.removeItem(LS_KEY);
+  localStorage.removeItem(LS_MODEL);
   apiKeyInput.value = "";
+  modelInput.value = "";
   keyStatus.textContent = "Saved key cleared. The server-side configuration will be used.";
   keyStatus.className = "key-status";
   refreshKeyIndicator();
@@ -104,10 +111,11 @@ function runAnalysis(tickers) {
   renderStatusSteps(-1);
   statusBarFill.style.width = "4%";
 
-  const { provider, key } = getSavedKey();
+  const { provider, key, model } = getSavedKey();
   let url = `/api/analyze?tickers=${encodeURIComponent(tickers)}`;
   if (provider && key) {
     url += `&provider=${encodeURIComponent(provider)}&key=${encodeURIComponent(key)}`;
+    if (model) url += `&model=${encodeURIComponent(model)}`;
   }
   const source = new EventSource(url);
 
