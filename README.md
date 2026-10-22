@@ -31,6 +31,11 @@ cp .env.example .env.local   # optional: server-side AI keys (or use the in-app 
 npm run dev                  # → http://localhost:3000
 ```
 
+`npm run dev` starts the Next.js server together with a local yfinance data server
+(`python_lib/serve.py`), because `next dev` cannot execute the Python serverless
+function. Run the two separately with `npm run dev:next` and `npm run dev:data`.
+On Vercel the Python function runs natively and no extra process is needed.
+
 Enter a ticker (`RELIANCE.NS`, `AAPL`, `NVDA`, `MSFT`, `TCS.NS`, …) or several
 (`AAPL, MSFT` for comparison). No company-specific code anywhere — the same engine
 serves every ticker.

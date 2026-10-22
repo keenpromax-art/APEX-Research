@@ -3,7 +3,9 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "node scripts/dev.mjs",
+    "dev:next": "next dev",
+    "dev:data": "python python_lib/serve.py",
     "build": "next build",
     "start": "next start",
     "test": "vitest run",
