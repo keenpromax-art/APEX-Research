@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+.env
+.env.*
+!.env.example
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+htmlcov/
+.coverage
+coverage.xml
+
+# Local data / caches
+backend/apex.db
+backend/.cache/
+*.sqlite
+*.sqlite3
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+build/
+*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Tooling / OS
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.log
