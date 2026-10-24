@@ -13,6 +13,11 @@ services:
         value: 3.12.8
       - key: APP_ENV
         value: production
+      # SQLite on Render's free plan is ephemeral: the file is wiped on every
+      # deploy, restart and idle cold start, so saved models/keys vanish.
+      # For durable storage set DATABASE_URL (Render dashboard > Environment)
+      # to a Postgres URL, e.g. Neon/Supabase free tier:
+      # DATABASE_URL=postgresql+psycopg://user:pass@host/apex
       - key: DATABASE_URL
         value: sqlite:///./apex.db
       - key: CORS_ORIGINS

@@ -46,6 +46,37 @@ const PROVIDER_CATALOG_FALLBACK: ProviderCatalog[] = [
 
 const EMPTY_FORM = { name: "", provider: "openrouter", model_id: "", base_url: "", api_key: "" };
 
+const MIRROR_KEY = "apex.ai.models.v1";
+
+type LocalModel = {
+  name: string;
+  provider: string;
+  model_id: string;
+  base_url?: string | null;
+  api_key?: string | null;
+  enabled: boolean;
+};
+
+function readMirror(): LocalModel[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(MIRROR_KEY);
+    if (!raw) return [];
+    const rows = JSON.parse(raw);
+    return Array.isArray(rows) ? rows : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeMirror(rows: LocalModel[]) {
+  try {
+    window.localStorage.setItem(MIRROR_KEY, JSON.stringify(rows));
+  } catch {
+    // storage unavailable or full — backup simply disabled
+  }
+}
+
 export default function AIPage() {
   const [models, setModels] = useState<Model[]>([]);
   const [jobs, setJobs] = useState<Job[]>([]);
@@ -67,6 +98,35 @@ export default function AIPage() {
       ]);
       setModels(modelRows);
       setJobs(jobRows);
+      const serverNames = new Set(modelRows.map((row) => row.name));
+      const missing = readMirror().filter((row) => row.name && !serverNames.has(row.name));
+      let restored = 0;
+      for (const row of missing) {
+        try {
+          await api("/api/ai/models", {
+            method: "POST",
+            body: JSON.stringify({
+              name: row.name,
+              provider: row.provider,
+              model_id: row.model_id,
+              base_url: row.base_url ?? null,
+              api_key: row.api_key ?? null,
+              enabled: row.enabled !== false,
+            }),
+          });
+          restored += 1;
+        } catch {
+          // keep it in the browser backup; retried on the next load
+        }
+      }
+      if (restored > 0) {
+        try {
+          setModels(await api<Model[]>("/api/ai/models"));
+        } catch {
+          // fall back to the pre-restore list
+        }
+        flash(`Restored ${restored} locally saved model${restored === 1 ? "" : "s"} missing from the server.`);
+      }
     } catch (loadError) {
       setError(getErrorMessage(loadError));
     } finally {
@@ -128,6 +188,15 @@ export default function AIPage() {
           enabled: true,
         }),
       });
+      const saved: LocalModel = {
+        name: form.name.trim(),
+        provider: form.provider,
+        model_id: form.model_id.trim(),
+        base_url: form.base_url.trim() || null,
+        api_key: form.api_key.trim() || null,
+        enabled: true,
+      };
+      writeMirror([...readMirror().filter((row) => row.name !== saved.name), saved]);
       setForm(EMPTY_FORM);
       flash("Model added. Test the connection before using it for research.");
       await load();
@@ -146,6 +215,7 @@ export default function AIPage() {
         method: "PUT",
         body: JSON.stringify({ enabled: !model.enabled }),
       });
+      writeMirror(readMirror().map((row) => (row.name === model.name ? { ...row, enabled: !model.enabled } : row)));
       setModels((current) => current.map((row) => (row.name === model.name ? { ...row, enabled: !row.enabled } : row)));
     } catch (toggleError) {
       setError(getErrorMessage(toggleError));
@@ -173,6 +243,7 @@ export default function AIPage() {
     setError(null);
     try {
       await api(`/api/ai/models/${encodeURIComponent(model.name)}`, { method: "DELETE" });
+      writeMirror(readMirror().filter((row) => row.name !== model.name));
       setModels((current) => current.filter((row) => row.name !== model.name));
       flash(`Deleted “${model.name}”.`);
     } catch (deleteError) {
@@ -193,7 +264,7 @@ export default function AIPage() {
             <Cpu size={18} className="text-accent" /> AI Control Center
           </h1>
           <p className="text-xs text-muted mt-1">
-            Providers are optional. Keys are stored server-side and never sent to the browser. AI writes narrative only.
+            Providers are optional. Keys are stored server-side and backed up in this browser, so they survive backend restarts. AI writes narrative only.
           </p>
         </div>
         <div className="ml-auto flex items-center gap-2">
@@ -322,7 +393,7 @@ export default function AIPage() {
         </Card>
 
         <Card>
-          <CardHeader title="Add a model" subtitle="Saved to the local database" />
+          <CardHeader title="Add a model" subtitle="Saved server-side + backed up in this browser" />
           <form onSubmit={addModel} className="p-4 space-y-2">
             <Field label="name" type="text" value={form.name} placeholder={selectedProvider ? `${selectedProvider.label} — model` : "OpenRouter — Sonnet"} onChange={(value) => setForm({ ...form, name: value })} />
             <Select label="provider" value={form.provider} onChange={changeProvider} options={providerOptions} />
@@ -350,7 +421,7 @@ export default function AIPage() {
             </div>
             <Field label="api_key" type="password" value={form.api_key} placeholder="sk-…" onChange={(value) => setForm({ ...form, api_key: value })} />
             <div className="rounded-md border border-border bg-panel/50 px-2.5 py-2 text-[10px] text-muted">
-              The key is masked in the API response and stored in the local SQLite database. Use environment variables for shared deployments.
+              The key is masked in the API response, saved server-side, and kept in this browser&apos;s local storage (unencrypted) as a backup so it survives backend restarts. Use environment variables for shared deployments.
             </div>
             <button
               type="submit"
