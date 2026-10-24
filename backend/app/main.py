@@ -11,6 +11,7 @@ from .routers.core import router as core_router
 from .routers.ai import router as ai_router, load_from_db
 from .routers.export import router as export_router
 from .routers.projects import router as projects_router
+from .routers.research import router as research_router
 
 
 @asynccontextmanager
@@ -44,6 +45,7 @@ app.add_middleware(
 
 app.include_router(core_router)
 app.include_router(ai_router)
+app.include_router(research_router)
 app.include_router(export_router)
 app.include_router(projects_router)
 

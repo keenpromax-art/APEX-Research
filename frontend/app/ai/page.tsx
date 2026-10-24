@@ -29,11 +29,19 @@ type Job = {
   created_at?: string | null;
 };
 
-const PROVIDERS = [
-  { value: "openrouter", label: "OpenRouter" },
-  { value: "groq", label: "Groq" },
-  { value: "nvidia", label: "NVIDIA NIM" },
-  { value: "openai_compatible", label: "OpenAI-compatible" },
+type ProviderCatalog = {
+  provider: string;
+  label: string;
+  base_url?: string | null;
+  requires_base_url: boolean;
+  model_hint?: string;
+};
+
+const PROVIDER_CATALOG_FALLBACK: ProviderCatalog[] = [
+  { provider: "openrouter", label: "OpenRouter", base_url: "https://openrouter.ai/api/v1", requires_base_url: false, model_hint: "openai/gpt-4o-mini" },
+  { provider: "groq", label: "Groq", base_url: "https://api.groq.com/openai/v1", requires_base_url: false, model_hint: "llama-3.3-70b-versatile" },
+  { provider: "nvidia", label: "NVIDIA NIM", base_url: "https://integrate.api.nvidia.com/v1", requires_base_url: false, model_hint: "meta/llama-3.1-70b-instruct" },
+  { provider: "openai_compatible", label: "OpenAI-compatible", base_url: null, requires_base_url: true, model_hint: "vendor/model-name" },
 ];
 
 const EMPTY_FORM = { name: "", provider: "openrouter", model_id: "", base_url: "", api_key: "" };
@@ -41,6 +49,7 @@ const EMPTY_FORM = { name: "", provider: "openrouter", model_id: "", base_url: "
 export default function AIPage() {
   const [models, setModels] = useState<Model[]>([]);
   const [jobs, setJobs] = useState<Job[]>([]);
+  const [catalog, setCatalog] = useState<ProviderCatalog[]>(PROVIDER_CATALOG_FALLBACK);
   const [form, setForm] = useState<Record<string, string>>(EMPTY_FORM);
   const [loading, setLoading] = useState(true);
   const [adding, setAdding] = useState(false);
@@ -67,7 +76,30 @@ export default function AIPage() {
 
   useEffect(() => {
     load();
+    api<ProviderCatalog[]>("/api/ai/providers")
+      .then((rows) => {
+        if (Array.isArray(rows) && rows.length) setCatalog(rows);
+      })
+      .catch(() => setCatalog(PROVIDER_CATALOG_FALLBACK));
   }, [load]);
+
+  const providerOptions = catalog.map((row) => ({ value: row.provider, label: row.label }));
+  const selectedProvider = catalog.find((row) => row.provider === form.provider);
+  const defaultBaseUrl = selectedProvider?.base_url ?? "";
+  const usingDefault = !form.base_url.trim() || form.base_url.trim() === defaultBaseUrl;
+
+  function changeProvider(provider: string) {
+    setForm((current) => {
+      const next: Record<string, string> = { ...current, provider };
+      const previousDefault = catalog.find((row) => row.provider === current.provider)?.base_url ?? "";
+      const value = current.base_url.trim();
+      if (!value || value === previousDefault) {
+        next.base_url = catalog.find((row) => row.provider === provider)?.base_url ?? "";
+      }
+      if (!current.model_id.trim()) next.model_id = catalog.find((row) => row.provider === provider)?.model_hint ?? "";
+      return next;
+    });
+  }
 
   function flash(message: string) {
     setNotice(message);
@@ -292,16 +324,30 @@ export default function AIPage() {
         <Card>
           <CardHeader title="Add a model" subtitle="Saved to the local database" />
           <form onSubmit={addModel} className="p-4 space-y-2">
-            <Field label="name" type="text" value={form.name} placeholder="OpenRouter — Sonnet" onChange={(value) => setForm({ ...form, name: value })} />
-            <Select label="provider" value={form.provider} onChange={(value) => setForm({ ...form, provider: value })} options={PROVIDERS} />
-            <Field label="model_id" type="text" value={form.model_id} placeholder="openai/gpt-4o-mini" onChange={(value) => setForm({ ...form, model_id: value })} />
+            <Field label="name" type="text" value={form.name} placeholder={selectedProvider ? `${selectedProvider.label} — model` : "OpenRouter — Sonnet"} onChange={(value) => setForm({ ...form, name: value })} />
+            <Select label="provider" value={form.provider} onChange={changeProvider} options={providerOptions} />
+            <Field
+              label="model_id"
+              type="text"
+              value={form.model_id}
+              placeholder={selectedProvider?.model_hint || "vendor/model-id"}
+              onChange={(value) => setForm({ ...form, model_id: value })}
+            />
             <Field
               label="base_url"
               type="text"
               value={form.base_url}
-              placeholder={form.provider === "openai_compatible" ? "https://host/v1 (required)" : "Default for provider"}
+              placeholder={defaultBaseUrl || "https://host/v1 (required)"}
               onChange={(value) => setForm({ ...form, base_url: value })}
             />
+            <div className="flex items-center justify-between gap-2 text-[10px] text-muted pl-0.5">
+              <span className="mono break-all">{defaultBaseUrl ? `Default for provider: ${defaultBaseUrl}` : "Required for OpenAI-compatible endpoints"}</span>
+              {defaultBaseUrl && !usingDefault ? (
+                <button type="button" onClick={() => setForm({ ...form, base_url: defaultBaseUrl })} className="text-accent hover:underline shrink-0">
+                  Use default
+                </button>
+              ) : null}
+            </div>
             <Field label="api_key" type="password" value={form.api_key} placeholder="sk-…" onChange={(value) => setForm({ ...form, api_key: value })} />
             <div className="rounded-md border border-border bg-panel/50 px-2.5 py-2 text-[10px] text-muted">
               The key is masked in the API response and stored in the local SQLite database. Use environment variables for shared deployments.

@@ -21,6 +21,7 @@ INFO = {
     "sharesOutstanding": 120_000_000,
     "marketCap": 5_000_000_000,
     "longBusinessSummary": "Synthetic demo company for evaluating APEX Terminal without live market data. All numbers are fabricated for demonstration only.",
+    "fullTimeEmployees": 18_500,
 }
 
 # Four years of history, most recent first (like yfinance ordering)
@@ -43,6 +44,25 @@ CF = [
     {"period_end": "2024-12-31", "items": {"operating_cash_flow": 990, "capex": -390, "free_cash_flow": 600, "da_cf": 274, "change_in_wc": -60}},
     {"period_end": "2023-12-31", "items": {"operating_cash_flow": 860, "capex": -350, "free_cash_flow": 510, "da_cf": 229, "change_in_wc": -55}},
     {"period_end": "2022-12-31", "items": {"operating_cash_flow": 760, "capex": -310, "free_cash_flow": 450, "da_cf": 206, "change_in_wc": -50}},
+]
+
+# Quarterly income statement for FY2025; line items sum to the FY2025 annual
+# totals above so the quarterly follow-through reconciles to the annual base.
+Q_IS = [
+    {"period_end": "2025-03-31", "items": {"revenue": 1180, "cost_of_revenue": 661, "gross_profit": 519, "operating_expense": 189, "operating_income": 240, "ebit": 240, "ebitda": 321, "pretax_income": 216, "tax_expense": 54, "net_income": 162, "interest_expense": 24, "diluted_eps": 1.35, "da": 76}},
+    {"period_end": "2025-06-30", "items": {"revenue": 1260, "cost_of_revenue": 706, "gross_profit": 554, "operating_expense": 202, "operating_income": 260, "ebit": 260, "ebitda": 339, "pretax_income": 234, "tax_expense": 58, "net_income": 176, "interest_expense": 26, "diluted_eps": 1.47, "da": 76}},
+    {"period_end": "2025-09-30", "items": {"revenue": 1340, "cost_of_revenue": 750, "gross_profit": 590, "operating_expense": 214, "operating_income": 275, "ebit": 275, "ebitda": 352, "pretax_income": 250, "tax_expense": 63, "net_income": 187, "interest_expense": 26, "diluted_eps": 1.56, "da": 73}},
+    {"period_end": "2025-12-31", "items": {"revenue": 1420, "cost_of_revenue": 795, "gross_profit": 625, "operating_expense": 227, "operating_income": 265, "ebit": 265, "ebitda": 340, "pretax_income": 236, "tax_expense": 59, "net_income": 177, "interest_expense": 28, "diluted_eps": 1.47, "da": 87}},
+]
+
+DIVIDENDS = [
+    {"date": "2023-06-15", "value": 0.80},
+    {"date": "2023-12-15", "value": 0.85},
+    {"date": "2024-06-14", "value": 0.85},
+    {"date": "2024-12-13", "value": 0.90},
+    {"date": "2025-06-13", "value": 0.90},
+    {"date": "2025-12-12", "value": 0.95},
+    {"date": "2026-06-12", "value": 0.95},
 ]
 
 _PRICE_END = date(2026, 10, 23)
@@ -85,17 +105,23 @@ def demo_normalized(ticker: str = "DEMO") -> dict:
             "balance_sheet": scale(BS),
             "cash_flow": scale(CF),
         },
-        "quarterly": {"income_statement": [], "balance_sheet": [], "cash_flow": []},
+        "quarterly": {
+            "income_statement": scale(Q_IS),
+            "balance_sheet": [],
+            "cash_flow": [],
+        },
         "price_history": PRICE,
         "price_summary": {
             "last_close": PRICE[-1]["close"],
+            "last_date": PRICE[-1]["date"],
             "previous_close": PRICE[-2]["close"],
             "change": PRICE[-1]["close"] - PRICE[-2]["close"],
             "change_pct": (PRICE[-1]["close"] - PRICE[-2]["close"]) / PRICE[-2]["close"],
             "high_52w": max(point["close"] for point in PRICE),
             "low_52w": min(point["close"] for point in PRICE),
+            "avg_volume_3m": sum(point["volume"] for point in PRICE[-63:]) / min(63, len(PRICE)),
         },
-        "dividends": [],
+        "dividends": DIVIDENDS,
         "splits": [],
         "data_quality": {"alerts": [{"level": "info", "message": "DEMO fixture: synthetic data for evaluation only"}], "retrieved_at": "demo-fixture"},
         "demo": True,

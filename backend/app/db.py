@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import JSON, DateTime, Integer, String, Text, create_engine
+from sqlalchemy import JSON, DateTime, Integer, LargeBinary, String, Text, create_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
 from .config import get_settings
@@ -69,6 +69,39 @@ class ResearchJob(Base):
     progress: Mapped[int] = mapped_column(Integer, default=0)
     result: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class ReportRun(Base):
+    """A saved research report version.
+
+    Each row is immutable once created: regenerating a report appends a new
+    version rather than mutating live market data into an existing row.
+    """
+
+    __tablename__ = "report_runs"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    ticker: Mapped[str] = mapped_column(String(40))
+    company_name: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    title: Mapped[str] = mapped_column(String(300))
+    report_type: Mapped[str] = mapped_column(String(20), default="full")  # quick | full
+    status: Mapped[str] = mapped_column(String(20), default="complete")  # complete | preliminary | failed
+    rating: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    target_price: Mapped[float | None] = mapped_column(nullable=True)
+    current_price: Mapped[float | None] = mapped_column(nullable=True)
+    currency: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    horizon: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    ai_model: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    config: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    warnings: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    source_snapshot: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    previous_version_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    project_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    pdf: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    pdf_size: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    page_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 

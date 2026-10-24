@@ -17,6 +17,7 @@ coverage.xml
 # Local data / caches
 backend/apex.db
 backend/.cache/
+*.db
 *.sqlite
 *.sqlite3
 

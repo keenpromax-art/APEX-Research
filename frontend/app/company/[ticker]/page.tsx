@@ -1200,6 +1200,13 @@ export default function CompanyPage() {
                   <button onClick={() => exportFile("pdf")} disabled={exporting !== null} className="border border-border px-3 py-1.5 rounded-md text-xs hover:bg-panel disabled:opacity-40">
                     Export PDF
                   </button>
+                  <Link
+                    href={`/research?ticker=${encodeURIComponent(ticker)}`}
+                    className="border border-accent/50 text-accent px-3 py-1.5 rounded-md text-xs hover:bg-accent/10"
+                    title="Open the full institutional research studio versioned generator"
+                  >
+                    Research Studio
+                  </Link>
                 </div>
               }
             />

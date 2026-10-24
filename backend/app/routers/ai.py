@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from ..db import AIProviderConfig, ResearchJob, SessionLocal, get_session
+from ..config import get_settings
 from ..exceptions import AIError, AITimeoutError, DataError, TickerNotFoundError
 from ..services.ai_gateway import ModelConfig
 from ..services.ai_state import get_gateway, seed_from_env
@@ -207,6 +208,42 @@ def _load_research_inputs(ticker: str) -> tuple[dict[str, Any], dict[str, Any], 
     except Exception as error:
         raise HTTPException(status_code=500, detail=f"Data fetch failed: {error}")
     return normalized, metrics, _research_messages(ticker, normalized, metrics)
+
+
+@router.get("/providers")
+def providers():
+    """Provider catalog with default base URLs so the UI matches the gateway."""
+    settings = get_settings()
+    return [
+        {
+            "provider": "openrouter",
+            "label": "OpenRouter",
+            "base_url": settings.openrouter_base_url,
+            "requires_base_url": False,
+            "model_hint": "deepseek/deepseek-chat-v3.1:free",
+        },
+        {
+            "provider": "groq",
+            "label": "Groq",
+            "base_url": settings.groq_base_url,
+            "requires_base_url": False,
+            "model_hint": "llama-3.3-70b-versatile",
+        },
+        {
+            "provider": "nvidia",
+            "label": "NVIDIA NIM",
+            "base_url": settings.nvidia_base_url,
+            "requires_base_url": False,
+            "model_hint": "meta/llama-3.1-70b-instruct",
+        },
+        {
+            "provider": "openai_compatible",
+            "label": "OpenAI-compatible",
+            "base_url": None,
+            "requires_base_url": True,
+            "model_hint": "vendor/model-name",
+        },
+    ]
 
 
 @router.get("/models")

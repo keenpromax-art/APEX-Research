@@ -151,13 +151,16 @@ def _price_summary(history: list[dict[str, Any]]) -> dict[str, Any] | None:
     latest = closes[-1]
     previous = closes[-2] if len(closes) > 1 else None
     window = closes[-252:]
+    volumes = [point.get("volume") for point in history[-63:] if point.get("volume")]
     return {
         "last_close": latest,
+        "last_date": history[-1].get("date"),
         "previous_close": previous,
         "change": (latest - previous) if previous is not None else None,
         "change_pct": ((latest - previous) / previous) if previous else None,
         "high_52w": max(window),
         "low_52w": min(window),
+        "avg_volume_3m": (sum(volumes) / len(volumes)) if volumes else None,
     }
 
 

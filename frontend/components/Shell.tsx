@@ -3,13 +3,14 @@
 import { FormEvent, ReactNode, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { BarChart3, BookOpen, Calculator, Cpu, Home, Menu, Moon, Search, Settings, Sun, X } from "lucide-react";
+import { BarChart3, BookOpen, Calculator, Cpu, FileText, Home, Menu, Moon, Search, Settings, Sun, X } from "lucide-react";
 import { useTheme } from "./ThemeProvider";
 
 const NAV = [
   { href: "/", label: "Home", icon: Home },
   { href: "/company", label: "Company", icon: BarChart3 },
   { href: "/modelling", label: "Modelling", icon: Calculator },
+  { href: "/research", label: "Research", icon: FileText },
   { href: "/ai", label: "AI Center", icon: Cpu },
   { href: "/library", label: "Library", icon: BookOpen },
   { href: "/settings", label: "Settings", icon: Settings },

@@ -161,7 +161,7 @@ export function Field({
   step?: string;
   placeholder?: string;
   hint?: string;
-  type?: "number" | "text" | "password";
+  type?: "number" | "text" | "password" | "date";
   className?: string;
 }) {
   return (
