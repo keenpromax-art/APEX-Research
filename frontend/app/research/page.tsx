@@ -2,7 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Download, FileText, RefreshCw, Trash2 } from "lucide-react";
+import { Download, Eye, FileText, RefreshCw, Trash2 } from "lucide-react";
 import { API_BASE, api, getErrorMessage } from "@/lib/api";
 import { fmt, money, pct } from "@/lib/format";
 import { Card, CardHeader, EmptyState, ErrorBanner, Field, InfoBanner, Select, Spinner, Stat } from "@/components/ui";
@@ -32,6 +32,9 @@ type ReportSummary = {
 };
 
 type ModelRow = { name: string; enabled: boolean };
+
+type PreviewPage = { number: number; width: number; height: number; image: string };
+type Preview = { id: number; page_count: number; rendered: number; pages: PreviewPage[] };
 
 const ratingTone: Record<string, string> = { BUY: "text-pos", HOLD: "text-warn", SELL: "text-neg", "NOT RATED": "text-muted" };
 const statusTone: Record<string, string> = { complete: "text-pos", preliminary: "text-warn", failed: "text-neg" };
@@ -68,6 +71,25 @@ function ResearchStudio() {
   const [selected, setSelected] = useState<ReportSummary | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [preview, setPreview] = useState<Preview | null>(null);
+  const [previewBusy, setPreviewBusy] = useState(false);
+
+  useEffect(() => {
+    setPreview(null);
+  }, [selected?.id]);
+
+  async function loadPreview(id: number) {
+    setPreviewBusy(true);
+    setError("");
+    try {
+      setPreview(await api<Preview>(`/api/research/reports/${id}/preview`));
+    } catch (err) {
+      setPreview(null);
+      setError(getErrorMessage(err));
+    } finally {
+      setPreviewBusy(false);
+    }
+  }
 
   const loadReports = useCallback(async (focusTicker?: string) => {
     try {
@@ -282,6 +304,13 @@ function ResearchStudio() {
                   <a href={`${API_BASE}/api/research/reports/${selected.id}/pdf`} className="border border-border rounded-md px-3 py-1.5 text-xs hover:bg-panel inline-flex items-center gap-1.5">
                     <Download size={14} /> Download PDF
                   </a>
+                  <button
+                    onClick={() => (preview ? setPreview(null) : void loadPreview(selected.id))}
+                    disabled={previewBusy || !selected.pdf_size}
+                    className="border border-border rounded-md px-3 py-1.5 text-xs hover:bg-panel inline-flex items-center gap-1.5 disabled:opacity-50"
+                  >
+                    <Eye size={14} /> {previewBusy ? "Rendering…" : preview ? "Hide preview" : "Preview pages"}
+                  </button>
                   <button onClick={() => void regenerate(selected.id)} disabled={busy} className="border border-border rounded-md px-3 py-1.5 text-xs hover:bg-panel inline-flex items-center gap-1.5 disabled:opacity-50">
                     <RefreshCw size={14} /> Regenerate (new version)
                   </button>
@@ -290,6 +319,32 @@ function ResearchStudio() {
                   </button>
                   {selected.ai_model ? <span className="text-[11px] text-muted self-center">AI narrative: {selected.ai_model}</span> : <span className="text-[11px] text-muted self-center">No AI narrative (deterministic)</span>}
                 </div>
+                {preview ? (
+                  <div className="border border-border rounded-md">
+                    <div className="flex items-center justify-between px-3 py-2 border-b border-border text-xs">
+                      <span className="font-medium">Page preview</span>
+                      <span className="text-muted">
+                        {preview.rendered >= preview.page_count
+                          ? `${preview.page_count} page${preview.page_count === 1 ? "" : "s"}`
+                          : `showing ${preview.rendered} of ${preview.page_count} pages`}
+                      </span>
+                    </div>
+                    <div className="max-h-[70vh] overflow-auto p-3 space-y-3 bg-black/10">
+                      {preview.pages.map((page) => (
+                        <figure key={page.number} className="mx-auto max-w-[640px]">
+                          <img
+                            src={page.image}
+                            alt={`Report page ${page.number}`}
+                            width={page.width}
+                            height={page.height}
+                            className="w-full h-auto rounded border border-border/60 bg-white"
+                          />
+                          <figcaption className="text-center text-[11px] text-muted mt-1">Page {page.number}</figcaption>
+                        </figure>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
               </div>
             ) : (
               <EmptyState title="No report selected" body="Generate a note from the configuration panel, or pick a version from the library below." />

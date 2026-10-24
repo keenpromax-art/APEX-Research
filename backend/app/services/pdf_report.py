@@ -119,7 +119,8 @@ def _money(value: Any, currency: str | None = None) -> str:
     number = _finite(value)
     if number is None:
         return "—"
-    return f"{_currency_symbol(currency)}{_compact(number)}"
+    sign = "−" if number < 0 else ""
+    return f"{sign}{_currency_symbol(currency)}{_compact(abs(number))}"
 
 
 def _price(value: Any, currency: str | None = None) -> str:
@@ -182,49 +183,69 @@ def _escape(text: Any) -> str:
 # --------------------------------------------------------------------------- #
 
 def _styles() -> dict[str, ParagraphStyle]:
-    base = dict(fontName="Helvetica", fontSize=8.5, leading=11.4, textColor=SLATE)
+    base = dict(fontName="Helvetica", fontSize=9.0, leading=12.0, textColor=SLATE)
     return {
         "body": ParagraphStyle("body", **base),
         "body_sm": ParagraphStyle(
             "body_sm", **{key: value for key, value in base.items() if key not in ("fontSize", "leading")},
-            fontSize=8.0, leading=10.6,
+            fontSize=8.4, leading=11.2,
         ),
         "body_muted": ParagraphStyle(
             "body_muted",
             **{key: value for key, value in base.items() if key not in ("textColor", "fontSize", "leading")},
             textColor=MUTED,
-            fontSize=7.6,
-            leading=10.0,
+            fontSize=8.0,
+            leading=10.6,
         ),
         "section": ParagraphStyle(
-            "section", fontName="Helvetica-Bold", fontSize=12.5, leading=15,
+            "section", fontName="Helvetica-Bold", fontSize=13, leading=15.5,
             textColor=INK, spaceBefore=0, spaceAfter=2,
         ),
         "subsection": ParagraphStyle(
-            "subsection", fontName="Helvetica-Bold", fontSize=9.4, leading=12,
+            "subsection", fontName="Helvetica-Bold", fontSize=9.8, leading=12.4,
             textColor=INK, spaceBefore=6, spaceAfter=2,
         ),
         "eyebrow": ParagraphStyle(
-            "eyebrow", fontName="Helvetica-Bold", fontSize=6.8, leading=9,
+            "eyebrow", fontName="Helvetica-Bold", fontSize=7.0, leading=9,
             textColor=ACCENT, spaceAfter=1,
         ),
-        "cell": ParagraphStyle("cell", fontSize=7.4, leading=9.3, textColor=SLATE),
-        "cell_muted": ParagraphStyle("cell_muted", fontSize=7.3, leading=9.3, textColor=MUTED),
-        "cell_right": ParagraphStyle("cell_right", alignment=TA_RIGHT, fontSize=7.5, leading=9.5, textColor=SLATE),
-        "cell_bold": ParagraphStyle("cell_bold", fontName="Helvetica-Bold", fontSize=7.5, leading=9.5, textColor=INK),
-        "bullet": ParagraphStyle("bullet", fontSize=8.2, leading=11.0, textColor=SLATE, leftIndent=8, bulletIndent=2, spaceAfter=2.0),
-        "bullet_sm": ParagraphStyle("bullet_sm", fontSize=7.8, leading=10.4, textColor=SLATE, leftIndent=7, bulletIndent=1, spaceAfter=1.6),
-        "note": ParagraphStyle("note", fontSize=7.0, leading=9.3, textColor=MUTED, spaceBefore=1.5),
-        "disclaimer": ParagraphStyle("disclaimer", fontSize=7.2, leading=10, textColor=MUTED, alignment=TA_LEFT),
-        "h1": ParagraphStyle("h1", fontName="Helvetica-Bold", fontSize=17, leading=20, textColor=INK),
-        "h1_sub": ParagraphStyle("h1_sub", fontSize=8.8, leading=11.6, textColor=MUTED),
+        "cell": ParagraphStyle("cell", fontSize=7.7, leading=9.6, textColor=SLATE),
+        "cell_muted": ParagraphStyle("cell_muted", fontSize=7.6, leading=9.6, textColor=MUTED),
+        "cell_right": ParagraphStyle("cell_right", alignment=TA_RIGHT, fontSize=7.8, leading=9.8, textColor=SLATE),
+        "cell_bold": ParagraphStyle("cell_bold", fontName="Helvetica-Bold", fontSize=7.8, leading=9.8, textColor=INK),
+        "bullet": ParagraphStyle("bullet", fontSize=8.6, leading=11.4, textColor=SLATE, leftIndent=8, bulletIndent=2, spaceAfter=2.2),
+        "bullet_sm": ParagraphStyle("bullet_sm", fontSize=8.1, leading=10.8, textColor=SLATE, leftIndent=7, bulletIndent=1, spaceAfter=1.8),
+        "note": ParagraphStyle("note", fontSize=7.4, leading=9.6, textColor=MUTED, spaceBefore=1.5),
+        "disclaimer": ParagraphStyle("disclaimer", fontSize=7.6, leading=10.4, textColor=MUTED, alignment=TA_LEFT),
+        "h1": ParagraphStyle("h1", fontName="Helvetica-Bold", fontSize=17.5, leading=21, textColor=INK),
+        "h1_sub": ParagraphStyle("h1_sub", fontSize=9.0, leading=11.8, textColor=MUTED),
         "title_line": ParagraphStyle("title_line", fontName="Helvetica-Bold", fontSize=10.5, leading=13, textColor=ACCENT),
-        "th_left": ParagraphStyle("th_left", fontName="Helvetica-Bold", fontSize=7.5, leading=9.5, textColor=colors.white, alignment=TA_LEFT),
-        "th_right": ParagraphStyle("th_right", fontName="Helvetica-Bold", fontSize=7.5, leading=9.5, textColor=colors.white, alignment=TA_RIGHT),
+        "th_left": ParagraphStyle("th_left", fontName="Helvetica-Bold", fontSize=7.7, leading=9.6, textColor=colors.white, alignment=TA_LEFT),
+        "th_right": ParagraphStyle("th_right", fontName="Helvetica-Bold", fontSize=7.7, leading=9.6, textColor=colors.white, alignment=TA_RIGHT),
+        "toc_entry": ParagraphStyle("toc_entry", fontSize=9.0, leading=14, textColor=SLATE),
     }
 
 
 S = _styles()
+
+# exhibit and section counters (reset per document build)
+_EXHIBIT = {"n": 0}
+_SECTION = {"n": 0}
+
+
+def _reset_counters() -> None:
+    _EXHIBIT["n"] = 0
+    _SECTION["n"] = 0
+
+
+def _next_exhibit() -> int:
+    _EXHIBIT["n"] += 1
+    return _EXHIBIT["n"]
+
+
+def exhibit_caption(text: str) -> Paragraph:
+    """Numbered exhibit caption: 'Exhibit 3 — caption text'."""
+    return Paragraph(_escape(f"Exhibit {_next_exhibit()} — {text}"), S["note"])
 
 
 def _th(text: Any, align: str = "right") -> Paragraph:
@@ -268,8 +289,11 @@ class Rule(Flowable):
         self.canv.line(0, self.space_after, self.width, self.space_after)
 
 
-def section(title: str, subtitle: str | None = None, eyebrow: str | None = None, min_space: float = 175) -> list:
+def section(title: str, subtitle: str | None = None, eyebrow: str | None = None, min_space: float = 175, number: bool = True) -> list:
     """Section heading that keeps its first block together (no forced break)."""
+    if number:
+        _SECTION["n"] += 1
+        title = f"{_SECTION['n']}. {title}"
     out: list = [CondPageBreak(min_space), Rule(CONTENT_W, ACCENT, 2.2, space_before=4, space_after=1)]
     if eyebrow:
         out.append(Paragraph(_escape(eyebrow.upper()), S["eyebrow"]))
@@ -337,7 +361,7 @@ def _make_image(data: bytes, width: float) -> Image:
 
 
 def _captioned(image: Image, caption: str) -> list:
-    return [image, Paragraph(_escape(caption), S["note"])]
+    return [image, exhibit_caption(caption)]
 
 
 def _two_up(left: list, right: list) -> Table:
@@ -404,6 +428,7 @@ def chart_price(payload: dict[str, Any]) -> bytes | None:
     ax.set_xticks(tick_idx)
     ax.set_xticklabels([_tick_label(dates[i]) for i in tick_idx], fontsize=6.0)
     ax.set_ylim(lo, hi)
+    ax.set_ylabel(_currency(payload), fontsize=6, color="#64748B")
     if target is not None:
         ax.axhline(target, color="#B45309", linewidth=0.9, linestyle=(0, (4, 3)))
         ax.annotate(f"target {_price(target)}", (0.02, target), xycoords=("axes fraction", "data"), fontsize=5.8, color="#B45309", ha="left", va="bottom")
@@ -433,6 +458,7 @@ def chart_hist_earnings(payload: dict[str, Any]) -> bytes | None:
     _chart_style(ax)
     ax.legend(fontsize=5.8, frameon=False, loc="upper left", ncol=3, handlelength=0.9, columnspacing=0.7)
     ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: _compact(v)))
+    ax.set_ylabel(_currency(payload), fontsize=6, color="#64748B")
     return _fig_bytes(fig)
 
 
@@ -487,6 +513,7 @@ def chart_quarterly(payload: dict[str, Any]) -> bytes | None:
     _chart_style(ax)
     ax.legend(fontsize=5.8, frameon=False, loc="upper left", ncol=2, handlelength=0.9, columnspacing=0.7)
     ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: _compact(v)))
+    ax.set_ylabel(_currency(payload), fontsize=6, color="#64748B")
     return _fig_bytes(fig)
 
 
@@ -510,6 +537,7 @@ def chart_forecast(payload: dict[str, Any]) -> bytes | None:
     _chart_style(ax)
     ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: _compact(v)))
     ax.legend(fontsize=5.8, frameon=False, loc="upper left", ncol=3, handlelength=0.9, columnspacing=0.7)
+    ax.set_ylabel(_currency(payload), fontsize=6, color="#64748B")
     return _fig_bytes(fig)
 
 
@@ -676,6 +704,13 @@ def _ai_tag(payload: dict[str, Any]) -> Paragraph | None:
 
 def _currency(payload: dict[str, Any]) -> str:
     return str((payload.get("meta") or {}).get("currency") or "USD")
+
+
+def _unit_label(payload: dict[str, Any], compact_unit: bool = True) -> str:
+    cur = _currency(payload)
+    if compact_unit:
+        return f"{_currency_symbol(cur)} (compact)".strip()
+    return cur
 
 
 def _div(payload: dict[str, Any]) -> dict[str, Any]:
@@ -1072,6 +1107,22 @@ def cover(payload: dict[str, Any], cfg: dict[str, Any], quick: bool = False) -> 
         f"reported financials from {_escape(source_note)}; forecast from APEX models. "
         "Italic blue-tinted columns are model forecasts, not company guidance."
     ))
+
+    # data freshness and limitations strip
+    quality = payload.get("data_quality") or {}
+    freshness_bits: list[str] = []
+    price_date = str(price.get("price_date") or "")[:10]
+    if price_date:
+        freshness_bits.append(f"price dated {price_date}")
+    retrieved = str(quality.get("retrieved_at") or payload.get("retrieved_at") or "")[:19]
+    if retrieved:
+        freshness_bits.append(f"data retrieved {retrieved}")
+    gaps = payload.get("gaps") or []
+    if gaps:
+        first_gap = gaps[0]
+        freshness_bits.append(f"gap: {str(first_gap.get('area') or '')} — {str(first_gap.get('detail') or '')}"[:150])
+    freshness_bits.append("figures shown as em-dashes are unavailable, never estimated")
+    story.append(Paragraph(_escape("Data note: " + "; ".join(freshness_bits) + "."), S["note"]))
     story.append(PageBreak())
     return story
 
@@ -1079,6 +1130,120 @@ def cover(payload: dict[str, Any], cfg: dict[str, Any], quick: bool = False) -> 
 # --------------------------------------------------------------------------- #
 # body sections
 # --------------------------------------------------------------------------- #
+
+def _toc_section() -> list:
+    """Contents page for full reports; entries are the numbered section titles."""
+    story: list = [Rule(CONTENT_W, ACCENT, 2.2, space_before=4, space_after=1)]
+    story.append(Paragraph("CONTENTS", S["eyebrow"]))
+    story.append(Paragraph("Contents", S["section"]))
+    story.append(Paragraph("Report structure for this note.", S["body_muted"]))
+    story.append(Spacer(1, 4))
+    entries = [
+        "Executive summary",
+        "Investment thesis and scenarios",
+        "Company and business overview",
+        "Financial performance",
+        "Operating drivers and peer comparison",
+        "Valuation",
+        "Forecast drivers and assumptions",
+        "Appendix — reported statements",
+        "Investment conclusion",
+        "Risks and monitoring",
+        "Sources, provenance and methodology",
+        "Data gaps and quality control",
+        "Disclosures",
+    ]
+    for index, entry in enumerate(entries, start=1):
+        story.append(Paragraph(_escape(f"{index}.  {entry}"), S["toc_entry"]))
+    story.append(Spacer(1, 6))
+    return story
+
+
+def _executive_summary(payload: dict[str, Any], cfg: dict[str, Any]) -> list:
+    """Decision-useful opening page: recommendation, thesis, findings, risks, valuation, scenarios."""
+    story = section(
+        "Executive summary",
+        subtitle="The recommendation, the argument behind it, and the numbers that matter.",
+        eyebrow="Summary",
+        min_space=320,
+    )
+    rating = payload.get("rating") or {}
+    price = payload.get("price") or {}
+    cur = _currency(payload)
+    code = str(rating.get("code") or "NOT RATED")
+    target = rating.get("target_price")
+    current = price.get("current")
+    upside = rating.get("upside")
+    horizon = str(rating.get("horizon") or "12M")
+
+    # metrics strip — compact table, not oversized cards
+    strip_head = [_th("Recommendation", "left"), _th("Target price"), _th("Market price"),
+                  _th("Implied upside"), _th("Horizon"), _th("Confidence", "left")]
+    confidence = str((payload.get("narrative") or {}).get("confidence") or "—")
+    strip_body = [[
+        _cell(code, "left", bold=True),
+        _cell(_price(target, cur), align="right", bold=True),
+        _cell(_price(current, cur), align="right"),
+        _cell(_signed_pct(upside), align="right", bold=True),
+        _cell(horizon, align="right"),
+        _cell(confidence.capitalize(), "left", muted=True),
+    ]]
+    story.append(_t(strip_head, strip_body, [CONTENT_W * 0.2, CONTENT_W * 0.15, CONTENT_W * 0.15,
+                                             CONTENT_W * 0.15, CONTENT_W * 0.12, CONTENT_W * 0.23]))
+    story.append(Spacer(1, 4))
+
+    narrative = payload.get("narrative") or {}
+    thesis_text = str(narrative.get("central_thesis") or "").strip()
+    if not thesis_text:
+        thesis_text = _deterministic_thesis(payload, cfg)[0] if _deterministic_thesis(payload, cfg) else ""
+    story.append(Paragraph("Investment thesis", S["subsection"]))
+    story.append(Paragraph(_escape(thesis_text[:1200]), S["body"]))
+
+    # three to five major findings
+    findings = _arr(narrative.get("value_drivers"))[:3] or _deterministic_thesis(payload, cfg)[1:4]
+    if findings:
+        story.append(Paragraph("Major findings", S["subsection"]))
+        for finding in findings[:5]:
+            story.append(Paragraph(_escape(finding), S["bullet_sm"], bulletText="•"))
+
+    risks = _arr(narrative.get("key_risks"))[:3] or _risks_cover(payload)[:3]
+    story.append(Paragraph("Key risks", S["subsection"]))
+    for risk in risks:
+        story.append(Paragraph(_escape(risk), S["bullet_sm"], bulletText="•"))
+
+    # valuation summary + scenario comparison
+    dcf = payload.get("valuation", {}).get("dcf") or {}
+    scenarios = payload.get("scenarios") or {}
+    story.append(Paragraph("Valuation and scenarios", S["subsection"]))
+    val_bits = []
+    if dcf.get("value_per_share"):
+        val_bits.append(f"DCF fair value {_price(dcf.get('value_per_share'), cur)}")
+    wacc = (payload.get("valuation") or {}).get("wacc")
+    if wacc is not None:
+        val_bits.append(f"WACC {_pct(wacc)}")
+    tv_share = None
+    if _finite(dcf.get("enterprise_value")) and _finite(dcf.get("pv_terminal_value")) and dcf.get("enterprise_value"):
+        tv_share = dcf["pv_terminal_value"] / dcf["enterprise_value"]
+    if tv_share is not None:
+        val_bits.append(f"{_pct(tv_share, 0)} of value beyond the explicit horizon")
+    reverse = (payload.get("valuation") or {}).get("reverse_dcf") or {}
+    if reverse.get("implied_wacc") is not None:
+        val_bits.append(f"the market price implies {_pct(reverse.get('implied_wacc'))} WACC")
+    if val_bits:
+        story.append(Paragraph(_escape("; ".join(val_bits) + "."), S["body_sm"]))
+    bear = (scenarios.get("bear") or {}).get("target_price")
+    base = (scenarios.get("base") or {}).get("target_price")
+    bull = (scenarios.get("bull") or {}).get("target_price")
+    if bear and base and bull:
+        story.append(Paragraph(
+            _escape(f"Scenario range: bear {_price(bear, cur)} · base {_price(base, cur)} · bull {_price(bull, cur)} "
+                    f"around the last close of {_price(current, cur)}."),
+            S["body_sm"],
+        ))
+    story.append(_ai_tag(payload) or Spacer(1, 0))
+    story.append(Spacer(1, 3))
+    return story
+
 
 def _thesis_section(payload: dict[str, Any], cfg: dict[str, Any]) -> list:
     story: list = section(
@@ -1809,6 +1974,57 @@ def _render_statement(rows_spec: list, metrics: list[dict], labels: list[str]) -
     return [_t(head, body, widths), source_line("computed by APEX from reported statements; blank lines render as em-dash.")]
 
 
+def _conclusion_section(payload: dict[str, Any], cfg: dict[str, Any]) -> list:
+    story = section(
+        "Investment conclusion",
+        subtitle="How the fundamentals, trajectory, valuation and risks reconcile into the published view.",
+        eyebrow="Conclusion",
+    )
+    narrative = payload.get("narrative") or {}
+    rating = payload.get("rating") or {}
+    cur = _currency(payload)
+    code = str(rating.get("code") or "NOT RATED")
+
+    summary = str(narrative.get("conclusion") or "").strip()
+    if not summary:
+        bits = []
+        if rating.get("target_price") and (payload.get("price") or {}).get("current"):
+            bits.append(
+                f"{code} with a {_horizon_word(rating)} fair value of {_price(rating.get('target_price'), cur)} "
+                f"versus the last close of {_price((payload.get('price') or {}).get('current'), cur)} "
+                f"({_signed_pct(rating.get('upside'))})."
+            )
+        first_bullet = (_deterministic_thesis(payload, cfg) or [""])[0]
+        if first_bullet:
+            bits.append(first_bullet)
+        summary = " ".join(bits) or "Insufficient evidence for a rated conclusion; see data gaps."
+    story.append(Paragraph(_escape(summary[:1600]), S["body"]))
+
+    balanced = str(narrative.get("balanced_view") or "").strip()
+    if balanced:
+        story.append(Paragraph("Balanced view", S["subsection"]))
+        story.append(Paragraph(_escape(balanced[:900]), S["body_sm"]))
+
+    change_view = _arr(narrative.get("what_would_change_the_view"))
+    if change_view:
+        story.append(Paragraph("What would change the view", S["subsection"]))
+        for item in change_view[:5]:
+            story.append(Paragraph(_escape(item), S["bullet_sm"], bulletText="•"))
+
+    if code in (None, "NOT RATED"):
+        story.append(Paragraph(
+            "This report is Not Rated: the available evidence does not support a defensible target price "
+            "over the stated horizon.",
+            S["body_muted"],
+        ))
+    story.append(_ai_tag(payload) or Spacer(1, 0))
+    return story
+
+
+def _horizon_word(rating: dict[str, Any]) -> str:
+    return f"{str(rating.get('horizon') or '12M')}"
+
+
 def _risk_section(payload: dict[str, Any], quick: bool = False) -> list:
     narrative = payload.get("narrative") or {}
     story = section(
@@ -1923,7 +2139,7 @@ DISCLOSURE_PARAGRAPHS = [
     "This document has been prepared by APEX Research for informational purposes only and does not constitute an "
     "offer or solicitation to buy or sell any security. Opinions and estimates are those of APEX Research as of the "
     "publication date and are subject to change without notice.",
-    "Apeq Research and its affiliates may hold long or short positions in, act as market maker for, or provide "
+    "APEX Research and its affiliates may hold long or short positions in, act as market maker for, or provide "
     "investment-banking services to the companies covered. Compensation may be tied to specific activities.",
     "Recipients should not rely on this document as the sole basis for any investment decision and should consider "
     "their own circumstances, objectives and risk tolerance. Past performance is not indicative of future results.",
@@ -1933,13 +2149,56 @@ DISCLOSURE_PARAGRAPHS = [
 ]
 
 
+def _dynamic_disclosures(payload: dict[str, Any]) -> list[str]:
+    """Provider, retrieval, demo, AI-model and limitation disclosures from the payload."""
+    out: list[str] = []
+    sources = payload.get("sources") or []
+    if sources:
+        labels = "; ".join(str(s.get("label") or s.get("ref") or "") for s in sources[:4] if isinstance(s, dict))
+        retrieved = next((str(s.get("retrieved_at") or "") for s in sources if isinstance(s, dict) and s.get("retrieved_at")), "")
+        out.append(
+            f"Data providers and retrieval: {labels or 'listed in the sources section'}"
+            + (f"; retrieved {retrieved[:19]}." if retrieved else ".")
+        )
+    quality = payload.get("data_quality") or {}
+    alerts = quality.get("alerts") or []
+    demo = bool(quality.get("demo") or (payload.get("meta") or {}).get("demo"))
+    if demo:
+        out.append(
+            "This report is generated from a synthetic demonstration fixture. All company figures, prices and "
+            "market data are fabricated for evaluation purposes and do not represent any real issuer or security."
+        )
+    if quality.get("stale"):
+        out.append("Some input data is flagged stale by the data source; figures may not reflect the latest reporting period.")
+    ai_model = payload.get("narrative_model")
+    if ai_model:
+        out.append(
+            f"Qualitative narrative sections were drafted with AI assistance (model: {ai_model}) and reviewed only by "
+            "automated validation; every quantitative figure originates from the deterministic calculation engines."
+        )
+    else:
+        out.append("This report is fully deterministic: no AI-generated narrative is included; all qualitative text is rule-based.")
+    gaps = payload.get("gaps") or []
+    if gaps:
+        out.append(
+            "Known data limitations: "
+            + "; ".join(f"{str(g.get('area') or 'area')}: {str(g.get('detail') or '')}" for g in gaps[:3])
+            + "."
+        )
+    out.append(
+        "This document is a model-generated research note that has not been independently verified, peer-reviewed "
+        "or produced under a regulated research process; it is not regulated investment advice."
+    )
+    return out
+
+
 def _disclosures_section(payload: dict[str, Any]) -> list:
     story = section(
         "Disclosures",
-        subtitle="Analyst certification and general disclosures.",
+        subtitle="Certification, providers, AI usage, demo-data status and general disclosures.",
         eyebrow="Legal",
     )
-    for paragraph in DISCLOSURE_PARAGRAPHS:
+    for paragraph in _dynamic_disclosures(payload) + DISCLOSURE_PARAGRAPHS:
         story.append(Paragraph(_escape(paragraph), S["disclaimer"]))
         story.append(Spacer(1, 3))
     return story
@@ -1949,8 +2208,11 @@ def _disclosures_section(payload: dict[str, Any]) -> list:
 # assembly
 # --------------------------------------------------------------------------- #
 
-def build_research_pdf(payload: dict[str, Any], cfg: dict[str, Any] | None = None, quick: bool = False) -> bytes:
+def build_research_pdf(payload: dict[str, Any], cfg: dict[str, Any] | None = None, quick: bool | None = None) -> bytes:
     cfg = dict(cfg or {})
+    if quick is None:
+        quick = str(cfg.get("report_type") or "full").lower() == "quick"
+    _reset_counters()
     ticker = str(payload.get("ticker") or "RESEARCH").upper()
     meta = payload.get("meta") or {}
     name = str(meta.get("name") or ticker)
@@ -1977,6 +2239,9 @@ def build_research_pdf(payload: dict[str, Any], cfg: dict[str, Any] | None = Non
 
     story: list = cover(payload, cfg, quick=quick)
 
+    if not quick:
+        story += _toc_section()
+        story += _executive_summary(payload, cfg)
     story += _thesis_section(payload, cfg)
     if not quick:
         story += _company_section(payload)
@@ -1987,6 +2252,7 @@ def build_research_pdf(payload: dict[str, Any], cfg: dict[str, Any] | None = Non
     story += _forecast_section(payload, quick=quick)
     if not quick:
         story += _appendix_section(payload, quick=quick)
+    story += _conclusion_section(payload, cfg)
     story += _risk_section(payload, quick=quick)
     story += _sources_section(payload)
     story += _gaps_qc_section(payload, quick=quick)

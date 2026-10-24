@@ -302,6 +302,41 @@ def get_report_pdf(report_id: int, download: bool = True, db: Session = Depends(
     return Response(content=row.pdf, media_type="application/pdf", headers=headers)
 
 
+@router.get("/reports/{report_id}/preview")
+def get_report_preview(report_id: int, max_pages: int = 12, db: Session = Depends(get_session)):
+    """Render the stored PDF to PNG page images (base64 data URLs) for in-browser preview."""
+    import base64
+
+    row = db.get(ReportRun, report_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"Report {report_id} not found")
+    if not row.pdf:
+        raise HTTPException(status_code=410, detail="This report has no stored PDF")
+    try:
+        import pymupdf  # type: ignore
+    except Exception as error:
+        raise HTTPException(status_code=501, detail="PDF preview renderer unavailable on this host") from error
+    try:
+        doc = pymupdf.open(stream=row.pdf, filetype="pdf")
+    except Exception as error:
+        raise HTTPException(status_code=422, detail=f"Stored PDF could not be opened: {error}") from error
+    try:
+        limit = max(1, min(int(max_pages or 12), doc.page_count, 20))
+        pages = []
+        for index in range(limit):
+            pix = doc[index].get_pixmap(dpi=100)
+            encoded = base64.b64encode(pix.tobytes("png")).decode("ascii")
+            pages.append({
+                "number": index + 1,
+                "width": pix.width,
+                "height": pix.height,
+                "image": f"data:image/png;base64,{encoded}",
+            })
+        return {"id": row.id, "page_count": doc.page_count, "rendered": len(pages), "pages": pages}
+    finally:
+        doc.close()
+
+
 @router.delete("/reports/{report_id}")
 def delete_report(report_id: int, db: Session = Depends(get_session)):
     row = db.get(ReportRun, report_id)

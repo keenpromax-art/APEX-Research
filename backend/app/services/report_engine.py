@@ -622,7 +622,7 @@ def build_report_payload(ticker: str, config: dict[str, Any] | None = None) -> d
                 name: _statement_payload(rows)
                 for name, rows in (quarterly or {}).items()
             },
-            "quarterly_metrics": quarterly_metrics.get("periods")[:8],
+            "quarterly_metrics": (quarterly_metrics.get("periods") or [])[:8],
             "quarterly_periods": [_quarter_label(p.get("period_end")) for p in (quarterly_metrics.get("periods") or [])[:8]],
         },
         "market_context": {
