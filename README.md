@@ -67,6 +67,30 @@ The app is now at http://localhost:3000.
 > 503 with a retry hint; previously fetched tickers are served from the local cache
 > and explicitly flagged as possibly stale.
 
+## Deployment
+
+The frontend and API deploy separately; Vercel hosts the Next.js app and Render hosts
+the FastAPI service.
+
+**Backend (Render):** create a Blueprint from this repository and apply `render.yaml`.
+It builds `backend/` and serves Uvicorn at `/health`. The free plan sleeps after
+inactivity, so the first request can be slow. SQLite is ephemeral on Render: saved
+projects, model snapshots and database-configured AI providers reset on redeploy or
+restart. Use PostgreSQL (for example a managed Neon database) or a paid persistent
+disk for durable data. If you add a custom frontend domain, update `CORS_ORIGINS` in the Render
+dashboard. Optional AI keys (`OPENROUTER_API_KEY`, `GROQ_API_KEY`, `NVIDIA_API_KEY`)
+are set there too and never reach the browser.
+
+**Frontend (Vercel):** import the repository, set **Root Directory** to `frontend`,
+and add the environment variable `NEXT_PUBLIC_API_URL` with the Render service root
+(for example `https://apex-terminal-api.onrender.com`, no trailing slash and no
+`/api`). Redeploy after changing it because Next.js inlines `NEXT_PUBLIC_*` values at
+build time. Point `NEXT_PUBLIC_API_URL` at `http://localhost:8000` for local
+development.
+
+Yahoo Finance may throttle requests from cloud IP ranges; the deployed `DEMO` ticker
+still exercises the full workflow without external data.
+
 ## Repository layout
 
 ```
