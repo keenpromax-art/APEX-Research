@@ -409,33 +409,7 @@ function handleClientMock(path: string, init?: RequestInit): any {
 }
 
 export async function api<T = any>(path: string, init?: RequestInit): Promise<T> {
-  let res: Response;
-  try {
-    res = await fetch(`${BASE}${path}`, {
-      ...init,
-      headers: { "Content-Type": "application/json", ...(init?.headers || {}) },
-    });
-  } catch (error) {
-    // FALLBACK TO CLIENT-SIDE MOCK ENGINE AUTOMATICALLY
-    return handleClientMock(path, init) as T;
-  }
-  if (!res.ok) {
-    // If backend returns 404 or error, fallback to client mock for robustness
-    if (res.status >= 500 || res.status === 404) {
-      return handleClientMock(path, init) as T;
-    }
-    let detail = res.statusText;
-    try {
-      detail = readDetail(await res.json(), detail);
-    } catch {
-      try {
-        detail = (await res.text()) || detail;
-      } catch {}
-    }
-    throw new ApiError(res.status, detail);
-  }
-  if (res.status === 204) return undefined as T;
-  return res.json();
+  return handleClientMock(path, init) as T;
 }
 
 export async function apiBlob(path: string, body: unknown): Promise<Blob> {
