@@ -19,7 +19,8 @@ from .calc_engine import build_three_statement, last_historical
 from .data_access import load_normalized, refresh
 from ..exceptions import DataError, TickerNotFoundError
 from .metrics import compute_metrics
-from .valuation import dcf, reverse_dcf, sensitivity_table, wacc
+from .narrative_qa import duplicate_sentence_issues, flatten_narrative_text
+from .valuation import dcf, reverse_dcf, reverse_dcf_growth, sensitivity_table, wacc, wacc_details
 
 CALC_ASSUMPTION_KEYS = [
     "revenue_growth",
@@ -129,34 +130,84 @@ def _shift_growth(assumptions: dict[str, Any], delta: float) -> dict[str, Any]:
     return out
 
 
-def _merge_assumptions(base: dict[str, Any], overrides: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+def _merge_assumptions(
+    base: dict[str, Any],
+    overrides: dict[str, Any],
+    provenance: dict[str, str] | None = None,
+) -> tuple[dict[str, Any], list[str], dict[str, str]]:
     """Merge analyst overrides onto engine-inferred base-year assumptions."""
-    merged = {**base}
+    base_provenance = dict(provenance or base.get("assumption_provenance") or {})
+    merged = {key: value for key, value in base.items() if key in CALC_ASSUMPTION_KEYS or key == "base_period"}
+    merged.update({key: base[key] for key in base if key not in merged})
     applied: list[str] = []
+    output_provenance: dict[str, str] = dict(base_provenance)
     for key, value in (overrides or {}).items():
         if key not in CALC_ASSUMPTION_KEYS:
             continue
         if value is None or value == "":
+            continue
+        if isinstance(value, (list, tuple)) and value:
+            clean_list = [_finite(item) for item in value]
+            if any(item is None for item in clean_list):
+                continue
+            merged[key] = clean_list
+            applied.append(key)
+            output_provenance[key] = "analyst override: per-year schedule"
             continue
         number = _finite(value)
         if number is None:
             continue
         merged[key] = number
         applied.append(key)
-    return merged, applied
+        output_provenance[key] = "analyst override"
+    for key in merged:
+        output_provenance.setdefault(key, "engine-inferred from the forecast base year")
+    return merged, applied, output_provenance
+
+
+def _growth_schedule(base_growth: float | None, terminal_growth: float | None, years: int) -> list[float]:
+    """Fade base-year growth toward the configured terminal growth.
+
+    This prevents the engine from mechanically repeating one unsupported growth
+    rate across every forecast year. The schedule is deterministic and
+    disclosed as a model convention, not company guidance.
+    """
+    start = _finite(base_growth)
+    end = _finite(terminal_growth)
+    if start is None:
+        start = 0.05
+    if end is None:
+        end = start
+    if years <= 1 or abs(start - end) < 1e-9:
+        return [max(-0.90, start)]
+    return [max(-0.90, start + (end - start) * index / (years - 1)) for index in range(years)]
 
 
 def _wacc_value(config: dict[str, Any]) -> tuple[float, dict[str, Any]]:
     explicit = _finite(config.get("wacc"))
     if explicit is not None and explicit > -1:
-        return explicit, {"mode": "explicit", "value": explicit}
+        return explicit, {
+            "mode": "explicit",
+            "value": explicit,
+            "note": "Analyst-supplied discount rate; no CAPM build-up is implied.",
+        }
     inputs = {**DEFAULT_WACC_INPUTS}
     for key, value in (config.get("wacc_inputs") or {}).items():
         number = _finite(value)
         if number is not None and key in inputs:
             inputs[key] = number
-    value = wacc(**inputs)
-    return value, {"mode": "capm", "inputs": inputs, "value": value}
+    details = wacc_details(**inputs)
+    value = details.get("value")
+    if value is None:
+        # Preserve a numeric WACC for legacy callers, while exposing the error.
+        value = wacc(**inputs)
+    return value, {
+        "mode": "capm",
+        "inputs": inputs,
+        "value": value,
+        "details": details,
+        "warnings": details.get("warnings") or [],
+    }
 
 
 def _period_fy(period_end: Any) -> str:
@@ -260,10 +311,13 @@ def build_market_multiples(
         add("P/B (latest FY book)", price / bvps)
     ebitda = _finite(latest.get("ebitda"))
     ev = None
-    if market_cap is not None:
-        ev = market_cap + (net_debt or 0.0)
+    if market_cap is not None and net_debt is not None:
+        ev = market_cap + net_debt
     if ev is not None and ebitda is not None and ebitda > 0:
         add("EV/EBITDA (latest FY)", ev / ebitda)
+    ebit = _finite(latest.get("ebit"))
+    if ev is not None and ebit is not None and ebit > 0:
+        add("EV/EBIT (latest FY)", ev / ebit)
     if market_cap is not None and market_cap > 0:
         fcf = _finite(latest.get("fcf"))
         if fcf is not None:
@@ -272,7 +326,7 @@ def build_market_multiples(
         if ni is not None:
             add("Earnings yield (latest FY)", ni / market_cap)
     if not out["rows"]:
-        out["note"] = "Insufficient price/earnings data to form market multiples."
+        out["note"] = "Insufficient price/earnings data or an incomplete net-debt bridge to form market multiples."
     return out
 
 
@@ -305,7 +359,8 @@ def build_operating_drivers(info: dict[str, Any], metrics_periods: list[dict], q
         fmt("days_sales_outstanding", "Days sales outstanding", "x")
         fmt("days_inventory", "Days inventory", "x")
         fmt("days_payable", "Days payable", "x")
-        fmt("net_debt_ebitda", "Net debt / EBITDA", "x")
+        if not financial:
+            fmt("net_debt_ebitda", "Net debt / EBITDA", "x")
         fmt("interest_coverage", "Interest coverage (EBIT ÷ interest)", "x")
         fmt("cash_conversion", "Cash conversion (OCF ÷ net income)", "x")
 
@@ -313,6 +368,7 @@ def build_operating_drivers(info: dict[str, Any], metrics_periods: list[dict], q
     if financial:
         unavailable += [
             "Loan growth, deposit growth, NIM, asset-quality and capital-adequacy series are not exposed by the statement adapter.",
+            "Net debt / EBITDA is suppressed because balance-sheet leverage is not a normal financial-sector metric.",
         ]
     if consumer:
         unavailable += ["Volume, realization and market-share series are not disclosed in the structured data feed."]
@@ -362,14 +418,27 @@ def build_peer_comps(peers: Any, subject_normalized: dict[str, Any]) -> tuple[di
         bs = (norm.get("annual", {}) or {}).get("balance_sheet") or []
         p_debt = _finite((bs[0].get("items") or {}).get("total_debt")) if bs else None
         p_cash = _finite((bs[0].get("items") or {}).get("cash")) if bs else None
-        p_net_debt = (p_debt - p_cash) if (p_debt is not None and p_cash is not None) else 0.0
+        p_net_debt = (p_debt - p_cash) if (p_debt is not None and p_cash is not None) else None
         eps = _finite(latest.get("eps_diluted"))
         ebitda = _finite(latest.get("ebitda"))
         equity = _finite(latest.get("equity"))
         pe = (p_price / eps) if (p_price and eps and eps > 0) else None
-        ev = (p_mcap + p_net_debt) if p_mcap is not None else None
+        ev = (p_mcap + p_net_debt) if (p_mcap is not None and p_net_debt is not None) else None
         ev_ebitda = (ev / ebitda) if (ev is not None and ebitda and ebitda > 0) else None
         pb = (p_mcap / equity) if (p_mcap is not None and equity and equity > 0) else None
+        missing: list[str] = []
+        if pe is None:
+            missing.append("P/E")
+        if ev_ebitda is None:
+            missing.append("EV/EBITDA")
+        if pb is None:
+            missing.append("P/B")
+        if missing:
+            gaps.append({
+                "area": "peer data",
+                "severity": "info",
+                "detail": f"Peer {peer} is shown with {', '.join(missing)} unavailable because its matching inputs are incomplete; they are not inferred.",
+            })
         out["rows"].append({
             "ticker": peer,
             "name": info.get("shortName") or peer,
@@ -382,6 +451,7 @@ def build_peer_comps(peers: Any, subject_normalized: dict[str, Any]) -> tuple[di
             "revenue_growth": _finite(latest.get("revenue_growth")),
             "gross_margin": _finite(latest.get("gross_margin")),
             "currency": info.get("currency"),
+            "incomplete": missing,
         })
     if not out["rows"]:
         out["note"] = "Peer group was requested but no peer could be resolved from the provider."
@@ -390,19 +460,30 @@ def build_peer_comps(peers: Any, subject_normalized: dict[str, Any]) -> tuple[di
     return out, gaps
 
 
-def valuation_rationale(cfg: dict[str, Any], latest: dict[str, Any]) -> str:
+def valuation_rationale(cfg: dict[str, Any], latest: dict[str, Any], sector: str | None = None) -> str:
     method = str(cfg.get("valuation_method") or "dcf")
     if method == "dcf":
         fcf = _finite(latest.get("fcf"))
+        is_financial = any(token in str(sector or "").lower() for token in ("bank", "financial", "insurance", "credit"))
         if fcf is not None and fcf > 0:
-            return (
+            prefix = (
                 "A discounted-cash-flow framework is used because the company converts earnings into positive free cash flow, "
                 "so intrinsic value can be tied to modelled cash generation rather than to a multiple that may embed cycle peaks or troughs. "
-                "The DCF is cross-checked with a reverse DCF (the discount rate the current price implies) and a 5×5 sensitivity grid."
             )
-        return (
-            "A discounted-cash-flow framework is applied, but the latest reported free cash flow is not positive; "
-            "the terminal value therefore carries more of the valuation and the output should be treated as preliminary."
+        else:
+            prefix = (
+                "A discounted-cash-flow framework is applied, but the latest reported free cash flow is not positive; "
+                "the terminal value therefore carries more of the valuation and the output should be treated as preliminary. "
+            )
+        if is_financial:
+            return prefix + (
+                "For banks and other financial companies, unlevered FCF and enterprise-value bridges are structurally "
+                "less appropriate because funding is part of operations; treat the output as a screening cross-check and "
+                "prioritise earnings, capital adequacy and P/B evidence where available."
+            )
+        return prefix + (
+            "The DCF is cross-checked with a reverse DCF (the discount rate the current price implies) and a "
+            "WACC-versus-terminal-parameter sensitivity grid."
         )
     return f"Valuation method '{method}' requested; the displayed bridge documents whichever engine output is available."
 
@@ -423,6 +504,23 @@ def build_report_payload(ticker: str, config: dict[str, Any] | None = None) -> d
         raise
     except Exception as error:  # pragma: no cover - defensive
         raise DataError(ticker, str(error)) from error
+    return build_payload_from_data(ticker, normalized, metrics, cfg)
+
+
+def build_payload_from_data(
+    ticker: str,
+    normalized: dict[str, Any],
+    metrics: dict[str, Any],
+    config: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build the report payload from already normalized provider data.
+
+    This is the shared deterministic core used by both report pathways. The
+    small research note consumes the same engine output but renders a compact
+    PDF; it never bypasses these calculations.
+    """
+    cfg = {**DEFAULT_CONFIG, **(config or {})}
+    ticker = ticker.strip().upper()
 
     info = normalized.get("info", {}) or {}
     annual = normalized.get("annual", {}) or {}
@@ -467,94 +565,164 @@ def build_report_payload(ticker: str, config: dict[str, Any] | None = None) -> d
             "deterministic forecast and valuation cannot be built. Consider "
             "generating a preliminary (data-gap) report instead.",
         )
-    merged_assumptions, applied_overrides = _merge_assumptions(base, cfg.get("assumptions"))
+    merged_assumptions, applied_overrides, assumption_provenance = _merge_assumptions(
+        base, cfg.get("assumptions"), base.get("assumption_provenance")
+    )
     n_years = max(1, min(int(_finite(cfg.get("years")) or 5), 10))
+    if "revenue_growth" not in applied_overrides:
+        base_growth = _finite(base.get("revenue_growth"))
+        schedule = _growth_schedule(base_growth, terminal_growth_later := _finite(cfg.get("terminal_growth")), n_years)
+        merged_assumptions["revenue_growth"] = schedule
+        assumption_provenance["revenue_growth"] = (
+            "engine convention: fade the latest reported growth to the configured terminal growth "
+            f"({', '.join(f'{g:.1%}' for g in schedule)})"
+        )
+    else:
+        terminal_growth_later = _finite(cfg.get("terminal_growth"))
     forecast = build_three_statement(base, merged_assumptions, n_years)
     forecast_periods = forecast.get("periods") or []
 
     # ---------------- valuation ----------------
     wacc_value, wacc_meta = _wacc_value(cfg)
-    wacc_rate = _finite(wacc_value) or 0.10
+    wacc_rate = _finite(wacc_value)
+    if wacc_rate is None:
+        wacc_rate = 0.10
+        wacc_meta["warning"] = "WACC was invalid; a disclosed 10% fallback is used for the screening valuation."
+    wacc_warnings = [str(w) for w in (wacc_meta.get("warnings") or [])]
+
     net_debt_stat = _sub(
         latest_balance_value(annual, "total_debt"),
         latest_balance_value(annual, "cash"),
     )
-    net_debt = first_not_none(net_debt_stat, 0.0)
-    fcf_list = [first_not_none(_finite(period.get("fcf")), 0.0) for period in forecast_periods]
+    net_debt_available = net_debt_stat is not None
+    net_debt = net_debt_stat if net_debt_available else 0.0
+    net_debt_basis = (
+        "reported balance sheet: total debt − cash"
+        if net_debt_available else
+        "model assumption: zero net debt because balance-sheet debt or cash is unavailable"
+    )
+    if not net_debt_available:
+        wacc_warnings.append("Net debt is unavailable; the equity bridge explicitly assumes zero until data are supplied.")
 
-    terminal_growth = _finite(cfg.get("terminal_growth"))
+    fcf_list = [_finite(period.get("fcf")) for period in forecast_periods]
+    shares_for_valuation = _finite(shares)
+    shares_available = bool(shares_for_valuation and shares_for_valuation > 0)
+    if not shares_available:
+        wacc_warnings.append("Share count is unavailable; DCF, sensitivity and reverse-DCF per-share values are suppressed.")
+
+    terminal_growth = terminal_growth_later
     exit_multiple = _finite(cfg.get("exit_multiple"))
-    if (cfg.get("terminal_mode") or "growth") == "growth" and terminal_growth is not None:
-        dcf_result = dcf(
-            fcf_list, wacc_rate, terminal_growth=terminal_growth,
-            net_debt=net_debt, shares=shares or 1.0,
-        )
+    if fcf_list and all(value is not None for value in fcf_list) and shares_available:
+        if (cfg.get("terminal_mode") or "growth") == "growth" and terminal_growth is not None:
+            dcf_result = dcf(
+                fcf_list, wacc_rate, terminal_growth=terminal_growth,
+                net_debt=net_debt, shares=shares_for_valuation,
+            )
+        else:
+            final_ebitda = _finite(forecast_periods[-1].get("ebitda")) if forecast_periods else None
+            dcf_result = dcf(
+                fcf_list, wacc_rate, exit_multiple=exit_multiple, final_ebitda=final_ebitda,
+                net_debt=net_debt, shares=shares_for_valuation,
+            )
     else:
-        final_ebitda = first_not_none(
-            [_finite(forecast_periods[-1].get("ebitda"))] if forecast_periods else [None]
-        )
-        dcf_result = dcf(
-            fcf_list, wacc_rate, exit_multiple=exit_multiple, final_ebitda=final_ebitda,
-            net_debt=net_debt, shares=shares or 1.0,
-        )
-    dcf_warnings = [str(w) for w in (dcf_result.get("warnings") or [])]
+        missing_input = "share count" if not shares_available else "forecast free cash flow"
+        dcf_result = {"error": f"Valuation cannot be published because {missing_input} is unavailable."}
+    dcf_warnings = list(wacc_warnings) + [str(w) for w in (dcf_result.get("warnings") or [])]
     target_price = _finite(dcf_result.get("value_per_share"))
 
     # sensitivity grid (5x5 around the configured inputs)
-    wacc_values = [round(wacc_rate + offset, 5) for offset in (-0.02, -0.01, 0.0, 0.01, 0.02) if wacc_rate + offset > terminal_growth + 0.005]
-    if not wacc_values:
-        wacc_values = [wacc_rate]
-    if (cfg.get("terminal_mode") or "growth") == "growth" and terminal_growth is not None:
-        terminal_values = [max(0.0, round(terminal_growth + g, 5)) for g in (-0.01, -0.005, 0.0, 0.005, 0.01)]
-    else:
-        terminal_values = [round((exit_multiple or 10.0) + delta, 2) for delta in (2.0, 1.0, 0.0, -1.0, -2.0)]
-    sensitivity = sensitivity_table(
-        fcf_list, shares or 1.0, net_debt,
-        first_not_none([_finite((forecast_periods[-1] or {}).get("ebitda"))]) or 0.0,
-        wacc_values, terminal_values,
-        "growth" if (cfg.get("terminal_mode") or "growth") == "growth" else "multiple",
-    )
-
-    reverse_dcf_result = None
-    if current_price and current_price > 0 and fcf_list and terminal_growth is not None:
-        reverse_dcf_result = reverse_dcf(
-            fcf_list, current_price, shares or 1.0, net_debt=net_debt,
-            terminal_growth=terminal_growth,
+    if shares_available and fcf_list and all(value is not None for value in fcf_list):
+        wacc_values = [round(wacc_rate + offset, 5) for offset in (-0.02, -0.01, 0.0, 0.01, 0.02) if wacc_rate + offset > (terminal_growth or -1.0) + 0.005]
+        if not wacc_values:
+            wacc_values = [wacc_rate]
+        if (cfg.get("terminal_mode") or "growth") == "growth" and terminal_growth is not None:
+            terminal_values = [max(0.0, round(terminal_growth + g, 5)) for g in (-0.01, -0.005, 0.0, 0.005, 0.01)]
+        else:
+            terminal_values = [round((exit_multiple or 10.0) + delta, 2) for delta in (2.0, 1.0, 0.0, -1.0, -2.0)]
+        sensitivity = sensitivity_table(
+            fcf_list, shares_for_valuation, net_debt,
+            _finite((forecast_periods[-1] or {}).get("ebitda")) or 0.0,
+            wacc_values, terminal_values,
+            "growth" if (cfg.get("terminal_mode") or "growth") == "growth" else "multiple",
         )
-        if "error" in reverse_dcf_result:
-            reverse_dcf_result = {"unavailable": reverse_dcf_result.get("error")}
+    else:
+        wacc_values, terminal_values, sensitivity = [], [], []
+
+    reverse_dcf_result: dict[str, Any] | None = None
+    reverse_growth_result: dict[str, Any] | None = None
+    if current_price and current_price > 0 and shares_available and fcf_list and all(value is not None for value in fcf_list):
+        if terminal_growth is not None:
+            reverse_dcf_result = reverse_dcf(
+                fcf_list, current_price, shares_for_valuation, net_debt=net_debt,
+                terminal_growth=terminal_growth,
+            )
+            if "error" in reverse_dcf_result:
+                reverse_dcf_result = {"unavailable": reverse_dcf_result.get("error")}
+        if wacc_rate > 0:
+            reverse_growth_result = reverse_dcf_growth(
+                fcf_list, current_price, shares_for_valuation, net_debt=net_debt, wacc=wacc_rate,
+            )
+            if "error" in reverse_growth_result:
+                reverse_growth_result = {"unavailable": reverse_growth_result.get("error")}
 
     # ---------------- scenarios ----------------
     scenarios = {}
     for name, spec in SCENARIOS.items():
         scenario_assumptions = _shift_growth(merged_assumptions, spec["growth_delta"])
         scenario_forecast = build_three_statement(base, scenario_assumptions, n_years)
-        scenario_fcf = [first_not_none(_finite(p.get("fcf")), 0.0) for p in (scenario_forecast.get("periods") or [])]
+        scenario_fcf = [_finite(p.get("fcf")) for p in (scenario_forecast.get("periods") or [])]
         scenario_wacc = round(wacc_rate + spec["wacc_delta"], 5)
-        if wacc_rate + spec["wacc_delta"] <= (terminal_growth or 0.0) + 0.002:
-            scenario_result = {"error": f"scenario WACC {scenario_wacc:.2%} does not exceed terminal growth"}
+        scenario_valid = (
+            shares_available
+            and scenario_fcf
+            and all(value is not None for value in scenario_fcf)
+            and wacc_rate + spec["wacc_delta"] > (terminal_growth or -1.0) + 0.002
+        )
+        if not scenario_valid:
+            scenario_result: dict[str, Any] = {
+                "error": (
+                    f"scenario WACC {scenario_wacc:.2%} does not exceed terminal growth"
+                    if scenario_fcf and all(value is not None for value in scenario_fcf) and shares_available
+                    else "valuation inputs are incomplete"
+                )
+            }
+        elif (cfg.get("terminal_mode") or "growth") == "growth" and terminal_growth is not None:
+            scenario_result = dcf(
+                scenario_fcf, scenario_wacc, terminal_growth=terminal_growth,
+                net_debt=net_debt, shares=shares_for_valuation,
+            )
         else:
-            if (cfg.get("terminal_mode") or "growth") == "growth" and terminal_growth is not None:
-                scenario_result = dcf(
-                    scenario_fcf, scenario_wacc, terminal_growth=terminal_growth,
-                    net_debt=net_debt, shares=shares or 1.0,
-                )
-            else:
-                scenario_final = scenario_forecast.get("periods") or [{}]
-                scenario_result = dcf(
-                    scenario_fcf, scenario_wacc, exit_multiple=exit_multiple,
-                    final_ebitda=_finite(scenario_final[-1].get("ebitda")),
-                    net_debt=net_debt, shares=shares or 1.0,
-                )
+            scenario_final = scenario_forecast.get("periods") or [{}]
+            scenario_result = dcf(
+                scenario_fcf, scenario_wacc, exit_multiple=exit_multiple,
+                final_ebitda=_finite(scenario_final[-1].get("ebitda")),
+                net_debt=net_debt, shares=shares_for_valuation,
+            )
         scenarios[name] = {
             "target_price": _finite(scenario_result.get("value_per_share")) if "error" not in scenario_result else None,
             "wacc": scenario_wacc,
             "growth_delta": spec["growth_delta"],
+            "enterprise_value": _finite(scenario_result.get("enterprise_value")) if "error" not in scenario_result else None,
+            "equity_value": _finite(scenario_result.get("equity_value")) if "error" not in scenario_result else None,
+            "fcf": scenario_fcf,
+            "assumptions": {key: value for key, value in scenario_assumptions.items() if key in CALC_ASSUMPTION_KEYS},
             "error": scenario_result.get("error") if "error" in scenario_result else None,
         }
 
-    # ---------------- gaps ----------------
-    gaps: list[dict[str, str]] = []
+    # ---------------- input and data gaps ----------------
+    gaps: list[dict[str, str]] = list(base.get("model_input_gaps") or [])
+    if not net_debt_available:
+        gaps.append({
+            "area": "valuation net debt",
+            "severity": "warning",
+            "detail": "Balance-sheet debt or cash is unavailable; the DCF bridge explicitly assumes zero net debt.",
+        })
+    if not shares_available:
+        gaps.append({
+            "area": "valuation shares",
+            "severity": "error",
+            "detail": "No reliable share count is available; target price and upside are suppressed.",
+        })
 
     # ---------------- quarterly follow-through ----------------
     quarterly_metrics: dict[str, Any] = {}
@@ -637,8 +805,13 @@ def build_report_payload(ticker: str, config: dict[str, Any] | None = None) -> d
             "assumptions": {
                 "values": merged_assumptions,
                 "overrides": applied_overrides,
-                "provenance": {key: ("analyst override" if key in applied_overrides else "engine-inferred from base year") for key in merged_assumptions},
+                "provenance": assumption_provenance,
+                "growth_convention": (
+                    "Revenue growth is a per-year schedule that fades latest reported growth toward the configured "
+                    "terminal growth unless the analyst supplies an explicit growth override."
+                ),
             },
+            "model_input_gaps": base.get("model_input_gaps") or [],
             "periods": forecast_periods,
             "summary": forecast.get("summary"),
             "balance_ok": bool((forecast.get("summary") or {}).get("balance_ok"))
@@ -647,17 +820,20 @@ def build_report_payload(ticker: str, config: dict[str, Any] | None = None) -> d
         },
         "valuation": {
             "method": cfg.get("valuation_method") or "dcf",
-            "rationale": valuation_rationale(cfg, latest_metrics),
+            "rationale": valuation_rationale(cfg, latest_metrics, info.get("sector")),
             "wacc": wacc_rate,
             "wacc_meta": _clean(wacc_meta),
+            "wacc_warnings": wacc_warnings,
             "terminal_mode": cfg.get("terminal_mode") or "growth",
             "terminal_growth": terminal_growth,
             "exit_multiple": exit_multiple,
             "net_debt": net_debt,
+            "net_debt_basis": net_debt_basis,
             "shares": shares,
+            "shares_basis": (base.get("assumption_provenance") or {}).get("shares"),
             "fcf": fcf_list,
             "dcf": _clean(dcf_result),
-            "dcf_warnings": dcf_warnings,
+            "dcf_warnings": _clean(dcf_warnings),
             "sensitivity": {
                 "wacc_values": wacc_values,
                 "terminal_values": terminal_values,
@@ -665,6 +841,7 @@ def build_report_payload(ticker: str, config: dict[str, Any] | None = None) -> d
                 "table": _clean(sensitivity),
             },
             "reverse_dcf": _clean(reverse_dcf_result),
+            "reverse_dcf_growth": _clean(reverse_growth_result),
         },
         "scenarios": {
             **scenarios,
@@ -926,6 +1103,8 @@ def run_qa(payload: dict[str, Any], cfg: dict[str, Any]) -> list[dict[str, str]]
 
     valuation = payload.get("valuation", {})
     dcf_result = valuation.get("dcf") or {}
+    fcf_list_sens = [_finite(value) for value in (valuation.get("fcf") or [])]
+    shares_available_sens = bool(_finite(valuation.get("shares")) and _finite(valuation.get("shares")) > 0 and fcf_list_sens and all(v is not None for v in fcf_list_sens))
     target = _finite(dcf_result.get("value_per_share"))
     rating = payload.get("rating") or {}
     displayed_target = _finite(rating.get("target_price"))
@@ -951,6 +1130,104 @@ def run_qa(payload: dict[str, Any], cfg: dict[str, Any]) -> list[dict[str, str]]
             add("info", "target_reconciliation", f"Analyst target override {displayed_target} is displayed in place of the model value {target} (documented, not an error).")
     else:
         add("warning", "target_reconciliation", "No defensible target price: valuation incomplete or cash flows invalid.")
+
+    # 1b. DCF arithmetic at full internal precision
+    if not dcf_result.get("error"):
+        fcf = [_finite(value) for value in (valuation.get("fcf") or [])]
+        rate = _finite(valuation.get("wacc"))
+        if fcf and all(v is not None for v in fcf) and rate is not None:
+            recompute_pvs = [value / ((1.0 + rate) ** index) for index, value in enumerate(fcf, start=1)]
+            stored_pvs = [_finite(value) for value in (dcf_result.get("pv_cash_flows_by_year") or [])]
+            stored_pv = _finite(dcf_result.get("pv_cash_flows"))
+            if stored_pv is None or abs(stored_pv - sum(recompute_pvs)) > max(1e-7, abs(stored_pv) * 1e-10):
+                add("error", "dcf_pv_sum", "PV of explicit cash flows does not equal the sum of annual present values.")
+            if stored_pvs and any(abs(a - b) > max(1e-7, abs(a) * 1e-10) for a, b in zip(stored_pvs, recompute_pvs)):
+                add("error", "dcf_yearly_pv", "One or more annual DCF present values do not reconcile.")
+            terminal_mode = valuation.get("terminal_mode")
+            stored_tv = _finite(dcf_result.get("terminal_value"))
+            if terminal_mode == "growth" and stored_tv is not None:
+                expected_tv = fcf[-1] * (1 + _finite(valuation.get("terminal_growth") or 0)) / (rate - _finite(valuation.get("terminal_growth") or 0))
+                if abs(stored_tv - expected_tv) > max(1e-7, abs(expected_tv) * 1e-10):
+                    add("error", "dcf_terminal_value", "Terminal value does not reconcile to perpetuity-growth inputs.")
+            stored_ev = _finite(dcf_result.get("enterprise_value"))
+            stored_pv_tv = _finite(dcf_result.get("pv_terminal_value"))
+            if stored_ev is not None and stored_pv is not None and stored_pv_tv is not None:
+                if abs(stored_ev - (stored_pv + stored_pv_tv)) > max(1e-7, abs(stored_ev) * 1e-10):
+                    add("error", "dcf_enterprise_value", "Enterprise value does not equal PV of cash flows plus PV of terminal value.")
+            stored_net_debt = _finite(dcf_result.get("net_debt"))
+            stored_equity = _finite(dcf_result.get("equity_value"))
+            if stored_ev is not None and stored_net_debt is not None and stored_equity is not None:
+                if abs(stored_equity - (stored_ev - stored_net_debt)) > max(1e-7, abs(stored_equity) * 1e-10):
+                    add("error", "equity_bridge", "Equity value does not equal enterprise value minus net debt.")
+            stored_shares = _finite(valuation.get("shares"))
+            stored_vps = _finite(dcf_result.get("value_per_share"))
+            if stored_shares and stored_shares > 0 and stored_vps is not None:
+                if abs(stored_vps - stored_equity / stored_shares) > max(1e-7, abs(stored_vps) * 1e-10):
+                    add("error", "value_per_share_bridge", "Value per share does not equal equity value divided by shares.")
+
+    # 1c. independently recompute the sensitivity grid
+    sens = valuation.get("sensitivity") or {}
+    sens_grid = sens.get("table") or []
+    if sens_grid and shares_available_sens and fcf_list_sens:
+        recomputed = sensitivity_table(
+            fcf_list_sens,
+            _finite(valuation.get("shares")) or 0.0,
+            _finite(valuation.get("net_debt")) or 0.0,
+            _finite((payload["forecast"]["periods"][-1] if payload["forecast"]["periods"] else {}).get("ebitda")) or 0.0,
+            sens.get("wacc_values") or [],
+            sens.get("terminal_values") or [],
+            "growth" if valuation.get("terminal_mode") == "growth" else "multiple",
+        )
+        mismatched_cells = 0
+        for row_index, row in enumerate(recomputed):
+            stored_row = sens_grid[row_index] if row_index < len(sens_grid) else []
+            for col_index, expected in enumerate(row):
+                stored = _finite(stored_row[col_index]) if col_index < len(stored_row) else None
+                expected_f = _finite(expected)
+                if stored is None and expected_f is None:
+                    continue
+                if stored is None or expected_f is None or abs(stored - expected_f) > max(0.01, abs(expected_f or 0) * 1e-8):
+                    mismatched_cells += 1
+        if mismatched_cells:
+            add("error", "sensitivity_reconciliation", f"{mismatched_cells} sensitivity cells failed an independent DCF re-run.")
+
+    # 1d. reverse-DCF convergence must reproduce the market price
+    reverse = valuation.get("reverse_dcf") or {}
+    implied_wacc = _finite(reverse.get("implied_wacc"))
+    if implied_wacc is not None:
+        converged = bool(reverse.get("converged"))
+        reproduced = _finite(reverse.get("value_at_implied_wacc"))
+        current = _finite((payload.get("price") or {}).get("current"))
+        if not converged or reproduced is None or current is None or abs(reproduced - current) > max(0.01, current * 1e-6):
+            add("error", "reverse_dcf_convergence", "Reverse-DCF result did not reproduce the observed market price within tolerance.")
+    reverse_growth = valuation.get("reverse_dcf_growth") or {}
+    implied_growth = _finite(reverse_growth.get("implied_terminal_growth"))
+    if implied_growth is not None and not bool(reverse_growth.get("converged")):
+        add("error", "reverse_growth_convergence", "Reverse terminal-growth result did not reproduce the observed market price within tolerance.")
+
+    # 1e. scenario prices reconcile to their scenario cash flows
+    for name in ("bear", "base", "bull"):
+        scenario = (payload.get("scenarios") or {}).get(name) or {}
+        scenario_target = _finite(scenario.get("target_price"))
+        scenario_fcf = [_finite(value) for value in (scenario.get("fcf") or [])]
+        if scenario_target is None:
+            continue
+        scenario_shares = _finite(valuation.get("shares"))
+        if not scenario_shares or scenario_shares <= 0:
+            add("error", "scenario_reconciliation", f"{name.capitalize()} scenario publishes a per-share value without a share count.")
+            continue
+        rerun_scenario = dcf(
+            scenario_fcf,
+            _finite(scenario.get("wacc")) or 0.10,
+            terminal_growth=valuation.get("terminal_growth") if valuation.get("terminal_mode") == "growth" else None,
+            exit_multiple=valuation.get("exit_multiple") if valuation.get("terminal_mode") != "growth" else None,
+            final_ebitda=_finite((payload["forecast"]["periods"][-1] if payload["forecast"]["periods"] else {}).get("ebitda")) or 0.0,
+            net_debt=_finite(valuation.get("net_debt")) or 0.0,
+            shares=scenario_shares,
+        )
+        rerun_target = _finite(rerun_scenario.get("value_per_share"))
+        if rerun_target is None or abs(rerun_target - scenario_target) > max(0.01, abs(scenario_target) * 1e-6):
+            add("error", "scenario_reconciliation", f"{name.capitalize()} scenario target does not match an independent DCF re-run.")
 
     # 2. rating consistency with published bands (auto mode)
     upside = _finite(rating.get("upside"))
@@ -1003,6 +1280,15 @@ def run_qa(payload: dict[str, Any], cfg: dict[str, Any]) -> list[dict[str, str]]
     if len(payload.get("sources") or []) < 4:
         add("warning", "provenance", "Source register incomplete.")
 
+    # 5b. valuation input assumptions must be disclosed, not hidden
+    if valuation.get("wacc_warnings"):
+        add("warning", "valuation_inputs", "; ".join(str(w) for w in valuation.get("wacc_warnings")[:4]))
+    for gap in payload.get("forecast", {}).get("model_input_gaps") or []:
+        if gap.get("severity") in ("warning", "error"):
+            add("warning", "forecast_input_defaults", f"{gap.get('area')}: {gap.get('detail')}")
+    if payload.get("valuation", {}).get("net_debt_basis") and "assumption" in str(payload["valuation"]["net_debt_basis"]):
+        add("warning", "net_debt_assumption", str(payload["valuation"]["net_debt_basis"]))
+
     # 6. NaN sanitisation
     def scan(value: Any, path: str) -> None:
         if isinstance(value, float):
@@ -1022,4 +1308,13 @@ def run_qa(payload: dict[str, Any], cfg: dict[str, Any]) -> list[dict[str, str]]
     if warning_gaps:
         add("info", "gaps_disclosed", f"{len(warning_gaps)} data gaps disclosed in the source & gaps section.")
 
+    # 8. narrative duplication/placeholder quality
+    narrative = payload.get("narrative")
+    if narrative:
+        repeated = duplicate_sentence_issues(flatten_narrative_text(narrative))
+        if repeated:
+            add("warning", "narrative_duplication", f"Repeated narrative sentences: {repeated[:3]}")
+        for token in ("TODO", "TBD", "{ticker}", "{{ticker}}", "lorem ipsum"):
+            if token.lower() in flatten_narrative_text(narrative).lower():
+                add("error", "narrative_placeholder", f"Unresolved placeholder '{token}' found in narrative.")
     return issues

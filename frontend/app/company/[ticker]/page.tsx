@@ -224,6 +224,7 @@ export default function CompanyPage() {
   const [models, setModels] = useState<any[]>([]);
   const [modelName, setModelName] = useState("");
   const [report, setReport] = useState<any>(null);
+  const [notePayload, setNotePayload] = useState<any>(null);
   const [reportLoading, setReportLoading] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
   const [reportJob, setReportJob] = useState<number | null>(null);
@@ -493,6 +494,7 @@ export default function CompanyPage() {
         body: JSON.stringify({ ticker, model: modelName || undefined }),
       });
       setReport(result.report);
+      setNotePayload(result.payload ?? null);
       setReportJob(result.job_id ?? null);
     } catch (reportFailure) {
       setReportError(getErrorMessage(reportFailure));
@@ -560,8 +562,12 @@ export default function CompanyPage() {
         dcf,
         sensitivity: sens,
         report,
+        research_payload: notePayload,
         assumptions: forecast?.assumptions || assumptions,
         data_quality: normalized?.data_quality,
+        company: company || undefined,
+        actuals: metricsPeriods[0] || undefined,
+        price_summary: priceSummary || undefined,
       });
       downloadBlob(blob, kind === "xlsx" ? `apex_${ticker}_model.xlsx` : `apex_${ticker}_report.pdf`);
     } catch (exportFailure) {

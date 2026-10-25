@@ -14,8 +14,11 @@ def test_df_to_periods_maps_and_preserves_none():
             pd.Timestamp("2023-12-31"): {"Total Revenue": 90.0, "Gross Profit": 36.0, "Cost Of Revenue": 54.0, "Net Income": 10.0},
         }
     )
-    periods = _df_to_periods(df, INCOME_MAP)
-    assert periods[0]["period_end"] == "2024-12-31"
+    periods = _df_to_periods(df, INCOME_MAP, "annual", "2026-01-01")
+    assert [p["period_end"] for p in periods] == ["2024-12-31", "2023-12-31"]
+    assert periods[0]["periodicity"] == "annual"
+    assert periods[0]["provenance"]["revenue"] == "Total Revenue"
+    assert periods[0]["source"]["value_type"] == "reported"
     assert periods[0]["items"]["revenue"] == 100.0
     assert periods[0]["items"]["net_income"] is None
     assert periods[1]["items"]["net_income"] == 10.0

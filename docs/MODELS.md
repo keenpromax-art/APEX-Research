@@ -76,8 +76,10 @@ uses a relative tolerance on total assets. Nothing is plugged silently.
 
 The base year (`last_historical`) is matched by `period_end`, not by list position,
 so companion statements with different coverage cannot be paired with the wrong year.
-Missing margins fall back to explicit defaults and missing series surface as `None`
-in metrics rather than zero.
+Operating NWC is computed as current assets less cash, less current liabilities
+(less short-term debt when exposed). Missing base-year drivers are not silently
+zero-filled: they use explicit engine defaults and are recorded in
+`assumption_provenance` and `model_input_gaps`.
 
 ## DCF (services/valuation.py)
 
@@ -99,10 +101,11 @@ WACC = w_e × (risk_free + β × ERP) + w_d × cost_of_debt × (1 − tax_rate).
 Sensitivity: `mode="growth"` → rows WACC × cols terminal growth;
 `mode="multiple"` → rows WACC × cols exit multiple.
 
-Reverse DCF solves for the WACC that reprices the current share price. The value is
-monotonically decreasing in WACC above terminal growth, so a bracketed bisection is
-used. The lower bound is lifted above `terminal_growth` to keep that monotonicity;
-prices outside the search range return an explicit error.
+Reverse DCF solves for the WACC implied by the current share price. APEX does not
+assume monotonicity: it brackets the root on a deterministic rate grid, then uses
+bisection. The solver reports reproduced value, residual, tolerance and whether the
+observed price was actually reproduced. A separate reverse-growth solver follows the
+same discipline when WACC is fixed.
 
 ## LBO (services/advanced.py)
 

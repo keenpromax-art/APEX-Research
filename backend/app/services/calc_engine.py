@@ -201,7 +201,26 @@ def build_three_statement(hist_last: dict[str, Any], assumptions: dict[str, Any]
     }
 
 
+def _optional_number(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        result = float(value)
+    except (TypeError, ValueError):
+        return None
+    if result != result or result in (float("inf"), float("-inf")):
+        return None
+    return result
+
+
 def last_historical(normalized: dict[str, Any], metrics: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Build the forecast base year without silently substituting missing data.
+
+    Where a required driver is unavailable, a documented modelling default is
+    used and recorded in ``assumption_provenance`` and ``model_input_gaps``.
+    The report layer must disclose those defaults; they are never presented as
+    reported company data.
+    """
     annual = (normalized or {}).get("annual", {}) or {}
     income_periods = annual.get("income_statement", []) or []
     balance_periods = annual.get("balance_sheet", []) or []
@@ -216,59 +235,195 @@ def last_historical(normalized: dict[str, Any], metrics: dict[str, Any] | None =
     balance_items = balance.get("items", {}) or {}
     cashflow_items = cashflow.get("items", {}) or {}
 
-    revenue = _number(income_items.get("revenue"), 0.0)
-    if revenue <= 0:
+    revenue = _optional_number(income_items.get("revenue"))
+    if revenue is None or revenue <= 0:
         return {}
 
-    gross_profit = _number(income_items.get("gross_profit"), 0.0)
-    gross_margin = gross_profit / revenue if gross_profit else None
-    if gross_margin is None and income_items.get("cost_of_revenue") is not None:
-        gross_margin = 1 - _number(income_items.get("cost_of_revenue")) / revenue
+    provenance: dict[str, str] = {}
+    gaps: list[dict[str, str]] = []
 
-    operating_expense = income_items.get("operating_expense") or income_items.get("sga_expense")
-    operating_ratio = _number(operating_expense) / revenue if operating_expense is not None else None
-    depreciation = income_items.get("da") or cashflow_items.get("da_cf")
-    da_pct = _number(depreciation) / revenue if depreciation is not None else None
-    capex = cashflow_items.get("capex")
-    capex_pct = abs(_number(capex)) / revenue if capex is not None else None
+    def with_default(key: str, value: Any, default: float, source: str, default_note: str) -> float:
+        number = _optional_number(value)
+        if number is not None:
+            provenance[key] = source
+            return number
+        provenance[key] = f"engine default: {default_note}"
+        gaps.append({"area": key, "severity": "warning", "detail": default_note})
+        return default
 
-    pretax = income_items.get("pretax_income")
-    tax = income_items.get("tax_expense")
-    tax_rate = _number(tax) / _number(pretax) if pretax not in (None, 0) and tax is not None else None
-    if tax_rate is None or tax_rate < 0 or tax_rate > 1:
+    metric_periods = (metrics or {}).get("periods") or []
+    latest_metric = metric_periods[0] if metric_periods else {}
+    revenue_growth = with_default(
+        "revenue_growth",
+        latest_metric.get("revenue_growth"),
+        0.05,
+        "engine-inferred from the latest reported annual revenue growth",
+        "revenue growth unavailable; the model uses a disclosed 5.0% annual default",
+    )
+
+    gross_margin: float | None = None
+    gross_profit = _optional_number(income_items.get("gross_profit"))
+    cost_of_revenue = _optional_number(income_items.get("cost_of_revenue"))
+    if gross_profit is not None:
+        gross_margin = gross_profit / revenue
+        provenance["gross_margin"] = "reported gross profit ÷ latest annual revenue"
+    elif cost_of_revenue is not None:
+        gross_margin = 1 - cost_of_revenue / revenue
+        provenance["gross_margin"] = "calculated from reported revenue and cost of revenue"
+    if gross_margin is None:
+        gross_margin = 0.4
+        provenance["gross_margin"] = "engine default: 40% gross margin"
+        gaps.append({"area": "gross_margin", "severity": "warning", "detail": "gross profit and cost of revenue unavailable; using a disclosed 40% margin default"})
+
+    operating_expense = income_items.get("operating_expense")
+    operating_source = "reported operating expense"
+    if operating_expense is None and income_items.get("sga_expense") is not None:
+        operating_expense = income_items.get("sga_expense")
+        operating_source = "reported SG&A used as operating expense"
+    operating_ratio = with_default(
+        "opex_ratio",
+        (_optional_number(operating_expense) / revenue if operating_expense is not None else None),
+        0.2,
+        operating_source + " ÷ revenue",
+        "operating expense unavailable; using a disclosed 20% of revenue default",
+    )
+
+    depreciation = income_items.get("da")
+    depreciation_source = "reported depreciation and amortization"
+    if depreciation is None and cashflow_items.get("da_cf") is not None:
+        depreciation = cashflow_items.get("da_cf")
+        depreciation_source = "cash-flow-statement D&A"
+    da_pct = with_default(
+        "da_pct",
+        (_optional_number(depreciation) / revenue if depreciation is not None else None),
+        0.03,
+        depreciation_source + " ÷ revenue",
+        "D&A unavailable; using a disclosed 3% of revenue default",
+    )
+
+    capex = _optional_number(cashflow_items.get("capex"))
+    capex_pct = with_default(
+        "capex_pct",
+        (abs(capex) / revenue if capex is not None else None),
+        0.04,
+        "|reported capex| ÷ revenue",
+        "capex unavailable; using a disclosed 4% of revenue default",
+    )
+
+    pretax = _optional_number(income_items.get("pretax_income"))
+    tax = _optional_number(income_items.get("tax_expense"))
+    reported_tax_rate = tax / pretax if tax is not None and pretax not in (None, 0) else None
+    if reported_tax_rate is not None and 0 <= reported_tax_rate <= 1:
+        tax_rate = reported_tax_rate
+        provenance["tax_rate"] = "reported tax expense ÷ pretax income"
+    else:
         tax_rate = 0.25
+        provenance["tax_rate"] = "engine default: 25% tax rate"
+        gaps.append({"area": "tax_rate", "severity": "warning", "detail": "effective tax rate unavailable or invalid; using a disclosed 25% default"})
 
-    cash = _number(balance_items.get("cash"), 0.0)
-    debt = _number(balance_items.get("total_debt"), 0.0)
-    equity = _number(balance_items.get("equity"), 0.0)
-    ppe = _number(balance_items.get("ppe_net"), 0.0)
-    total_assets = _number(balance_items.get("total_assets"), cash + ppe)
-    current_assets = balance_items.get("current_assets")
-    current_liabilities = balance_items.get("current_liabilities")
-    nwc = _number(current_assets) - _number(current_liabilities) if current_assets is not None and current_liabilities is not None else 0.0
-    nwc_pct = nwc / revenue if revenue else 0.15
-    nwc_pct = max(0.0, min(1.0, nwc_pct))
+    cash = with_default(
+        "cash", balance_items.get("cash"), 0.0, "reported cash and equivalents",
+        "cash unavailable; using a disclosed zero opening cash balance",
+    )
+    debt = with_default(
+        "debt", balance_items.get("total_debt"), 0.0, "reported total debt",
+        "total debt unavailable; using a disclosed zero opening debt balance",
+    )
+    equity = with_default(
+        "equity", balance_items.get("equity"), 0.0, "reported shareholders' equity",
+        "equity unavailable; using a disclosed zero opening equity",
+    )
+    ppe = with_default(
+        "ppe", balance_items.get("ppe_net"), 0.0, "reported net PP&E",
+        "net PP&E unavailable; using a disclosed zero opening PP&E",
+    )
 
-    interest_expense = _number(income_items.get("interest_expense"), 0.0)
-    interest_rate = interest_expense / debt if debt > 0 else 0.05
-    dividends_paid = _number(cashflow_items.get("dividends_paid"), 0.0)
-    net_income = _number(income_items.get("net_income"), 0.0)
-    payout = min(1.0, abs(dividends_paid) / net_income) if net_income > 0 and dividends_paid else 0.3
+    total_assets_reported = _optional_number(balance_items.get("total_assets"))
+    if total_assets_reported is not None:
+        total_assets = total_assets_reported
+        provenance["total_assets"] = "reported total assets"
+    else:
+        total_assets = cash + ppe
+        provenance["total_assets"] = "engine fallback: cash + net PP&E"
+        gaps.append({"area": "total_assets", "severity": "warning", "detail": "total assets unavailable; balance-sheet opening residual is incomplete"})
 
-    shares = _number(balance_items.get("shares_issued"))
+    current_assets = _optional_number(balance_items.get("current_assets"))
+    current_liabilities = _optional_number(balance_items.get("current_liabilities"))
+    short_term_debt = _optional_number(balance_items.get("short_term_debt"))
+    if current_assets is not None and current_liabilities is not None:
+        # Operating NWC excludes cash. Short-term debt is excluded when exposed;
+        # otherwise this limitation is disclosed instead of silently netting it.
+        operating_assets = current_assets - (cash if cash is not None else 0.0)
+        operating_liabilities = current_liabilities - (short_term_debt if short_term_debt is not None else 0.0)
+        nwc = operating_assets - operating_liabilities
+        if short_term_debt is not None:
+            provenance["nwc"] = "calculated operating NWC: current assets − cash − (current liabilities − short-term debt)"
+        else:
+            provenance["nwc"] = "calculated operating NWC: current assets − cash − current liabilities; short-term debt split unavailable"
+            gaps.append({"area": "nwc", "severity": "info", "detail": "short-term debt not separated; current liabilities are treated as operating liabilities"})
+        nwc_pct = max(0.0, min(1.0, nwc / revenue))
+        provenance["nwc_pct"] = "base-year operating NWC ÷ revenue"
+    else:
+        nwc = 0.0
+        nwc_pct = 0.15
+        provenance["nwc"] = "engine default: zero opening operating working capital"
+        provenance["nwc_pct"] = "engine default: 15% incremental working capital"
+        gaps.append({"area": "nwc", "severity": "warning", "detail": "current assets/liabilities unavailable; using disclosed operating-NWC defaults"})
+
+    interest_expense = _optional_number(income_items.get("interest_expense"))
+    if interest_expense is not None and debt > 0:
+        interest_rate = interest_expense / debt
+        provenance["interest_rate"] = "reported interest expense ÷ opening total debt"
+    else:
+        interest_rate = 0.05
+        provenance["interest_rate"] = "engine default: 5% interest rate"
+        gaps.append({"area": "interest_rate", "severity": "warning", "detail": "interest expense or debt unavailable; using a disclosed 5% rate default"})
+
+    dividends_paid = _optional_number(cashflow_items.get("dividends_paid"))
+    net_income = _optional_number(income_items.get("net_income")) or 0.0
+    if dividends_paid is not None and net_income > 0:
+        payout = min(1.0, abs(dividends_paid) / net_income)
+        provenance["dividend_payout"] = "|reported dividends paid| ÷ net income"
+    elif dividends_paid is not None:
+        payout = 0.0
+        provenance["dividend_payout"] = "no positive net income; modelled payout set to zero"
+    else:
+        payout = 0.3
+        provenance["dividend_payout"] = "engine default: 30% payout"
+        gaps.append({"area": "dividend_payout", "severity": "warning", "detail": "dividends paid unavailable; using a disclosed 30% payout default"})
+
+    balance_shares = _optional_number(balance_items.get("shares_issued"))
     info = (normalized or {}).get("info", {}) or {}
-    if not shares:
-        shares = _number(info.get("sharesOutstanding") or info.get("impliedSharesOutstanding"), 1.0)
-    if not shares:
+    info_shares = _optional_number(info.get("sharesOutstanding") or info.get("impliedSharesOutstanding"))
+    if balance_shares is not None and balance_shares > 0:
+        shares = balance_shares
+        shares_available = True
+        provenance["shares"] = "balance-sheet shares issued"
+    elif info_shares is not None and info_shares > 0:
+        shares = info_shares
+        shares_available = True
+        provenance["shares"] = "provider company-info shares outstanding"
+    else:
+        # Keep the statement engine usable for operating forecasts, but mark the
+        # share count unavailable so valuation must not publish a per-share value.
         shares = 1.0
+        shares_available = False
+        provenance["shares"] = "unavailable; one-share placeholder for EPS-only diagnostics"
+        gaps.append({"area": "shares", "severity": "error", "detail": "no share count available; per-share valuation is suppressed"})
+
+    other_assets = total_assets - cash - ppe - nwc
+    other_net_liabilities = total_assets - debt - equity
+    provenance["other_assets"] = "base-year balance-sheet residual"
+    provenance["other_net_liabilities"] = "base-year balance-sheet residual"
 
     return {
         "revenue": revenue,
-        "gross_margin": gross_margin if gross_margin is not None else 0.4,
-        "opex_ratio": operating_ratio if operating_ratio is not None else 0.2,
+        "revenue_growth": revenue_growth,
+        "gross_margin": gross_margin,
+        "opex_ratio": operating_ratio,
         "tax_rate": tax_rate,
-        "da_pct": da_pct if da_pct is not None else 0.03,
-        "capex_pct": capex_pct if capex_pct is not None else 0.04,
+        "da_pct": da_pct,
+        "capex_pct": capex_pct,
         "nwc_pct": nwc_pct,
         "nwc": nwc,
         "ppe": ppe,
@@ -276,10 +431,13 @@ def last_historical(normalized: dict[str, Any], metrics: dict[str, Any] | None =
         "cash": cash,
         "equity": equity,
         "total_assets": total_assets,
-        "other_assets": total_assets - cash - ppe - nwc,
-        "other_net_liabilities": total_assets - debt - equity,
+        "other_assets": other_assets,
+        "other_net_liabilities": other_net_liabilities,
         "shares": shares,
+        "shares_available": shares_available,
         "interest_rate": interest_rate,
         "dividend_payout": payout,
         "base_period": income.get("period_end"),
+        "assumption_provenance": provenance,
+        "model_input_gaps": gaps,
     }

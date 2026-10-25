@@ -4,7 +4,7 @@ import math
 
 import pytest
 
-from app.services.valuation import dcf, reverse_dcf, sensitivity_table, wacc as calc_wacc
+from app.services.valuation import dcf, reverse_dcf, reverse_dcf_growth, sensitivity_table, wacc as calc_wacc
 from app.services.advanced import lbo, black_scholes, bond_price
 
 
@@ -104,6 +104,48 @@ def test_reverse_dcf_recovers_supplied_wacc():
 def test_reverse_dcf_handles_unreachable_price():
     res = reverse_dcf([100.0], 1e9, 1.0, terminal_growth=0.025)
     assert "error" in res
+
+
+def test_dcf_exposes_reproducible_schedule():
+    res = dcf([50.0, 60.0], 0.10, terminal_growth=0.0, net_debt=20.0, shares=10.0)
+    assert res["discount_factors"] == pytest.approx([1 / 1.1, 1 / 1.21])
+    assert res["pv_cash_flows_by_year"] == pytest.approx([50 / 1.1, 60 / 1.21])
+    assert sum(res["pv_cash_flows_by_year"]) == pytest.approx(res["pv_cash_flows"])
+    assert res["terminal_discount_factor"] == pytest.approx(1 / 1.21)
+    assert res["equity_value"] == pytest.approx(res["enterprise_value"] - 20.0)
+
+
+def test_reverse_dcf_reports_convergence():
+    flows = [100.0, 110.0, 121.0]
+    price = dcf(flows, 0.10, terminal_growth=0.025, net_debt=0.0, shares=10.0)["value_per_share"]
+    res = reverse_dcf(flows, price, 10.0, terminal_growth=0.025)
+    assert res["converged"] is True
+    assert res["value_at_implied_wacc"] == pytest.approx(price, rel=1e-8)
+    assert res["root_solutions_in_range"] >= 1
+
+
+def test_reverse_dcf_negative_flows_disclosed():
+    flows = [100.0, -20.0, 150.0]
+    price = dcf(flows, 0.12, terminal_growth=0.02, net_debt=0.0, shares=10.0)["value_per_share"]
+    res = reverse_dcf(flows, price, 10.0, terminal_growth=0.02)
+    if "implied_wacc" in res:
+        assert any("not be monotonic" in warning for warning in res.get("warnings", []))
+    else:
+        assert "error" in res
+
+
+def test_reverse_dcf_growth_solves_known_value():
+    flows = [100.0, 105.0]
+    target = dcf(flows, 0.10, terminal_growth=0.03, net_debt=0.0, shares=10.0)["value_per_share"]
+    res = reverse_dcf_growth(flows, target, 10.0, wacc=0.10)
+    assert res["implied_terminal_growth"] == pytest.approx(0.03, abs=1e-6)
+    assert res["converged"] is True
+
+
+def test_dcf_rejects_nonpositive_share_count():
+    res = dcf([100.0], 0.10, terminal_growth=0.0, shares=0.0)
+    assert res["value_per_share"] is None
+    assert any("Share count" in warning for warning in res["warnings"])
 
 
 def test_black_scholes_theta_rho_and_vega_signs():

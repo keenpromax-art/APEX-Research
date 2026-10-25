@@ -34,6 +34,8 @@ class Settings(BaseSettings):
     default_ai_provider: str = "openrouter"
     default_ai_model: str = "openai/gpt-4o-mini"
 
+    # Partner API administration (server-side only)
+    partner_admin_token: str | None = None
     # Cache
     cache_ttl_seconds: int = 3600
     yfinance_timeout: float = 30.0

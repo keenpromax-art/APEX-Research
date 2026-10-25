@@ -604,6 +604,21 @@ def test_long_horizon_full_report(patched):
     assert [i for i in issues if i["level"] == "error"] == [], issues
 
 
+def test_narrative_qa_flags_repeats_and_placeholders(patched):
+    from app.services import narrative_qa
+    from app.services.report_engine import run_qa
+
+    payload = build_report_payload("TEST", {"years": 3, "ai_model": None})
+    payload["narrative"] = {
+        "investment_thesis": ["This is the same sentence repeated once. This is the same sentence repeated once."],
+        "conclusion": "A TODO remains in the narrative.",
+    }
+    issues = run_qa(payload, {"years": 3})
+    assert any(issue["check"] == "narrative_duplication" and issue["level"] == "warning" for issue in issues)
+    assert any(issue["check"] == "narrative_placeholder" and issue["level"] == "error" for issue in issues)
+    assert narrative_qa.duplicate_sentence_issues("x") == []
+
+
 def test_full_has_toc_and_exec_summary_quick_does_not(patched):
     full = build_research_pdf(build_report_payload("TEST", {"years": 3}), {"report_type": "full"})
     quick = build_research_pdf(build_report_payload("TEST", {"years": 3}), {"report_type": "quick"})
@@ -619,3 +634,91 @@ def test_full_has_toc_and_exec_summary_quick_does_not(patched):
     full_pages = len(PdfReader(io.BytesIO(full)).pages)
     quick_pages = len(PdfReader(io.BytesIO(quick)).pages)
     assert full_pages > quick_pages
+
+
+def test_payload_no_share_count_suppresses_per_share_valuation(patched, monkeypatch):
+    normalized = _fake_norm()
+    normalized["info"].pop("sharesOutstanding", None)
+    normalized["annual"]["balance_sheet"][0]["items"].pop("shares_issued", None)
+    monkeypatch.setattr(
+        report_engine, "load_normalized",
+        lambda ticker, **kwargs: (normalized, metrics_service.compute_metrics(normalized)),
+    )
+    payload = build_report_payload("TEST", {"years": 3, "ai_model": None})
+    assert payload["valuation"]["shares"] is None
+    assert "error" in payload["valuation"]["dcf"]
+    assert payload["rating"]["code"] == "NOT RATED"
+    assert any(gap["area"] == "valuation shares" for gap in payload["gaps"])
+    issues = run_qa(payload, {"years": 3})
+    assert any(issue["check"] == "valuation_inputs" and issue["level"] == "warning" for issue in issues)
+
+
+def test_payload_forecast_growth_is_faded_not_repeated(patched):
+    payload = build_report_payload("TEST", {"years": 4, "ai_model": None})
+    growth = [p["revenue_growth"] for p in payload["forecast"]["periods"]]
+    assert len(growth) == 4
+    assert len(set(round(g, 6) for g in growth)) == 4
+    assert payload["forecast"]["assumptions"]["values"]["revenue_growth"] == pytest.approx(growth)
+    assert "engine convention" in payload["forecast"]["assumptions"]["provenance"]["revenue_growth"]
+
+
+def test_sensitivity_qa_recomputes_all_cells(patched):
+    payload = build_report_payload("TEST", {"years": 3, "ai_model": None})
+    payload["qc"] = run_qa(payload, {"years": 3})
+    assert [i for i in payload["qc"] if i["level"] == "error"] == []
+    table = payload["valuation"]["sensitivity"]["table"]
+    assert table and len(table) >= 2 and len(table[0]) >= 2
+
+
+def test_note_engine_reuses_deterministic_payload(patched):
+    from app.services.note_engine import build_note_payload_from_data
+
+    normalized = _fake_norm()
+    payload = build_note_payload_from_data("TEST", normalized, metrics_service.compute_metrics(normalized), {"years": 3})
+    assert payload["artifact"] == "concise_research_note"
+    assert payload["note_schema"] == "apex.note.v1"
+    assert payload["valuation"]["dcf"]["value_per_share"]
+
+
+def test_note_engine_actual_only_fallback_is_not_valued():
+    from app.services.note_engine import build_note_payload_from_data
+
+    normalized = _note_norm_empty()
+    payload = build_note_payload_from_data("NOTEX", normalized, metrics_service.compute_metrics(normalized))
+    assert payload["artifact"] == "concise_research_note"
+    assert payload["rating"]["code"] == "NOT RATED"
+    assert "error" in payload["valuation"]["dcf"]
+    assert payload["forecast"]["periods"] == []
+
+
+def _note_norm_empty():
+    return {
+        "ticker": "NOTEX",
+        "retrieved_at": "2026-01-01T00:00:00Z",
+        "info": {"longName": "Actual Only", "currency": "USD", "marketCap": 1000},
+        "annual": {},
+        "quarterly": {},
+        "price_summary": {"last_close": 10.0, "last_date": "2026-01-01"},
+        "price_history": [{"date": f"2025-{m:02d}-01", "close": 10 + m / 10} for m in range(1, 13)],
+        "data_quality": {"alerts": [], "retrieved_at": "2026-01-01"},
+    }
+
+
+def test_note_qa_blocks_missing_sections(patched):
+    from app.services.note_engine import build_note_payload_from_data
+    from app.services.pdf_qa import run_note_pdf_qa
+
+    normalized = _fake_norm()
+    payload = build_note_payload_from_data("TEST", normalized, metrics_service.compute_metrics(normalized), {"years": 3})
+    body = {
+        "ticker": "TEST",
+        "rating": payload["rating"],
+        "dcf": payload["valuation"]["dcf"],
+        "forecast": payload["forecast"],
+        "report": {"executive_summary": "A concise thesis."},
+    }
+    pdf = build_research_pdf(payload, {"report_type": "quick"})
+    # The large-report render is not expected to satisfy concise-note markers;
+    # this fixture checks that the compact QA gate is active and detects the gap.
+    issues = run_note_pdf_qa(pdf, body)
+    assert any(issue["level"] == "error" and issue["check"] == "pdf.missing_sections" for issue in issues)

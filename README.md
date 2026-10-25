@@ -63,6 +63,22 @@ The app is now at http://localhost:3000.
 4. Add an AI key in the AI Control Center to generate research reports.
 5. Save the project / model, reopen it from the Library, and export XLSX / PDF.
 
+### Generate the concise note
+
+The concise report is the AI Research Note on `/company/{ticker}`, or via API:
+
+```bash
+curl -X POST http://localhost:8000/api/ai/research \
+  -H "Content-Type: application/json" \
+  -d '{"ticker":"DEMO"}'
+```
+
+The response contains `report` (validated narrative sections) and `payload`
+(the deterministic model artifact). Export it with `POST /api/export/pdf`,
+passing the returned `payload` as `research_payload` and the validated `report`
+as `report`. The large institutional report remains available at
+`POST /api/research/generate`.
+
 > Yahoo Finance rate limits aggressively. If you hit a throttle the UI shows a clear
 > 503 with a retry hint; previously fetched tickers are served from the local cache
 > and explicitly flagged as possibly stale.
@@ -165,5 +181,29 @@ edit/delete by the API.
   Carlo are on the roadmap.
 - Research reports require at least one configured AI model. Streaming is supported
   by the API; the current UI uses the non-streaming endpoint.
+- The concise note (`/api/ai/research`) uses the same deterministic calculation core
+  as the institutional report, but renders a separate compact PDF. The two report
+  pathways and templates remain independent.
 - There is no authentication layer. Run locally or add auth/TLS before exposing the
-  service.
+  service. Partner API admin endpoints additionally require `PARTNER_ADMIN_TOKEN`.
+
+## Partner artifact API
+
+The backend can expose selected immutable report artifacts to partners. Admin
+endpoints require the `PARTNER_ADMIN_TOKEN` header; partner endpoints require the
+server-issued `X-API-Key`.
+
+- `POST /api/partners` creates a partner and returns its key once.
+- `PATCH /api/partners/{id}` enables/disables a partner.
+- `POST /api/partners/{id}/artifacts` grants access to a `ReportRun` and assigns a
+  partner-facing `external_id`.
+- Partners can list, inspect, version and download artifacts:
+  - `GET /api/partner/artifacts`
+  - `GET /api/partner/artifacts/{external_id}`
+  - `GET /api/partner/artifacts/{external_id}/pdf`
+  - `GET /api/partner/artifacts/{external_id}/versions`
+- Partners can update only their own artifact metadata:
+  - `PATCH /api/partner/artifacts/{external_id}`
+
+The underlying report payload and PDF are immutable. Partner metadata is stored in
+`partner_artifacts`; access grants and key creation are audit-logged.

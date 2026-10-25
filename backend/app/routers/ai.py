@@ -14,20 +14,16 @@ from ..exceptions import AIError, AITimeoutError, DataError, TickerNotFoundError
 from ..services.ai_gateway import ModelConfig
 from ..services.ai_state import get_gateway, seed_from_env
 from ..services.data_access import load_normalized
+from ..services.note_engine import build_note_payload_from_data
+from ..services.note_narrative import (
+    build_facts,
+    build_research_messages,
+    figure_correction_message,
+    validate_report_figures,
+)
 from ..services.yfinance_adapter import RateLimitedError
 
 router = APIRouter(prefix="/api/ai", tags=["ai"])
-
-REPORT_SECTIONS = [
-    "executive_summary",
-    "business_overview",
-    "financial_performance",
-    "strengths",
-    "risks",
-    "catalysts",
-    "valuation_view",
-    "conclusion",
-]
 
 
 class ProviderIn(BaseModel):
@@ -55,6 +51,14 @@ class ResearchIn(BaseModel):
     model: str | None = None
     temperature: float = 0.3
     max_tokens: int = 4096
+    years: int | None = Field(default=None, ge=1, le=10)
+    horizon: str | None = Field(default=None, max_length=20)
+    terminal_mode: str | None = Field(default=None, pattern="^(growth|multiple)$")
+    terminal_growth: float | None = Field(default=None, ge=-0.05, le=0.10)
+    exit_multiple: float | None = Field(default=None, ge=0.5, le=100.0)
+    wacc: float | None = Field(default=None, ge=0.0001, le=1.0)
+    wacc_inputs: dict[str, Any] | None = None
+    assumptions: dict[str, Any] | None = None
 
 
 def _to_config(row: AIProviderConfig) -> ModelConfig:
@@ -104,6 +108,19 @@ def _ai_http(error: Exception) -> HTTPException:
     return HTTPException(status_code=500, detail=f"AI generation failed: {error}")
 
 
+def _note_config(body: ResearchIn) -> dict[str, Any]:
+    return {
+        "years": body.years or 3,
+        "horizon": body.horizon or "12M",
+        "terminal_mode": body.terminal_mode or "growth",
+        "terminal_growth": body.terminal_growth if body.terminal_growth is not None else 0.025,
+        "exit_multiple": body.exit_multiple if body.exit_multiple is not None else 10.0,
+        "wacc": body.wacc,
+        "wacc_inputs": body.wacc_inputs or {},
+        "assumptions": body.assumptions or {},
+    }
+
+
 def _data_http(error: Exception) -> HTTPException:
     if isinstance(error, RateLimitedError):
         return HTTPException(status_code=503, detail=str(error))
@@ -130,45 +147,6 @@ def _parse_json(content: str) -> dict[str, Any]:
     if not isinstance(parsed, dict):
         return {"executive_summary": content, "raw": content}
     return parsed
-
-
-def _research_messages(ticker: str, normalized: dict[str, Any], metrics: dict[str, Any]) -> list[dict[str, str]]:
-    info = normalized.get("info", {}) or {}
-    periods = (metrics.get("periods") or [])[:5]
-    verified = {
-        "ticker": ticker.upper(),
-        "company": info.get("longName") or info.get("shortName"),
-        "sector": info.get("sector"),
-        "industry": info.get("industry"),
-        "country": info.get("country"),
-        "currency": info.get("currency"),
-        "market_cap": info.get("marketCap"),
-        "price_summary": normalized.get("price_summary"),
-        "metrics_most_recent_first": periods,
-        "data_quality": normalized.get("data_quality"),
-        "demo_data": bool(normalized.get("demo")),
-    }
-    prompt = (
-        "You are a rigorous institutional equity research analyst. Write a concise, balanced "
-        f"research note for {ticker.upper()} using ONLY the verified data below.\n\n"
-        f"VERIFIED DATA:\n{json.dumps(verified, indent=2, default=str)}\n\n"
-        "Rules:\n"
-        "- Never invent a number, period, guidance figure, target price or event.\n"
-        "- Every quantitative claim must trace to the verified data.\n"
-        "- If data is missing, say so explicitly.\n"
-        "- The DEMO fixture is synthetic; label it clearly as demo analysis.\n"
-        "- Be analytical, note both bull and bear points, and avoid promotional language.\n\n"
-        "Return valid JSON only with these keys: "
-        + ", ".join(REPORT_SECTIONS)
-        + ". Use strings for prose and arrays of strings for strengths, risks and catalysts."
-    )
-    return [
-        {
-            "role": "system",
-            "content": "You are a rigorous equity research analyst. Return valid JSON only, with no markdown fences.",
-        },
-        {"role": "user", "content": prompt},
-    ]
 
 
 def _create_job(db: Session, ticker: str) -> int:
@@ -200,14 +178,64 @@ def _finish_job(
         db.close()
 
 
-def _load_research_inputs(ticker: str) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, str]]]:
+def _load_research_inputs(
+    ticker: str,
+    note_config: dict[str, Any] | None = None,
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], list[dict[str, str]], dict[str, Any]]:
     try:
         normalized, metrics = load_normalized(ticker)
     except DataError as error:
         raise _data_http(error)
     except Exception as error:
         raise HTTPException(status_code=500, detail=f"Data fetch failed: {error}")
-    return normalized, metrics, _research_messages(ticker, normalized, metrics)
+    try:
+        note_payload = build_note_payload_from_data(ticker, normalized, metrics, note_config)
+    except DataError as error:
+        raise _data_http(error)
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=f"Note model failed: {error}")
+    return (
+        normalized,
+        metrics,
+        note_payload,
+        build_research_messages(ticker, normalized, metrics, note_payload),
+        build_facts(ticker, normalized, metrics, note_payload),
+    )
+
+
+def _finalize_report(
+    facts: dict[str, Any],
+    messages: list[dict[str, str]],
+    content: str,
+    complete,  # callable(list[dict[str, str]]) -> str for the retry pass
+    note_payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Parse the AI note, then verify every figure against engine facts.
+
+    One constrained retry repairs unverified figures; anything still
+    unverified is attached as `figure_warnings` so the UI and PDF can
+    surface it instead of silently trusting invented numbers.
+    """
+    report = _parse_json(content)
+    warnings = validate_report_figures(report, facts)
+    if warnings:
+        report = _parse_json(complete(messages + [figure_correction_message(warnings)]))
+        warnings = validate_report_figures(report, facts)
+    report.setdefault(
+        "disclaimer",
+        "AI-assisted analysis. All financial figures come from the deterministic data engine; verify before investment use.",
+    )
+    if not report.get("sources_limitations") and note_payload:
+        limitations: list[str] = []
+        for gap in (note_payload.get("gaps") or [])[:6]:
+            limitations.append(f"{gap.get('area')}: {gap.get('detail')}")
+        forecast_status = "Forecast periods are deterministic model estimates (E), not guidance." if (note_payload.get("forecast") or {}).get("periods") else "No deterministic forecast is available for this company."
+        limitations.append(forecast_status)
+        limitations.append("All figures are provider-reported, engine-calculated or clearly labelled model estimates; no external source independently verifies them.")
+        report["sources_limitations"] = limitations
+    if warnings:
+        report["figure_warnings"] = warnings
+    return report
 
 
 @router.get("/providers")
@@ -352,18 +380,21 @@ def research(body: ResearchIn, db: Session = Depends(get_session)):
     name, config = _model_or_404(body.model, db)
     job_id = _create_job(db, ticker)
     try:
-        _normalized, _metrics, messages = _load_research_inputs(ticker)
-        content = get_gateway().generate(
-            config,
-            messages,
-            temperature=body.temperature,
-            max_tokens=body.max_tokens,
-            json_mode=True,
-        )
-        report = _parse_json(content)
-        report.setdefault("disclaimer", "AI-assisted analysis. All financial figures come from the deterministic data engine; verify before investment use.")
-        _finish_job(job_id, "complete", result={"report": report, "model": name})
-        return {"ticker": ticker.upper(), "model": name, "report": report, "job_id": job_id}
+        note_cfg = _note_config(body)
+        _normalized, _metrics, note_payload, messages, facts = _load_research_inputs(ticker, note_cfg)
+
+        def complete(msgs: list[dict[str, str]]) -> str:
+            return get_gateway().generate(
+                config,
+                msgs,
+                temperature=body.temperature,
+                max_tokens=body.max_tokens,
+                json_mode=True,
+            )
+
+        report = _finalize_report(facts, messages, complete(messages), complete, note_payload)
+        _finish_job(job_id, "complete", result={"report": report, "model": name, "payload": note_payload})
+        return {"ticker": ticker.upper(), "model": name, "report": report, "payload": note_payload, "job_id": job_id}
     except HTTPException as error:
         _finish_job(job_id, "failed", error=str(error.detail), progress=100)
         raise
@@ -378,7 +409,7 @@ def research(body: ResearchIn, db: Session = Depends(get_session)):
 def research_stream(body: ResearchIn, db: Session = Depends(get_session)):
     ticker = body.ticker.strip()
     name, config = _model_or_404(body.model, db)
-    _normalized, _metrics, messages = _load_research_inputs(ticker)
+    _normalized, _metrics, note_payload, messages, facts = _load_research_inputs(ticker, _note_config(body))
     job_id = _create_job(db, ticker)
 
     def event(event_name: str, payload: dict[str, Any]) -> str:
@@ -396,11 +427,21 @@ def research_stream(body: ResearchIn, db: Session = Depends(get_session)):
             ):
                 chunks.append(chunk)
                 yield event("token", {"text": chunk})
+            yield event("status", {"stage": "verifying_figures", "model": name, "job_id": job_id})
             content = "".join(chunks)
-            report = _parse_json(content)
-            report.setdefault("disclaimer", "AI-assisted analysis. All financial figures come from the deterministic data engine; verify before investment use.")
-            _finish_job(job_id, "complete", result={"report": report, "model": name})
-            yield event("done", {"ticker": ticker.upper(), "model": name, "report": report, "job_id": job_id})
+
+            def complete(msgs: list[dict[str, str]]) -> str:
+                return get_gateway().generate(
+                    config,
+                    msgs,
+                    temperature=body.temperature,
+                    max_tokens=body.max_tokens,
+                    json_mode=True,
+                )
+
+            report = _finalize_report(facts, messages, content, complete, note_payload)
+            _finish_job(job_id, "complete", result={"report": report, "model": name, "payload": note_payload})
+            yield event("done", {"ticker": ticker.upper(), "model": name, "report": report, "payload": note_payload, "job_id": job_id})
         except Exception as error:
             _finish_job(job_id, "failed", error=str(error), progress=100)
             yield event("error", {"detail": str(error)})

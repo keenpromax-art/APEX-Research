@@ -71,8 +71,15 @@ CASHFLOW_MAP = {
     "Repayment Of Debt": "debt_repaid",
 }
 
+PROVIDER_LABEL = "Yahoo Finance via yfinance"
 
-def _df_to_periods(df: pd.DataFrame | None, mapping: dict[str, str]) -> list[dict[str, Any]]:
+
+def _df_to_periods(
+    df: pd.DataFrame | None,
+    mapping: dict[str, str],
+    periodicity: str,
+    retrieved_at: str | None = None,
+) -> list[dict[str, Any]]:
     if df is None or df.empty:
         return []
     periods = []
@@ -80,11 +87,12 @@ def _df_to_periods(df: pd.DataFrame | None, mapping: dict[str, str]) -> list[dic
     for col in df.columns:
         period_label = col.strftime("%Y-%m-%d") if hasattr(col, "strftime") else str(col)
         items: dict[str, Any] = {}
+        provenance: dict[str, str] = {}
         for idx, row in df.iterrows():
             label = str(idx)
             key = mapping.get(label)
             if key is None:
-                # fuzzy match
+                # Conservative fuzzy match: only map when one label contains the other.
                 for k, v in mapping.items():
                     if k.lower() in label.lower() or label.lower() in k.lower():
                         key = v
@@ -99,25 +107,51 @@ def _df_to_periods(df: pd.DataFrame | None, mapping: dict[str, str]) -> list[dic
                     items[key] = float(val)
                 except (TypeError, ValueError):
                     items[key] = str(val)
-        periods.append({"period_end": period_label, "items": items})
+            if key not in provenance or label not in provenance[key]:
+                provenance[key] = label if key not in provenance else f"{provenance[key]}; {label}"
+        periods.append(
+            {
+                "period_end": period_label,
+                "periodicity": periodicity,
+                "items": items,
+                "provenance": provenance,
+                "source": {
+                    "provider": PROVIDER_LABEL,
+                    "retrieved_at": retrieved_at,
+                    "value_type": "reported",
+                },
+            }
+        )
+    # Normalize ordering once at the adapter boundary: newest period first.
+    periods.sort(key=lambda period: str(period.get("period_end") or ""), reverse=True)
     return periods
 
 
 def normalize_statements(raw) -> dict[str, Any]:
     price_history = _price_history(raw.price_history)
+    retrieved_at = raw.retrieved_at
     return {
         "ticker": raw.ticker,
-        "retrieved_at": raw.retrieved_at,
+        "retrieved_at": retrieved_at,
         "info": raw.info or {},
+        "conventions": {
+            "currency": (raw.info or {}).get("currency"),
+            "statement_units": "reported currency units (not thousands or millions)",
+            "period_order": "newest to oldest",
+            "annual_periods": "fiscal years ending on each period_end",
+            "quarterly_periods": "fiscal quarters ending on each period_end",
+            "missing_values": None,
+            "capex_sign": "provider-reported sign; derived FCF uses |capex|",
+        },
         "annual": {
-            "income_statement": _df_to_periods(raw.income_statement, INCOME_MAP),
-            "balance_sheet": _df_to_periods(raw.balance_sheet, BALANCE_MAP),
-            "cash_flow": _df_to_periods(raw.cash_flow, CASHFLOW_MAP),
+            "income_statement": _df_to_periods(raw.income_statement, INCOME_MAP, "annual", retrieved_at),
+            "balance_sheet": _df_to_periods(raw.balance_sheet, BALANCE_MAP, "annual", retrieved_at),
+            "cash_flow": _df_to_periods(raw.cash_flow, CASHFLOW_MAP, "annual", retrieved_at),
         },
         "quarterly": {
-            "income_statement": _df_to_periods(raw.quarterly_income_statement, INCOME_MAP),
-            "balance_sheet": _df_to_periods(raw.quarterly_balance_sheet, BALANCE_MAP),
-            "cash_flow": _df_to_periods(raw.quarterly_cash_flow, CASHFLOW_MAP),
+            "income_statement": _df_to_periods(raw.quarterly_income_statement, INCOME_MAP, "quarterly", retrieved_at),
+            "balance_sheet": _df_to_periods(raw.quarterly_balance_sheet, BALANCE_MAP, "quarterly", retrieved_at),
+            "cash_flow": _df_to_periods(raw.quarterly_cash_flow, CASHFLOW_MAP, "quarterly", retrieved_at),
         },
         "price_history": price_history,
         "price_summary": _price_summary(price_history),

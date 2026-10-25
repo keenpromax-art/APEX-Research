@@ -11,6 +11,7 @@ from ..services.yfinance_adapter import RateLimitedError
 from ..services.calc_engine import build_three_statement, last_historical
 from ..services.valuation import dcf, reverse_dcf, sensitivity_table, wacc
 from ..services.advanced import bond_price, black_scholes, lbo
+from ..services.ticker_search import search_tickers
 
 router = APIRouter(prefix="/api", tags=["core"])
 
@@ -126,6 +127,11 @@ class BondIn(BaseModel):
     ytm: float = 0.05
     years: float = 10.0
     freq: int = 2
+
+
+@router.get("/ticker/search")
+def ticker_search(q: str = Query(default="", max_length=120), limit: int = Query(default=8, ge=1, le=25)):
+    return {"query": q, "results": search_tickers(q, limit)}
 
 
 @router.get("/company/{ticker}")

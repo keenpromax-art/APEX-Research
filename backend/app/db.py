@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import JSON, DateTime, Integer, LargeBinary, String, Text, create_engine
+from sqlalchemy import JSON, DateTime, Integer, LargeBinary, String, Text, UniqueConstraint, create_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
 from .config import get_settings
@@ -102,6 +102,43 @@ class ReportRun(Base):
     pdf: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
     pdf_size: Mapped[int | None] = mapped_column(Integer, nullable=True)
     page_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class Partner(Base):
+    """A partner allowed to consume selected immutable report artifacts."""
+
+    __tablename__ = "partners"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(200))
+    contact_email: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    enabled: Mapped[bool] = mapped_column(Integer, default=1)
+    api_key_hash: Mapped[str] = mapped_column(String(128))
+    api_key_prefix: Mapped[str] = mapped_column(String(16))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class PartnerArtifact(Base):
+    """Partner-visible metadata over an immutable ReportRun artifact.
+
+    Partners may update title/notes/external_id/status for their own copy, but
+    the underlying payload and PDF are never changed by this endpoint.
+    """
+
+    __tablename__ = "partner_artifacts"
+    __table_args__ = (
+        UniqueConstraint("partner_id", "report_run_id", name="uq_partner_report"),
+        UniqueConstraint("partner_id", "external_id", name="uq_partner_external_id"),
+    )
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    partner_id: Mapped[int] = mapped_column(Integer)
+    report_run_id: Mapped[int] = mapped_column(Integer)
+    external_id: Mapped[str] = mapped_column(String(120))
+    title: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(40), default="published")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 

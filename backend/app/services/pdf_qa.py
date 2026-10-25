@@ -21,6 +21,7 @@ from typing import Any
 
 from pypdf import PdfReader
 
+from .narrative_qa import duplicate_sentence_issues
 from .pdf_report import _money, _pct, _price, _signed_pct
 
 SECTION_MARKERS = (
@@ -154,18 +155,19 @@ def _financial_checks(payload: dict[str, Any], full_text: str, issues: list[dict
                                  f"{name.capitalize()} scenario price {expected} is not present in the rendered PDF."))
 
 
-def _visual_checks(pdf_bytes: bytes, issues: list[dict[str, str]]) -> None:
+def _visual_checks(pdf_bytes: bytes, issues: list[dict[str, str]]) -> bool:
+    """Run pymupdf geometry checks. Returns False when the renderer is unavailable."""
     try:
         import pymupdf  # type: ignore
     except Exception:
-        return
+        return False
     try:
         doc = pymupdf.open(stream=pdf_bytes, filetype="pdf")
     except Exception:
-        return
+        return False
     try:
         if doc.page_count == 0:
-            return
+            return False
         total_dark = 0
         total_px = 0
         for pno, page in enumerate(doc, start=1):
@@ -240,8 +242,9 @@ def _visual_checks(pdf_bytes: bytes, issues: list[dict[str, str]]) -> None:
             issues.append(_issue("error", "blank_render",
                                  f"Overall ink coverage is {total_dark / total_px:.3%}; "
                                  "the render appears visually blank."))
+        return True
     except Exception:
-        return
+        return False
     finally:
         doc.close()
 
@@ -317,13 +320,119 @@ def run_pdf_qa(pdf_bytes: bytes, payload: dict[str, Any], config: dict[str, Any]
             issues.append(_issue("warning", "sources_missing",
                                  f"First source reference '{first}' not found in the rendered PDF."))
 
+    quality = payload.get("data_quality") or {}
+    if quality.get("stale") and "cached" not in full_text.lower():
+        issues.append(_issue("warning", "stale_data_not_disclosed",
+                             "Input data is flagged stale, but the rendered report does not disclose cached data."))
+    if quality.get("demo") and "demo" not in full_text.lower():
+        issues.append(_issue("warning", "demo_data_not_disclosed",
+                             "Input is a demo fixture, but the rendered report does not disclose it."))
+
     if len(pdf_bytes) < 20_000:
         issues.append(_issue("warning", "small_file", f"PDF is only {len(pdf_bytes):,} bytes; render may be incomplete."))
 
-    _visual_checks(pdf_bytes, issues)
+    visual_ran = _visual_checks(pdf_bytes, issues)
+    if not visual_ran:
+        issues.append(_issue("info", "visual_checks_unavailable", "pymupdf is unavailable; geometry checks did not run."))
 
     if not issues:
         issues.append(_issue("info", "passed",
                              f"Rendered PDF checks passed: {len(page_texts)} pages, financial reconciliation "
                              "and geometry checks clean."))
+    return issues
+
+
+NOTE_SECTION_MARKERS = (
+    "Executive Summary",
+    "Financial Performance",
+    "Risks",
+    "Sources & Limitations",
+)
+
+FORBIDDEN_PATTERNS = (
+    "TODO",
+    "TBD",
+    "lorem ipsum",
+    "{ticker}",
+    "{{ticker}}",
+    "undefined",
+    "NaN",
+    "Infinity",
+)
+
+MIN_NOTE_SENTENCE_WORDS = 3
+
+
+def run_note_pdf_qa(pdf_bytes: bytes, body: dict[str, Any]) -> list[dict[str, str]]:
+    """Release gate for the concise research note (POST /api/export/pdf)."""
+    issues: list[dict[str, str]] = []
+    try:
+        reader = PdfReader(io.BytesIO(pdf_bytes))
+    except Exception as error:
+        return [_issue("error", "unreadable", f"PDF could not be parsed: {error}")]
+
+    page_texts: list[str] = []
+    for page in reader.pages:
+        try:
+            raw = page.extract_text() or ""
+        except Exception:
+            raw = ""
+        page_texts.append(_norm(raw))
+    if not page_texts:
+        return [_issue("error", "empty", "PDF contains no pages.")]
+
+    full_text = " ".join(page_texts)
+    if len(page_texts) < 1:
+        issues.append(_issue("error", "empty", "PDF contains no pages."))
+    if any(len(text) < 40 for text in page_texts):
+        issues.append(_issue("error", "blank_pages", "One or more pages contain almost no extractable text."))
+
+    required = list(NOTE_SECTION_MARKERS)
+    forecast = body.get("forecast") if isinstance(body.get("forecast"), dict) else {}
+    periods = forecast.get("periods") or []
+    dcf = body.get("dcf") if isinstance(body.get("dcf"), dict) else {}
+    if periods:
+        required += ["Model Assumptions", "Forecast Summary"]
+    if dcf and not dcf.get("error"):
+        required += ["Valuation Detail"]
+    missing = [name for name in required if name.lower() not in full_text.lower()]
+    if missing:
+        issues.append(_issue("error", "missing_sections", f"Required concise-note sections not found: {missing}."))
+
+    normalized = full_text.lower()
+    for token in FORBIDDEN_PATTERNS:
+        if token.lower() in {"nan", "infinity", "undefined"}:
+            if re.search(rf"\b{re.escape(token.lower())}\b", normalized):
+                issues.append(_issue("error", "placeholder_text", f"Unresolved placeholder or invalid value '{token}' found in rendered text."))
+        elif token.lower() in normalized:
+            issues.append(_issue("error", "placeholder_text", f"Unresolved placeholder or invalid value '{token}' found in rendered text."))
+
+    # A concise note must not be a duplicate-text machine.
+    repeats = duplicate_sentence_issues(full_text)
+    if repeats:
+        issues.append(_issue("warning", "repeated_sentences", f"Repeated narrative sentences detected: {repeats[:5]}"))
+
+    # Recommendation and valuation must agree in rendered text and structured inputs.
+    rating = body.get("rating") if isinstance(body.get("rating"), dict) else {}
+    dcf = body.get("dcf") if isinstance(body.get("dcf"), dict) else {}
+    target = rating.get("target_price") if rating.get("target_price") is not None else dcf.get("value_per_share")
+    if target is not None and not _money_in_text(float(target), _match_text(full_text)):
+        issues.append(_issue("error", "target_missing", f"Model target {target} is absent from the rendered concise note."))
+    code = str(rating.get("code") or "")
+    if code in ("BUY", "HOLD", "SELL") and code not in full_text.upper():
+        issues.append(_issue("error", "rating_missing", f"Rating {code} is absent from the rendered concise note."))
+
+    forecast = body.get("forecast") if isinstance(body.get("forecast"), dict) else {}
+    periods = forecast.get("periods") or []
+    if periods:
+        first_revenue = (periods[0] or {}).get("revenue")
+        if first_revenue is not None and not _money_in_text(float(first_revenue), _match_text(full_text)):
+            issues.append(_issue("error", "forecast_revenue_missing", "First forecast revenue is absent from the rendered concise note."))
+
+    visual_ran = _visual_checks(pdf_bytes, issues)
+    if not visual_ran:
+        issues.append(_issue("info", "visual_checks_unavailable", "pymupdf is unavailable; geometry checks did not run."))
+
+    if not issues:
+        issues.append(_issue("info", "passed", f"Concise-note render checks passed: {len(page_texts)} pages, financial and layout checks clean."))
     return issues

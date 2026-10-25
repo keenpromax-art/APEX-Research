@@ -100,9 +100,10 @@ than crashing the request. AI never mutates the deterministic metric payload.
 ## Persistence
 
 SQLAlchemy models (`projects`, `saved_models`, `ai_provider_configs`,
-`research_jobs`, `audit_log`). Projects and saved models expose full CRUD; saved
-models store assumptions and results separately so a snapshot never silently
-changes when new market data arrives. Writes append to the audit log. SQLite is the
+`research_jobs`, `report_runs`, `partners`, `partner_artifacts`, `audit_log`).
+Projects and saved models expose full CRUD; report runs are immutable versions,
+and partner artifacts are partner-facing metadata over selected immutable reports.
+Writes append to the audit log. SQLite is the
 zero-setup default; set `DATABASE_URL=postgresql+psycopg://...` and install
 `psycopg[binary]` for Postgres. Migrations via Alembic are recommended before
 production.

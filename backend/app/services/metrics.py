@@ -29,8 +29,8 @@ def _align(income_periods: list[dict], other_periods: list[dict]) -> list[dict]:
     """Align companion statements to the income statement by period end.
 
     yfinance usually returns the same columns, but coverage can differ (e.g. a
-    cash-flow column missing for the oldest period). Falling back to positional
-    indexing in that case silently pairs the wrong years, so only do it when the
+    cash-flow column missing for the oldest period). Positional pairing can
+    silently combine different fiscal years, so it is used only when the
     companion statement has no period labels at all.
     """
     by_period = {_period_end(period): period for period in other_periods if _period_end(period)}
@@ -66,6 +66,11 @@ def _previous_period(periods: list[dict], index: int) -> dict | None:
 
 
 def compute_metrics(normalized: dict[str, Any]) -> dict[str, Any]:
+    """Compute period-aligned ratios from normalized statements.
+
+    Every derived value records its calculation basis in ``calculation_basis``.
+    Missing inputs stay ``None``; no ratio is silently completed with zero.
+    """
     annual = normalized.get("annual", {}) or {}
     income_periods = annual.get("income_statement", []) or []
     balance_periods = annual.get("balance_sheet", []) or []
@@ -78,6 +83,7 @@ def compute_metrics(normalized: dict[str, Any]) -> dict[str, Any]:
     for index, income in enumerate(income_periods):
         balance = balance_aligned[index]
         cashflow = cashflow_aligned[index]
+        basis: dict[str, str] = {}
 
         revenue = _get(income, "revenue")
         gross_profit = _get(income, "gross_profit")
@@ -88,6 +94,12 @@ def compute_metrics(normalized: dict[str, Any]) -> dict[str, Any]:
         ebitda = _get(income, "ebitda")
         if ebitda is None and ebit is not None and da is not None:
             ebitda = ebit + da
+            basis["ebitda"] = "calculated: EBIT + D&A"
+        elif ebitda is not None:
+            basis["ebitda"] = "reported"
+        if ebit is None and operating_income is not None:
+            ebit = operating_income
+            basis["ebit"] = "operating income used as EBIT"
         net_income = _get(income, "net_income")
         tax = _get(income, "tax_expense")
         interest = _get(income, "interest_expense")
@@ -109,20 +121,44 @@ def compute_metrics(normalized: dict[str, Any]) -> dict[str, Any]:
         free_cash_flow = _get(cashflow, "free_cash_flow")
         if free_cash_flow is None and operating_cash_flow is not None and capex is not None:
             free_cash_flow = operating_cash_flow - abs(capex)
+            basis["fcf"] = "calculated: operating cash flow − |capex|"
+        elif free_cash_flow is not None:
+            basis["fcf"] = "reported"
 
         gross_margin = _safe_div(gross_profit, revenue)
         if gross_margin is None and revenue is not None and cogs is not None:
             gross_margin = _safe_div(revenue - cogs, revenue)
+            if gross_margin is not None:
+                basis["gross_margin"] = "calculated: (revenue − cost of revenue) ÷ revenue"
+        elif gross_margin is not None:
+            basis["gross_margin"] = "reported gross profit ÷ revenue"
 
         net_debt = total_debt - cash if total_debt is not None and cash is not None else None
-        invested_capital = total_debt + equity - (cash or 0) if total_debt is not None and equity is not None else None
+        if net_debt is not None:
+            basis["net_debt"] = "calculated: total debt − cash and equivalents"
+
         tax_rate = _safe_div(tax, pretax) if tax is not None and pretax not in (None, 0) else None
-        roic_tax = tax_rate if tax_rate is not None else 0.25
+        roic_tax = tax_rate
+        roic_tax_basis = "reported effective tax rate"
+        if roic_tax is None:
+            roic_tax = 0.25
+            roic_tax_basis = "assumption: 25% when the effective rate is unavailable"
+        if total_debt is not None and equity is not None and cash is not None:
+            invested_capital = total_debt + equity - cash
+            basis["invested_capital"] = "calculated: total debt + equity − cash"
+        else:
+            invested_capital = None
         nopat = ebit * (1 - roic_tax) if ebit is not None else None
 
         cogs_for_days = cogs
         if cogs_for_days is None and revenue is not None and gross_profit is not None:
             cogs_for_days = revenue - gross_profit
+
+        quick_ratio = None
+        if current_assets is not None and current_liabilities is not None and inventory is not None:
+            quick_ratio = _safe_div(current_assets - inventory, current_liabilities)
+            if quick_ratio is not None:
+                basis["quick_ratio"] = "calculated: (current assets − inventory) ÷ current liabilities"
 
         metrics_by_period.append(
             {
@@ -139,12 +175,11 @@ def compute_metrics(normalized: dict[str, Any]) -> dict[str, Any]:
                 "ebitda": ebitda,
                 "eps_diluted": _get(income, "diluted_eps"),
                 "tax_rate": tax_rate,
+                "roic_tax_rate": roic_tax,
+                "roic_tax_basis": roic_tax_basis,
                 "interest_coverage": _safe_div(ebit, interest) if interest not in (None, 0) else None,
                 "current_ratio": _safe_div(current_assets, current_liabilities),
-                "quick_ratio": _safe_div(
-                    (current_assets - (inventory or 0)) if current_assets is not None else None,
-                    current_liabilities,
-                ),
+                "quick_ratio": quick_ratio,
                 "cash": cash,
                 "total_debt": total_debt,
                 "net_debt": net_debt,
@@ -155,6 +190,7 @@ def compute_metrics(normalized: dict[str, Any]) -> dict[str, Any]:
                 "roa": _safe_div(net_income, total_assets),
                 "roe": _safe_div(net_income, equity),
                 "roic": _safe_div(nopat, invested_capital),
+                "invested_capital": invested_capital,
                 "debt_to_equity": _safe_div(total_debt, equity),
                 "net_debt_ebitda": _safe_div(net_debt, ebitda) if net_debt is not None and ebitda not in (None, 0) else None,
                 "asset_turnover": _safe_div(revenue, total_assets),
@@ -168,6 +204,7 @@ def compute_metrics(normalized: dict[str, Any]) -> dict[str, Any]:
                 "days_sales_outstanding": _safe_div(receivables * 365, revenue) if receivables is not None and revenue else None,
                 "days_inventory": _safe_div(inventory * 365, cogs_for_days) if inventory is not None else None,
                 "days_payable": _safe_div(payables * 365, cogs_for_days) if payables is not None else None,
+                "calculation_basis": basis,
             }
         )
 
@@ -177,5 +214,6 @@ def compute_metrics(normalized: dict[str, Any]) -> dict[str, Any]:
         current_revenue = metric.get("revenue")
         if previous_revenue not in (None, 0) and current_revenue is not None:
             metric["revenue_growth"] = (current_revenue - previous_revenue) / previous_revenue
+            metric["calculation_basis"]["revenue_growth"] = "calculated: current revenue ÷ prior annual revenue − 1"
 
     return {"periods": metrics_by_period}

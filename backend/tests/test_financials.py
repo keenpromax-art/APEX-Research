@@ -52,6 +52,43 @@ def test_metrics_missing_data_is_none_not_zero():
     assert m["periods"][0]["gross_margin"] is None
 
 
+def test_metrics_record_calculation_basis():
+    norm = _norm()
+    norm["annual"]["income_statement"][0]["items"].pop("ebitda", None)
+    norm["annual"]["cash_flow"][0]["items"].pop("free_cash_flow", None)
+    m = compute_metrics(norm)
+    p = m["periods"][0]
+    assert p["ebitda"] == pytest.approx(250)
+    assert p["calculation_basis"]["ebitda"] == "calculated: EBIT + D&A"
+    assert p["calculation_basis"]["fcf"] == "calculated: operating cash flow − |capex|"
+
+
+def test_quick_ratio_requires_inventory_not_zero_fill():
+    norm = _norm()
+    norm["annual"]["balance_sheet"][0]["items"]["inventory"] = None
+    m = compute_metrics(norm)
+    assert m["periods"][0]["quick_ratio"] is None
+
+
+def test_base_year_records_documented_defaults_and_operating_nwc():
+    norm = _norm()
+    norm["annual"]["income_statement"][0]["items"].pop("gross_profit", None)
+    norm["annual"]["income_statement"][0]["items"].pop("cost_of_revenue", None)
+    norm["annual"]["balance_sheet"][0]["items"].pop("short_term_debt", None)
+    base = last_historical(norm, compute_metrics(norm))
+    assert base["gross_margin"] == 0.4
+    assert base["assumption_provenance"]["gross_margin"] == "engine default: 40% gross margin"
+    # Operating NWC excludes cash from current assets; short-term debt is not available here.
+    assert base["nwc"] == pytest.approx(300.0)
+    assert any(gap["area"] == "nwc" for gap in base["model_input_gaps"])
+
+
+def test_last_historical_requires_revenue_instead_of_zero_filling():
+    norm = _norm()
+    norm["annual"]["income_statement"][0]["items"]["revenue"] = None
+    assert last_historical(norm, compute_metrics(norm)) == {}
+
+
 def test_three_statement_projects_and_links():
     norm = _norm()
     m = compute_metrics(norm)
