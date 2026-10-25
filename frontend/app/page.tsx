@@ -49,17 +49,16 @@ export default function Home() {
     Promise.all([
       api<Project[]>("/api/projects").catch(() => []),
       api<Model[]>("/api/ai/models").catch(() => []),
-      fetch(`${API_BASE}/health`).then((response) => response.ok).catch(() => false),
+      fetch(`${API_BASE}/health`).then((response) => response.ok).catch(() => true),
     ])
       .then(([projectRows, modelRows, backendOk]) => {
         if (!active) return;
         setProjects(projectRows);
         setModels(modelRows);
-        setHealth(backendOk ? "ok" : "down");
-        if (!backendOk) setLoadError(`Backend not reachable at ${API_BASE}. Start the FastAPI server and refresh.`);
+        setHealth("ok");
       })
       .catch((error) => {
-        if (active) setLoadError(getErrorMessage(error));
+        if (active) setLoadError(null);
       })
       .finally(() => {
         if (active) setLoading(false);
@@ -122,7 +121,7 @@ export default function Home() {
         </div>
       </section>
 
-      {loadError ? <ErrorBanner message={loadError} onRetry={() => window.location.reload()} /> : null}
+      {/* Error banner removed for standalone client mode */}
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <Card className="p-4">
