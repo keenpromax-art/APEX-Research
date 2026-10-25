@@ -256,11 +256,117 @@ function handleClientMock(path: string, init?: RequestInit): any {
 
   if (path.startsWith("/api/company/")) {
     const ticker = path.split("/")[3] || "DEMO";
-    return mockTickerData(ticker);
+    const normalized = mockTickerData(ticker);
+    const info = normalized.info;
+    const income = normalized.annual.income_statement;
+    return {
+      ticker: ticker.toUpperCase(),
+      name: info.longName,
+      exchange: info.exchange,
+      currency: info.currency,
+      sector: info.sector,
+      industry: info.industry,
+      country: info.country,
+      website: info.website,
+      summary: info.longBusinessSummary,
+      market_cap: info.marketCap,
+      last_data_date: income[0]?.period_end || "2025-12-31",
+      price_summary: normalized.price_summary,
+      retrieved_at: normalized.retrieved_at,
+      demo: true,
+      data_quality: normalized.data_quality,
+    };
   }
   if (path.startsWith("/api/data/")) {
     const ticker = path.split("/")[3] || "DEMO";
-    return mockTickerData(ticker);
+    const normalized = mockTickerData(ticker);
+    return {
+      normalized,
+      metrics: {
+        periods: [
+          {
+            period_end: "2025-12-31",
+            metrics: {
+              revenue: 6000_000_000,
+              revenue_growth: 0.15,
+              gross_margin: 0.6333,
+              operating_margin: 0.30,
+              net_margin: 0.2333,
+              ebitda: 2200_000_000,
+              net_income: 1400_000_000,
+              eps_diluted: 9.33,
+              roe: 0.2545,
+              roa: 0.1647,
+              roic: 0.1923,
+              fcf: 1300_000_000,
+              current_ratio: 1.94,
+              net_debt: -300_000_000,
+              book_value_per_share: 36.67,
+            },
+          },
+          {
+            period_end: "2024-12-31",
+            metrics: {
+              revenue: 5200_000_000,
+              revenue_growth: 0.155,
+              gross_margin: 0.625,
+              operating_margin: 0.288,
+              net_margin: 0.225,
+              ebitda: 1850_000_000,
+              net_income: 1170_000_000,
+              eps_diluted: 7.80,
+              roe: 0.234,
+              roa: 0.156,
+              roic: 0.181,
+              fcf: 1100_000_000,
+              current_ratio: 2.0,
+              net_debt: -200_000_000,
+              book_value_per_share: 33.33,
+            },
+          },
+          {
+            period_end: "2023-12-31",
+            metrics: {
+              revenue: 4500_000_000,
+              revenue_growth: 0.153,
+              gross_margin: 0.622,
+              operating_margin: 0.288,
+              net_margin: 0.224,
+              ebitda: 1600_000_000,
+              net_income: 1010_000_000,
+              eps_diluted: 6.73,
+              roe: 0.224,
+              roa: 0.149,
+              roic: 0.172,
+              fcf: 950_000_000,
+              current_ratio: 1.94,
+              net_debt: -100_000_000,
+              book_value_per_share: 30.00,
+            },
+          },
+          {
+            period_end: "2022-12-31",
+            metrics: {
+              revenue: 3900_000_000,
+              revenue_growth: 0.12,
+              gross_margin: 0.615,
+              operating_margin: 0.282,
+              net_margin: 0.218,
+              ebitda: 1350_000_000,
+              net_income: 850_000_000,
+              eps_diluted: 5.67,
+              roe: 0.20,
+              roa: 0.137,
+              roic: 0.155,
+              fcf: 800_000_000,
+              current_ratio: 1.95,
+              net_debt: 50_000_000,
+              book_value_per_share: 26.67,
+            },
+          },
+        ],
+      },
+    };
   }
   if (path.startsWith("/api/forecast/")) {
     const ticker = path.split("/")[3] || "DEMO";
