@@ -278,6 +278,20 @@ function handleClientMock(path: string, init?: RequestInit): any {
   if (path === "/api/ai/research") {
     return mockAiResearch(body);
   }
+  if (path.startsWith("/api/ai/jobs")) {
+    return [];
+  }
+  if (path.startsWith("/api/ai/providers")) {
+    return [
+      { provider: "openrouter", label: "OpenRouter", base_url: "https://openrouter.ai/api/v1", requires_base_url: false, model_hint: "openai/gpt-4o-mini" },
+      { provider: "groq", label: "Groq", base_url: "https://api.groq.com/openai/v1", requires_base_url: false, model_hint: "llama-3.3-70b-versatile" },
+      { provider: "nvidia", label: "NVIDIA NIM", base_url: "https://integrate.api.nvidia.com/v1", requires_base_url: false, model_hint: "meta/llama-3.1-70b-instruct" },
+      { provider: "openai_compatible", label: "OpenAI-compatible", base_url: null, requires_base_url: true, model_hint: "vendor/model-name" },
+    ];
+  }
+  if (path.startsWith("/api/research/reports")) {
+    return [];
+  }
   if (path === "/api/wacc") {
     return { wacc: 0.085, cost_of_equity: 0.10, after_tax_cost_of_debt: 0.045 };
   }
