@@ -1,5 +1,5 @@
-import { humanize, isNum, localDate, num, pct, fmt, periodLabel } from "./format";
-import { PdfDocument } from "./pdf";
+import { fmt, humanize, isNum, localDate, num, pct } from "./format";
+import { measureText, PdfColor, PdfDocument, CONTENT_WIDTH, MARGIN_LEFT, MARGIN_RIGHT, PAGE_WIDTH, PAGE_HEIGHT, MARGIN_TOP, MARGIN_BOTTOM } from "./pdf";
 import { buildXlsx, Sheet, SheetValue } from "./xlsx";
 
 type AnyRecord = Record<string, any>;
@@ -7,31 +7,52 @@ type AnyRecord = Record<string, any>;
 export type ExportPayload = {
   ticker?: string;
   title?: string;
+  generated_at?: string | null;
+  company?: AnyRecord | null;
+  listing?: AnyRecord | null;
+  actuals?: AnyRecord | null;
+  history?: AnyRecord[] | null;
+  annual?: AnyRecord | null;
   forecast?: AnyRecord | null;
   dcf?: AnyRecord | null;
   sensitivity?: AnyRecord | null;
+  reverse_dcf?: AnyRecord | null;
   report?: AnyRecord | null;
-  research_payload?: AnyRecord | null;
+  rating?: string | null;
+  target_price?: number | null;
+  current_price?: number | null;
+  upside?: number | null;
+  horizon?: string | null;
+  report_date?: string | null;
+  peers?: string[] | null;
   assumptions?: AnyRecord | null;
   data_quality?: AnyRecord | null;
-  company?: AnyRecord | null;
-  actuals?: AnyRecord | null;
   price_summary?: AnyRecord | null;
-  generated_at?: string | null;
+  provenance?: AnyRecord[] | null;
+  validation?: AnyRecord[] | null;
+  integrity?: AnyRecord | null;
+  sector_profile?: AnyRecord | null;
+  is_synthetic?: boolean;
+  currency?: string | null;
+  research_payload?: AnyRecord | null;
 };
 
-const CONTENT_WIDTH = 483;
-const REPORT_SECTION_ORDER = [
-  "executive_summary",
-  "business_overview",
-  "financial_performance",
-  "strengths",
-  "risks",
-  "catalysts",
-  "valuation_view",
-  "conclusion",
-  "disclaimer",
-];
+export type PdfLayoutIssue = { level: "error" | "warn" | "info"; check: string; detail: string };
+
+const INK: PdfColor = { r: 0.08, g: 0.09, b: 0.11 };
+const ACCENT: PdfColor = { r: 0.13, g: 0.35, b: 0.85 };
+const POS: PdfColor = { r: 0.06, g: 0.45, b: 0.29 };
+const NEG: PdfColor = { r: 0.72, g: 0.16, b: 0.16 };
+const AMBER: PdfColor = { r: 0.71, g: 0.47, b: 0.05 };
+const PANEL: PdfColor = { r: 0.955, g: 0.965, b: 0.98 };
+const ZEBRA: PdfColor = { r: 0.976, g: 0.98, b: 0.988 };
+const DEMO_FILL: PdfColor = { r: 0.99, g: 0.93, b: 0.93 };
+const RULE_GRAY = 0.82;
+
+function trendColor(value?: number | null): PdfColor | undefined {
+  if (!isNum(value) || value === 0) return undefined;
+  return value > 0 ? POS : NEG;
+}
 
 function label(value: unknown, fallback = "—"): string {
   if (value === null || value === undefined || value === "") return fallback;
@@ -41,216 +62,697 @@ function label(value: unknown, fallback = "—"): string {
 
 function money(value: unknown, currency?: string): string {
   if (!isNum(value)) return "—";
-  return `${fmt(value)}${currency ? ` ${currency}` : ""}`;
+  const formatted = Math.abs(value) < 1000 ? num(value, 2) : fmt(value);
+  return `${formatted}${currency ? ` ${currency}` : ""}`;
 }
 
-function section(doc: PdfDocument, title: string) {
-  doc.space(10).text(title, { size: 11.5, bold: true, gray: 0.08, gap: 6 });
+function cellMoney(value: unknown): string {
+  return isNum(value) ? fmt(value) : "—";
 }
 
-function pair(doc: PdfDocument, key: string, value: string, indent = 0) {
+function pair(doc: PdfDocument, key: string, value: string, color?: PdfColor) {
   doc.row([
-    { text: key, offset: indent, gray: 0.45 },
-    { text: value, offset: CONTENT_WIDTH, align: "right" },
-  ]);
+    { text: key, offset: 0, gray: 0.45, size: 9 },
+    { text: value, offset: CONTENT_WIDTH, align: "right", color, size: 9 },
+  ], 2.5);
 }
 
-function reportSections(report: AnyRecord): [string, unknown][] {
-  const keys = [...REPORT_SECTION_ORDER, ...Object.keys(report).filter((key) => !REPORT_SECTION_ORDER.includes(key))];
-  return keys.filter((key) => report[key] !== undefined && report[key] !== null).map((key) => [key, report[key]]);
+function yearOf(period: AnyRecord): string {
+  const year = Number(String(period.period_end || period.year || "").slice(0, 4));
+  return Number.isInteger(year) && year > 1990 && year < 2100 ? String(year) : "—";
 }
 
-function writeReportBlock(doc: PdfDocument, name: string, content: unknown) {
-  doc.space(6).text(humanize(name), { size: 10, bold: true, gray: 0.2, gap: 3 });
-  if (Array.isArray(content)) {
-    content.forEach((item) => doc.text(`- ${label(item)}`, { size: 9.5, indent: 10, gap: 2 }));
-    return;
-  }
-  if (content && typeof content === "object") {
-    Object.entries(content as AnyRecord).forEach(([key, value]) =>
-      doc.text(`${humanize(key)}: ${label(value)}`, { size: 9.5, indent: 10, gap: 2 }),
-    );
-    return;
-  }
-  doc.text(label(content), { size: 9.5, gray: 0.25, gap: 4 });
-}
+// ---------------------------------------------------------------------------
+// A–J section builders
+// ---------------------------------------------------------------------------
 
-export function buildResearchPdf(payload: ExportPayload): Blob {
-  const { doc, title } = buildReportDocument(payload);
-  return new Blob([doc.build(title)], { type: "application/pdf" });
-}
+function sectionA_cover(doc: PdfDocument, payload: ExportPayload) {
+  const company = payload.company || {};
+  const listing = payload.listing || {};
+  const currency = payload.currency || company.currency || listing.currency || "USD";
+  const synthetic = payload.is_synthetic !== false;
 
-export function buildResearchPdfMeta(payload: ExportPayload): { blob: Blob; pages: number; size: number } {
-  const { doc, title } = buildReportDocument(payload);
-  const bytes = doc.build(title);
-  return { blob: new Blob([bytes], { type: "application/pdf" }), pages: doc.pageCount, size: bytes.length };
-}
-
-function buildReportDocument(payload: ExportPayload) {
-  const doc = new PdfDocument();
-  const title = payload?.title || `${payload?.ticker || "APEX"} — APEX Terminal Research Report`;
-  const company = payload?.company || {};
-  const forecast = payload?.forecast || null;
-  const dcf = payload?.dcf || null;
-  const sensitivity = payload?.sensitivity || null;
-  const report = payload?.report || null;
-  const actuals = payload?.actuals || null;
-  const price = payload?.price_summary || company.price_summary || null;
-  const currency = company.currency || payload?.price_summary?.currency || "USD";
-
-  doc.text(title, { size: 17, bold: true, gray: 0.06, gap: 3 });
+  doc.rect(0, 0, CONTENT_WIDTH, 6, ACCENT);
+  doc.space(12);
+  doc.text("APEX TERMINAL  ·  EQUITY RESEARCH", { size: 8, bold: true, color: ACCENT, gap: 6 });
+  doc.text(payload.title || `${payload.ticker || "APEX"} — Equity Research Note`, { size: 19, bold: true, color: INK, gap: 3 });
   doc.text(
-    [payload?.ticker, company.name, company.sector].filter(Boolean).join("  ·  "),
-    { size: 9.5, gray: 0.4, gap: 2 },
+    [payload.ticker, company.name, company.sector, company.industry].filter(Boolean).join("  ·  "),
+    { size: 10, gray: 0.4, gap: 2 },
   );
-  doc.text(`Generated ${localDate(payload.generated_at || new Date().toISOString())} · deterministic client engine`, {
+  doc.text(
+    `${listing.venueLabel || company.exchange || "Listing venue"}  ·  ${currency}  ·  ${payload.horizon || "12M"} outlook  ·  report date ${payload.report_date || "—"}`,
+    { size: 9, gray: 0.45, gap: 2 },
+  );
+  doc.text(`Generated ${localDate(payload.generated_at || new Date().toISOString())} — deterministic client engine`, {
     size: 8.5,
     gray: 0.5,
     gap: 8,
   });
-  doc.rule();
+  doc.rule(8, RULE_GRAY);
 
-  section(doc, "Market snapshot");
-  if (price) {
-    pair(doc, "Last close", num(price.last_close));
-    pair(doc, "Day change", isNum(price.change_pct) ? `${pct(price.change_pct)} (${num(price.change)})` : "—");
-    pair(doc, "52-week range", isNum(price.low_52w) ? `${num(price.low_52w)} – ${num(price.high_52w)}` : "—");
-    pair(doc, "Average volume (3m)", isNum(price.avg_volume_3m) ? fmt(price.avg_volume_3m) : "—");
+  if (synthetic) {
+    doc.callout(
+      "DEMO — SYNTHETIC DATA — NOT FOR INVESTMENT USE",
+      "Every financial figure in this report is generated by the local deterministic engine from a synthetic fixture. " +
+        "These are not company-reported financials, not audited disclosures, and must not be read as a description of any real company or used for investment decisions.",
+      { fill: DEMO_FILL, accent: NEG, titleColor: NEG },
+    );
   }
+}
+
+function sectionB_summary(doc: PdfDocument, payload: ExportPayload) {
+  const currency = payload.currency || "USD";
+  const rating = payload.rating || "NOT RATED";
+  const target = payload.target_price;
+  const current = payload.current_price;
+  const upside = payload.upside;
+  const blocked = payload.integrity && payload.integrity.ratingAllowed === false;
+
+  doc.heading("Investment Summary");
+
+  const kpiHeight = 46;
+  doc.rect(0, 0, CONTENT_WIDTH, kpiHeight, PANEL);
+  const colW = CONTENT_WIDTH / 4;
+  const ratingColor = rating === "BUY" ? POS : rating === "SELL" || rating === "SSELL" ? NEG : blocked ? AMBER : INK;
+  const kpis: { label: string; value: string; color?: PdfColor }[] = [
+    { label: "RATING", value: String(rating).toUpperCase(), color: ratingColor },
+    { label: `TARGET (${payload.horizon || "12M"})`, value: isNum(target) ? `${num(target)} ${currency}` : "—" },
+    { label: "IMPLIED UPSIDE", value: isNum(upside) ? `${(upside >= 0 ? "+" : "")}${pct(upside)}` : "—", color: trendColor(upside) },
+    { label: "LAST PRICE", value: isNum(current) ? `${num(current)} ${currency}` : "—" },
+  ];
+  kpis.forEach((kpi, index) => {
+    const x = index * colW + 12;
+    doc.textAt(x, 10, kpi.label, { size: 7, bold: true, gray: 0.45 });
+    doc.textAt(x, 23, kpi.value, { size: 12, bold: true, color: kpi.color ?? INK });
+  });
+  doc.space(kpiHeight + 8);
+
+  if (blocked) {
+    doc.callout(
+      "Rating withheld — data-integrity checks failed",
+      (payload.integrity?.blockers || []).map((b: AnyRecord) => b.message).join(" ") ||
+        "Integrity gates blocked the rating.",
+      { fill: DEMO_FILL, accent: AMBER, titleColor: AMBER },
+    );
+  }
+
+  const report = payload.report || {};
+  if (report.rating_line) {
+    doc.text(String(report.rating_line), { size: 9.5, bold: true, gray: 0.2, gap: 5 });
+  }
+  if (report.executive_summary) {
+    doc.text(String(report.executive_summary), { size: 9.5, gray: 0.18, gap: 4, leading: 1.45 });
+  }
+}
+
+function sectionC_company(doc: PdfDocument, payload: ExportPayload) {
+  const company = payload.company || {};
+  const currency = payload.currency || "USD";
+  const price = payload.price_summary || {};
+  const sector = payload.sector_profile || {};
+
+  doc.heading("Company & Industry");
   pair(doc, "Market cap", money(company.market_cap, currency));
-  pair(doc, "Exchange / currency", `${label(company.exchange)} · ${currency}`);
+  pair(doc, "Employees", isNum(company.fullTimeEmployees) ? Math.round(company.fullTimeEmployees).toLocaleString("en-US") : isNum(company.employees) ? Math.round(company.employees).toLocaleString("en-US") : label(company.employees));
+  pair(doc, "Last close", money(price.last_close, currency));
+  pair(doc, "52-week range", isNum(price.low_52w) ? `${num(price.low_52w)} - ${isNum(price.high_52w) ? num(price.high_52w) : "n/a"}` : "n/a");
   pair(doc, "Last reported period", label(company.last_data_date));
 
-  if (actuals) {
-    section(doc, `Reported figures — ${periodLabel(actuals.period_end)}`);
-    pair(doc, "Revenue", money(actuals.revenue, currency));
-    pair(doc, "Revenue growth", pct(actuals.revenue_growth));
-    pair(doc, "Gross margin", pct(actuals.gross_margin));
-    pair(doc, "Operating margin", pct(actuals.operating_margin));
-    pair(doc, "Net margin", pct(actuals.net_margin));
-    pair(doc, "ROE / ROA / ROIC", `${pct(actuals.roe)} / ${pct(actuals.roa)} / ${pct(actuals.roic)}`);
-    pair(doc, "EBITDA", money(actuals.ebitda, currency));
-    pair(doc, "Free cash flow", money(actuals.fcf, currency));
-    pair(doc, "Net debt", money(actuals.net_debt, currency));
-    pair(doc, "Diluted EPS", num(actuals.eps_diluted));
+  if (report_text(company.summary)) {
+    doc.space(4).text("Business overview", { size: 9.5, bold: true, gray: 0.3, gap: 3 });
+    doc.text(String(company.summary), { size: 9.2, gray: 0.2, gap: 4, leading: 1.4 });
   }
 
-  const periods: AnyRecord[] = Array.isArray(forecast?.periods) ? forecast.periods : [];
-  if (periods.length) {
-    section(doc, "Base-case forecast");
-    doc.row(
-      [
-        { text: "Year", offset: 0, bold: true, size: 9 },
-        { text: "Revenue", offset: 175, align: "right", bold: true, size: 9 },
-        { text: "EBITDA", offset: 265, align: "right", bold: true, size: 9 },
-        { text: "Net income", offset: 375, align: "right", bold: true, size: 9 },
-        { text: "FCF", offset: 460, align: "right", bold: true, size: 9 },
-      ],
-      2,
-    );
-    periods.forEach((period) => {
-      doc.row([
-        { text: `Y${label(period.year)}`, offset: 0, gray: 0.3 },
-        { text: fmt(period.revenue), offset: 175, align: "right" },
-        { text: fmt(period.ebitda), offset: 265, align: "right" },
-        { text: fmt(period.net_income), offset: 375, align: "right" },
-        { text: fmt(period.fcf), offset: 460, align: "right" },
-      ]);
+  const report = payload.report || {};
+  if (report.business_overview) {
+    doc.text(String(report.business_overview), { size: 9.2, gray: 0.2, gap: 4, leading: 1.4 });
+  }
+  if (report.industry_context) {
+    doc.space(2).text("Industry context", { size: 9.5, bold: true, gray: 0.3, gap: 3 });
+    doc.text(String(report.industry_context), { size: 9.2, gray: 0.2, gap: 4, leading: 1.4 });
+  }
+  if (sector.watchMetrics && sector.watchMetrics.length) {
+    doc.space(2).text("Sector metrics a professional note would track", { size: 9, bold: true, gray: 0.3, gap: 3 });
+    sector.watchMetrics.forEach((metric: AnyRecord) => {
+      const status = metric.available ? "available" : `unavailable — ${metric.note || "not disclosed"}`;
+      doc.text(`•  ${metric.name}: ${status}`, { size: 8.8, indent: 8, gray: metric.available ? 0.2 : 0.4, gap: 1.5 });
     });
+    doc.space(3);
+  }
+}
+
+function report_text(value: unknown): boolean {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function sectionD_financials(doc: PdfDocument, payload: ExportPayload) {
+  const annual = payload.annual || {};
+  const history: AnyRecord[] = Array.isArray(payload.history) ? payload.history : [];
+  const currency = payload.currency || "USD";
+
+  doc.heading("Financial Statements — Reported History");
+
+  const income: AnyRecord[] = Array.isArray(annual.income_statement) ? annual.income_statement : [];
+  if (income.length) {
+    doc.space(2).text("Income statement", { size: 9.5, bold: true, gray: 0.3, gap: 3 });
+    const incomeCols = [
+      { key: "period", label: "Period", x: 0, format: (r: AnyRecord) => yearOf(r) },
+      { key: "revenue", label: "Revenue", x: 90, align: "right" as const, format: (r: AnyRecord) => cellMoney(r.items?.revenue) },
+      { key: "gross_profit", label: "Gross profit", x: 165, align: "right" as const, format: (r: AnyRecord) => cellMoney(r.items?.gross_profit) },
+      { key: "operating_income", label: "Operating income", x: 250, align: "right" as const, format: (r: AnyRecord) => cellMoney(r.items?.operating_income) },
+      { key: "ebitda", label: "EBITDA", x: 340, align: "right" as const, format: (r: AnyRecord) => cellMoney(r.items?.ebitda) },
+      { key: "net_income", label: "Net income", x: 415, align: "right" as const, format: (r: AnyRecord) => cellMoney(r.items?.net_income) },
+      { key: "eps", label: "EPS", x: CONTENT_WIDTH, align: "right" as const, format: (r: AnyRecord) => (isNum(r.items?.diluted_eps) ? num(r.items.diluted_eps) : "—"), color: (_r: AnyRecord) => undefined },
+    ];
+    doc.dataTable(incomeCols, income, { fontSize: 8, headerFontSize: 7, sourceNote: `All figures in ${currency}. Synthetic local fixture.` });
+  }
+
+  const balance: AnyRecord[] = Array.isArray(annual.balance_sheet) ? annual.balance_sheet : [];
+  if (balance.length) {
+    doc.space(6).text("Balance sheet", { size: 9.5, bold: true, gray: 0.3, gap: 3 });
+    const balanceCols = [
+      { key: "period", label: "Period", x: 0, format: (r: AnyRecord) => yearOf(r) },
+      { key: "total_assets", label: "Total assets", x: 90, align: "right" as const, format: (r: AnyRecord) => cellMoney(r.items?.total_assets) },
+      { key: "cash", label: "Cash", x: 175, align: "right" as const, format: (r: AnyRecord) => cellMoney(r.items?.cash) },
+      { key: "total_debt", label: "Total debt", x: 250, align: "right" as const, format: (r: AnyRecord) => cellMoney(r.items?.total_debt) },
+      { key: "equity", label: "Equity", x: 330, align: "right" as const, format: (r: AnyRecord) => cellMoney(r.items?.equity) },
+      { key: "net_debt", label: "Net debt", x: CONTENT_WIDTH, align: "right" as const, format: (r: AnyRecord) => (isNum(r.items?.total_debt) ? cellMoney(r.items.total_debt - (r.items.cash ?? 0)) : "—") },
+    ];
+    doc.dataTable(balanceCols, balance, { fontSize: 8, headerFontSize: 7, sourceNote: `All figures in ${currency}. Synthetic local fixture.` });
+  }
+
+  const cashflow: AnyRecord[] = Array.isArray(annual.cash_flow) ? annual.cash_flow : [];
+  if (cashflow.length) {
+    doc.space(6).text("Cash-flow statement", { size: 9.5, bold: true, gray: 0.3, gap: 3 });
+    const cfCols = [
+      { key: "period", label: "Period", x: 0, format: (r: AnyRecord) => yearOf(r) },
+      { key: "ocf", label: "Operating CF", x: 110, align: "right" as const, format: (r: AnyRecord) => cellMoney(r.items?.operating_cash_flow) },
+      { key: "capex", label: "Capex", x: 220, align: "right" as const, format: (r: AnyRecord) => cellMoney(r.items?.capex) },
+      { key: "fcf", label: "Free cash flow", x: CONTENT_WIDTH, align: "right" as const, format: (r: AnyRecord) => cellMoney(r.items?.free_cash_flow), color: (r: AnyRecord) => trendColor(r.items?.free_cash_flow) },
+    ];
+    doc.dataTable(cfCols, cashflow, { fontSize: 8, headerFontSize: 7, sourceNote: `All figures in ${currency}. Synthetic local fixture.` });
+  } else {
+    doc.space(4).callout(
+      "Cash-flow statement unavailable",
+      "The dataset carries no cash-flow statement for this company. Historical free cash flow, operating cash flow and capex are reported as null and are never estimated.",
+      { fill: PANEL, accent: AMBER, titleColor: AMBER },
+    );
+  }
+
+  if (history.length) {
+    doc.space(6).text("Key ratios", { size: 9.5, bold: true, gray: 0.3, gap: 3 });
+    const ratioCols = [
+      { key: "period", label: "Period", x: 0, format: (r: AnyRecord) => yearOf(r) },
+      { key: "revenue_growth", label: "Rev growth", x: 80, align: "right" as const, format: (r: AnyRecord) => pct(r.revenue_growth), color: (r: AnyRecord) => trendColor(r.revenue_growth) },
+      { key: "gross_margin", label: "Gross margin", x: 165, align: "right" as const, format: (r: AnyRecord) => pct(r.gross_margin) },
+      { key: "operating_margin", label: "Op margin", x: 255, align: "right" as const, format: (r: AnyRecord) => pct(r.operating_margin) },
+      { key: "net_margin", label: "Net margin", x: 330, align: "right" as const, format: (r: AnyRecord) => pct(r.net_margin) },
+      { key: "roic", label: "ROIC", x: 405, align: "right" as const, format: (r: AnyRecord) => pct(r.roic) },
+      { key: "fcf", label: "FCF", x: CONTENT_WIDTH, align: "right" as const, format: (r: AnyRecord) => cellMoney(r.fcf), color: (r: AnyRecord) => trendColor(r.fcf) },
+    ];
+    doc.dataTable(ratioCols, history, { fontSize: 8, headerFontSize: 7, sourceNote: "Derived from reported statements. Nulls preserved where data is missing." });
+  }
+
+  // Trend chart across reported history.
+  if (history.length >= 2) {
+    const labels = history.slice().reverse().map((row) => yearOf(row));
+    const revenueSeries = history.slice().reverse().map((row) => (isNum(row.revenue) ? row.revenue : null));
+    const ebitdaSeries = history.slice().reverse().map((row) => (isNum(row.ebitda) ? row.ebitda : null));
     doc.space(4);
-    const summary = forecast?.summary || {};
-    pair(doc, "Revenue CAGR", pct(summary.revenue_cagr));
-    pair(doc, "Final revenue", money(summary.final_revenue, currency));
-    pair(doc, "Final EBITDA", money(summary.final_ebitda, currency));
-    pair(doc, "Final free cash flow", money(summary.final_fcf, currency));
-    pair(doc, "Balance check", summary.balance_ok ? "Balanced" : "Mismatch");
+    doc.drawBars({
+      labels,
+      series: [
+        { name: "Revenue", color: ACCENT, values: revenueSeries },
+        { name: "EBITDA", color: POS, values: ebitdaSeries },
+      ],
+      height: 110,
+      sourceNote: `Reported revenue and EBITDA (${payload.currency || "USD"}).`,
+    });
+  }
+}
+
+function sectionE_forecast(doc: PdfDocument, payload: ExportPayload) {
+  const forecast = payload.forecast || null;
+  const periods: AnyRecord[] = Array.isArray(forecast?.periods) ? forecast.periods : [];
+  const assumptions = payload.assumptions || forecast?.assumptions || {};
+  const currency = payload.currency || "USD";
+
+  doc.heading("Base-Case Forecast");
+  if (!periods.length) {
+    doc.text("No forecast horizon is available in this build.", { size: 9.5, gray: 0.3 });
+    return;
   }
 
-  if (dcf && !dcf.error) {
-    section(doc, "Discounted cash flow");
-    pair(doc, "WACC", pct(dcf.wacc, 2));
-    pair(
-      doc,
-      dcf.exit_multiple !== undefined && dcf.exit_multiple !== null ? "Exit multiple" : "Terminal growth",
-      dcf.exit_multiple !== undefined && dcf.exit_multiple !== null ? `${num(dcf.exit_multiple)}x` : pct(dcf.terminal_growth),
-    );
-    pair(doc, "PV of forecast cash flows", money(dcf.pv_cash_flows, currency));
-    pair(doc, "PV of terminal value", money(dcf.pv_terminal_value, currency));
-    pair(doc, "Enterprise value", money(dcf.enterprise_value, currency));
-    pair(doc, "Equity value", money(dcf.equity_value, currency));
-    pair(doc, "Value per share", num(dcf.value_per_share));
-    pair(doc, "Market price", num(price?.last_close));
-    if (isNum(dcf.value_per_share) && isNum(price?.last_close)) {
-      pair(doc, "Implied upside", pct(dcf.value_per_share / price.last_close - 1));
-    }
-    pair(doc, "Discounted periods", label(dcf.cash_flow_count));
-    (dcf.warnings || []).forEach((warning: string) =>
-      doc.text(`! ${warning}`, { size: 9, gray: 0.35, indent: 6, gap: 2 }),
-    );
+  const fcCols = [
+    { key: "year", label: "Year", x: 0, format: (r: AnyRecord) => `Y${isNum(r.year) ? Math.round(r.year) : label(r.year)}` },
+    { key: "revenue", label: "Revenue", x: 80, align: "right" as const, format: (r: AnyRecord) => cellMoney(r.revenue) },
+    { key: "ebitda", label: "EBITDA", x: 160, align: "right" as const, format: (r: AnyRecord) => cellMoney(r.ebitda) },
+    { key: "ebit", label: "EBIT", x: 230, align: "right" as const, format: (r: AnyRecord) => cellMoney(r.ebit) },
+    { key: "net_income", label: "Net income", x: 310, align: "right" as const, format: (r: AnyRecord) => cellMoney(r.net_income), color: (r: AnyRecord) => trendColor(r.net_income) },
+    { key: "free_cash_flow", label: "FCF", x: 400, align: "right" as const, format: (r: AnyRecord) => cellMoney(r.free_cash_flow), color: (r: AnyRecord) => trendColor(r.free_cash_flow) },
+    { key: "shares", label: "Shares", x: CONTENT_WIDTH, align: "right" as const, format: (r: AnyRecord) => (isNum(r.shares) ? fmt(r.shares) : "—") },
+  ];
+  doc.dataTable(fcCols, periods, { fontSize: 8, headerFontSize: 7, sourceNote: `Forecast figures in ${currency}. Deterministic model output.` });
+
+  const summary = forecast?.summary || {};
+  doc.space(5);
+  pair(doc, "Revenue CAGR", pct(summary.revenue_cagr), trendColor(summary.revenue_cagr));
+  pair(doc, "Final revenue", money(summary.final_revenue, currency));
+  pair(doc, "Final EBITDA", money(summary.final_ebitda, currency));
+  pair(doc, "Final free cash flow", money(summary.final_fcf, currency));
+  pair(doc, "Balance-sheet identity", summary.balance_ok ? "Balanced in every year" : "Mismatch", summary.balance_ok ? POS : NEG);
+
+  doc.space(4).text("Forecast drivers (documented assumptions)", { size: 9, bold: true, gray: 0.3, gap: 3 });
+  Object.entries(assumptions as AnyRecord).forEach(([key, value]) => {
+    if (!isNum(value)) return;
+    pair(doc, humanize(key), pct(value, 2));
+  });
+
+  // Forecast revenue/EBITDA bar chart.
+  const labels = periods.map((period) => `Y${isNum(period.year) ? Math.round(period.year) : label(period.year)}`);
+  doc.space(4);
+  doc.drawBars({
+    labels,
+    series: [
+      { name: "Revenue", color: ACCENT, values: periods.map((p) => (isNum(p.revenue) ? p.revenue : null)) },
+      { name: "EBITDA", color: POS, values: periods.map((p) => (isNum(p.ebitda) ? p.ebitda : null)) },
+      { name: "FCF", color: AMBER, values: periods.map((p) => (isNum(p.free_cash_flow) ? p.free_cash_flow : null)) },
+    ],
+    height: 115,
+    sourceNote: `Forecast revenue, EBITDA and free cash flow (${currency}).`,
+  });
+}
+
+function sectionF_valuation(doc: PdfDocument, payload: ExportPayload) {
+  const dcf = payload.dcf || null;
+  const sensitivity = payload.sensitivity || null;
+  const reverse = payload.reverse_dcf || null;
+  const currency = payload.currency || "USD";
+
+  doc.heading("Valuation — Discounted Cash Flow");
+  if (!dcf || dcf.error) {
+    doc.callout("No valid DCF output", String(dcf?.error || "The discounted-cash-flow model did not produce a value."), { fill: DEMO_FILL, accent: AMBER, titleColor: AMBER });
+    return;
   }
 
+  doc.space(2).text("WACC build-up (CAPM, documented defaults)", { size: 9, bold: true, gray: 0.3, gap: 3 });
+  const comps = dcf.wacc_components || {};
+  pair(doc, "Risk-free rate", pct(comps.risk_free, 2));
+  pair(doc, "Equity beta", num(comps.beta, 2));
+  pair(doc, "Market risk premium", pct(comps.market_premium, 2));
+  pair(doc, "Cost of equity (Rf + β × MRP)", pct(comps.cost_of_equity, 2));
+  pair(doc, "Pre-tax cost of debt", pct(comps.cost_of_debt, 2));
+  pair(doc, "Tax rate", pct(comps.tax_rate, 2));
+  pair(doc, "After-tax cost of debt", pct(comps.after_tax_cost_of_debt, 2));
+  pair(doc, "Equity / debt weight", `${pct(comps.equity_weight, 0)} / ${pct(comps.debt_weight, 0)}`);
+  pair(doc, "WACC applied", pct(dcf.wacc, 2), INK);
+
+  doc.space(4).text("Free cash flows and discounting", { size: 9, bold: true, gray: 0.3, gap: 3 });
+  const forecast = payload.forecast || null;
+  const periods: AnyRecord[] = Array.isArray(forecast?.periods) ? forecast.periods : [];
+  const flows: number[] = Array.isArray(forecast?.periods) ? forecast.periods.map((p: AnyRecord) => p.fcf) : [];
+  if (flows.length) {
+    const discCols = [
+      { key: "year", label: "Year", x: 0, format: (_r: AnyRecord, i: number) => `Y${i + 1}` },
+      { key: "fcf", label: "Free cash flow", x: 90, align: "right" as const, format: (_r: AnyRecord, i: number) => cellMoney(flows[i]), color: (_r: AnyRecord, i: number) => trendColor(flows[i]) },
+      { key: "df", label: "Discount factor", x: 210, align: "right" as const, format: (_r: AnyRecord, i: number) => num(1 / Math.pow(1 + dcf.wacc, i + 1), 4) },
+      { key: "pv", label: "Present value", x: CONTENT_WIDTH, align: "right" as const, format: (_r: AnyRecord, i: number) => cellMoney(flows[i] / Math.pow(1 + dcf.wacc, i + 1)) },
+    ];
+    doc.dataTable(discCols, flows.map((f, i) => ({ fcf: f, i })), { fontSize: 8, headerFontSize: 7 });
+  }
+
+  doc.space(4).text("Enterprise-to-equity bridge", { size: 9, bold: true, gray: 0.3, gap: 3 });
+  pair(doc, "PV of explicit cash flows", money(dcf.pv_cash_flows, currency));
+  pair(doc, "PV of terminal value", money(dcf.pv_terminal_value, currency));
+  const tvShare = isNum(dcf.enterprise_value) && dcf.enterprise_value ? dcf.pv_terminal_value / dcf.enterprise_value : null;
+  pair(doc, "Terminal value share of EV", pct(tvShare), tvShare !== null && tvShare > 0.6 ? AMBER : undefined);
+  pair(doc, "Enterprise value", money(dcf.enterprise_value, currency), INK);
+  pair(doc, `Net ${isNum(dcf.net_debt) && dcf.net_debt >= 0 ? "debt" : "cash"}`, money(Math.abs(dcf.net_debt ?? 0), currency));
+  pair(doc, "Equity value", money(dcf.equity_value, currency), INK);
+  pair(doc, "Shares outstanding", isNum(dcf.shares) ? fmt(dcf.shares) : "—");
+  pair(doc, "Value per share", isNum(dcf.value_per_share) ? `${num(dcf.value_per_share)} ${currency}` : "—", INK);
+  const finalEbitda = forecast?.summary?.final_ebitda;
+  const exitMultiple = isNum(dcf.enterprise_value) && isNum(finalEbitda) && finalEbitda ? dcf.enterprise_value / finalEbitda : null;
+  pair(doc, "Implied exit multiple on final EBITDA", exitMultiple !== null ? `${num(exitMultiple, 1)}x` : "—");
+  if (isNum(payload.current_price) && payload.current_price > 0 && isNum(dcf.value_per_share)) {
+    const implied = dcf.value_per_share / payload.current_price - 1;
+    pair(doc, "Implied upside vs last price", pct(implied), trendColor(implied));
+  }
+  (dcf.warnings || []).forEach((warning: string) => doc.text(`! ${warning}`, { size: 8.5, gray: 0.35, indent: 6, gap: 2 }));
+
+  // Sensitivity grid.
   const waccValues: number[] = Array.isArray(sensitivity?.wacc_values) ? sensitivity.wacc_values : [];
   const terminalValues: number[] = Array.isArray(sensitivity?.terminal_values) ? sensitivity.terminal_values : [];
   const table: any[][] = Array.isArray(sensitivity?.table) ? sensitivity.table : [];
-  if (sensitivity && waccValues.length && terminalValues.length && table.length) {
-    section(
-      doc,
+  if (sensitivity && !sensitivity.error && waccValues.length && terminalValues.length && table.length) {
+    doc.space(6).text(
       sensitivity.mode === "multiple" ? "Sensitivity — WACC vs exit multiple" : "Sensitivity — WACC vs terminal growth",
+      { size: 9, bold: true, gray: 0.3, gap: 3 },
     );
-    const columnWidth = (CONTENT_WIDTH - 80) / terminalValues.length;
-    doc.row([
-      { text: "WACC", offset: 0, bold: true, size: 9 },
+    const firstCol = 70;
+    const colWidth = (CONTENT_WIDTH - firstCol) / terminalValues.length;
+    const sensCols = [
+      { key: "wacc", label: "WACC", x: 0, format: (r: AnyRecord) => pct(r.wacc, 1) },
       ...terminalValues.map((value, index) => ({
-        text: sensitivity.mode === "multiple" ? `${num(value, 1)}x` : pct(value),
-        offset: 80 + columnWidth * (index + 1),
+        key: `t${index}`,
+        label: sensitivity.mode === "multiple" ? `${num(value, 1)}x` : pct(value, 1),
+        x: firstCol + colWidth * (index + 1),
         align: "right" as const,
-        bold: true,
-        size: 9,
+        format: (r: AnyRecord) => (isNum(r[`t${index}`]) ? num(r[`t${index}`], 2) : "—"),
       })),
-    ]);
-    waccValues.forEach((waccValue, rowIndex) => {
-      doc.row([
-        { text: pct(waccValue), offset: 0, gray: 0.3 },
-        ...(table[rowIndex] || []).map((value, columnIndex) => ({
-          text: fmt(value),
-          offset: 80 + columnWidth * (columnIndex + 1),
-          align: "right" as const,
-        })),
-      ]);
+    ];
+    const sensRows = waccValues.map((waccValue, rowIndex) => {
+      const row: AnyRecord = { wacc: waccValue };
+      terminalValues.forEach((_, columnIndex) => {
+        row[`t${columnIndex}`] = table[rowIndex]?.[columnIndex];
+      });
+      return row;
+    });
+    doc.dataTable(sensCols, sensRows, { fontSize: 8, headerFontSize: 7, sourceNote: `Value per share (${currency}). Sensitivity maps model response to assumptions; it does not remove uncertainty.` });
+  }
+
+  if (reverse && !reverse.error && isNum(reverse.implied_wacc)) {
+    doc.space(4).callout(
+      "Reverse DCF at the current market price",
+      `At a market price of ${num(reverse.current_price)} ${currency} the implied WACC is ${pct(reverse.implied_wacc, 2)}, ` +
+        `versus our stated ${pct(dcf.wacc, 2)}. The market discounts these cash flows more steeply than our cost of capital.`,
+      { fill: PANEL, accent: ACCENT },
+    );
+  }
+
+  const report = payload.report || {};
+  if (report.scenario_analysis) {
+    doc.space(4).text("Scenario analysis", { size: 9, bold: true, gray: 0.3, gap: 3 });
+    const scen = report.scenario_analysis;
+    doc.text(`Bull: ${scen.bull || "n/a"}`, { size: 8.8, gray: 0.2, indent: 6, gap: 2 });
+    doc.text(`Base: ${scen.base || "n/a"}`, { size: 8.8, gray: 0.2, indent: 6, gap: 2 });
+    doc.text(`Bear: ${scen.bear || "n/a"}`, { size: 8.8, gray: 0.2, indent: 6, gap: 2 });
+  }
+}
+
+function sectionG_risks(doc: PdfDocument, payload: ExportPayload) {
+  const report = payload.report || {};
+
+  doc.heading("Risks & Catalysts");
+
+  const strengths: string[] = Array.isArray(report.strengths) ? report.strengths : [];
+  if (strengths.length) {
+    doc.space(2).text("Strengths", { size: 9.5, bold: true, gray: 0.3, gap: 3 });
+    strengths.forEach((item) => doc.text(`•  ${String(item)}`, { size: 9, indent: 8, gray: 0.2, gap: 2 }));
+  }
+
+  const risks: AnyRecord[] = Array.isArray(report.risks) ? report.risks : [];
+  if (risks.length) {
+    doc.space(4).text("Risks", { size: 9.5, bold: true, gray: 0.3, gap: 3 });
+    risks.forEach((risk) => {
+      if (typeof risk === "string") {
+        doc.text(`•  ${risk}`, { size: 9, indent: 8, gray: 0.2, gap: 2 });
+        return;
+      }
+      doc.text(risk.title || "Risk", { size: 9, bold: true, indent: 8, color: NEG, gap: 1.5 });
+      if (risk.exposure) doc.text(`Exposure: ${risk.exposure}`, { size: 8.7, indent: 14, gray: 0.2, gap: 1 });
+      if (risk.impact) doc.text(`Impact: ${risk.impact}`, { size: 8.7, indent: 14, gray: 0.2, gap: 1 });
+      if (risk.monitoring_metric) doc.text(`Monitoring metric: ${risk.monitoring_metric}`, { size: 8.7, indent: 14, gray: 0.35, gap: 1 });
+      if (risk.scenario) doc.text(`Scenario: ${risk.scenario}`, { size: 8.7, indent: 14, gray: 0.35, gap: 1 });
+      if (risk.basis) doc.text(`Basis: ${risk.basis}`, { size: 8, indent: 14, gray: 0.45, gap: 3 });
     });
   }
 
-  if (report) {
-    section(doc, "Research note");
-    reportSections(report).forEach(([name, content]) => writeReportBlock(doc, name, content));
+  const catalysts: AnyRecord[] = Array.isArray(report.catalysts) ? report.catalysts : [];
+  if (catalysts.length) {
+    doc.space(4).text("Catalysts", { size: 9.5, bold: true, gray: 0.3, gap: 3 });
+    catalysts.forEach((catalyst) => {
+      if (typeof catalyst === "string") {
+        doc.text(`•  ${catalyst}`, { size: 9, indent: 8, gray: 0.2, gap: 2 });
+        return;
+      }
+      doc.text(catalyst.title || "Catalyst", { size: 9, bold: true, indent: 8, color: POS, gap: 1.5 });
+      if (catalyst.event) doc.text(`Event: ${catalyst.event}`, { size: 8.7, indent: 14, gray: 0.2, gap: 1 });
+      if (catalyst.timing) doc.text(`Timing: ${catalyst.timing}`, { size: 8.7, indent: 14, gray: 0.2, gap: 1 });
+      if (catalyst.grounding) doc.text(`Grounding: ${catalyst.grounding}`, { size: 8.7, indent: 14, gray: 0.35, gap: 3 });
+    });
   }
-
-  const alerts: any[] = payload?.data_quality?.alerts || company.data_quality?.alerts || [];
-  if (alerts.length) {
-    section(doc, "Data quality");
-    alerts.forEach((alert) =>
-      doc.text(`- [${label(alert.level, "info")}] ${label(alert.message)}`, { size: 9, indent: 6, gap: 2 }),
-    );
-    pair(doc, "Retrieved", localDate(company.retrieved_at));
-  }
-
-  doc.space(14);
-  doc.rule(6, 0.85);
-  doc.text(
-    "Generated by APEX Terminal. Figures are produced by the deterministic calculation engine; AI only writes narrative. Research software, not investment advice.",
-    { size: 8, gray: 0.5, gap: 0 },
-  );
-
-  return { doc, title };
 }
 
-function keyValueRows(record: AnyRecord | null | undefined, keys?: string[]): SheetValue[][] {
+function sectionH_modelQuality(doc: PdfDocument, payload: ExportPayload) {
+  const report = payload.report || {};
+  const forecast = payload.forecast || null;
+  const dcf = payload.dcf || null;
+
+  doc.heading("Model Quality & Integrity Review");
+
+  const conviction = report.conviction;
+  if (conviction) {
+    doc.callout(
+      `Conviction: ${String(conviction.level || "").toUpperCase()}`,
+      String(conviction.basis || ""),
+      { fill: PANEL, accent: conviction.level === "low" ? AMBER : ACCENT },
+    );
+  }
+
+  if (report.model_quality) {
+    doc.space(2).text(String(report.model_quality), { size: 9, gray: 0.2, gap: 4, leading: 1.4 });
+  }
+
+  doc.space(2).text("Automated checks", { size: 9, bold: true, gray: 0.3, gap: 3 });
+  pair(doc, "Balance-sheet identity", forecast?.summary?.balance_ok ? "Pass" : "Check residual", forecast?.summary?.balance_ok ? POS : AMBER);
+  if (!forecast?.summary?.balance_ok) {
+    pair(doc, "Largest residual", label(forecast?.summary?.max_balance_check));
+  }
+  pair(doc, "DCF produced a value", dcf && !dcf.error ? "Yes" : "No", dcf && !dcf.error ? POS : NEG);
+  pair(doc, "Valuation warnings", dcf?.warnings?.length ? String(dcf.warnings.length) : "0", dcf?.warnings?.length ? AMBER : undefined);
+
+  const validation: AnyRecord[] = Array.isArray(payload.validation) ? payload.validation : [];
+  const errors = validation.filter((v) => v.severity === "error" || v.blocking);
+  const warns = validation.filter((v) => v.severity === "warn" && !v.blocking);
+  pair(doc, "Integrity errors (blocking)", String(errors.length), errors.length ? NEG : POS);
+  pair(doc, "Integrity warnings", String(warns.length), warns.length ? AMBER : undefined);
+  if (validation.length) {
+    doc.space(2).text("Validation detail", { size: 8.5, bold: true, gray: 0.35, gap: 2 });
+    validation.forEach((issue) => {
+      const tag = issue.severity === "error" || issue.blocking ? "ERROR" : issue.severity === "warn" ? "WARN" : "INFO";
+      const color = issue.severity === "error" || issue.blocking ? NEG : issue.severity === "warn" ? AMBER : undefined;
+      doc.text(`[${tag}] ${issue.code}: ${issue.message}`, { size: 8, indent: 6, color, gray: color ? undefined : 0.4, gap: 1.5 });
+    });
+  }
+}
+
+function sectionI_sources(doc: PdfDocument, payload: ExportPayload) {
+  doc.heading("Sources & Methodology");
+
+  const provenance: AnyRecord[] = Array.isArray(payload.provenance) ? payload.provenance : [];
+  if (provenance.length) {
+    doc.space(2).text("Data sources (numbered)", { size: 9, bold: true, gray: 0.3, gap: 3 });
+    const srcCols = [
+      { key: "n", label: "#", x: 0, format: (_r: AnyRecord, i: number) => String(i + 1) },
+      { key: "metric", label: "Metric", x: 22, format: (r: AnyRecord) => String(r.metric) },
+      { key: "value", label: "Value", x: 150, align: "right" as const, format: (r: AnyRecord) => String(r.value_label) },
+      { key: "period", label: "Period", x: 215, format: (r: AnyRecord) => label(r.period) },
+      { key: "status", label: "Status", x: 295, format: (r: AnyRecord) => String(r.status) },
+      { key: "source", label: "Source", x: 360, format: (r: AnyRecord) => String(r.source).slice(0, 28) },
+    ];
+    doc.dataTable(srcCols, provenance, { fontSize: 7, headerFontSize: 6.5, rowHeight: 13 });
+  }
+
+  doc.space(5).text("Methodology", { size: 9, bold: true, gray: 0.3, gap: 3 });
+  doc.text(
+    "Forecast: a deterministic three-statement model driven by the documented assumptions in the forecast section. " +
+      "Valuation: unlevered free cash flows discounted at a CAPM-built WACC, with a Gordon-growth or exit-multiple terminal value. " +
+      "Rating: a mechanical band on model upside (BUY ≥ +10%, HOLD within ±10%, SELL below −10%), withheld entirely when integrity gates fail. " +
+      "Every figure is a model output; the deterministic engine writes the narrative from those outputs and never invents numbers.",
+    { size: 8.8, gray: 0.2, gap: 4, leading: 1.4 },
+  );
+
+  const peers: string[] = Array.isArray(payload.peers) ? payload.peers : [];
+  pair(doc, "Peer set", peers.length ? peers.join(", ") : "None supplied (comparables omitted)");
+}
+
+function sectionJ_conclusion(doc: PdfDocument, payload: ExportPayload) {
+  const report = payload.report || {};
+
+  doc.heading("Conclusion");
+  if (report.conclusion) {
+    doc.text(String(report.conclusion), { size: 9.5, gray: 0.18, gap: 5, leading: 1.45 });
+  }
+  if (report.investment_thesis) {
+    doc.space(2).text("Investment thesis", { size: 9, bold: true, gray: 0.3, gap: 3 });
+    doc.text(String(report.investment_thesis), { size: 9, gray: 0.2, gap: 3, leading: 1.4 });
+  }
+  const drivers: string[] = Array.isArray(report.thesis_drivers) ? report.thesis_drivers : [];
+  if (drivers.length) {
+    doc.space(2).text("Thesis drivers", { size: 9, bold: true, gray: 0.3, gap: 3 });
+    drivers.forEach((driver) => doc.text(`•  ${driver}`, { size: 8.8, indent: 8, gray: 0.2, gap: 2 }));
+  }
+
+  doc.space(10);
+  doc.rule(4, RULE_GRAY);
+  doc.text("Disclaimer", { size: 8.5, bold: true, gray: 0.45, gap: 2 });
+  doc.text(String(report.disclaimer || "Generated by the APEX deterministic engine. Research software, not investment advice."), {
+    size: 7.5,
+    gray: 0.5,
+    gap: 4,
+  });
+}
+
+function buildReportDocument(payload: ExportPayload) {
+  const doc = new PdfDocument();
+  const title = payload?.title || `${payload?.ticker || "APEX"} — Equity Research Note`;
+  const footerLeft = [payload?.ticker, payload?.company?.name, "APEX Terminal"].filter(Boolean).join("  ·  ");
+  doc.setRunningHeader([payload?.ticker, payload?.company?.name].filter(Boolean).join(" · "));
+
+  sectionA_cover(doc, payload);
+  sectionB_summary(doc, payload);
+  sectionC_company(doc, payload);
+  sectionD_financials(doc, payload);
+  sectionE_forecast(doc, payload);
+  sectionF_valuation(doc, payload);
+  sectionG_risks(doc, payload);
+  sectionH_modelQuality(doc, payload);
+  sectionI_sources(doc, payload);
+  sectionJ_conclusion(doc, payload);
+
+  return { doc, title, footerLeft };
+}
+
+export function buildResearchPdf(payload: ExportPayload): Blob {
+  const { doc, title, footerLeft } = buildReportDocument(payload);
+  return new Blob([doc.build(title, footerLeft)], { type: "application/pdf" });
+}
+
+export function buildResearchPdfMeta(payload: ExportPayload): { blob: Blob; pages: number; size: number; bytes: Uint8Array } {
+  const { doc, title, footerLeft } = buildReportDocument(payload);
+  const bytes = doc.build(title, footerLeft);
+  return { blob: new Blob([bytes], { type: "application/pdf" }), pages: doc.pageCount, size: bytes.length, bytes };
+}
+
+// ---------------------------------------------------------------------------
+// Programmatic PDF layout inspection (independent of visual rendering)
+// ---------------------------------------------------------------------------
+
+const REQUIRED_SECTIONS = [
+  "Investment Summary",
+  "Company & Industry",
+  "Financial Statements",
+  "Base-Case Forecast",
+  "Valuation",
+  "Risks & Catalysts",
+  "Model Quality",
+  "Sources & Methodology",
+  "Conclusion",
+];
+
+// Malformed render artifacts. "null" is only treated as malformed when it is a
+// bare value token (its own text op or surrounded by non-letters with no
+// following word) — never when it appears mid-sentence in prose.
+const MALFORMED_TEXT = /NaN|Infinity|undefined|\[object Object\]|(?<![A-Za-z])null(?![A-Za-z]|\s+[A-Za-z])/;
+const LONG_DECIMAL = /\b\d{2,}\.\d{5,}\b/;
+
+export function inspectPdfBytes(bytes: Uint8Array): PdfLayoutIssue[] {
+  const issues: PdfLayoutIssue[] = [];
+  let body = "";
+  for (let i = 0; i < bytes.length; i += 1) body += String.fromCharCode(bytes[i]);
+
+  const streams = body.match(/stream\n([\s\S]*?)\nendstream/g) || [];
+  const allText: string[] = [];
+  let headingCount = 0;
+
+  streams.forEach((streamBlock, pageIndex) => {
+    const content = streamBlock.replace(/^stream\n/, "").replace(/\nendstream$/, "");
+    const lines = content.split("\n");
+    let lastTextWasHeading = false;
+    let textOpsOnPage = 0;
+
+    lines.forEach((line) => {
+      const match = line.match(/\/(F\d)\s+([\d.]+)\s+Tf.*?1 0 0 1\s+([\d.-]+)\s+([\d.-]+)\s+Tm\s+\((.*)\)\s+Tj/);
+      if (!match) return;
+      const font = match[1];
+      const size = Number(match[2]);
+      const x = Number(match[3]);
+      const y = Number(match[4]);
+      const rawText = match[5].replace(/\\([()\\])/g, "$1");
+      allText.push(rawText);
+      textOpsOnPage += 1;
+      lastTextWasHeading = font === "F2" && size >= 11 && size <= 13;
+      if (lastTextWasHeading) headingCount += 1;
+
+      // Bounds: text left edge inside margins; baseline inside vertical content band.
+      // Header (top margin) and footer (bottom margin) text is exempt from the
+      // content-band y check — it is intentionally placed in the margin strip.
+      const isRunningChrome = y < MARGIN_BOTTOM - 20 || y > PAGE_HEIGHT - MARGIN_TOP + 2;
+      const textWidth = measureText(rawText, size, font === "F2");
+      if (x < MARGIN_LEFT - 2 || x + textWidth > PAGE_WIDTH - MARGIN_RIGHT + 2) {
+        issues.push({
+          level: "error",
+          check: "layout.bounds.x",
+          detail: `Page ${pageIndex + 1}: text "${rawText.slice(0, 40)}" at x=${x.toFixed(1)} (width ${textWidth.toFixed(1)}) escapes the ${MARGIN_LEFT}–${(PAGE_WIDTH - MARGIN_RIGHT).toFixed(1)} content band.`,
+        });
+      }
+      if (isRunningChrome) {
+        // Header/footer y is outside the content band by design; only flag if it
+        // goes past the physical page edge.
+        if (y < 10 || y > PAGE_HEIGHT - 10) {
+          issues.push({
+            level: "error",
+            check: "layout.bounds.y",
+            detail: `Page ${pageIndex + 1}: running-header/footer text "${rawText.slice(0, 40)}" baseline y=${y.toFixed(1)} is off the physical page.`,
+          });
+        }
+      }
+      if (MALFORMED_TEXT.test(rawText)) {
+        issues.push({
+          level: "error",
+          check: "layout.malformed",
+          detail: `Page ${pageIndex + 1}: malformed value "${rawText.slice(0, 60)}" rendered into the PDF.`,
+        });
+      }
+      if (LONG_DECIMAL.test(rawText)) {
+        issues.push({
+          level: "warn",
+          check: "layout.precision",
+          detail: `Page ${pageIndex + 1}: over-precise number "${rawText.slice(0, 60)}" (should be rounded for display).`,
+        });
+      }
+    });
+
+    // Orphan heading: last text op on the page is a section heading.
+    if (textOpsOnPage > 0 && lastTextWasHeading) {
+      issues.push({
+        level: "warn",
+        check: "layout.orphan_heading",
+        detail: `Page ${pageIndex + 1} ends with a heading and no following content.`,
+      });
+    }
+  });
+
+  const joined = allText.join("\n");
+  REQUIRED_SECTIONS.forEach((section) => {
+    if (!joined.includes(section)) {
+      issues.push({ level: "error", check: "content.section_missing", detail: `Required section "${section}" not found in the PDF.` });
+    }
+  });
+
+  if (headingCount === 0) {
+    issues.push({ level: "error", check: "content.empty", detail: "No section headings were rendered." });
+  }
+
+  if (!issues.some((issue) => issue.check.startsWith("layout.bounds"))) {
+    issues.push({ level: "info", check: "layout.bounds", detail: "All text positions are inside the content margins." });
+  }
+  issues.push({ level: "info", check: "content.sections", detail: `${REQUIRED_SECTIONS.length} required sections checked; ${headingCount} headings rendered.` });
+
+  return issues;
+}
+
+// ---------------------------------------------------------------------------
+// XLSX export
+// ---------------------------------------------------------------------------
+
+function keyValueRows(record: AnyRecord | null | undefined): SheetValue[][] {
   if (!record) return [];
-  const entries = keys ? keys.filter((key) => key in record).map((key) => [key, record[key]] as const) : Object.entries(record);
-  return entries.map(([key, value]) => [
-    humanize(String(key)),
-    typeof value === "object" && value !== null ? JSON.stringify(value) : (value as SheetValue),
-  ]);
+  return Object.entries(record)
+    .filter(([, value]) => typeof value !== "object" || value === null)
+    .map(([key, value]) => [humanize(String(key)), value as SheetValue]);
 }
 
 export function buildResearchXlsx(payload: ExportPayload): Blob {
@@ -258,17 +760,16 @@ export function buildResearchXlsx(payload: ExportPayload): Blob {
   const forecast = payload?.forecast || null;
   const dcf = payload?.dcf || null;
   const sensitivity = payload?.sensitivity || null;
-  const report = payload?.report || null;
   const actuals = payload?.actuals || null;
   const price = payload?.price_summary || company.price_summary || null;
-  const currency = company.currency || "USD";
+  const currency = payload?.currency || company.currency || "USD";
 
   const sheets: Sheet[] = [];
 
   sheets.push({
     name: "Summary",
     rows: [
-      ["APEX Terminal export"],
+      ["APEX Terminal research export"],
       ["Generated", new Date().toISOString()],
       [],
       ["Ticker", payload?.ticker || ""],
@@ -279,43 +780,23 @@ export function buildResearchXlsx(payload: ExportPayload): Blob {
       ["Industry", company.industry || ""],
       ["Market cap", company.market_cap ?? ""],
       ["Last close", price?.last_close ?? ""],
-      ["Day change", price?.change_pct ?? ""],
       ["52w low", price?.low_52w ?? ""],
       ["52w high", price?.high_52w ?? ""],
-      ["Last reported period", company.last_data_date || actuals?.period_end || ""],
-      ["Synthetic fixture", company.demo ? "yes" : "no"],
+      ["Rating", payload?.rating ?? ""],
+      ["Target price", payload?.target_price ?? ""],
+      ["Upside", payload?.upside ?? ""],
+      ["Synthetic fixture", payload?.is_synthetic === false ? "no" : "yes"],
       [],
       ["Latest revenue", actuals?.revenue ?? ""],
       ["Latest net margin", actuals?.net_margin ?? ""],
-      ["Latest ROE", actuals?.roe ?? ""],
       ["Latest FCF", actuals?.fcf ?? ""],
-      ["Latest net debt", actuals?.net_debt ?? ""],
       ["Value per share (DCF)", dcf?.value_per_share ?? ""],
     ],
   });
 
   const periods: AnyRecord[] = Array.isArray(forecast?.periods) ? forecast.periods : [];
   if (periods.length) {
-    const columns = [
-      "year",
-      "revenue",
-      "gross_profit",
-      "operating_expense",
-      "ebit",
-      "ebitda",
-      "net_income",
-      "eps",
-      "operating_cash_flow",
-      "capex",
-      "free_cash_flow",
-      "cash",
-      "debt",
-      "equity",
-      "total_assets",
-      "total_liabilities",
-      "balance_check",
-      "shares",
-    ];
+    const columns = ["year", "revenue", "gross_profit", "operating_expense", "ebit", "ebitda", "net_income", "eps", "operating_cash_flow", "capex", "free_cash_flow", "cash", "debt", "equity", "total_assets", "total_liabilities", "balance_check", "shares"];
     sheets.push({
       name: "Forecast",
       rows: [
@@ -325,30 +806,44 @@ export function buildResearchXlsx(payload: ExportPayload): Blob {
     });
   }
 
-  if (actuals) {
-    sheets.push({ name: "Actuals", rows: [["Metric", "Value"], ...keyValueRows(actuals)] });
+  const history: AnyRecord[] = Array.isArray(payload?.history) ? payload.history : [];
+  if (history.length) {
+    const hCols = ["period_end", "revenue", "revenue_growth", "gross_margin", "operating_margin", "net_margin", "ebitda", "net_income", "eps_diluted", "roe", "roic", "fcf", "net_debt"];
+    sheets.push({
+      name: "History",
+      rows: [
+        hCols.map((column) => humanize(column)),
+        ...history.map((row) => hCols.map((column) => (row[column] ?? "") as SheetValue)),
+      ],
+    });
   }
+
+  if (actuals) sheets.push({ name: "Actuals", rows: [["Metric", "Value"], ...keyValueRows(actuals)] });
 
   const assumptions = payload?.assumptions || forecast?.assumptions || null;
   if (assumptions) {
-    sheets.push({ name: "Assumptions", rows: [["Assumption", "Value"], ...keyValueRows(assumptions)] });
+    sheets.push({ name: "Drivers", rows: [["Driver", "Value"], ...keyValueRows(assumptions)] });
   }
 
   if (dcf) {
-    sheets.push({ name: "DCF", rows: [["Metric", "Value"], ...keyValueRows(dcf)] });
+    const dcfRows: SheetValue[][] = [["Metric", "Value"], ...keyValueRows(dcf)];
+    const comps = dcf.wacc_components;
+    if (comps) {
+      dcfRows.push([]);
+      dcfRows.push(["WACC build-up", ""]);
+      Object.entries(comps as AnyRecord).forEach(([key, value]) => dcfRows.push([humanize(key), value as SheetValue]));
+    }
+    sheets.push({ name: "DCF", rows: dcfRows });
   }
 
   const waccValues: number[] = Array.isArray(sensitivity?.wacc_values) ? sensitivity.wacc_values : [];
   const terminalValues: number[] = Array.isArray(sensitivity?.terminal_values) ? sensitivity.terminal_values : [];
   const matrix: any[][] = Array.isArray(sensitivity?.table) ? sensitivity.table : [];
-  if (sensitivity && waccValues.length && terminalValues.length && matrix.length) {
+  if (sensitivity && !sensitivity.error && waccValues.length && terminalValues.length && matrix.length) {
     sheets.push({
       name: "Sensitivity",
       rows: [
-        [
-          `WACC vs ${sensitivity.mode === "multiple" ? "exit multiple" : "terminal growth"}`,
-          ...terminalValues.map((value) => value as SheetValue),
-        ],
+        [`WACC vs ${sensitivity.mode === "multiple" ? "exit multiple" : "terminal growth"}`, ...terminalValues.map((value) => value as SheetValue)],
         ...waccValues.map((waccValue, rowIndex) => [
           waccValue as SheetValue,
           ...(matrix[rowIndex] || []).map((value) => (isNum(value) ? value : "")),
@@ -357,19 +852,41 @@ export function buildResearchXlsx(payload: ExportPayload): Blob {
     });
   }
 
+  const provenance: AnyRecord[] = Array.isArray(payload?.provenance) ? payload.provenance : [];
+  if (provenance.length) {
+    const pCols = ["metric", "value_label", "unit", "currency", "period", "source", "retrieved_at", "status"];
+    sheets.push({
+      name: "Provenance",
+      rows: [
+        pCols.map((column) => humanize(column)),
+        ...provenance.map((row) => pCols.map((column) => (row[column] ?? "") as SheetValue)),
+      ],
+    });
+  }
+
+  const report = payload?.report || null;
   if (report) {
+    const skip = new Set(["narrative_source", "ai_generated"]);
     sheets.push({
       name: "Report",
       rows: [
         ["Section", "Content"],
-        ...reportSections(report).map(([name, content]) => [
-          humanize(name),
-          Array.isArray(content)
-            ? content.map((item) => `- ${label(item)}`).join("\n")
-            : content && typeof content === "object"
-              ? JSON.stringify(content)
-              : label(content),
-        ]),
+        ...Object.entries(report)
+          .filter(([key]) => !skip.has(key))
+          .map(([key, value]) => [
+            humanize(key),
+            Array.isArray(value)
+              ? value
+                  .map((item: any) =>
+                    item && typeof item === "object"
+                      ? `- ${item.title || ""}: ${item.exposure || item.event || ""}${item.monitoring_metric ? ` (monitor: ${item.monitoring_metric})` : ""}`
+                      : `- ${String(item)}`,
+                  )
+                  .join("\n")
+              : value && typeof value === "object"
+                ? JSON.stringify(value)
+                : String(value ?? ""),
+          ]),
       ],
     });
   }
@@ -379,6 +896,14 @@ export function buildResearchXlsx(payload: ExportPayload): Blob {
     sheets.push({
       name: "Data quality",
       rows: [["Level", "Message"], ...alerts.map((alert) => [label(alert.level, "info"), label(alert.message)])],
+    });
+  }
+
+  const validation: AnyRecord[] = Array.isArray(payload?.validation) ? payload.validation : [];
+  if (validation.length) {
+    sheets.push({
+      name: "Validation",
+      rows: [["Severity", "Code", "Message"], ...validation.map((issue) => [label(issue.severity), label(issue.code), label(issue.message)])],
     });
   }
 

@@ -1,4 +1,15 @@
-import { buildResearchPdf, buildResearchPdfMeta, buildResearchXlsx, type ExportPayload } from "./exporters";
+import { buildResearchPdf, buildResearchPdfMeta, buildResearchXlsx, inspectPdfBytes, type ExportPayload } from "./exporters";
+import {
+  buildProvenanceRows,
+  integrityGates,
+  parseListing,
+  sectorProfile,
+  validateIdentity,
+} from "./provenance";
+import {
+  buildDeterministicNarrative,
+  tryProviderNarrative,
+} from "./narrative";
 
 export class ApiError extends Error {
   status: number;
@@ -92,44 +103,240 @@ function numberOr(value: unknown, fallback: number): number {
   return typeof parsed === "number" && Number.isFinite(parsed) ? parsed : fallback;
 }
 
+type FixtureIdentity = {
+  name: string;
+  sector: string;
+  industry: string;
+  country: string;
+  website: string;
+  employees: number;
+  business: string;
+};
+
+const KNOWN_IDENTITIES: Record<string, FixtureIdentity> = {
+  AAPL: {
+    name: "Apple Inc.",
+    sector: "Technology",
+    industry: "Consumer Electronics",
+    country: "US",
+    website: "https://www.apple.com",
+    employees: 164_000,
+    business: "Designs and markets smartphones, personal computers, tablets, wearables and accessories, and sells a range of related services.",
+  },
+  MSFT: {
+    name: "Microsoft Corporation",
+    sector: "Technology",
+    industry: "Systems Software",
+    country: "US",
+    website: "https://www.microsoft.com",
+    employees: 221_000,
+    business: "Develops and supports software, services, devices and solutions across productivity, cloud infrastructure and personal computing.",
+  },
+  NVDA: {
+    name: "NVIDIA Corporation",
+    sector: "Technology",
+    industry: "Semiconductors",
+    country: "US",
+    website: "https://www.nvidia.com",
+    employees: 29_600,
+    business: "Designs graphics processing units and accelerated computing platforms for gaming, data centre, professional visualisation and automotive markets.",
+  },
+  TSLA: {
+    name: "Tesla, Inc.",
+    sector: "Consumer Discretionary",
+    industry: "Automobile Manufacturers",
+    country: "US",
+    website: "https://www.tesla.com",
+    employees: 140_473,
+    business: "Designs, develops, manufactures and sells electric vehicles and energy generation and storage systems.",
+  },
+  "RELIANCE.NS": {
+    name: "Reliance Industries Limited",
+    sector: "Energy",
+    industry: "Diversified Oil Gas & Chemicals",
+    country: "IN",
+    website: "https://www.ril.com",
+    employees: 389_414,
+    business: "Operates across refining, petrochemicals, retail and digital services with integrated energy-to-consumer operations.",
+  },
+  "INFY.NS": {
+    name: "Infosys Limited",
+    sector: "Information Technology",
+    industry: "IT Consulting & Services",
+    country: "IN",
+    website: "https://www.infosys.com",
+    employees: 317_240,
+    business: "Provides consulting, technology, outsourcing and digital services to global enterprises.",
+  },
+  "INOXWIND.NS": {
+    name: "Inox Wind Limited",
+    sector: "Industrials",
+    industry: "Wind Energy Equipment",
+    country: "IN",
+    website: "https://www.inoxwind.com",
+    employees: 1_200,
+    business: "Manufactures wind turbine generators and provides turnkey wind power project development, construction and operations services in India.",
+  },
+  GAPCO: {
+    name: "GAPCO演示 sparse fixture".replace("演示 sparse fixture", " Demonstration Co."),
+    sector: "Consumer Discretionary",
+    industry: "Specialty Retail",
+    country: "US",
+    website: "https://example.invalid",
+    employees: 4_200,
+    business: "Sparse demonstration fixture: only two annual income periods, no cash-flow statement and a partially blank price summary.",
+  },
+};
+
+const SECTOR_WHEEL: FixtureIdentity[] = [
+  {
+    name: "",
+    sector: "Technology",
+    industry: "Application Software",
+    country: "US",
+    website: "https://example.invalid",
+    employees: 9_500,
+    business: "Enterprise software products and subscription services.",
+  },
+  {
+    name: "",
+    sector: "Energy",
+    industry: "Oil & Gas Exploration and Production",
+    country: "US",
+    website: "https://example.invalid",
+    employees: 3_100,
+    business: "Upstream oil and gas exploration and production assets.",
+  },
+  {
+    name: "",
+    sector: "Industrials",
+    industry: "Specialty Machinery",
+    country: "US",
+    website: "https://example.invalid",
+    employees: 12_400,
+    business: "Engineered equipment for process and manufacturing industries.",
+  },
+  {
+    name: "",
+    sector: "Consumer Discretionary",
+    industry: "Packaged Foods & Meats",
+    country: "US",
+    website: "https://example.invalid",
+    employees: 21_800,
+    business: "Branded packaged food products sold through retail channels.",
+  },
+  {
+    name: "",
+    sector: "Health Care",
+    industry: "Biotechnology",
+    country: "US",
+    website: "https://example.invalid",
+    employees: 1_850,
+    business: "Clinical-stage biopharmaceutical development platform.",
+  },
+  {
+    name: "",
+    sector: "Financials",
+    industry: "Regional Banks",
+    country: "US",
+    website: "https://example.invalid",
+    employees: 2_600,
+    business: "Deposit-taking and commercial lending franchise.",
+  },
+];
+
+function tickerHash(value: string): number {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return Math.abs(hash);
+}
+
+const CURRENCY_SCALES: Record<string, number> = { USD: 1, INR: 85, GBp: 0.8, JPY: 150, EUR: 0.92 };
+
+function scaleMoney(value: unknown, scale: number): unknown {
+  if (typeof value !== "number" || !Number.isFinite(value)) return value;
+  return Number((value * scale).toPrecision(12));
+}
+
+function scaleStatement(items: Record<string, unknown>, scale: number): Record<string, unknown> {
+  const scaled: Record<string, unknown> = {};
+  Object.entries(items).forEach(([key, value]) => {
+    scaled[key] = typeof value === "number" ? scaleMoney(value, scale) : value;
+  });
+  return scaled;
+}
+
 function mockTickerData(ticker: string) {
   const upper = ticker.toUpperCase();
-  return {
-    ticker: upper,
-    retrieved_at: new Date().toISOString(),
-    info: {
-      longName: `${upper} Corporation Inc. (Local Engine)`,
-      shortName: upper,
-      exchange: "NASDAQ / NYSE",
-      currency: "USD",
-      sector: "Technology & Industrials",
-      industry: "Enterprise Software & Equipment",
-      country: "US",
-      website: "https://example.com",
-      sharesOutstanding: 150_000_000,
-      marketCap: 12_500_000_000,
-      longBusinessSummary: `Local-engine financial profile for ${upper}. Every figure is generated deterministically in this browser.`,
-      fullTimeEmployees: 25000,
-    },
-    annual: {
-      income_statement: [
+  const listing = parseListing(upper);
+  const identity = KNOWN_IDENTITIES[upper] || KNOWN_IDENTITIES[listing.baseTicker] || {
+    ...SECTOR_WHEEL[tickerHash(upper) % SECTOR_WHEEL.length],
+    name: `${listing.baseTicker} Corporation (Local Engine)`,
+  };
+  const currency = listing.currency;
+  const scale = CURRENCY_SCALES[currency] || 1;
+  const isSparse = upper === "GAPCO";
+
+  const annualIncome = isSparse
+    ? [
+        { period_end: "2024-12-31", items: { revenue: 820_000_000, cost_of_revenue: 460_000_000, gross_profit: 360_000_000, operating_expense: 240_000_000, operating_income: 120_000_000, ebit: 120_000_000, ebitda: 150_000_000, pretax_income: 115_000_000, tax_expense: 24_000_000, net_income: 91_000_000, interest_expense: 8_000_000, diluted_eps: null, da: 30_000_000 } },
+        { period_end: "2023-12-31", items: { revenue: 780_000_000, cost_of_revenue: 450_000_000, gross_profit: 330_000_000, operating_expense: 230_000_000, operating_income: 100_000_000, ebit: 100_000_000, ebitda: 126_000_000, pretax_income: 96_000_000, tax_expense: 20_000_000, net_income: 76_000_000, interest_expense: 8_000_000, diluted_eps: 1.81, da: 26_000_000 } },
+      ]
+    : [
         { period_end: "2025-12-31", items: { revenue: 6000_000_000, cost_of_revenue: 2200_000_000, gross_profit: 3800_000_000, operating_expense: 2000_000_000, operating_income: 1800_000_000, ebit: 1800_000_000, ebitda: 2200_000_000, pretax_income: 1750_000_000, tax_expense: 350_000_000, net_income: 1400_000_000, interest_expense: 50_000_000, diluted_eps: 9.33, da: 400_000_000 } },
         { period_end: "2024-12-31", items: { revenue: 5200_000_000, cost_of_revenue: 1950_000_000, gross_profit: 3250_000_000, operating_expense: 1750_000_000, operating_income: 1500_000_000, ebit: 1500_000_000, ebitda: 1850_000_000, pretax_income: 1460_000_000, tax_expense: 290_000_000, net_income: 1170_000_000, interest_expense: 40_000_000, diluted_eps: 7.80, da: 350_000_000 } },
         { period_end: "2023-12-31", items: { revenue: 4500_000_000, cost_of_revenue: 1700_000_000, gross_profit: 2800_000_000, operating_expense: 1500_000_000, operating_income: 1300_000_000, ebit: 1300_000_000, ebitda: 1600_000_000, pretax_income: 1260_000_000, tax_expense: 250_000_000, net_income: 1010_000_000, interest_expense: 40_000_000, diluted_eps: 6.73, da: 300_000_000 } },
         { period_end: "2022-12-31", items: { revenue: 3900_000_000, cost_of_revenue: 1500_000_000, gross_profit: 2400_000_000, operating_expense: 1300_000_000, operating_income: 1100_000_000, ebit: 1100_000_000, ebitda: 1350_000_000, pretax_income: 1060_000_000, tax_expense: 210_000_000, net_income: 850_000_000, interest_expense: 40_000_000, diluted_eps: 5.67, da: 250_000_000 } },
-      ],
-      balance_sheet: [
-        { period_end: "2025-12-31", items: { total_assets: 8500_000_000, current_assets: 3500_000_000, current_liabilities: 1800_000_000, cash: 1500_000_000, total_debt: 1200_000_000, equity: 5500_000_000, accounts_receivable: 900_000_000, inventory: 600_000_000, accounts_payable: 700_000_000, ppe_net: 4000_000_000, goodwill: 1000_000_000, shares_issued: 150_000_000 } },
-        { period_end: "2024-12-31", items: { total_assets: 7500_000_000, current_assets: 3000_000_000, current_liabilities: 1500_000_000, cash: 1200_000_000, total_debt: 1000_000_000, equity: 5000_000_000, accounts_receivable: 800_000_000, inventory: 550_000_000, accounts_payable: 600_000_000, ppe_net: 3500_000_000, goodwill: 1000_000_000, shares_issued: 150_000_000 } },
-        { period_end: "2023-12-31", items: { total_assets: 6800_000_000, current_assets: 2700_000_000, current_liabilities: 1350_000_000, cash: 1000_000_000, total_debt: 900_000_000, equity: 4550_000_000, accounts_receivable: 700_000_000, inventory: 500_000_000, accounts_payable: 550_000_000, ppe_net: 3100_000_000, goodwill: 1000_000_000, shares_issued: 150_000_000 } },
-        { period_end: "2022-12-31", items: { total_assets: 6000_000_000, current_assets: 2400_000_000, current_liabilities: 1200_000_000, cash: 850_000_000, total_debt: 900_000_000, equity: 3900_000_000, accounts_receivable: 620_000_000, inventory: 450_000_000, accounts_payable: 500_000_000, ppe_net: 2600_000_000, goodwill: 1000_000_000, shares_issued: 150_000_000 } },
-      ],
-      cash_flow: [
+      ];
+  const annualBalanceAll = [
+    { period_end: "2025-12-31", items: { total_assets: 8500_000_000, current_assets: 3500_000_000, current_liabilities: 1800_000_000, cash: 1500_000_000, total_debt: 1200_000_000, equity: 5500_000_000, accounts_receivable: 900_000_000, inventory: 600_000_000, accounts_payable: 700_000_000, ppe_net: 4000_000_000, goodwill: 1000_000_000, shares_issued: 150_000_000 } },
+    { period_end: "2024-12-31", items: { total_assets: 7500_000_000, current_assets: 3000_000_000, current_liabilities: 1500_000_000, cash: 1200_000_000, total_debt: 1000_000_000, equity: 5000_000_000, accounts_receivable: 800_000_000, inventory: 550_000_000, accounts_payable: 600_000_000, ppe_net: 3500_000_000, goodwill: 1000_000_000, shares_issued: 150_000_000 } },
+    { period_end: "2023-12-31", items: { total_assets: 6800_000_000, current_assets: 2700_000_000, current_liabilities: 1350_000_000, cash: 1000_000_000, total_debt: 900_000_000, equity: 4550_000_000, accounts_receivable: 700_000_000, inventory: 500_000_000, accounts_payable: 550_000_000, ppe_net: 3100_000_000, goodwill: 1000_000_000, shares_issued: 150_000_000 } },
+    { period_end: "2022-12-31", items: { total_assets: 6000_000_000, current_assets: 2400_000_000, current_liabilities: 1200_000_000, cash: 850_000_000, total_debt: 900_000_000, equity: 3900_000_000, accounts_receivable: 620_000_000, inventory: 450_000_000, accounts_payable: 500_000_000, ppe_net: 2600_000_000, goodwill: 1000_000_000, shares_issued: 150_000_000 } },
+  ];
+  // Sparse fixture: balance-sheet periods must align with the (short) income history.
+  const sparseYears = new Set(annualIncome.map((row) => row.period_end));
+  const annualBalance = isSparse ? annualBalanceAll.filter((row) => sparseYears.has(row.period_end)) : annualBalanceAll;
+  const annualCashFlow = isSparse
+    ? []
+    : [
         { period_end: "2025-12-31", items: { operating_cash_flow: 1800_000_000, capex: -500_000_000, free_cash_flow: 1300_000_000, da_cf: 400_000_000, change_in_wc: -100_000_000 } },
         { period_end: "2024-12-31", items: { operating_cash_flow: 1500_000_000, capex: -400_000_000, free_cash_flow: 1100_000_000, da_cf: 350_000_000, change_in_wc: -80_000_000 } },
         { period_end: "2023-12-31", items: { operating_cash_flow: 1300_000_000, capex: -350_000_000, free_cash_flow: 950_000_000, da_cf: 300_000_000, change_in_wc: -70_000_000 } },
         { period_end: "2022-12-31", items: { operating_cash_flow: 1100_000_000, capex: -300_000_000, free_cash_flow: 800_000_000, da_cf: 250_000_000, change_in_wc: -60_000_000 } },
-      ],
+      ];
+
+  const priceBase = isSparse ? 22.4 : 94.5;
+  // Price-history ramp is built at ~94.5 scale; rescale it to the ticker's price base and currency.
+  const priceFactor = (priceBase / 94.5) * scale;
+  const sparseAlerts: any[] = isSparse
+    ? [{ level: "warn", mode: "local", message: "Sparse fixture: two annual periods only; cash-flow statement and diluted EPS are unavailable and are reported as null." }]
+    : [];
+
+  return {
+    ticker: upper,
+    retrieved_at: new Date().toISOString(),
+    info: {
+      longName: identity.name,
+      shortName: listing.baseTicker,
+      exchange: listing.exchange,
+      currency,
+      sector: identity.sector,
+      industry: identity.industry,
+      country: identity.country,
+      website: identity.website,
+      sharesOutstanding: 150_000_000,
+      marketCap: scaleMoney(isSparse ? 3_360_000_000 : 12_500_000_000, scale),
+      longBusinessSummary: `${identity.business} Every figure in this profile is generated deterministically in this browser for ${upper}.`,
+      fullTimeEmployees: identity.employees,
+    },
+    annual: {
+      income_statement: annualIncome.map((row) => ({ period_end: row.period_end, items: scaleStatement(row.items, scale) })),
+      balance_sheet: annualBalance.map((row) => ({ period_end: row.period_end, items: scaleStatement(row.items, scale) })),
+      cash_flow: annualCashFlow.map((row) => ({ period_end: row.period_end, items: scaleStatement(row.items, scale) })),
     },
     quarterly: {
       income_statement: [
@@ -137,44 +344,54 @@ function mockTickerData(ticker: string) {
         { period_end: "2025-06-30", items: { revenue: 1480_000_000, cost_of_revenue: 540_000_000, gross_profit: 940_000_000, operating_expense: 490_000_000, operating_income: 450_000_000, ebit: 450_000_000, ebitda: 550_000_000, pretax_income: 440_000_000, tax_expense: 90_000_000, net_income: 350_000_000, interest_expense: 10_000_000, diluted_eps: 2.33, da: 100_000_000 } },
         { period_end: "2025-09-30", items: { revenue: 1540_000_000, cost_of_revenue: 560_000_000, gross_profit: 980_000_000, operating_expense: 510_000_000, operating_income: 470_000_000, ebit: 470_000_000, ebitda: 570_000_000, pretax_income: 460_000_000, tax_expense: 90_000_000, net_income: 370_000_000, interest_expense: 10_000_000, diluted_eps: 2.47, da: 100_000_000 } },
         { period_end: "2025-12-31", items: { revenue: 1580_000_000, cost_of_revenue: 600_000_000, gross_profit: 980_000_000, operating_expense: 520_000_000, operating_income: 460_000_000, ebit: 460_000_000, ebitda: 560_000_000, pretax_income: 440_000_000, tax_expense: 90_000_000, net_income: 350_000_000, interest_expense: 20_000_000, diluted_eps: 2.33, da: 100_000_000 } },
-      ],
+      ].map((row) => ({ period_end: row.period_end, items: scaleStatement(row.items, scale) })),
       balance_sheet: [
         { period_end: "2025-03-31", items: { total_assets: 7750_000_000, current_assets: 3125_000_000, current_liabilities: 1575_000_000, cash: 1275_000_000, total_debt: 1050_000_000, equity: 5125_000_000, accounts_receivable: 825_000_000, inventory: 562_500_000, accounts_payable: 625_000_000, ppe_net: 3625_000_000, goodwill: 1000_000_000, shares_issued: 150_000_000 } },
         { period_end: "2025-06-30", items: { total_assets: 8000_000_000, current_assets: 3250_000_000, current_liabilities: 1650_000_000, cash: 1350_000_000, total_debt: 1100_000_000, equity: 5250_000_000, accounts_receivable: 850_000_000, inventory: 575_000_000, accounts_payable: 650_000_000, ppe_net: 3750_000_000, goodwill: 1000_000_000, shares_issued: 150_000_000 } },
         { period_end: "2025-09-30", items: { total_assets: 8250_000_000, current_assets: 3375_000_000, current_liabilities: 1725_000_000, cash: 1425_000_000, total_debt: 1150_000_000, equity: 5375_000_000, accounts_receivable: 875_000_000, inventory: 587_500_000, accounts_payable: 675_000_000, ppe_net: 3875_000_000, goodwill: 1000_000_000, shares_issued: 150_000_000 } },
         { period_end: "2025-12-31", items: { total_assets: 8500_000_000, current_assets: 3500_000_000, current_liabilities: 1800_000_000, cash: 1500_000_000, total_debt: 1200_000_000, equity: 5500_000_000, accounts_receivable: 900_000_000, inventory: 600_000_000, accounts_payable: 700_000_000, ppe_net: 4000_000_000, goodwill: 1000_000_000, shares_issued: 150_000_000 } },
-      ],
-      cash_flow: [
-        { period_end: "2025-03-31", items: { operating_cash_flow: 420_000_000, capex: -120_000_000, free_cash_flow: 300_000_000, da_cf: 100_000_000, change_in_wc: -20_000_000 } },
-        { period_end: "2025-06-30", items: { operating_cash_flow: 440_000_000, capex: -120_000_000, free_cash_flow: 320_000_000, da_cf: 100_000_000, change_in_wc: -20_000_000 } },
-        { period_end: "2025-09-30", items: { operating_cash_flow: 460_000_000, capex: -130_000_000, free_cash_flow: 330_000_000, da_cf: 100_000_000, change_in_wc: -30_000_000 } },
-        { period_end: "2025-12-31", items: { operating_cash_flow: 480_000_000, capex: -130_000_000, free_cash_flow: 350_000_000, da_cf: 100_000_000, change_in_wc: -30_000_000 } },
-      ],
+      ].map((row) => ({ period_end: row.period_end, items: scaleStatement(row.items, scale) })),
+      cash_flow: isSparse
+        ? []
+        : [
+            { period_end: "2025-03-31", items: { operating_cash_flow: 420_000_000, capex: -120_000_000, free_cash_flow: 300_000_000, da_cf: 100_000_000, change_in_wc: -20_000_000 } },
+            { period_end: "2025-06-30", items: { operating_cash_flow: 440_000_000, capex: -120_000_000, free_cash_flow: 320_000_000, da_cf: 100_000_000, change_in_wc: -20_000_000 } },
+            { period_end: "2025-09-30", items: { operating_cash_flow: 460_000_000, capex: -130_000_000, free_cash_flow: 330_000_000, da_cf: 100_000_000, change_in_wc: -30_000_000 } },
+            { period_end: "2025-12-31", items: { operating_cash_flow: 480_000_000, capex: -130_000_000, free_cash_flow: 350_000_000, da_cf: 100_000_000, change_in_wc: -30_000_000 } },
+          ].map((row) => ({ period_end: row.period_end, items: scaleStatement(row.items, scale) })),
     },
     price_history: Array.from({ length: 90 }, (_, i) => ({
       date: new Date(Date.now() - (89 - i) * 86400000).toISOString().split("T")[0],
-      open: 80 + i * 0.15,
-      high: 82 + i * 0.15,
-      low: 79 + i * 0.15,
-      close: 81 + i * 0.15,
+      open: scaleMoney(80 + i * 0.15, priceFactor),
+      high: scaleMoney(82 + i * 0.15, priceFactor),
+      low: scaleMoney(79 + i * 0.15, priceFactor),
+      close: scaleMoney(81 + i * 0.15, priceFactor),
       volume: 2_000_000,
     })),
     price_summary: {
-      last_close: 94.50,
+      last_close: scaleMoney(priceBase, scale),
       last_date: new Date().toISOString().split("T")[0],
-      previous_close: 93.80,
-      change: 0.70,
-      change_pct: 0.0075,
-      high_52w: 105.00,
-      low_52w: 65.00,
+      previous_close: scaleMoney(isSparse ? 22.1 : 93.8, scale),
+      change: scaleMoney(isSparse ? 0.3 : 0.7, scale),
+      change_pct: isSparse ? 0.0136 : 0.0075,
+      high_52w: isSparse ? null : scaleMoney(105, scale),
+      low_52w: scaleMoney(isSparse ? 14.2 : 65, scale),
       avg_volume_3m: 2_100_000,
     },
-    dividends: [
-      { date: "2025-06-15", value: 0.50 },
-      { date: "2025-12-15", value: 0.55 },
-    ],
+    dividends: isSparse
+      ? []
+      : [
+          { date: "2025-06-15", value: scaleMoney(0.5, scale) },
+          { date: "2025-12-15", value: scaleMoney(0.55, scale) },
+        ],
     splits: [],
-    data_quality: { alerts: [{ level: "info", mode: "local", message: `Local engine: fully operational financial profile for ${upper}` }] },
+    data_quality: {
+      alerts: [
+        { level: "info", mode: "local", message: `Local engine: deterministic ${currency} financial profile for ${upper} on ${listing.venueLabel}` },
+        { level: "warn", mode: "local", message: "All figures are synthetic demonstration data, not company-reported financials." },
+        ...sparseAlerts,
+      ],
+    },
   };
 }
 
@@ -261,8 +478,8 @@ function resolveAssumptions(input: any): Record<string, number> {
 
 function buildForecast(ticker: string, yearsInput: unknown, assumptionsInput: any) {
   const fixture = mockTickerData(ticker);
-  const baseIncome = fixture.annual.income_statement[0].items;
-  const baseBalance = fixture.annual.balance_sheet[0].items;
+  const baseIncome: any = fixture.annual.income_statement[0].items;
+  const baseBalance: any = fixture.annual.balance_sheet[0].items;
   const years = Math.max(1, Math.min(25, Math.round(numberOr(yearsInput, 5))));
   const a = resolveAssumptions(assumptionsInput);
 
@@ -677,44 +894,21 @@ function waccCompute(body: any) {
 }
 
 function mockAiResearch(body: any) {
-  const ticker = (body?.ticker || "DEMO").toUpperCase();
-  const forecast = buildForecast(ticker, 5, {});
-  const valuation = dcfCompute({
-    fcf: forecast.periods.map((period: any) => period.fcf),
-    wacc: 0.085,
-    terminal_growth: 0.025,
-    net_debt: -300_000_000,
-    shares: 150_000_000,
-  }) as any;
-  const targetPrice = Number.isFinite(valuation.value_per_share) ? valuation.value_per_share : null;
-
-  return {
-    report: {
-      title: `${ticker} Institutional Equity Research Note`,
-      executive_summary: `${ticker} compounds revenue at ${forecast.summary.revenue_cagr * 100.0}% on our base-case drivers with a ${forecast.periods[0].ebitda / forecast.periods[0].revenue * 100.0}% EBITDA margin, converting a large share of earnings into free cash flow. Our DCF implies ${targetPrice !== null ? targetPrice.toFixed(2) : "an undetermined"} per share against the current quote.`,
-      business_overview: `${ticker} operates as a scaled enterprise supplier with recurring demand, a net-cash balance sheet and disciplined capital returns. The synthetic local-engine fixture is used here so the workflow stays fully operational without a server.`,
-      financial_performance: `Revenue grew from ${forecast.summary.base_revenue / 1e9}B to ${forecast.periods[forecast.periods.length - 1].revenue / 1e9}B across the forecast horizon while operating margin held near ${(forecast.periods[0].gross_profit / forecast.periods[0].revenue - 0.3333) * 100.0}%. Balance-sheet identity checks stay clean in every projected year.`,
-      strengths: [
-        "Pricing power supporting a gross margin above 60%.",
-        "Free cash flow conversion with a net-cash balance sheet.",
-        "Forecast model balances assets against liabilities and equity in every year.",
-      ],
-      risks: [
-        "Terminal growth assumptions drive a large share of intrinsic value.",
-        "Input costs and pricing pressure could compress gross margin.",
-        "The local fixture is synthetic and must not be read as company data.",
-      ],
-      catalysts: [
-        "Operating leverage as revenue scales against a fixed cost base.",
-        "Buybacks or dividends funded by free cash flow.",
-        "Multiple re-rating if growth outruns the base case.",
-      ],
-      valuation_view: `Discounting the base-case free cash flow at 8.5% with 2.5% terminal growth yields ${targetPrice !== null ? targetPrice.toFixed(2) : "n/a"} per share. Sensitivity across ±2% WACC and ±1% terminal growth brackets that range.`,
-      conclusion: "Constructive on the fundamental setup; position sizing should reflect the terminal-value dependence of the estimate.",
-      disclaimer: "Generated by the deterministic APEX engine with AI-assisted narrative. Research software, not investment advice.",
-    },
-    payload: forecast,
+  const inputs = reportInputs({ ...body, years: numberOr(body?.years, 5) });
+  const artifacts = reportArtifacts(inputs);
+  // Flatten structured risks/catalysts to strings for the legacy company-page UI.
+  const narrative = artifacts.narrative;
+  const flatReport = {
+    ...narrative,
+    risks: (narrative.risks || []).map((r: any) =>
+      typeof r === "string" ? r : `${r.title}: ${r.exposure}${r.monitoring_metric ? ` Monitoring: ${r.monitoring_metric}.` : ""}`,
+    ),
+    catalysts: (narrative.catalysts || []).map((c: any) =>
+      typeof c === "string" ? c : `${c.title}: ${c.event} (${c.timing})`,
+    ),
+    rating: artifacts.rating,
   };
+  return { report: flatReport, payload: artifacts.forecast };
 }
 
 // --- RESEARCH REPORT PIPELINE (local) ---
@@ -761,13 +955,19 @@ function reportInputs(body: any) {
 
 function reportArtifacts(inputs: any) {
   const ticker = inputs.ticker;
+  const listing = parseListing(ticker);
   const company = handleClientMock(`/api/company/${ticker}`);
   const normalized = mockTickerData(ticker);
-  const actuals = buildMetrics(normalized)[0] || null;
+  const metricsHistory = buildMetrics(normalized);
+  const actuals = metricsHistory[0] || null;
   const forecast = buildForecast(ticker, inputs.years, {});
   const flows: number[] = forecast.periods.map((period: any) => period.fcf);
   const netDebt = isFiniteNumber(actuals?.net_debt) ? actuals.net_debt : 0;
   const shares = numberOr(normalized.info?.sharesOutstanding, 0) || forecast.periods[0]?.shares || 1;
+  const price = numberOr(normalized.price_summary?.last_close, 0);
+
+  // WACC build-up via CAPM with documented defaults; inputs.wacc is the applied discount rate.
+  const waccComponents = waccCompute({}) as any;
 
   const dcfBody: any = {
     fcf: flows,
@@ -779,6 +979,22 @@ function reportArtifacts(inputs: any) {
   if (inputs.terminal_mode === "multiple") dcfBody.exit_multiple = inputs.exit_multiple;
   else dcfBody.terminal_growth = inputs.terminal_growth;
   const dcf = dcfCompute(dcfBody) as any;
+  if (!dcf.error) {
+    dcf.wacc_components = {
+      risk_free: 0.04,
+      beta: 1.0,
+      market_premium: 0.055,
+      cost_of_equity: waccComponents.cost_of_equity,
+      cost_of_debt: 0.06,
+      tax_rate: 0.25,
+      after_tax_cost_of_debt: waccComponents.after_tax_cost_of_debt,
+      equity_weight: 0.7,
+      debt_weight: 0.3,
+      capm_wacc: waccComponents.wacc,
+      applied_wacc: inputs.wacc,
+      note: "CAPM build-up uses documented engine defaults (risk-free 4%, beta 1.0, ERP 5.5%, cost of debt 6%, tax 25%, 70/30 weights). The applied WACC is the user input used to discount cash flows.",
+    };
+  }
 
   const sensitivity = sensitivityCompute({
     fcf: flows,
@@ -790,23 +1006,111 @@ function reportArtifacts(inputs: any) {
     mode: inputs.terminal_mode,
   }) as any;
 
-  const narrative = mockAiResearch({ ticker });
+  const reverseDcf = price > 0 ? (reverseDcfCompute({ ...dcfBody, current_price: price }) as any) : { error: "No market price available for reverse DCF." };
+
+  // Provenance + integrity gates
+  const issues = validateIdentity({ ticker, company, normalized, priceSummary: normalized.price_summary });
+  const gates = integrityGates(issues);
+  const provenance = buildProvenanceRows({
+    ticker,
+    listing,
+    normalized,
+    actuals,
+    forecast,
+    dcf: dcf.error ? null : dcf,
+    assumptions: forecast.assumptions,
+    retrievedAt: normalized.retrieved_at,
+    isSynthetic: true,
+  });
+  const sector = sectorProfile(company.sector, company.industry);
+
+  // Rating resolution — integrity gates block rating/target on failure.
+  const modelTarget = isFiniteNumber(dcf.value_per_share) ? dcf.value_per_share : null;
+  const manualCode = RATING_CODES.includes(inputs.manual_rating) ? inputs.manual_rating : "";
+  let target = inputs.manual_target_price ?? modelTarget;
+  let upside = target && price > 0 ? target / price - 1 : null;
+  let rating: string;
+  if (!gates.ratingAllowed) {
+    rating = "NOT RATED";
+    target = null;
+    upside = null;
+  } else if (inputs.rating_mode === "manual" && manualCode) {
+    rating = manualCode;
+  } else {
+    rating = autoRating(upside);
+  }
+  const ratingBlocked = !gates.ratingAllowed;
+  const ratingBlockReason = ratingBlocked ? gates.blockers.map((b) => b.message).join(" ") : null;
+
+  const narrative = buildDeterministicNarrative({
+    ticker,
+    companyName: company.name || ticker,
+    exchange: company.exchange || listing.exchange,
+    sector: company.sector || "",
+    industry: company.industry || "",
+    currency: company.currency || listing.currency,
+    marketCap: isFiniteNumber(company.market_cap) ? company.market_cap : null,
+    employees: isFiniteNumber(normalized.info?.fullTimeEmployees) ? normalized.info.fullTimeEmployees : null,
+    businessSummary: company.summary || "",
+    price: {
+      lastClose: isFiniteNumber(normalized.price_summary?.last_close) ? normalized.price_summary.last_close : null,
+      low52w: isFiniteNumber(normalized.price_summary?.low_52w) ? normalized.price_summary.low_52w : null,
+      high52w: isFiniteNumber(normalized.price_summary?.high_52w) ? normalized.price_summary.high_52w : null,
+    },
+    actuals,
+    history: metricsHistory,
+    forecast: { periods: forecast.periods, summary: forecast.summary, assumptions: forecast.assumptions },
+    dcf: dcf.error ? null : dcf,
+    sensitivity: sensitivity.error ? null : sensitivity,
+    reverseDcf: reverseDcf.error ? null : reverseDcf,
+    rating,
+    target,
+    upside,
+    ratingBlocked,
+    ratingBlockReason,
+    horizon: inputs.horizon,
+    sectorProfile: sector,
+    isSynthetic: true,
+  });
+
   const payload: ExportPayload = {
     ticker,
+    title: "",
+    generated_at: new Date(inputs.report_date || Date.now()).toISOString(),
+    company,
+    listing,
+    actuals,
+    history: metricsHistory,
+    annual: normalized.annual,
     forecast,
     dcf,
     sensitivity,
-    report: narrative.report,
-    research_payload: narrative.payload,
+    reverse_dcf: reverseDcf,
+    report: narrative,
+    rating,
+    target_price: target,
+    current_price: price > 0 ? price : null,
+    upside,
+    horizon: inputs.horizon,
+    report_date: inputs.report_date,
+    peers: inputs.peers,
     assumptions: forecast.assumptions,
     data_quality: normalized.data_quality,
-    company,
-    actuals,
     price_summary: normalized.price_summary,
-    generated_at: new Date(inputs.report_date || Date.now()).toISOString(),
+    provenance,
+    validation: issues,
+    integrity: {
+      ratingAllowed: gates.ratingAllowed,
+      targetAllowed: gates.targetAllowed,
+      blockers: gates.blockers,
+      warnings: gates.warnings,
+    },
+    sector_profile: sector,
+    is_synthetic: true,
+    currency: company.currency || listing.currency,
   };
 
-  return { company, forecast, dcf, sensitivity, payload };
+  return { company, normalized, listing, forecast, dcf, sensitivity, reverseDcf, issues, gates, provenance, sector, narrative, payload, actuals, metricsHistory, rating, target, upside, ratingBlocked, ratingBlockReason, price };
 }
 
 function autoRating(upside: number | null): string {
@@ -816,32 +1120,38 @@ function autoRating(upside: number | null): string {
   return "SELL";
 }
 
-function buildReportRecord(inputs: any, previousVersionId: number | null = null) {
-  const artifacts = reportArtifacts(inputs);
-  const company: any = artifacts.company || {};
-  const dcf: any = artifacts.dcf || {};
-  const forecast: any = artifacts.forecast || {};
-  const price = numberOr(company?.price_summary?.last_close, 0);
-  const modelTarget = isFiniteNumber(dcf.value_per_share) ? dcf.value_per_share : null;
-  const target = inputs.manual_target_price ?? modelTarget;
-  const upside = target && price > 0 ? target / price - 1 : null;
-  const manualCode = RATING_CODES.includes(inputs.manual_rating) ? inputs.manual_rating : "";
-  const rating = inputs.rating_mode === "manual" && manualCode ? manualCode : autoRating(upside);
+function finishReportRecord(
+  artifacts: ReturnType<typeof reportArtifacts>,
+  inputs: any,
+  previousVersionId: number | null,
+  narrativeSource: string,
+  extraWarnings: string[],
+) {
+  const { company, dcf, forecast, payload, rating, target, upside, price, gates } = artifacts;
 
   const warnings = [
-    "Local engine: all figures come from the deterministic in-browser model.",
+    gates.ratingAllowed
+      ? "Local engine: all figures come from the deterministic in-browser model."
+      : `Rating and target withheld: ${gates.blockers.map((b) => b.message).join(" ")}`,
   ];
   if (Array.isArray(dcf.warnings)) warnings.push(...dcf.warnings);
   if (inputs.force_refresh) {
     warnings.push("Force refresh was requested; the local engine rebuilt every figure from its own drivers.");
   }
+  warnings.push(...extraWarnings);
 
-  const title = inputs.title || `${inputs.ticker} · ${rating} · ${inputs.horizon} outlook`;
-  artifacts.payload.title = title;
-  artifacts.payload.generated_at = new Date(inputs.report_date || Date.now()).toISOString();
+  const title = inputs.title || (rating === "NOT RATED"
+    ? `${inputs.ticker} · Preliminary note (not rated) · ${inputs.horizon} outlook`
+    : `${inputs.ticker} · ${rating} · ${inputs.horizon} outlook`);
+  payload.title = title;
+  payload.rating = rating;
+  payload.target_price = target;
+  payload.upside = upside;
+  payload.current_price = price > 0 ? price : null;
 
-  const meta = buildResearchPdfMeta(artifacts.payload);
-  const pdfQa = [
+  const meta = buildResearchPdfMeta(payload);
+  const layoutIssues = inspectPdfBytes(meta.bytes);
+  const pdfQa: any[] = [
     {
       level: "info",
       check: "pdf.render",
@@ -868,6 +1178,7 @@ function buildReportRecord(inputs: any, previousVersionId: number | null = null)
         ? `Peer set recorded: ${inputs.peers.join(", ")}`
         : "No peer set supplied; comparables section omitted.",
     },
+    ...layoutIssues,
   ];
 
   const rows = getLocalReports();
@@ -879,14 +1190,15 @@ function buildReportRecord(inputs: any, previousVersionId: number | null = null)
     company_name: company.name || inputs.ticker,
     title,
     report_type: inputs.report_type,
-    status: "complete",
+    status: gates.ratingAllowed ? "complete" : "preliminary",
     rating,
     target_price: target,
     current_price: price > 0 ? price : null,
     upside,
     currency: company.currency || "USD",
     horizon: inputs.horizon,
-    ai_model: inputs.ai_model,
+    ai_model: narrativeSource.startsWith("provider:") ? narrativeSource.slice("provider:".length) : null,
+    narrative_source: narrativeSource,
     page_count: meta.pages,
     pdf_size: meta.size,
     previous_version_id: previousVersionId,
@@ -896,7 +1208,47 @@ function buildReportRecord(inputs: any, previousVersionId: number | null = null)
     report_date: inputs.report_date,
     peers: inputs.peers,
     inputs,
+    narrative: payload.report,
   };
+}
+
+async function buildReportRecordAsync(inputs: any, previousVersionId: number | null = null) {
+  const artifacts = reportArtifacts(inputs);
+  let narrativeSource = "deterministic-engine";
+  const extraWarnings: string[] = [];
+
+  if (inputs.ai_model) {
+    const models = getLocalModels();
+    const model = models.find((row: any) => row.name === inputs.ai_model);
+    if (model?.api_key) {
+      const providerResult = await tryProviderNarrative(
+        { name: model.name, provider: model.provider, base_url: model.base_url, api_key: model.api_key, model: model.model },
+        {
+          ticker: inputs.ticker,
+          company: artifacts.company.name,
+          currency: artifacts.payload.currency,
+          rating: artifacts.rating,
+          target: artifacts.target,
+          upside: artifacts.upside,
+          forecast_summary: artifacts.forecast.summary,
+          dcf: { wacc: artifacts.dcf.wacc, enterprise_value: artifacts.dcf.enterprise_value, value_per_share: artifacts.dcf.value_per_share },
+          actuals: artifacts.actuals,
+          sector: artifacts.payload.sector_profile,
+        },
+      );
+      if (providerResult?.narrative) {
+        artifacts.payload.report = providerResult.narrative;
+        artifacts.narrative = providerResult.narrative;
+        narrativeSource = providerResult.narrative.narrative_source;
+      } else {
+        extraWarnings.push(`AI provider narrative was unavailable or failed schema validation; deterministic fallback used.`);
+      }
+    } else {
+      extraWarnings.push(`AI model "${inputs.ai_model}" has no API key configured; deterministic narrative used.`);
+    }
+  }
+
+  return finishReportRecord(artifacts, inputs, previousVersionId, narrativeSource, extraWarnings);
 }
 
 function pctValue(value: unknown): string {
@@ -908,6 +1260,10 @@ function reportExportPayload(record: any): ExportPayload {
   const artifacts = reportArtifacts(inputs);
   if (record?.title) artifacts.payload.title = record.title;
   if (record?.created_at) artifacts.payload.generated_at = record.created_at;
+  if (record?.narrative) artifacts.payload.report = record.narrative;
+  if (record?.rating) artifacts.payload.rating = record.rating;
+  if (record?.target_price != null) artifacts.payload.target_price = record.target_price;
+  if (record?.upside != null) artifacts.payload.upside = record.upside;
   return artifacts.payload;
 }
 
@@ -1099,6 +1455,7 @@ function handleClientMock(path: string, init?: RequestInit): any {
       website: info.website,
       summary: info.longBusinessSummary,
       market_cap: info.marketCap,
+      employees: info.fullTimeEmployees,
       last_data_date: income[0]?.period_end || "2025-12-31",
       price_summary: normalized.price_summary,
       retrieved_at: normalized.retrieved_at,
@@ -1156,11 +1513,12 @@ function handleClientMock(path: string, init?: RequestInit): any {
     ];
   }
   if (cleanPath === "/api/research/generate" && method === "POST") {
-    const record = buildReportRecord(reportInputs(body || {}));
-    const rows = getLocalReports();
-    rows.unshift(record);
-    saveLocalReports(rows);
-    return record;
+    return buildReportRecordAsync(reportInputs(body || {})).then((record) => {
+      const rows = getLocalReports();
+      rows.unshift(record);
+      saveLocalReports(rows);
+      return record;
+    });
   }
 
   if (cleanPath === "/api/research/reports" && method === "GET") {
@@ -1179,10 +1537,11 @@ function handleClientMock(path: string, init?: RequestInit): any {
     if (!record) throw new ApiError(404, `Report ${id} was not found.`);
 
     if (action === "rebuild" && method === "POST") {
-      const fresh = buildReportRecord(reportInputs(record.inputs), record.id);
-      rows.unshift(fresh);
-      saveLocalReports(rows);
-      return fresh;
+      return buildReportRecordAsync(reportInputs(record.inputs), record.id).then((fresh) => {
+        rows.unshift(fresh);
+        saveLocalReports(rows);
+        return fresh;
+      });
     }
     if (action === "preview" && method === "GET") return buildReportPreview(record);
     if (method === "DELETE") {
