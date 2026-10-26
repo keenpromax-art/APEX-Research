@@ -85,6 +85,7 @@ export type NarrativeContext = {
     periods: Record<string, any>[];
     summary: Record<string, any>;
     assumptions: Record<string, any>;
+    assumption_sources?: Record<string, any>;
   } | null;
   dcf: Record<string, any> | null;
   sensitivity: Record<string, any> | null;
@@ -499,8 +500,10 @@ export function buildDeterministicNarrative(ctx: NarrativeContext): Narrative {
     qualityParts.push(`Valuation warnings: ${dcf.warnings.join(" ")}`);
   }
   if (Object.keys(assumptions).length) {
+    const driverSources = forecast?.assumption_sources || {};
+    const derivedCount = Object.values(driverSources).filter((source) => String(source).startsWith("Derived")).length;
     qualityParts.push(
-      `Principal assumptions: ${Object.entries(assumptions)
+      `Principal assumptions${derivedCount ? ` (${derivedCount} derived from reported history)` : ""}: ${Object.entries(assumptions)
         .filter(([, value]) => isNum(value))
         .slice(0, 6)
         .map(([key, value]) => `${key.replaceAll("_", " ")} ${pctStr(value, 2)}`)

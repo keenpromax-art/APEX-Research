@@ -263,8 +263,12 @@ export type ProvenanceContext = {
   forecast: Record<string, any> | null;
   dcf: Record<string, any> | null;
   assumptions: Record<string, any> | null;
+  /** Per-driver source labels (user input / derived from reported history / engine default). */
+  assumptionSources?: Record<string, any> | null;
   retrievedAt: string | null;
   isSynthetic: boolean;
+  /** Label for provider-sourced rows, e.g. "Yahoo Finance (retrieved ...)" */
+  source?: string;
 };
 
 function statusFor(isSynthetic: boolean, kind: ProvenanceStatus): ProvenanceStatus {
@@ -277,7 +281,7 @@ export function buildProvenanceRows(ctx: ProvenanceContext): ProvenanceRow[] {
   const rows: ProvenanceRow[] = [];
   const source = ctx.isSynthetic
     ? "APEX local deterministic fixture (synthetic)"
-    : "Configured market-data provider";
+    : ctx.source || "Configured market-data provider";
   const retrieved = ctx.retrievedAt ?? null;
   const currency = ctx.listing.currency;
 
@@ -317,17 +321,19 @@ export function buildProvenanceRows(ctx: ProvenanceContext): ProvenanceRow[] {
   add("Shares outstanding", ctx.normalized?.info?.sharesOutstanding, "shares", "actual", null);
 
   const assumptions = ctx.assumptions || {};
+  const assumptionSources = ctx.assumptionSources || {};
   Object.entries(assumptions).forEach(([key, value]) => {
     if (!isNum(value)) return;
+    const sourceLabel = String(assumptionSources[key] || "User / engine default (documented assumption)");
     rows.push({
       metric: `Assumption: ${key.replaceAll("_", " ")}`,
       value_label: String(Number(value.toPrecision(6))),
       unit: key.includes("rate") || key.includes("margin") || key.includes("pct") || key.includes("growth") || key.includes("dilution") || key.includes("sweep") || key.includes("payout") ? "% (decimal)" : "scalar",
       currency: null,
       period: "forecast horizon",
-      source: "User / engine default (documented assumption)",
+      source: sourceLabel,
       retrieved_at: null,
-      status: "assumption",
+      status: sourceLabel.startsWith("Derived") ? "derived" : "assumption",
     });
   });
 

@@ -26,6 +26,7 @@ export type ExportPayload = {
   report_date?: string | null;
   peers?: string[] | null;
   assumptions?: AnyRecord | null;
+  assumption_sources?: AnyRecord | null;
   data_quality?: AnyRecord | null;
   price_summary?: AnyRecord | null;
   provenance?: AnyRecord[] | null;
@@ -33,6 +34,8 @@ export type ExportPayload = {
   integrity?: AnyRecord | null;
   sector_profile?: AnyRecord | null;
   is_synthetic?: boolean;
+  data_source?: string | null;
+  retrieved_at?: string | null;
   currency?: string | null;
   research_payload?: AnyRecord | null;
 };
@@ -104,11 +107,16 @@ function sectionA_cover(doc: PdfDocument, payload: ExportPayload) {
     `${listing.venueLabel || company.exchange || "Listing venue"}  ·  ${currency}  ·  ${payload.horizon || "12M"} outlook  ·  report date ${payload.report_date || "—"}`,
     { size: 9, gray: 0.45, gap: 2 },
   );
-  doc.text(`Generated ${localDate(payload.generated_at || new Date().toISOString())} — deterministic client engine`, {
-    size: 8.5,
-    gray: 0.5,
-    gap: 8,
-  });
+  doc.text(
+    synthetic
+      ? `Generated ${localDate(payload.generated_at || new Date().toISOString())} — deterministic client engine`
+      : `Generated ${localDate(payload.generated_at || new Date().toISOString())} — market data: ${payload.data_source || "provider"} · retrieved ${localDate(payload.retrieved_at || payload.generated_at || new Date().toISOString())}`,
+    {
+      size: 8.5,
+      gray: 0.5,
+      gap: 8,
+    },
+  );
   doc.rule(8, RULE_GRAY);
 
   if (synthetic) {
@@ -210,6 +218,10 @@ function sectionD_financials(doc: PdfDocument, payload: ExportPayload) {
   const annual = payload.annual || {};
   const history: AnyRecord[] = Array.isArray(payload.history) ? payload.history : [];
   const currency = payload.currency || "USD";
+  const sourceNote =
+    payload.is_synthetic !== false
+      ? `All figures in ${currency}. Synthetic local fixture.`
+      : `All figures in ${currency}. Source: ${payload.data_source || "provider"}, retrieved ${payload.retrieved_at ? localDate(payload.retrieved_at) : "recently"}.`;
 
   doc.heading("Financial Statements — Reported History");
 
@@ -225,7 +237,7 @@ function sectionD_financials(doc: PdfDocument, payload: ExportPayload) {
       { key: "net_income", label: "Net income", x: 415, align: "right" as const, format: (r: AnyRecord) => cellMoney(r.items?.net_income) },
       { key: "eps", label: "EPS", x: CONTENT_WIDTH, align: "right" as const, format: (r: AnyRecord) => (isNum(r.items?.diluted_eps) ? num(r.items.diluted_eps) : "—"), color: (_r: AnyRecord) => undefined },
     ];
-    doc.dataTable(incomeCols, income, { fontSize: 8, headerFontSize: 7, sourceNote: `All figures in ${currency}. Synthetic local fixture.` });
+    doc.dataTable(incomeCols, income, { fontSize: 8, headerFontSize: 7, sourceNote });
   }
 
   const balance: AnyRecord[] = Array.isArray(annual.balance_sheet) ? annual.balance_sheet : [];
@@ -239,7 +251,7 @@ function sectionD_financials(doc: PdfDocument, payload: ExportPayload) {
       { key: "equity", label: "Equity", x: 330, align: "right" as const, format: (r: AnyRecord) => cellMoney(r.items?.equity) },
       { key: "net_debt", label: "Net debt", x: CONTENT_WIDTH, align: "right" as const, format: (r: AnyRecord) => (isNum(r.items?.total_debt) ? cellMoney(r.items.total_debt - (r.items.cash ?? 0)) : "—") },
     ];
-    doc.dataTable(balanceCols, balance, { fontSize: 8, headerFontSize: 7, sourceNote: `All figures in ${currency}. Synthetic local fixture.` });
+    doc.dataTable(balanceCols, balance, { fontSize: 8, headerFontSize: 7, sourceNote });
   }
 
   const cashflow: AnyRecord[] = Array.isArray(annual.cash_flow) ? annual.cash_flow : [];
@@ -251,7 +263,7 @@ function sectionD_financials(doc: PdfDocument, payload: ExportPayload) {
       { key: "capex", label: "Capex", x: 220, align: "right" as const, format: (r: AnyRecord) => cellMoney(r.items?.capex) },
       { key: "fcf", label: "Free cash flow", x: CONTENT_WIDTH, align: "right" as const, format: (r: AnyRecord) => cellMoney(r.items?.free_cash_flow), color: (r: AnyRecord) => trendColor(r.items?.free_cash_flow) },
     ];
-    doc.dataTable(cfCols, cashflow, { fontSize: 8, headerFontSize: 7, sourceNote: `All figures in ${currency}. Synthetic local fixture.` });
+    doc.dataTable(cfCols, cashflow, { fontSize: 8, headerFontSize: 7, sourceNote });
   } else {
     doc.space(4).callout(
       "Cash-flow statement unavailable",
@@ -328,6 +340,16 @@ function sectionE_forecast(doc: PdfDocument, payload: ExportPayload) {
     if (!isNum(value)) return;
     pair(doc, humanize(key), pct(value, 2));
   });
+  const driverSources = payload.assumption_sources || forecast?.assumption_sources || null;
+  if (driverSources) {
+    const derivedCount = Object.values(driverSources as AnyRecord).filter((source) => String(source).startsWith("Derived")).length;
+    doc.text(
+      derivedCount
+        ? `${derivedCount} of ${Object.keys(driverSources as AnyRecord).length} drivers are derived from reported history; the remainder are documented engine defaults or user inputs (per-driver sources in the provenance table).`
+        : "Drivers are documented engine defaults or user inputs (per-driver sources in the provenance table).",
+      { size: 8, gray: 0.35, gap: 3 },
+    );
+  }
 
   // Forecast revenue/EBITDA bar chart.
   const labels = periods.map((period) => `Y${isNum(period.year) ? Math.round(period.year) : label(period.year)}`);
@@ -786,6 +808,8 @@ export function buildResearchXlsx(payload: ExportPayload): Blob {
       ["Target price", payload?.target_price ?? ""],
       ["Upside", payload?.upside ?? ""],
       ["Synthetic fixture", payload?.is_synthetic === false ? "no" : "yes"],
+      ["Data source", payload?.data_source || "APEX local deterministic fixture"],
+      ["Retrieved", payload?.retrieved_at || ""],
       [],
       ["Latest revenue", actuals?.revenue ?? ""],
       ["Latest net margin", actuals?.net_margin ?? ""],
@@ -822,7 +846,18 @@ export function buildResearchXlsx(payload: ExportPayload): Blob {
 
   const assumptions = payload?.assumptions || forecast?.assumptions || null;
   if (assumptions) {
-    sheets.push({ name: "Drivers", rows: [["Driver", "Value"], ...keyValueRows(assumptions)] });
+    const driverSources = (payload?.assumption_sources || forecast?.assumption_sources || {}) as AnyRecord;
+    const rows: SheetValue[][] = [
+      ["Driver", "Value", "Source"],
+      ...Object.entries(assumptions as AnyRecord)
+        .filter(([, value]) => typeof value !== "object" || value === null)
+        .map(([key, value]) => [
+          humanize(String(key)),
+          value as SheetValue,
+          String(driverSources[key] || "Engine default (documented assumption)"),
+        ]),
+    ];
+    sheets.push({ name: "Drivers", rows });
   }
 
   if (dcf) {

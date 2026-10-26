@@ -10,6 +10,7 @@ import {
   buildDeterministicNarrative,
   tryProviderNarrative,
 } from "./narrative";
+import { fetchTickerFixture } from "./marketData";
 
 export class ApiError extends Error {
   status: number;
@@ -319,6 +320,7 @@ function mockTickerData(ticker: string) {
   return {
     ticker: upper,
     retrieved_at: new Date().toISOString(),
+    is_synthetic: true,
     info: {
       longName: identity.name,
       shortName: listing.baseTicker,
@@ -395,6 +397,72 @@ function mockTickerData(ticker: string) {
   };
 }
 
+function syntheticFixture(ticker: string, error: string | null) {
+  const fixture = mockTickerData(ticker);
+  if (error) {
+    fixture.data_quality.alerts.push({
+      level: "warn",
+      mode: "local",
+      message: `Market-data provider fetch failed (${error}); this synthetic demo fixture was used instead. Figures are fabricated and are not for investment use.`,
+    });
+  }
+  return fixture;
+}
+
+async function resolveFixture(
+  tickerInput: string,
+  force = false,
+): Promise<{ fixture: any; origin: string; error: string | null }> {
+  const ticker = String(tickerInput || "DEMO").trim().toUpperCase() || "DEMO";
+  if (parseListing(ticker).isDemo) {
+    return { fixture: mockTickerData(ticker), origin: "synthetic", error: null };
+  }
+  try {
+    const { result, error } = await fetchTickerFixture(ticker, force);
+    if (!result) return { fixture: syntheticFixture(ticker, error), origin: "synthetic", error };
+    const alerts = [...(result.fixture.data_quality?.alerts || [])];
+    if (error) {
+      alerts.push({
+        level: "warn",
+        mode: "cache",
+        message: `Provider refresh failed (${error}); showing provider data retrieved at ${result.fetchedAt}.`,
+      });
+    }
+    return {
+      fixture: { ...result.fixture, ticker, data_quality: { ...result.fixture.data_quality, alerts } },
+      origin: result.origin,
+      error,
+    };
+  } catch (fetchError) {
+    const error = getErrorMessage(fetchError);
+    return { fixture: syntheticFixture(ticker, error), origin: "synthetic", error };
+  }
+}
+
+function companySummary(fixture: any) {
+  const info = fixture?.info || {};
+  const income = fixture?.annual?.income_statement || [];
+  return {
+    ticker: String(fixture?.ticker || "DEMO").toUpperCase(),
+    name: info.longName,
+    exchange: info.exchange,
+    currency: info.currency,
+    sector: info.sector,
+    industry: info.industry,
+    country: info.country,
+    website: info.website,
+    summary: info.longBusinessSummary,
+    market_cap: info.marketCap,
+    employees: info.fullTimeEmployees,
+    last_data_date: income[0]?.period_end || null,
+    price_summary: fixture?.price_summary,
+    retrieved_at: fixture?.retrieved_at,
+    demo: fixture?.is_synthetic !== false,
+    provider: fixture?.provider || null,
+    data_quality: fixture?.data_quality,
+  };
+}
+
 function buildMetrics(normalized: any) {
   const incomeRows: any[] = normalized?.annual?.income_statement || [];
   const balanceByPeriod = new Map<string, any>(
@@ -460,8 +528,111 @@ const DEFAULT_ASSUMPTIONS: Record<string, number> = {
   share_dilution: 0,
 };
 
-function resolveAssumptions(input: any): Record<string, number> {
-  const resolved: Record<string, number> = { ...DEFAULT_ASSUMPTIONS };
+/**
+ * Derive forecast drivers from reported history so the projection reflects the
+ * company's own economics instead of generic engine defaults. Only drivers with
+ * reported inputs are derived; every derived value records where it came from.
+ */
+function deriveAssumptions(fixture: any): { values: Record<string, number>; sources: Record<string, string> } {
+  const values: Record<string, number> = {};
+  const sources: Record<string, string> = {};
+  const income: any[] = fixture?.annual?.income_statement || [];
+  if (!income.length || !income[0].period_end) return { values, sources };
+  const latestDate = String(income[0].period_end);
+  const latest: any = income[0].items || {};
+  const balance = (fixture?.annual?.balance_sheet || []).find((row: any) => String(row.period_end) === latestDate)?.items || null;
+  const cashFlow = (fixture?.annual?.cash_flow || []).find((row: any) => String(row.period_end) === latestDate)?.items || null;
+  const revenue = latest.revenue;
+  if (!isFiniteNumber(revenue) || revenue <= 0) return { values, sources };
+  const ratio = (num: unknown, den: unknown): number | null =>
+    isFiniteNumber(num) && isFiniteNumber(den) && den !== 0 ? num / den : null;
+  const set = (key: string, value: number, note: string) => {
+    values[key] = value;
+    sources[key] = note;
+  };
+  const ended = `reported period ended ${latestDate}`;
+
+  const dated = income.filter((row: any) => row.period_end && isFiniteNumber(row.items?.revenue) && row.items.revenue > 0);
+  if (dated.length >= 2) {
+    const firstYear = Number(String(dated[dated.length - 1].period_end).slice(0, 4));
+    const lastYear = Number(String(dated[0].period_end).slice(0, 4));
+    const span = lastYear - firstYear;
+    if (span >= 1) {
+      const cagr = Math.pow(dated[0].items.revenue / dated[dated.length - 1].items.revenue, 1 / span) - 1;
+      if (isFiniteNumber(cagr)) {
+        set("revenue_growth", Math.min(0.5, Math.max(-0.5, cagr)), `Derived from reported revenue CAGR over ${span} year(s) ending ${String(dated[0].period_end).slice(0, 10)}`);
+      }
+    }
+  }
+
+  const opexRatio = ratio(latest.operating_expense, revenue);
+  const oiRatio = ratio(latest.operating_income, revenue) ?? ratio(latest.ebit, revenue);
+  const gmActual = ratio(latest.gross_profit, revenue);
+  let grossMargin = gmActual;
+  let opex = opexRatio;
+  if (grossMargin === null && opex !== null && oiRatio !== null) grossMargin = opex + oiRatio;
+  if (opex === null && grossMargin !== null && oiRatio !== null) opex = grossMargin - oiRatio;
+  if (grossMargin !== null && opex !== null) {
+    set("gross_margin", Math.min(1, Math.max(0, grossMargin)), `Derived from reported gross profit / revenue, ${ended}`);
+    set("opex_ratio", Math.min(1, Math.max(0, opex)), `Derived from reported operating expense / revenue, ${ended}`);
+  }
+
+  let taxRate = ratio(latest.tax_expense, latest.pretax_income);
+  let taxNote = `Derived from reported tax expense / pre-tax income, ${ended}`;
+  if (taxRate === null && isFiniteNumber(latest.pretax_income) && latest.pretax_income > 0 && isFiniteNumber(latest.net_income) && latest.net_income >= 0) {
+    taxRate = 1 - latest.net_income / latest.pretax_income;
+    taxNote = `Derived as 1 - net income / pre-tax income, ${ended}`;
+  }
+  if (taxRate !== null && taxRate >= 0) {
+    set("tax_rate", Math.min(0.6, taxRate), taxNote);
+  }
+
+  const da = isFiniteNumber(latest.da) ? latest.da : cashFlow?.da_cf;
+  const daRatio = ratio(da, revenue);
+  if (daRatio !== null && daRatio >= 0) {
+    set("da_pct", Math.min(0.3, daRatio), `Derived from reported depreciation & amortization / revenue, ${ended}`);
+  }
+
+  const capexRatio = cashFlow ? ratio(cashFlow.capex, revenue) : null;
+  if (capexRatio !== null) {
+    set("capex_pct", Math.min(0.6, Math.max(0, -capexRatio)), `Derived from reported capex / revenue, ${ended}`);
+  }
+
+  const interestRatio = balance && isFiniteNumber(balance.total_debt) && balance.total_debt > 0
+    ? ratio(latest.interest_expense, balance.total_debt)
+    : null;
+  if (interestRatio !== null && interestRatio >= 0) {
+    set("interest_rate", Math.min(0.4, interestRatio), `Derived from reported interest expense / total debt, ${ended}`);
+  }
+
+  const nwcRatio = balance
+    ? ratio(
+        (balance.current_assets ?? 0) - (balance.cash ?? 0) - (balance.current_liabilities ?? 0),
+        revenue,
+      )
+    : null;
+  if (nwcRatio !== null) {
+    set("nwc_pct", Math.min(0.33, Math.max(-0.5, nwcRatio)), `Derived from reported (current assets - cash - current liabilities) / revenue, ${ended}`);
+  }
+
+  const shareRows = (fixture?.annual?.balance_sheet || [])
+    .filter((row: any) => isFiniteNumber(row.items?.shares_issued) && row.items.shares_issued > 0)
+    .slice(0, 8);
+  if (shareRows.length >= 2) {
+    const span = Number(String(shareRows[0].period_end).slice(0, 4)) - Number(String(shareRows[shareRows.length - 1].period_end).slice(0, 4));
+    if (span >= 1) {
+      const cagr = Math.pow(shareRows[0].items.shares_issued / shareRows[shareRows.length - 1].items.shares_issued, 1 / span) - 1;
+      if (isFiniteNumber(cagr)) {
+        set("share_dilution", Math.min(0.1, Math.max(0, cagr)), `Derived from reported share count CAGR over ${span} year(s) (buybacks floor at 0)`);
+      }
+    }
+  }
+
+  return { values, sources };
+}
+
+function resolveAssumptions(input: any, derived: Record<string, number> = {}): Record<string, number> {
+  const resolved: Record<string, number> = { ...DEFAULT_ASSUMPTIONS, ...derived };
   Object.keys(DEFAULT_ASSUMPTIONS).forEach((key) => {
     const raw = input?.[key];
     if (raw === "" || raw === null || raw === undefined) return;
@@ -476,29 +647,84 @@ function resolveAssumptions(input: any): Record<string, number> {
   return resolved;
 }
 
-function buildForecast(ticker: string, yearsInput: unknown, assumptionsInput: any) {
-  const fixture = mockTickerData(ticker);
-  const baseIncome: any = fixture.annual.income_statement[0].items;
-  const baseBalance: any = fixture.annual.balance_sheet[0].items;
+function buildForecast(ticker: string, yearsInput: unknown, assumptionsInput: any, fixtureInput?: any) {
+  const fixture = fixtureInput || mockTickerData(ticker);
   const years = Math.max(1, Math.min(25, Math.round(numberOr(yearsInput, 5))));
-  const a = resolveAssumptions(assumptionsInput);
+  const derived = deriveAssumptions(fixture);
+  const a = resolveAssumptions(assumptionsInput, derived.values);
+  const assumptionSources: Record<string, string> = {};
+  Object.keys(DEFAULT_ASSUMPTIONS).forEach((key) => {
+    const raw = assumptionsInput?.[key];
+    if (raw !== "" && raw !== null && raw !== undefined && Number.isFinite(Number(raw))) {
+      assumptionSources[key] = "User input (documented assumption)";
+    } else if (derived.sources[key]) {
+      assumptionSources[key] = derived.sources[key];
+    } else {
+      assumptionSources[key] = "Engine default (documented assumption)";
+    }
+  });
+  const baseIncome: any = fixture?.annual?.income_statement?.[0]?.items;
+  const baseBalance: any = fixture?.annual?.balance_sheet?.[0]?.items;
+  const emptySummary = { base_revenue: null, final_revenue: null, revenue_cagr: null, final_ebitda: null, final_fcf: null, balance_ok: true, max_balance_check: 0, base_balance_residual: 0, years: 0 };
+  if (!isFiniteNumber(baseIncome?.revenue) || !baseBalance) {
+    return {
+      ticker: fixture?.ticker || ticker,
+      error: "Base-period income statement or balance sheet is unavailable; no forecast was built.",
+      base_gaps: ["Base-period statements unavailable; forecast drivers could not be derived and were not estimated."],
+      assumptions: a,
+      assumption_sources: assumptionSources,
+      forecast_years: [] as number[],
+      periods: [] as any[],
+      summary: emptySummary,
+      valuation: { dcf_value_per_share: null },
+    };
+  }
+
+  const base_gaps: string[] = [];
+  const valueDriver = (value: unknown, name: string, fallback: number): number => {
+    if (isFiniteNumber(value)) return value;
+    base_gaps.push(`${name} is unavailable in the base period; engine default ${fallback} applied.`);
+    return fallback;
+  };
+  const ratioDriver = (value: unknown, name: string): number => {
+    if (isFiniteNumber(value)) return baseIncome.revenue ? value / baseIncome.revenue : 0;
+    base_gaps.push(`${name} is unavailable in the base period; the forecast driver defaults to 0.`);
+    return 0;
+  };
 
   const revenue = baseIncome.revenue;
-  const nonCashCurrentRatio = (baseBalance.current_assets - baseBalance.cash) / revenue;
-  const arRatio = baseBalance.accounts_receivable / revenue;
-  const invRatio = baseBalance.inventory / revenue;
-  const apRatio = baseBalance.accounts_payable / revenue;
+  const cashBase = valueDriver(baseBalance.cash, "Cash", 0);
+  const currentAssetsBase = valueDriver(baseBalance.current_assets, "Current assets", 0);
+  const currentLiabilitiesBase = valueDriver(baseBalance.current_liabilities, "Current liabilities", 0);
+  const totalAssetsBase = valueDriver(baseBalance.total_assets, "Total assets", 0);
+  const nonCashCurrentRatio = revenue ? Math.max(0, currentAssetsBase - cashBase) / revenue : 0;
+  const arRatio = ratioDriver(baseBalance.accounts_receivable, "Accounts receivable");
+  const invRatio = ratioDriver(baseBalance.inventory, "Inventory");
+  const apRatio = ratioDriver(baseBalance.accounts_payable, "Accounts payable");
   const clRatio = Math.max(0, nonCashCurrentRatio - a.nwc_pct);
   const startYear = Number(fixture.annual.income_statement[0].period_end.slice(0, 4)) + 1;
 
-  let cash = baseBalance.cash;
-  let debt = baseBalance.total_debt;
-  let equity = baseBalance.equity;
-  let ppe = baseBalance.ppe_net;
-  let shares = baseBalance.shares_issued;
-  const goodwill = baseBalance.goodwill;
+  let cash = cashBase;
+  let debt = valueDriver(baseBalance.total_debt, "Total debt", 0);
+  let equity = valueDriver(baseBalance.equity, "Equity", 0);
+  let ppe = valueDriver(baseBalance.ppe_net, "PP&E", Math.max(0, totalAssetsBase - currentAssetsBase));
+  let shares = valueDriver(
+    baseBalance.shares_issued,
+    "Shares issued",
+    numberOr(fixture?.info?.sharesOutstanding, 0) || 0,
+  );
+  const goodwill = isFiniteNumber(baseBalance.goodwill)
+    ? baseBalance.goodwill
+    : (base_gaps.push("Goodwill is unavailable in the base period; it is treated as 0 in the projected balance check."), 0);
+  const baseResidual = totalAssetsBase - currentLiabilitiesBase - debt - equity;
+  if (Math.abs(baseResidual) > 1) {
+    base_gaps.push(
+      `Base balance sheet residual of ${Number(baseResidual.toPrecision(6))} covers balances the engine does not model ` +
+        `(non-current liabilities beyond debt); the projection preserves this residual and reports drift against it.`,
+    );
+  }
   let previousRevenue = revenue;
-  let previousWorkingCapital = baseBalance.current_assets - baseBalance.cash - baseBalance.current_liabilities;
+  let previousWorkingCapital = currentAssetsBase - cashBase - currentLiabilitiesBase;
 
   const periods: any[] = [];
   for (let index = 0; index < years; index += 1) {
@@ -530,7 +756,8 @@ function buildForecast(ticker: string, yearsInput: unknown, assumptionsInput: an
 
     const totalAssets = cash + nonCashCurrent + ppe + goodwill;
     const totalLiabilities = currentLiabilities + debt;
-    const balanceCheck = totalAssets - totalLiabilities - equity;
+    const residual = totalAssets - totalLiabilities - equity;
+    const balanceCheck = residual - baseResidual;
 
     periods.push({
       year: startYear + index,
@@ -563,6 +790,7 @@ function buildForecast(ticker: string, yearsInput: unknown, assumptionsInput: an
       total_assets: totalAssets,
       total_liabilities: totalLiabilities,
       balance_check: balanceCheck,
+      balance_residual: residual,
     });
 
     previousRevenue = nextRevenue;
@@ -576,6 +804,8 @@ function buildForecast(ticker: string, yearsInput: unknown, assumptionsInput: an
   return {
     ticker: fixture.ticker,
     assumptions: a,
+    assumption_sources: assumptionSources,
+    base_gaps,
     forecast_years: periods.map((period) => period.year),
     periods,
     summary: {
@@ -586,6 +816,7 @@ function buildForecast(ticker: string, yearsInput: unknown, assumptionsInput: an
       final_fcf: last.fcf,
       balance_ok: maxBalanceCheck < 1,
       max_balance_check: maxBalanceCheck,
+      base_balance_residual: baseResidual,
       years: periods.length,
     },
     valuation: { dcf_value_per_share: null },
@@ -893,9 +1124,9 @@ function waccCompute(body: any) {
   };
 }
 
-function mockAiResearch(body: any) {
+function mockAiResearch(body: any, fixtureInput?: any, origin = "synthetic") {
   const inputs = reportInputs({ ...body, years: numberOr(body?.years, 5) });
-  const artifacts = reportArtifacts(inputs);
+  const artifacts = reportArtifacts(inputs, fixtureInput, origin);
   // Flatten structured risks/catalysts to strings for the legacy company-page UI.
   const narrative = artifacts.narrative;
   const flatReport = {
@@ -953,14 +1184,15 @@ function reportInputs(body: any) {
   };
 }
 
-function reportArtifacts(inputs: any) {
+function reportArtifacts(inputs: any, fixtureInput?: any, origin = "synthetic") {
   const ticker = inputs.ticker;
   const listing = parseListing(ticker);
-  const company = handleClientMock(`/api/company/${ticker}`);
-  const normalized = mockTickerData(ticker);
+  const normalized = fixtureInput || mockTickerData(ticker);
+  const isSynthetic = normalized.is_synthetic !== false;
+  const company = companySummary(normalized);
   const metricsHistory = buildMetrics(normalized);
   const actuals = metricsHistory[0] || null;
-  const forecast = buildForecast(ticker, inputs.years, {});
+  const forecast = buildForecast(ticker, inputs.years, {}, normalized);
   const flows: number[] = forecast.periods.map((period: any) => period.fcf);
   const netDebt = isFiniteNumber(actuals?.net_debt) ? actuals.net_debt : 0;
   const shares = numberOr(normalized.info?.sharesOutstanding, 0) || forecast.periods[0]?.shares || 1;
@@ -1019,8 +1251,10 @@ function reportArtifacts(inputs: any) {
     forecast,
     dcf: dcf.error ? null : dcf,
     assumptions: forecast.assumptions,
+    assumptionSources: forecast.assumption_sources,
     retrievedAt: normalized.retrieved_at,
-    isSynthetic: true,
+    isSynthetic,
+    source: isSynthetic ? undefined : `${normalized.provider || "Configured market-data provider"} (retrieved ${normalized.retrieved_at})`,
   });
   const sector = sectorProfile(company.sector, company.industry);
 
@@ -1059,7 +1293,7 @@ function reportArtifacts(inputs: any) {
     },
     actuals,
     history: metricsHistory,
-    forecast: { periods: forecast.periods, summary: forecast.summary, assumptions: forecast.assumptions },
+    forecast: { periods: forecast.periods, summary: forecast.summary, assumptions: forecast.assumptions, assumption_sources: forecast.assumption_sources },
     dcf: dcf.error ? null : dcf,
     sensitivity: sensitivity.error ? null : sensitivity,
     reverseDcf: reverseDcf.error ? null : reverseDcf,
@@ -1070,8 +1304,22 @@ function reportArtifacts(inputs: any) {
     ratingBlockReason,
     horizon: inputs.horizon,
     sectorProfile: sector,
-    isSynthetic: true,
+    isSynthetic,
   });
+
+  const dataQuality = forecast.base_gaps?.length
+    ? {
+        ...(normalized.data_quality || {}),
+        alerts: [
+          ...(normalized.data_quality?.alerts || []),
+          ...forecast.base_gaps.map((gap: string) => ({
+            level: "warn",
+            mode: "engine",
+            message: `Forecast driver: ${gap}`,
+          })),
+        ],
+      }
+    : normalized.data_quality;
 
   const payload: ExportPayload = {
     ticker,
@@ -1095,7 +1343,8 @@ function reportArtifacts(inputs: any) {
     report_date: inputs.report_date,
     peers: inputs.peers,
     assumptions: forecast.assumptions,
-    data_quality: normalized.data_quality,
+    assumption_sources: forecast.assumption_sources,
+    data_quality: dataQuality,
     price_summary: normalized.price_summary,
     provenance,
     validation: issues,
@@ -1106,11 +1355,13 @@ function reportArtifacts(inputs: any) {
       warnings: gates.warnings,
     },
     sector_profile: sector,
-    is_synthetic: true,
+    is_synthetic: isSynthetic,
+    data_source: isSynthetic ? null : normalized.provider || "Configured market-data provider",
+    retrieved_at: normalized.retrieved_at || null,
     currency: company.currency || listing.currency,
   };
 
-  return { company, normalized, listing, forecast, dcf, sensitivity, reverseDcf, issues, gates, provenance, sector, narrative, payload, actuals, metricsHistory, rating, target, upside, ratingBlocked, ratingBlockReason, price };
+  return { company, normalized, listing, forecast, dcf, sensitivity, reverseDcf, issues, gates, provenance, sector, narrative, payload, actuals, metricsHistory, rating, target, upside, ratingBlocked, ratingBlockReason, price, origin, baseGaps: forecast.base_gaps || [] };
 }
 
 function autoRating(upside: number | null): string {
@@ -1129,15 +1380,23 @@ function finishReportRecord(
 ) {
   const { company, dcf, forecast, payload, rating, target, upside, price, gates } = artifacts;
 
+  const synthetic = payload.is_synthetic !== false;
   const warnings = [
     gates.ratingAllowed
-      ? "Local engine: all figures come from the deterministic in-browser model."
+      ? synthetic
+        ? "Local engine: all figures come from the deterministic in-browser model."
+        : `Provider data: ${payload.data_source || "market-data provider"}, retrieved ${payload.retrieved_at || "unknown"}. The stored snapshot is reused on export.`
       : `Rating and target withheld: ${gates.blockers.map((b) => b.message).join(" ")}`,
   ];
   if (Array.isArray(dcf.warnings)) warnings.push(...dcf.warnings);
   if (inputs.force_refresh) {
-    warnings.push("Force refresh was requested; the local engine rebuilt every figure from its own drivers.");
+    warnings.push(
+      synthetic
+        ? "Force refresh was requested; the local engine rebuilt every figure from its own drivers."
+        : "Force refresh was requested; market data was re-fetched from the provider instead of the local cache.",
+    );
   }
+  (artifacts.baseGaps || []).forEach((gap: string) => warnings.push(`Forecast driver: ${gap}`));
   warnings.push(...extraWarnings);
 
   const title = inputs.title || (rating === "NOT RATED"
@@ -1165,11 +1424,17 @@ function finishReportRecord(
         : `DCF ${Number(dcf.value_per_share).toFixed(2)} vs market ${Number(price).toFixed(2)} · WACC ${pctValue(dcf.wacc)}`,
     },
     {
-      level: forecast.summary?.balance_ok ? "info" : "warn",
+      level: forecast.error ? "warn" : forecast.summary?.balance_ok ? "info" : "warn",
       check: "model.balance",
-      detail: forecast.summary?.balance_ok
-        ? "Balance sheet identity holds in every projected year."
-        : `Largest projected imbalance ${forecast.summary?.max_balance_check}`,
+      detail: forecast.error
+        ? String(forecast.error)
+        : forecast.summary?.balance_ok
+          ? Math.abs(forecast.summary?.base_balance_residual || 0) > 1
+            ? `Projected identity drift stays within tolerance; the base-period residual of ${Number(
+                forecast.summary.base_balance_residual.toPrecision(6),
+              )} is preserved (balances the engine does not model).`
+            : "Balance sheet identity holds in every projected year."
+          : `Largest projected imbalance ${forecast.summary?.max_balance_check}`,
     },
     {
       level: inputs.peers.length ? "info" : "warn",
@@ -1209,13 +1474,30 @@ function finishReportRecord(
     peers: inputs.peers,
     inputs,
     narrative: payload.report,
+    origin: artifacts.origin,
+    fixture: fixtureForRecord(artifacts.normalized),
   };
 }
 
+function fixtureForRecord(fixture: any) {
+  if (!fixture || fixture.is_synthetic === false) {
+    return fixture ? { ...fixture, price_history: [] } : null;
+  }
+  return null;
+}
+
 async function buildReportRecordAsync(inputs: any, previousVersionId: number | null = null) {
-  const artifacts = reportArtifacts(inputs);
+  const { fixture, origin, error } = await resolveFixture(inputs.ticker, inputs.force_refresh);
+  const artifacts = reportArtifacts(inputs, fixture, origin);
   let narrativeSource = "deterministic-engine";
   const extraWarnings: string[] = [];
+  if (origin === "synthetic") {
+    extraWarnings.push(
+      `Market-data provider fetch failed (${error || "unavailable"}); the synthetic demo fixture was used. Figures are fabricated and must not be used for investment decisions.`,
+    );
+  } else if (error) {
+    extraWarnings.push(`Provider refresh failed (${error}); provider data retrieved ${fixture.retrieved_at} from the local cache was used.`);
+  }
 
   if (inputs.ai_model) {
     const models = getLocalModels();
@@ -1257,7 +1539,7 @@ function pctValue(value: unknown): string {
 
 function reportExportPayload(record: any): ExportPayload {
   const inputs = record?.inputs || reportInputs({ ticker: record?.ticker });
-  const artifacts = reportArtifacts(inputs);
+  const artifacts = reportArtifacts(inputs, record?.fixture || undefined, record?.origin || "synthetic");
   if (record?.title) artifacts.payload.title = record.title;
   if (record?.created_at) artifacts.payload.generated_at = record.created_at;
   if (record?.narrative) artifacts.payload.report = record.narrative;
@@ -1441,41 +1723,26 @@ function handleClientMock(path: string, init?: RequestInit): any {
 
   if (cleanPath.startsWith("/api/company/")) {
     const ticker = cleanPath.split("/")[3] || "DEMO";
-    const normalized = mockTickerData(ticker);
-    const info = normalized.info;
-    const income = normalized.annual.income_statement;
-    return {
-      ticker: ticker.toUpperCase(),
-      name: info.longName,
-      exchange: info.exchange,
-      currency: info.currency,
-      sector: info.sector,
-      industry: info.industry,
-      country: info.country,
-      website: info.website,
-      summary: info.longBusinessSummary,
-      market_cap: info.marketCap,
-      employees: info.fullTimeEmployees,
-      last_data_date: income[0]?.period_end || "2025-12-31",
-      price_summary: normalized.price_summary,
-      retrieved_at: normalized.retrieved_at,
-      demo: true,
-      data_quality: normalized.data_quality,
-    };
+    const force = query.get("refresh") === "true";
+    return resolveFixture(ticker, force).then(({ fixture }) => companySummary(fixture));
   }
 
   if (cleanPath.startsWith("/api/data/")) {
     const ticker = cleanPath.split("/")[3] || "DEMO";
-    const normalized = mockTickerData(ticker);
-    return {
-      normalized,
-      metrics: { periods: buildMetrics(normalized) },
-    };
+    const force = query.get("refresh") === "true";
+    return resolveFixture(ticker, force).then((resolved) => ({
+      normalized: resolved.fixture,
+      metrics: { periods: buildMetrics(resolved.fixture) },
+      origin: resolved.origin,
+      provider_error: resolved.error,
+    }));
   }
 
   if (cleanPath.startsWith("/api/forecast/")) {
     const ticker = cleanPath.split("/")[3] || "DEMO";
-    return buildForecast(ticker, body?.years, body?.assumptions);
+    return resolveFixture(ticker, false).then((resolved) =>
+      buildForecast(ticker, body?.years, body?.assumptions, resolved.fixture),
+    );
   }
 
   if (cleanPath === "/api/valuation/dcf") {
@@ -1499,7 +1766,10 @@ function handleClientMock(path: string, init?: RequestInit): any {
   }
 
   if (cleanPath === "/api/ai/research") {
-    return mockAiResearch(body);
+    const ticker = String(body?.ticker || "DEMO").trim().toUpperCase() || "DEMO";
+    return resolveFixture(ticker, false).then((resolved) =>
+      mockAiResearch(body, resolved.fixture, resolved.origin),
+    );
   }
   if (cleanPath.startsWith("/api/ai/jobs")) {
     return [];

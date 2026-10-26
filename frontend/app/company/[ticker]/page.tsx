@@ -631,7 +631,7 @@ export default function CompanyPage() {
           <button
             onClick={() => loadData(true)}
             className="border border-border px-3 py-1.5 rounded-md text-xs hover:bg-panel inline-flex items-center gap-1.5"
-            title="Recompute every figure from the local engine"
+            title={isDemo ? "Recompute every figure from the local engine" : "Re-fetch market data from the provider, bypassing the cache"}
           >
             <RefreshCw size={13} /> Refresh
           </button>
@@ -1257,12 +1257,12 @@ export default function CompanyPage() {
           <Card className="p-4">
             <div className="text-sm font-medium mb-3">Data provenance</div>
             <dl className="space-y-2 text-xs">
-              <div className="flex justify-between gap-3"><dt className="text-muted">Fundamentals</dt><dd>Local engine (in-browser)</dd></div>
+              <div className="flex justify-between gap-3"><dt className="text-muted">Fundamentals</dt><dd>{company?.provider ? `${company.provider} snapshot` : "Local engine (in-browser)"}</dd></div>
               <div className="flex justify-between gap-3"><dt className="text-muted">Retrieved</dt><dd>{localDate(company?.retrieved_at || normalized?.retrieved_at)}</dd></div>
               <div className="flex justify-between gap-3"><dt className="text-muted">Latest period</dt><dd>{company?.last_data_date || "—"}</dd></div>
-              <div className="flex justify-between gap-3"><dt className="text-muted">Coverage</dt><dd>{stale ? "Partial" : "Complete fixture"}</dd></div>
+              <div className="flex justify-between gap-3"><dt className="text-muted">Coverage</dt><dd>{stale ? "Partial" : isDemo ? "Complete fixture" : "Provider snapshot"}</dd></div>
               <div className="flex justify-between gap-3"><dt className="text-muted">Price sessions</dt><dd>{priceHistory.length}</dd></div>
-              <div className="flex justify-between gap-3"><dt className="text-muted">Synthetic data</dt><dd>{isDemo ? "Yes — demo ticker" : "Yes — generated in this browser"}</dd></div>
+              <div className="flex justify-between gap-3"><dt className="text-muted">Synthetic data</dt><dd>{isDemo ? "Yes — synthetic fixture" : "No — provider-sourced"}</dd></div>
             </dl>
           </Card>
           <Card className="p-4">

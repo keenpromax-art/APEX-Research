@@ -4,23 +4,31 @@
 
 ```
 +--------------------------------------------------------------+
-|  Next.js app (single process, runs in the browser)           |
+|  Next.js app (server + browser)                              |
 |                                                              |
 |  pages/  company workspaces, modelling, AI center, research  |
 |    |                                                         |
 |  lib/api.ts       in-browser engine + localStorage store     |
+|  lib/marketData.ts provider cache (apex_market_*, 10 min)    |
 |  lib/exporters.ts research note -> PDF / XLSX                |
-|  lib/pdf.ts       PDF 1.4 writer                              |
-|  lib/xlsx.ts      OOXML (ZIP) writer                          |
+|  lib/pdf.ts       PDF 1.4 writer                             |
+|  lib/xlsx.ts      OOXML (ZIP) writer                         |
 |  components/      shell, theme, UI primitives, charts        |
+|                                                              |
+|  app/api/market/[ticker]  route handler (one dynamic route)  |
+|    -> lib/server/yahoo.ts   Yahoo Finance client + normalizer|
+|       quoteSummary (crumb+cookie), chart, fundamentals-      |
+|       timeseries, FX pairs; in-memory 10-min response cache  |
 +--------------------------------------------------------------+
             (optional) AI provider HTTP call from the browser
 ```
 
-There is no server process, no database and no environment configuration. `api()` and
-`apiBlob()` in `lib/api.ts` dispatch to pure functions in the same module, so the UI
-code is unchanged in shape from the earlier client/server design and could be pointed
-at a remote API again by swapping those two functions.
+There is no database and no environment configuration. The single dynamic route
+`GET /api/market/[ticker]` exists because browsers cannot call Yahoo Finance
+directly (CORS); it proxies to `lib/server/yahoo.ts` and caches raw responses in
+memory for 10 minutes. Everything else — `api()` and `apiBlob()` in `lib/api.ts`
+— dispatches to pure functions, so the UI code is unchanged in shape from a
+fully client/server design.
 
 Principles enforced in code:
 
@@ -34,15 +42,19 @@ Principles enforced in code:
 4. **Provider-agnostic AI** — models configured on `/ai` use the OpenAI-compatible
    `/chat/completions` surface; keys live in this browser's `localStorage` and are
    only sent to the endpoint you configured.
-5. **Nothing leaves the machine** — unless you configure an AI provider, no network
-   request is made at all.
+5. **Honest data origin** — every figure is either reported (provider snapshot),
+   derived (a calculation shown in the provenance table), or an explicitly
+   labelled synthetic/engine value. Provider failures degrade to a cached snapshot
+   or a clearly-marked synthetic fixture; they never fabricate reported figures.
 
 ## Data flow: ticker to valuation
 
 ```
-ticker  ->  mockTickerData()                  normalized {annual|quarterly, price history, info}
+ticker  ->  resolveFixture()                  provider snapshot | fresh cache | labelled synthetic
+             fetchTickerFixture()             GET /api/market/[ticker] (browser cache, 10 min TTL)
         ->  buildMetrics()                    ratio table per period (None-safe, period-aligned)
-        ->  buildForecast()                   linked IS/BS/CF with revolver and optional cash sweep
+        ->  buildForecast()                   linked IS/BS/CF; drivers derived from reported
+             deriveAssumptions()              history where available (per-driver provenance labels)
         ->  dcfCompute() / reverseDcfCompute()
              / sensitivityCompute()           valuation, implied WACC, matrices
         ->  exporters.ts                      xlsx / pdf bytes
@@ -61,12 +73,31 @@ Canonical keys (`revenue`, `cost_of_revenue`, `gross_profit`, `operating_income`
 `operating_cash_flow`, `capex`, `free_cash_flow`, ...) are mapped in
 `buildMetrics()`. Missing values stay `null`.
 
-### Fixtures
+### Market data & fixtures
 
-Every ticker resolves to a deterministic in-browser fixture (`mockTickerData`):
-annual and quarterly statements, 90 daily price points, a price summary and a
-data-quality record. It is synthetic and labelled as such in the UI and in AI
-prompts, so the full workflow is demonstrable with no network access.
+Fixture resolution order (`resolveFixture` in `lib/api.ts`):
+
+1. **Provider snapshot** — `GET /api/market/[ticker]` returns a normalized fixture
+   built from Yahoo Finance's public endpoints (quoteSummary with cookie+crumb,
+   1y daily chart, fundamentals-timeseries for statements). Statements reported in
+   a different currency than the listing are converted at each period end via a
+   monthly FX series (`USDINR=X`, `GBPUSD=X`, ...); when the FX series is
+   unavailable the statements are omitted with a warning — currencies are never
+   mixed. Result: `is_synthetic: false`, `provider: "Yahoo Finance"`,
+   `retrieved_at`, data-quality alerts with `mode: "provider"`.
+2. **Fresh browser cache** — `apex_market_{TICKER}` in `localStorage`, 10-minute
+   TTL, keeps reports reproducible when the provider is unreachable
+   (`mode: "cache"` alert).
+3. **Labelled synthetic fallback** — `mockTickerData()` emits a deterministic
+   fixture marked `is_synthetic: true` with a demo banner in the UI, PDF and AI
+   prompts, so the workflow is demonstrable with no network access.
+
+Forecast drivers are derived from reported history where inputs exist
+(`deriveAssumptions`): revenue growth from the reported revenue CAGR, margins from
+the latest reported statements, capex/D&A/interest/NWC/share-dilution ratios from
+the matching period. Each driver carries a source label (user input / derived from
+reported history / engine default) that is rendered in the provenance table, the
+forecast section of the PDF and the Drivers sheet of the XLSX.
 
 ## Persistence
 
@@ -78,6 +109,7 @@ Browser `localStorage`, namespaced per feature:
 | `apex_models`         | AI provider configuration and keys          |
 | `apex_saved_models`   | three-statement model snapshots             |
 | `apex_reports`        | research note versions and their inputs     |
+| `apex_market_{SYM}`   | cached provider snapshot (10-min TTL)       |
 | `apex-theme`          | dark / light preference                     |
 
 Report records store their *inputs*, not their outputs: the PDF is regenerated from
@@ -94,7 +126,9 @@ the inputs on download, so the store stays small and a rebuild is reproducible.
   Ctrl/Cmd-K focus; `ThemeProvider` persists dark/light in `localStorage` with a
   pre-hydration boot script.
 - Shared primitives in `components/ui.tsx`; charts in `components/charts.tsx`;
-  number/date formatting in `lib/format.ts`; engine dispatch in `lib/api.ts`.
+  number/date formatting in `lib/format.ts`; engine dispatch in `lib/api.ts`;
+  market-data route handler in `app/api/market/[ticker]/route.ts` calling
+  `lib/server/yahoo.ts`; browser-side cache in `lib/marketData.ts`.
 - Design tokens in `app/globals.css` (dark/light palette, tabular numerals).
 
 ## Exports
@@ -110,16 +144,19 @@ the inputs on download, so the store stays small and a rebuild is reproducible.
 
 ## Security
 
-- No server, no cookies, no third-party storage: data never leaves the browser.
+- Opening a ticker issues market-data requests to Yahoo Finance's public
+  endpoints through the local route handler; nothing else leaves the browser.
+  Snapshots are stored only in this browser's `localStorage`.
 - AI keys are stored unencrypted in `localStorage`; treat a shared browser profile as
   shared data. Keys are only transmitted to the provider endpoint on the model row.
 - Export text is XML-escaped before rendering to XLSX and ASCII-sanitised for the
   PDF content stream.
-- There is no authentication layer; add auth before exposing a shared deployment.
+- There is no authentication layer; add auth (and provider rate limiting) before
+  exposing a shared deployment.
 
 ## Known gaps / next milestones
 
-- Optional remote engine adapter so a hosted deployment can serve real market data.
+- Rate limiting / request throttling on the market-data route for shared deployments.
 - Comparable-companies harness with peer selection and Monte Carlo valuation.
 - Full M&A pro forma module; LBO tranches and a maintenance-covenant schedule.
 - IndexedDB instead of `localStorage` for large project libraries.
