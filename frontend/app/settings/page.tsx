@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { Check, Keyboard, Moon, RefreshCw, Server, ShieldCheck, Sun } from "lucide-react";
-import { API_BASE, api } from "@/lib/api";
+import { api } from "@/lib/api";
 import { useTheme } from "@/components/ThemeProvider";
 import { Badge, Card, CardHeader, InfoBanner, Spinner } from "@/components/ui";
 import { cn } from "@/lib/cn";
@@ -29,11 +29,9 @@ export default function SettingsPage() {
     setHealth("checking");
     const started = performance.now();
     try {
-      const response = await fetch(`${API_BASE}/health`);
-      const body = (await response.json()) as Health;
+      const body = await api<Health>("/health");
       setLatency(Math.round(performance.now() - started));
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      setHealth("ok");
+      setHealth(body.status === "ok" ? "ok" : "down");
       setHealthInfo(body);
     } catch {
       setHealth("down");
@@ -57,7 +55,7 @@ export default function SettingsPage() {
     <div className="p-5 md:p-7 max-w-5xl mx-auto space-y-4">
       <div>
         <h1 className="text-xl font-semibold">Settings</h1>
-        <p className="text-xs text-muted mt-1">Local display preferences and a read-only view of the API connection.</p>
+        <p className="text-xs text-muted mt-1">Local display preferences and a read-only view of the engine status.</p>
       </div>
 
       <div className="grid md:grid-cols-2 gap-4">
@@ -109,8 +107,8 @@ export default function SettingsPage() {
 
         <Card>
           <CardHeader
-            title="API connection"
-            subtitle="The Next.js client talks to the FastAPI service"
+            title="Local engine"
+            subtitle="Every calculation runs in this browser — no server required"
             action={
               <button onClick={check} className="border border-border px-2.5 py-1 rounded-md text-[11px] hover:bg-panel inline-flex items-center gap-1">
                 <RefreshCw size={12} /> Recheck
@@ -119,13 +117,13 @@ export default function SettingsPage() {
           />
           <div className="p-4 space-y-2.5 text-xs">
             <div className="flex items-center justify-between gap-3">
-              <span className="text-muted">Endpoint</span>
-              <span className="mono text-right break-all">{API_BASE}</span>
+              <span className="text-muted">Runtime</span>
+              <span className="mono text-right break-all">{healthInfo?.service || "apex-client-engine"}</span>
             </div>
             <div className="flex items-center justify-between gap-3">
               <span className="text-muted">Status</span>
               <Badge tone={health === "ok" ? "pos" : health === "down" ? "neg" : "muted"}>
-                {health === "checking" ? "checking" : health === "ok" ? "online" : "unreachable"}
+                {health === "checking" ? "checking" : health === "ok" ? "ready" : "error"}
               </Badge>
             </div>
             <div className="flex items-center justify-between gap-3">
@@ -133,7 +131,7 @@ export default function SettingsPage() {
               <span className="mono">{healthInfo?.version || "—"}</span>
             </div>
             <div className="flex items-center justify-between gap-3">
-              <span className="text-muted">Latency</span>
+              <span className="text-muted">Call latency</span>
               <span className="tabular">{latency !== null ? `${latency} ms` : "—"}</span>
             </div>
             <div className="flex items-center justify-between gap-3">
@@ -143,11 +141,10 @@ export default function SettingsPage() {
                 {enabledModels !== null ? ` (${enabledModels} enabled)` : ""}
               </span>
             </div>
-            {health === "checking" ? <Spinner label="Checking backend" /> : null}
+            {health === "checking" ? <Spinner label="Checking engine" /> : null}
             {health === "down" ? (
               <div className="rounded-md border border-warn/40 bg-warn/10 px-2.5 py-2 text-[11px] text-warn">
-                Start the backend with <span className="mono">uvicorn app.main:app --port 8000</span> inside{" "}
-                <span className="mono">backend/</span>, or set <span className="mono">NEXT_PUBLIC_API_URL</span>.
+                The local engine did not respond. Reload the page — nothing is installed on a server.
               </div>
             ) : null}
           </div>
@@ -175,15 +172,15 @@ export default function SettingsPage() {
           <div className="p-4 space-y-2 text-xs text-muted">
             <div className="flex items-start gap-2">
               <Server size={13} className="mt-0.5 text-accent shrink-0" />
-              <span>Fundamentals and prices come from Yahoo Finance via yfinance, cached server-side. Demo mode is synthetic.</span>
+              <span>Fundamentals, forecasts, valuations and PDF/Excel exports are generated by the in-browser engine. Nothing is uploaded.</span>
             </div>
             <div className="flex items-start gap-2">
               <ShieldCheck size={13} className="mt-0.5 text-pos shrink-0" />
-              <span>AI keys are stored server-side and masked in API responses. They are never written to the browser.</span>
+              <span>AI keys live in this browser&apos;s local storage and are only sent to the provider endpoint you configured.</span>
             </div>
             <div className="flex items-start gap-2">
               <Check size={13} className="mt-0.5 text-pos shrink-0" />
-              <span>Projects and model snapshots live in the local SQLite database; deleting them is immediate and permanent.</span>
+              <span>Projects, models and report versions live in this browser&apos;s local storage; deleting them is immediate and permanent.</span>
             </div>
             <div className="flex flex-wrap gap-3 pt-1">
               <Link href="/ai" className="text-accent">AI providers</Link>

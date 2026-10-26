@@ -3,7 +3,7 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Download, Eye, FileText, RefreshCw, Trash2 } from "lucide-react";
-import { API_BASE, api, getErrorMessage } from "@/lib/api";
+import { api, apiBlob, downloadBlob, getErrorMessage } from "@/lib/api";
 import { fmt, money, pct } from "@/lib/format";
 import { Card, CardHeader, EmptyState, ErrorBanner, Field, InfoBanner, Select, Spinner, Stat } from "@/components/ui";
 
@@ -151,16 +151,11 @@ function ResearchStudio() {
     setBusy(true);
     setError("");
     try {
-      const res = await fetch(`${API_BASE}/api/research/generate`, {
+      const payload = await api<ReportSummary>("/api/research/generate", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(buildBody()),
       });
-      const payload = await res.json().catch(() => null);
-      if (!res.ok) {
-        throw new Error((payload && (payload.detail || payload.message)) || `Generation failed (${res.status})`);
-      }
-      setSelected(payload as ReportSummary);
+      setSelected(payload);
       router.replace(`/research?ticker=${encodeURIComponent(clean)}`);
       await loadReports(clean);
     } catch (err) {
@@ -174,15 +169,23 @@ function ResearchStudio() {
     setBusy(true);
     setError("");
     try {
-      const res = await fetch(`${API_BASE}/api/research/reports/${id}/rebuild`, { method: "POST" });
-      const payload = await res.json().catch(() => null);
-      if (!res.ok) throw new Error((payload && payload.detail) || `Rebuild failed (${res.status})`);
-      setSelected(payload as ReportSummary);
+      const payload = await api<ReportSummary>(`/api/research/reports/${id}/rebuild`, { method: "POST" });
+      setSelected(payload);
       await loadReports(ticker.trim().toUpperCase());
     } catch (err) {
       setError(getErrorMessage(err));
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function downloadPdf(id: number, name?: string) {
+    setError("");
+    try {
+      const blob = await apiBlob(`/api/research/reports/${id}/pdf`, { id });
+      downloadBlob(blob, name || `apex_report_${id}.pdf`);
+    } catch (err) {
+      setError(getErrorMessage(err));
     }
   }
 
@@ -301,9 +304,12 @@ function ResearchStudio() {
                   </div>
                 ) : null}
                 <div className="flex flex-wrap gap-2">
-                  <a href={`${API_BASE}/api/research/reports/${selected.id}/pdf`} className="border border-border rounded-md px-3 py-1.5 text-xs hover:bg-panel inline-flex items-center gap-1.5">
+                  <button
+                    onClick={() => void downloadPdf(selected.id, `apex_${selected.ticker}_${selected.id}.pdf`)}
+                    className="border border-border rounded-md px-3 py-1.5 text-xs hover:bg-panel inline-flex items-center gap-1.5"
+                  >
                     <Download size={14} /> Download PDF
-                  </a>
+                  </button>
                   <button
                     onClick={() => (preview ? setPreview(null) : void loadPreview(selected.id))}
                     disabled={previewBusy || !selected.pdf_size}
@@ -381,9 +387,14 @@ function ResearchStudio() {
                         <td className={`px-3 py-2 capitalize ${statusTone[row.status] || ""}`}>{row.status}</td>
                         <td className="px-3 py-2 text-muted">{(row.created_at || "").slice(0, 16).replace("T", " ")}</td>
                         <td className="px-3 py-2 text-right whitespace-nowrap" onClick={(event) => event.stopPropagation()}>
-                          <a href={`${API_BASE}/api/research/reports/${row.id}/pdf`} className="inline-flex p-1.5 rounded hover:bg-border/60" title="Download PDF" aria-label="Download PDF">
+                          <button
+                            onClick={() => void downloadPdf(row.id, `apex_${row.ticker}_${row.id}.pdf`)}
+                            className="inline-flex p-1.5 rounded hover:bg-border/60"
+                            title="Download PDF"
+                            aria-label="Download PDF"
+                          >
                             <Download size={14} />
-                          </a>
+                          </button>
                           <button onClick={() => void regenerate(row.id)} disabled={busy} className="inline-flex p-1.5 rounded hover:bg-border/60 disabled:opacity-50" title="Regenerate" aria-label="Regenerate report">
                             <RefreshCw size={14} />
                           </button>

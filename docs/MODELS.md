@@ -156,7 +156,7 @@ convexity = Σ t(t+1/f)·PV(CF_t) / (price·(1+y/f)²)
 Duration is in years; convexity is the second-order price-yield term. Accrued
 interest is not modelled.
 
-## Test benchmarks (backend/tests)
+## Benchmarks
 
 - DCF: single-year perpetuity at WACC 10%, g 0% → EV 1000, VPS 100; net-debt bridge
   500→400→40; exit-multiple TV; net cash adds to equity; WACC ≤ g warns and omits TV.
@@ -169,6 +169,6 @@ interest is not modelled.
 - Three-statement: revenue compounding (scalar and per-year lists), NI = EBT − tax,
   equity/cash roll-forwards, revolver covers minimum cash, cash sweep pays down debt,
   share dilution, balance check, and period-end alignment.
-- Normalizer: mapping, NaN→None preservation, period ordering.
-- API: forecast balance, reverse DCF, WACC, LBO validation, bond, saved-model CRUD,
-  XLSX/PDF content, jobs listing.
+- Metrics: mapping, null preservation, period ordering.
+- Engine: forecast balance, reverse DCF, WACC, LBO validation, bond, saved-model CRUD,
+  XLSX/PDF bytes, report versioning and PDF download.

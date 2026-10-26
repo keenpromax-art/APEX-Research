@@ -4,9 +4,9 @@ import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowRight, BarChart3, BookOpen, Calculator, Cpu, Database, Search, ShieldCheck, Sparkles } from "lucide-react";
-import { api, API_BASE, getErrorMessage } from "@/lib/api";
+import { api } from "@/lib/api";
 import { localDate } from "@/lib/format";
-import { Badge, Card, CardHeader, ErrorBanner, Spinner } from "@/components/ui";
+import { Badge, Card, CardHeader, Spinner } from "@/components/ui";
 
 type Project = { id: number; name: string; ticker: string; description?: string | null; updated_at: string };
 type Model = { name: string; provider: string; enabled: boolean; source: string };
@@ -14,7 +14,7 @@ type Model = { name: string; provider: string; enabled: boolean; source: string 
 const FLOW = [
   {
     title: "Pull statements",
-    body: "Normalize annual and quarterly statements from Yahoo Finance, with missing data surfaced instead of zero-filled.",
+    body: "Normalize annual and quarterly statements in the browser, with missing data surfaced instead of zero-filled.",
     icon: Database,
   },
   {
@@ -24,7 +24,7 @@ const FLOW = [
   },
   {
     title: "Value it",
-    body: "Run DCF, reverse DCF, WACC and two-way sensitivity with deterministic, tested Python.",
+    body: "Run DCF, reverse DCF, WACC and two-way sensitivity with deterministic, tested code.",
     icon: Calculator,
   },
   {
@@ -41,7 +41,6 @@ export default function Home() {
   const [models, setModels] = useState<Model[]>([]);
   const [health, setHealth] = useState<"checking" | "ok" | "down">("checking");
   const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -49,17 +48,15 @@ export default function Home() {
     Promise.all([
       api<Project[]>("/api/projects").catch(() => []),
       api<Model[]>("/api/ai/models").catch(() => []),
-      fetch(`${API_BASE}/health`).then((response) => response.ok).catch(() => true),
+      api<{ status?: string }>("/health").then((body) => body.status === "ok").catch(() => false),
     ])
-      .then(([projectRows, modelRows, backendOk]) => {
+      .then(([projectRows, modelRows, engineOk]) => {
         if (!active) return;
         setProjects(projectRows);
         setModels(modelRows);
-        setHealth("ok");
+        setHealth(engineOk ? "ok" : "down");
       })
-      .catch((error) => {
-        if (active) setLoadError(null);
-      })
+      .catch(() => undefined)
       .finally(() => {
         if (active) setLoading(false);
       });
@@ -84,7 +81,7 @@ export default function Home() {
           <div className="flex items-center gap-2 mb-3">
             <Badge tone="accent">Equity research</Badge>
             <Badge tone={health === "ok" ? "pos" : health === "down" ? "neg" : "muted"}>
-              {health === "ok" ? "API online" : health === "down" ? "API offline" : "Checking API"}
+              {health === "ok" ? "Local engine" : health === "down" ? "Engine error" : "Starting engine"}
             </Badge>
           </div>
           <h1 className="text-2xl md:text-3xl font-semibold tracking-tight">
@@ -116,12 +113,10 @@ export default function Home() {
             </Link>
           </form>
           <div className="mt-3 text-[11px] text-muted">
-            Demo mode uses a synthetic company. Live data comes from Yahoo Finance and may be rate-limited.
+            Everything runs in this browser — fundamentals, forecasts, valuation and exports come from the local engine.
           </div>
         </div>
       </section>
-
-      {/* Error banner removed for standalone client mode */}
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <Card className="p-4">
@@ -140,8 +135,8 @@ export default function Home() {
         </Card>
         <Card className="p-4">
           <div className="text-[11px] uppercase tracking-wide text-muted">Data engine</div>
-          <div className="text-sm font-medium mt-1">yfinance + cache</div>
-          <div className="text-[11px] text-muted mt-1">Stale cache is labelled, never silent.</div>
+          <div className="text-sm font-medium mt-1">in-browser engine</div>
+          <div className="text-[11px] text-muted mt-1">Missing data is labelled, never silent.</div>
         </Card>
         <Card className="p-4">
           <div className="text-[11px] uppercase tracking-wide text-muted">Model integrity</div>
@@ -211,7 +206,8 @@ export default function Home() {
           </div>
           <p className="text-xs text-muted mt-2 leading-relaxed">
             Research reports need at least one configured model (OpenRouter, Groq, NVIDIA NIM or any OpenAI-compatible
-            endpoint). Keys stay server-side. Without a model, every deterministic workflow still works.
+            endpoint). Keys stay in this browser&apos;s local storage. Without a model, every deterministic workflow still
+            works.
           </p>
           <Link href="/ai" className="text-xs text-accent inline-flex items-center gap-1 mt-3">
             AI Control Center <ArrowRight size={12} />

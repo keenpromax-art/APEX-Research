@@ -159,7 +159,7 @@ export default function CompanyIndex() {
                   </li>
                 ))}
                 <li role="presentation" className="px-3 py-1.5 text-[10px] text-muted border-t border-border bg-panel/60">
-                  All Yahoo Finance listings · ↑↓ to navigate, Enter to open
+                  Suggested tickers · ↑↓ to navigate, Enter to open
                 </li>
               </ul>
             ) : null}
@@ -176,7 +176,7 @@ export default function CompanyIndex() {
       {error ? <ErrorBanner message={error} /> : null}
 
       <Card>
-        <CardHeader title="Saved workspaces" subtitle="Projects are stored server-side in SQLite or Postgres." />
+        <CardHeader title="Saved workspaces" subtitle="Projects are stored in this browser's local storage." />
         <div className="p-3">
           {loading ? (
             <div className="p-3"><Spinner label="Loading projects" /></div>

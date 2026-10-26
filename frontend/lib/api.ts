@@ -1,4 +1,4 @@
-const BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+import { buildResearchPdf, buildResearchPdfMeta, buildResearchXlsx, type ExportPayload } from "./exporters";
 
 export class ApiError extends Error {
   status: number;
@@ -12,36 +12,13 @@ export class ApiError extends Error {
   }
 }
 
-function readDetail(payload: unknown, fallback: string): string {
-  if (!payload || typeof payload !== "object") return fallback;
-  const detail = (payload as { detail?: unknown }).detail;
-  if (typeof detail === "string") return detail;
-  if (Array.isArray(detail)) {
-    return detail
-      .map((item) => {
-        if (!item || typeof item !== "object") return String(item);
-        const entry = item as { loc?: unknown[]; msg?: string };
-        const loc = Array.isArray(entry.loc) ? entry.loc.filter((part) => part !== "body").join(".") : "";
-        return [loc, entry.msg].filter(Boolean).join(": ");
-      })
-      .join("; ");
-  }
-  if (detail && typeof detail === "object") return JSON.stringify(detail);
-  return fallback;
-}
-
 export function getErrorMessage(error: unknown): string {
   if (error instanceof ApiError) return error.detail;
-  if (error instanceof Error) {
-    if (error.message === "Failed to fetch") {
-      return "Standalone mode active (Backend offline, using local client engine).";
-    }
-    return error.message;
-  }
+  if (error instanceof Error) return error.message;
   return String(error);
 }
 
-// --- CLIENT-SIDE STANDALONE MOCK ENGINE ---
+// --- CLIENT-SIDE ENGINE (all computation runs in the browser) ---
 
 function readStore(key: string, fallback: any): any {
   try {
@@ -121,7 +98,7 @@ function mockTickerData(ticker: string) {
     ticker: upper,
     retrieved_at: new Date().toISOString(),
     info: {
-      longName: `${upper} Corporation Inc. (Standalone Mode)`,
+      longName: `${upper} Corporation Inc. (Local Engine)`,
       shortName: upper,
       exchange: "NASDAQ / NYSE",
       currency: "USD",
@@ -131,7 +108,7 @@ function mockTickerData(ticker: string) {
       website: "https://example.com",
       sharesOutstanding: 150_000_000,
       marketCap: 12_500_000_000,
-      longBusinessSummary: `Standalone financial profile for ${upper}. Generated deterministically via APEX client engine without external API limits.`,
+      longBusinessSummary: `Local-engine financial profile for ${upper}. Every figure is generated deterministically in this browser.`,
       fullTimeEmployees: 25000,
     },
     annual: {
@@ -197,7 +174,7 @@ function mockTickerData(ticker: string) {
       { date: "2025-12-15", value: 0.55 },
     ],
     splits: [],
-    data_quality: { alerts: [{ level: "info", mode: "standalone", message: `Standalone mode: fully operational financial profile for ${upper}` }] },
+    data_quality: { alerts: [{ level: "info", mode: "local", message: `Local engine: fully operational financial profile for ${upper}` }] },
   };
 }
 
@@ -714,8 +691,8 @@ function mockAiResearch(body: any) {
   return {
     report: {
       title: `${ticker} Institutional Equity Research Note`,
-      executive_summary: `${ticker} compounds revenue at ${forecast.summary.revenue_cagr * 100.0}% on our base-case drivers with a ${forecast.periods[0].ebitda / forecast.periods[0].revenue * 100.0}% EBITDA margin, converting a large share of earnings into free cash flow. Our standalone DCF implies ${targetPrice !== null ? targetPrice.toFixed(2) : "an undetermined"} per share against the current quote.`,
-      business_overview: `${ticker} operates as a scaled enterprise supplier with recurring demand, a net-cash balance sheet and disciplined capital returns. The synthetic standalone fixture is used here so the workflow stays fully operational offline.`,
+      executive_summary: `${ticker} compounds revenue at ${forecast.summary.revenue_cagr * 100.0}% on our base-case drivers with a ${forecast.periods[0].ebitda / forecast.periods[0].revenue * 100.0}% EBITDA margin, converting a large share of earnings into free cash flow. Our DCF implies ${targetPrice !== null ? targetPrice.toFixed(2) : "an undetermined"} per share against the current quote.`,
+      business_overview: `${ticker} operates as a scaled enterprise supplier with recurring demand, a net-cash balance sheet and disciplined capital returns. The synthetic local-engine fixture is used here so the workflow stays fully operational without a server.`,
       financial_performance: `Revenue grew from ${forecast.summary.base_revenue / 1e9}B to ${forecast.periods[forecast.periods.length - 1].revenue / 1e9}B across the forecast horizon while operating margin held near ${(forecast.periods[0].gross_profit / forecast.periods[0].revenue - 0.3333) * 100.0}%. Balance-sheet identity checks stay clean in every projected year.`,
       strengths: [
         "Pricing power supporting a gross margin above 60%.",
@@ -725,7 +702,7 @@ function mockAiResearch(body: any) {
       risks: [
         "Terminal growth assumptions drive a large share of intrinsic value.",
         "Input costs and pricing pressure could compress gross margin.",
-        "The standalone fixture is synthetic and must not be read as company data.",
+        "The local fixture is synthetic and must not be read as company data.",
       ],
       catalysts: [
         "Operating leverage as revenue scales against a fixed cost base.",
@@ -738,6 +715,248 @@ function mockAiResearch(body: any) {
     },
     payload: forecast,
   };
+}
+
+// --- RESEARCH REPORT PIPELINE (local) ---
+
+const REPORT_STORE_KEY = "apex_reports";
+const REPORT_WACC = 0.085;
+const RATING_CODES = ["BUY", "HOLD", "SELL"];
+
+function getLocalReports(): any[] {
+  const rows = readStore(REPORT_STORE_KEY, []);
+  return Array.isArray(rows) ? rows : [];
+}
+
+function saveLocalReports(rows: any[]) {
+  writeStore(REPORT_STORE_KEY, rows);
+}
+
+function reportInputs(body: any) {
+  const rawTitle = typeof body?.title === "string" ? body.title.trim() : "";
+  const rawTarget = Number(body?.manual_target_price);
+  const rawPeers = Array.isArray(body?.peers) ? body.peers : [];
+  return {
+    ticker: String(body?.ticker || "DEMO").trim().toUpperCase() || "DEMO",
+    report_type: body?.report_type === "quick" ? "quick" : "full",
+    title: rawTitle,
+    years: Math.max(1, Math.min(10, Math.round(numberOr(body?.years, 5)))),
+    horizon: typeof body?.horizon === "string" && body.horizon.trim() ? body.horizon.trim() : "12M",
+    terminal_mode: body?.terminal_mode === "multiple" ? "multiple" : "growth",
+    terminal_growth: numberOr(body?.terminal_growth, 0.025),
+    exit_multiple: numberOr(body?.exit_multiple, 10),
+    wacc: numberOr(body?.wacc, REPORT_WACC),
+    rating_mode: body?.rating_mode === "manual" ? "manual" : "auto",
+    manual_rating: typeof body?.manual_rating === "string" ? body.manual_rating.toUpperCase() : "",
+    manual_target_price: Number.isFinite(rawTarget) && rawTarget > 0 ? rawTarget : null,
+    ai_model: typeof body?.ai_model === "string" && body.ai_model ? body.ai_model : null,
+    peers: rawPeers.filter((peer: unknown) => typeof peer === "string").slice(0, 8),
+    report_date:
+      typeof body?.report_date === "string" && body.report_date
+        ? body.report_date
+        : new Date().toISOString().slice(0, 10),
+    force_refresh: Boolean(body?.force_refresh),
+  };
+}
+
+function reportArtifacts(inputs: any) {
+  const ticker = inputs.ticker;
+  const company = handleClientMock(`/api/company/${ticker}`);
+  const normalized = mockTickerData(ticker);
+  const actuals = buildMetrics(normalized)[0] || null;
+  const forecast = buildForecast(ticker, inputs.years, {});
+  const flows: number[] = forecast.periods.map((period: any) => period.fcf);
+  const netDebt = isFiniteNumber(actuals?.net_debt) ? actuals.net_debt : 0;
+  const shares = numberOr(normalized.info?.sharesOutstanding, 0) || forecast.periods[0]?.shares || 1;
+
+  const dcfBody: any = {
+    fcf: flows,
+    wacc: inputs.wacc,
+    net_debt: netDebt,
+    shares,
+    final_ebitda: forecast.summary.final_ebitda,
+  };
+  if (inputs.terminal_mode === "multiple") dcfBody.exit_multiple = inputs.exit_multiple;
+  else dcfBody.terminal_growth = inputs.terminal_growth;
+  const dcf = dcfCompute(dcfBody) as any;
+
+  const sensitivity = sensitivityCompute({
+    fcf: flows,
+    shares,
+    net_debt: netDebt,
+    final_ebitda: forecast.summary.final_ebitda,
+    wacc_values: [-0.02, -0.01, 0, 0.01, 0.02].map((step) => Number((inputs.wacc + step).toFixed(4))),
+    terminal_values: inputs.terminal_mode === "multiple" ? [8, 9, 10, 11, 12] : [0.015, 0.02, 0.025, 0.03, 0.035],
+    mode: inputs.terminal_mode,
+  }) as any;
+
+  const narrative = mockAiResearch({ ticker });
+  const payload: ExportPayload = {
+    ticker,
+    forecast,
+    dcf,
+    sensitivity,
+    report: narrative.report,
+    research_payload: narrative.payload,
+    assumptions: forecast.assumptions,
+    data_quality: normalized.data_quality,
+    company,
+    actuals,
+    price_summary: normalized.price_summary,
+    generated_at: new Date(inputs.report_date || Date.now()).toISOString(),
+  };
+
+  return { company, forecast, dcf, sensitivity, payload };
+}
+
+function autoRating(upside: number | null): string {
+  if (upside === null || !Number.isFinite(upside)) return "NOT RATED";
+  if (upside >= 0.1) return "BUY";
+  if (upside > -0.1) return "HOLD";
+  return "SELL";
+}
+
+function buildReportRecord(inputs: any, previousVersionId: number | null = null) {
+  const artifacts = reportArtifacts(inputs);
+  const company: any = artifacts.company || {};
+  const dcf: any = artifacts.dcf || {};
+  const forecast: any = artifacts.forecast || {};
+  const price = numberOr(company?.price_summary?.last_close, 0);
+  const modelTarget = isFiniteNumber(dcf.value_per_share) ? dcf.value_per_share : null;
+  const target = inputs.manual_target_price ?? modelTarget;
+  const upside = target && price > 0 ? target / price - 1 : null;
+  const manualCode = RATING_CODES.includes(inputs.manual_rating) ? inputs.manual_rating : "";
+  const rating = inputs.rating_mode === "manual" && manualCode ? manualCode : autoRating(upside);
+
+  const warnings = [
+    "Local engine: all figures come from the deterministic in-browser model.",
+  ];
+  if (Array.isArray(dcf.warnings)) warnings.push(...dcf.warnings);
+  if (inputs.force_refresh) {
+    warnings.push("Force refresh was requested; the local engine rebuilt every figure from its own drivers.");
+  }
+
+  const title = inputs.title || `${inputs.ticker} · ${rating} · ${inputs.horizon} outlook`;
+  artifacts.payload.title = title;
+  artifacts.payload.generated_at = new Date(inputs.report_date || Date.now()).toISOString();
+
+  const meta = buildResearchPdfMeta(artifacts.payload);
+  const pdfQa = [
+    {
+      level: "info",
+      check: "pdf.render",
+      detail: `${meta.pages} page${meta.pages === 1 ? "" : "s"} rendered locally (${meta.size} bytes).`,
+    },
+    {
+      level: dcf.error ? "error" : "info",
+      check: "pdf.valuation",
+      detail: dcf.error
+        ? String(dcf.error)
+        : `DCF ${Number(dcf.value_per_share).toFixed(2)} vs market ${Number(price).toFixed(2)} · WACC ${pctValue(dcf.wacc)}`,
+    },
+    {
+      level: forecast.summary?.balance_ok ? "info" : "warn",
+      check: "model.balance",
+      detail: forecast.summary?.balance_ok
+        ? "Balance sheet identity holds in every projected year."
+        : `Largest projected imbalance ${forecast.summary?.max_balance_check}`,
+    },
+    {
+      level: inputs.peers.length ? "info" : "warn",
+      check: "sources.peers",
+      detail: inputs.peers.length
+        ? `Peer set recorded: ${inputs.peers.join(", ")}`
+        : "No peer set supplied; comparables section omitted.",
+    },
+  ];
+
+  const rows = getLocalReports();
+  const id = rows.reduce((peak, row) => Math.max(peak, numberOr(row?.id, 0)), 0) + 1;
+
+  return {
+    id,
+    ticker: inputs.ticker,
+    company_name: company.name || inputs.ticker,
+    title,
+    report_type: inputs.report_type,
+    status: "complete",
+    rating,
+    target_price: target,
+    current_price: price > 0 ? price : null,
+    upside,
+    currency: company.currency || "USD",
+    horizon: inputs.horizon,
+    ai_model: inputs.ai_model,
+    page_count: meta.pages,
+    pdf_size: meta.size,
+    previous_version_id: previousVersionId,
+    warnings,
+    pdf_qa: pdfQa,
+    created_at: new Date().toISOString(),
+    report_date: inputs.report_date,
+    peers: inputs.peers,
+    inputs,
+  };
+}
+
+function pctValue(value: unknown): string {
+  return typeof value === "number" && Number.isFinite(value) ? `${(value * 100).toFixed(2)}%` : "—";
+}
+
+function reportExportPayload(record: any): ExportPayload {
+  const inputs = record?.inputs || reportInputs({ ticker: record?.ticker });
+  const artifacts = reportArtifacts(inputs);
+  if (record?.title) artifacts.payload.title = record.title;
+  if (record?.created_at) artifacts.payload.generated_at = record.created_at;
+  return artifacts.payload;
+}
+
+function buildReportPreview(record: any) {
+  const pageCount = Math.max(1, numberOr(record?.page_count, 4));
+  const rendered = Math.min(pageCount, 6);
+  const pages = Array.from({ length: rendered }, (_, index) => ({
+    number: index + 1,
+    width: 612,
+    height: 792,
+    image: reportPreviewImage(record, index + 1, pageCount),
+  }));
+  return { id: record?.id ?? 0, page_count: pageCount, rendered, pages };
+}
+
+function reportPreviewImage(record: any, page: number, pageCount: number): string {
+  const lines = Array.from({ length: page === 1 ? 9 : 14 }, (_, index) => {
+    const y = 210 + index * 26;
+    const width = index % 4 === 3 ? 260 : 500 - (index % 3) * 40;
+    return `<rect x="56" y="${y}" width="${width}" height="10" rx="3" fill="#dfe3ea" />`;
+  }).join("");
+  const heading =
+    page === 1
+      ? `<text x="56" y="150" font-family="Helvetica, Arial, sans-serif" font-size="26" font-weight="bold" fill="#101318">${escapeXml(
+          String(record?.title || "APEX research note"),
+        )}</text>
+         <text x="56" y="180" font-family="Helvetica, Arial, sans-serif" font-size="14" fill="#5b6472">${escapeXml(
+          `${record?.ticker || ""} · ${record?.rating || "NOT RATED"} · ${record?.horizon || "12M"}`,
+        )}</text>`
+      : `<text x="56" y="150" font-family="Helvetica, Arial, sans-serif" font-size="18" font-weight="bold" fill="#101318">Page ${page}</text>`;
+  const svg =
+    `<svg xmlns="http://www.w3.org/2000/svg" width="612" height="792" viewBox="0 0 612 792">` +
+    `<rect width="612" height="792" fill="#ffffff"/>` +
+    `<rect width="612" height="64" fill="#11151c"/>` +
+    `<text x="56" y="40" font-family="Helvetica, Arial, sans-serif" font-size="16" fill="#ffffff">APEX Terminal · Research Note</text>` +
+    heading +
+    lines +
+    `<rect x="56" y="740" width="500" height="1" fill="#e6e9ef"/>` +
+    `<text x="56" y="764" font-family="Helvetica, Arial, sans-serif" font-size="11" fill="#8a93a3">Local preview · page ${page} of ${pageCount}</text>` +
+    `</svg>`;
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+
+function escapeXml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 const TICKER_SUGGESTIONS = [
@@ -762,7 +981,7 @@ function handleClientMock(path: string, init?: RequestInit): any {
   const query = new URLSearchParams(queryString || "");
 
   if (cleanPath === "/health") {
-    return { status: "ok", service: "apex-standalone-client" };
+    return { status: "ok", service: "apex-client-engine", version: "0.1.0", mode: "client-only" };
   }
 
   if (cleanPath === "/api/ticker/search") {
@@ -845,7 +1064,7 @@ function handleClientMock(path: string, init?: RequestInit): any {
     return created;
   }
   if (cleanPath.startsWith("/api/ai/models/") && cleanPath.endsWith("/test") && method === "POST") {
-    return { ok: true, latency_ms: 142, sample: "Standalone mode: connection verified locally." };
+    return { ok: true, latency_ms: 12, sample: "Local engine: everything runs in this browser." };
   }
   if (cleanPath.startsWith("/api/ai/models/") && (method === "PUT" || method === "PATCH")) {
     const name = decodeURIComponent(cleanPath.split("/").pop() || "");
@@ -919,7 +1138,7 @@ function handleClientMock(path: string, init?: RequestInit): any {
   if (cleanPath.startsWith("/api/advanced/bond")) return bondCompute(body);
   if (cleanPath.startsWith("/api/advanced/lbo")) return lboCompute(body);
   if (cleanPath.startsWith("/api/advanced/")) {
-    return { result: "success", valuation: 120, irr: 0.22, summary: "Advanced model computed successfully in standalone mode." };
+    return { result: "success", valuation: 120, irr: 0.22, summary: "Advanced model computed successfully by the local engine." };
   }
 
   if (cleanPath === "/api/ai/research") {
@@ -936,9 +1155,43 @@ function handleClientMock(path: string, init?: RequestInit): any {
       { provider: "openai_compatible", label: "OpenAI-compatible", base_url: null, requires_base_url: true, model_hint: "vendor/model-name" },
     ];
   }
-  if (cleanPath.startsWith("/api/research/reports")) {
-    return [];
+  if (cleanPath === "/api/research/generate" && method === "POST") {
+    const record = buildReportRecord(reportInputs(body || {}));
+    const rows = getLocalReports();
+    rows.unshift(record);
+    saveLocalReports(rows);
+    return record;
   }
+
+  if (cleanPath === "/api/research/reports" && method === "GET") {
+    const rows = getLocalReports().slice().sort((a, b) => numberOr(b?.id, 0) - numberOr(a?.id, 0));
+    const filter = (query.get("ticker") || "").trim().toUpperCase();
+    const limit = Math.max(1, Math.min(200, numberOr(query.get("limit"), 50)));
+    return (filter ? rows.filter((row) => row.ticker === filter) : rows).slice(0, limit);
+  }
+
+  const reportRoute = cleanPath.match(/^\/api\/research\/reports\/(\d+)(?:\/(rebuild|preview|pdf))?\/?$/);
+  if (reportRoute) {
+    const id = Number(reportRoute[1]);
+    const action = reportRoute[2] || "";
+    const rows = getLocalReports();
+    const record = rows.find((row) => row.id === id);
+    if (!record) throw new ApiError(404, `Report ${id} was not found.`);
+
+    if (action === "rebuild" && method === "POST") {
+      const fresh = buildReportRecord(reportInputs(record.inputs), record.id);
+      rows.unshift(fresh);
+      saveLocalReports(rows);
+      return fresh;
+    }
+    if (action === "preview" && method === "GET") return buildReportPreview(record);
+    if (method === "DELETE") {
+      saveLocalReports(rows.filter((row) => row.id !== id));
+      return { status: "deleted", id };
+    }
+    return record;
+  }
+
   if (cleanPath.startsWith("/api/projects")) {
     return [];
   }
@@ -951,19 +1204,16 @@ export async function api<T = any>(path: string, init?: RequestInit): Promise<T>
 }
 
 export async function apiBlob(path: string, body: unknown): Promise<Blob> {
-  try {
-    const res = await fetch(`${BASE}${path}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    if (res.ok) return res.blob();
-  } catch {}
+  const payload = (body || {}) as ExportPayload;
+  if (path.startsWith("/api/export/xlsx")) return buildResearchXlsx(payload);
 
-  // Standalone blob fallback (generate valid sample report/excel bytes)
-  const textContent =
-    "APEX Terminal Standalone Report Export\nGenerated locally without backend dependency.\nAll financial metrics verified.";
-  return new Blob([textContent], { type: "application/pdf" });
+  const reportPdf = path.match(/^\/api\/research\/reports\/(\d+)\/pdf/);
+  if (reportPdf) {
+    const record = getLocalReports().find((row) => numberOr(row?.id, 0) === Number(reportPdf[1]));
+    if (record) return buildResearchPdf(reportExportPayload(record));
+  }
+
+  return buildResearchPdf(payload);
 }
 
 export function downloadBlob(blob: Blob, filename: string) {
@@ -976,5 +1226,3 @@ export function downloadBlob(blob: Blob, filename: string) {
   anchor.remove();
   URL.revokeObjectURL(url);
 }
-
-export const API_BASE = BASE;

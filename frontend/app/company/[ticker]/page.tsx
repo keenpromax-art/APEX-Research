@@ -114,7 +114,7 @@ function fmtMetric(key: string, value: unknown) {
 
 function StatementTable({ rows }: { rows: any[] }) {
   if (!rows.length) {
-    return <EmptyState title="No periods for this statement" body="Yahoo Finance did not return this statement for the selected period." />;
+    return <EmptyState title="No periods for this statement" body="The local engine has no periods for this statement in the selected range." />;
   }
   const keys = Array.from(new Set(rows.flatMap((row) => Object.keys(row.items || {}))));
   keys.sort((a, b) => {
@@ -597,7 +597,7 @@ export default function CompanyPage() {
       <div className="p-6 md:p-8 max-w-3xl mx-auto space-y-3">
         <ErrorBanner message={error} onRetry={() => loadData(true)} />
         <div className="text-xs text-muted">
-          Try <Link href="/company/DEMO" className="text-accent">the demo company</Link> if Yahoo Finance is rate-limited.
+          Try <Link href="/company/DEMO" className="text-accent">the demo company</Link> to explore a fully populated fixture.
         </div>
       </div>
     );
@@ -631,7 +631,7 @@ export default function CompanyPage() {
           <button
             onClick={() => loadData(true)}
             className="border border-border px-3 py-1.5 rounded-md text-xs hover:bg-panel inline-flex items-center gap-1.5"
-            title="Bypass the cache and refresh from Yahoo Finance"
+            title="Recompute every figure from the local engine"
           >
             <RefreshCw size={13} /> Refresh
           </button>
@@ -657,7 +657,7 @@ export default function CompanyPage() {
       ) : null}
       {stale ? (
         <InfoBanner>
-          Yahoo Finance is unavailable, so cached data is being served. Check the data-quality panel before relying on it.
+          Some periods are incomplete for this ticker. Check the data-quality panel before relying on it.
         </InfoBanner>
       ) : null}
       {exportError ? <ErrorBanner message={exportError} /> : null}
@@ -1257,12 +1257,12 @@ export default function CompanyPage() {
           <Card className="p-4">
             <div className="text-sm font-medium mb-3">Data provenance</div>
             <dl className="space-y-2 text-xs">
-              <div className="flex justify-between gap-3"><dt className="text-muted">Fundamentals</dt><dd>Yahoo Finance via yfinance</dd></div>
+              <div className="flex justify-between gap-3"><dt className="text-muted">Fundamentals</dt><dd>Local engine (in-browser)</dd></div>
               <div className="flex justify-between gap-3"><dt className="text-muted">Retrieved</dt><dd>{localDate(company?.retrieved_at || normalized?.retrieved_at)}</dd></div>
               <div className="flex justify-between gap-3"><dt className="text-muted">Latest period</dt><dd>{company?.last_data_date || "—"}</dd></div>
-              <div className="flex justify-between gap-3"><dt className="text-muted">Cache status</dt><dd>{stale ? "Stale cache served" : "Fresh / no throttle flag"}</dd></div>
+              <div className="flex justify-between gap-3"><dt className="text-muted">Coverage</dt><dd>{stale ? "Partial" : "Complete fixture"}</dd></div>
               <div className="flex justify-between gap-3"><dt className="text-muted">Price sessions</dt><dd>{priceHistory.length}</dd></div>
-              <div className="flex justify-between gap-3"><dt className="text-muted">Demo fixture</dt><dd>{isDemo ? "Yes — synthetic" : "No"}</dd></div>
+              <div className="flex justify-between gap-3"><dt className="text-muted">Synthetic data</dt><dd>{isDemo ? "Yes — demo ticker" : "Yes — generated in this browser"}</dd></div>
             </dl>
           </Card>
           <Card className="p-4">

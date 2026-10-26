@@ -311,7 +311,7 @@ export default function ModellingPage() {
             <Calculator size={18} className="text-accent" /> Financial Modelling Studio
           </h1>
           <p className="text-xs text-muted mt-1">
-            Standalone LBO, option, bond and WACC calculators. Every output is deterministic Python; save results to the library.
+            LBO, option, bond and WACC calculators. Every output is deterministic in-browser code; save results to the library.
           </p>
         </div>
         <div className="ml-auto flex flex-wrap items-center gap-2">

@@ -264,7 +264,7 @@ export default function AIPage() {
             <Cpu size={18} className="text-accent" /> AI Control Center
           </h1>
           <p className="text-xs text-muted mt-1">
-            Providers are optional. Keys are stored server-side and backed up in this browser, so they survive backend restarts. AI writes narrative only.
+            Providers are optional. Keys stay in this browser&apos;s local storage and are only sent to the provider you configure. AI writes narrative only.
           </p>
         </div>
         <div className="ml-auto flex items-center gap-2">
@@ -387,13 +387,13 @@ export default function AIPage() {
           )}
           {envModels > 0 ? (
             <div className="px-4 py-3 text-[11px] text-muted border-t border-border">
-              Environment models come from <span className="mono">.env</span> and are read-only here. Edit the key there and restart the API to change them.
+              Environment models are read-only here. Add your own model below to change providers.
             </div>
           ) : null}
         </Card>
 
         <Card>
-          <CardHeader title="Add a model" subtitle="Saved server-side + backed up in this browser" />
+          <CardHeader title="Add a model" subtitle="Saved in this browser only" />
           <form onSubmit={addModel} className="p-4 space-y-2">
             <Field label="name" type="text" value={form.name} placeholder={selectedProvider ? `${selectedProvider.label} — model` : "OpenRouter — Sonnet"} onChange={(value) => setForm({ ...form, name: value })} />
             <Select label="provider" value={form.provider} onChange={changeProvider} options={providerOptions} />
@@ -421,7 +421,7 @@ export default function AIPage() {
             </div>
             <Field label="api_key" type="password" value={form.api_key} placeholder="sk-…" onChange={(value) => setForm({ ...form, api_key: value })} />
             <div className="rounded-md border border-border bg-panel/50 px-2.5 py-2 text-[10px] text-muted">
-              The key is masked in the API response, saved server-side, and kept in this browser&apos;s local storage (unencrypted) as a backup so it survives backend restarts. Use environment variables for shared deployments.
+              The key is stored in this browser&apos;s local storage (unencrypted) and sent only to the provider endpoint you configured. Treat this browser profile as sensitive.
             </div>
             <button
               type="submit"

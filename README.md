@@ -1,50 +1,33 @@
 # APEX Terminal
 
-Institutional-grade AI equity research, financial modelling and valuation platform.
+Institutional-grade AI equity research, financial modelling and valuation platform —
+running entirely in your browser.
 
-APEX Terminal takes you from a ticker to a full research workflow: retrieve historical
-statements (yfinance), analyze historical performance, build a linked three-statement
-forecast with a cash revolver, run DCF / reverse DCF / sensitivity analysis, use
-advanced models (LBO, options, fixed income), save projects and model snapshots,
-generate an AI-assisted research report over SSE, and export Excel/PDF deliverables.
+APEX Terminal takes you from a ticker to a full research workflow: analyze historical
+statements, build a linked three-statement forecast with a cash revolver, run
+DCF / reverse DCF / sensitivity analysis, use advanced models (LBO, options, fixed
+income), save projects and model snapshots, generate a versioned research note, and
+export Excel/PDF deliverables.
 
-AI is never the calculation engine: every financial number is produced by deterministic,
-tested Python code. AI providers are pluggable (OpenRouter, Groq, NVIDIA NIM, any
-OpenAI-compatible endpoint) and keys never reach the browser.
-
-A synthetic `DEMO` ticker exercises the entire workflow without calling Yahoo Finance,
-so the product can be evaluated offline or while the data provider is throttled.
+There is no backend: the Next.js app carries the whole engine. Financial figures are
+produced by deterministic TypeScript in `frontend/lib/api.ts`; AI providers are
+optional (OpenRouter, Groq, NVIDIA NIM, any OpenAI-compatible endpoint) and write the
+narrative only. Projects, models and report versions live in this browser's
+`localStorage`, and nothing is uploaded anywhere.
 
 ## Overview
 
 | Layer      | Stack                                             |
 |------------|---------------------------------------------------|
-| Frontend   | Next.js 16 + React 19 + TypeScript + Tailwind 4, Recharts, lucide-react |
-| API        | FastAPI (Python 3.12), Pydantic, SQLAlchemy 2     |
-| Data       | yfinance with session + disk cache and rate-limit quarantine |
-| Storage    | SQLite by default (zero setup); PostgreSQL via `DATABASE_URL` + `psycopg` |
-| AI         | Provider-agnostic gateway (OpenRouter / Groq / NVIDIA / OpenAI-compatible) |
-| Exports    | openpyxl (XLSX), ReportLab (PDF)                  |
-
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the system design and
-[docs/MODELS.md](docs/MODELS.md) for financial formulas and conventions.
+| App        | Next.js 16 + React 19 + TypeScript + Tailwind 4, Recharts, lucide-react |
+| Engine     | In-browser TypeScript: statements, forecast, DCF, sensitivity, LBO, Black–Scholes, bonds |
+| Storage    | Browser `localStorage` (projects, models, report versions) |
+| Exports    | In-browser PDF 1.4 writer and XLSX writer (`lib/pdf.ts`, `lib/xlsx.ts`) |
+| AI         | Optional, provider-agnostic (OpenRouter / Groq / NVIDIA / OpenAI-compatible) |
 
 ## Quickstart
 
-Requirements: Python 3.12+, Node.js 20+ (Node 24 tested).
-
-### 1. Backend
-
-```powershell
-cd backend
-pip install -r requirements.txt
-copy .env.example .env     # then edit if you have AI keys
-python -m uvicorn app.main:app --port 8000
-```
-
-The API is now at http://localhost:8000 — interactive docs at http://localhost:8000/docs.
-
-### 2. Frontend
+Requirements: Node.js 20+ (Node 24 tested). No Python, no database, no API server.
 
 ```powershell
 cd frontend
@@ -54,156 +37,53 @@ npm run dev
 
 The app is now at http://localhost:3000.
 
-### 3. Try it
-
 1. Open http://localhost:3000 and use **Try demo** (or open `/company/DEMO`).
 2. Explore statements and history, then run the forecast and DCF in the company
    workspace. Re-run the forecast with your own assumptions and check the balance check.
 3. Open `/modelling` for LBO, option, bond and WACC calculators; save a result.
-4. Add an AI key in the AI Control Center to generate research reports.
-5. Save the project / model, reopen it from the Library, and export XLSX / PDF.
+4. Add an AI key in the AI Control Center to write narratives (optional).
+5. Open `/research` to build a versioned institutional note, then download the PDF.
+6. Save the project / model, reopen it from the Library, and export XLSX / PDF.
 
-### Generate the concise note
-
-The concise report is the AI Research Note on `/company/{ticker}`, or via API:
-
-```bash
-curl -X POST http://localhost:8000/api/ai/research \
-  -H "Content-Type: application/json" \
-  -d '{"ticker":"DEMO"}'
-```
-
-The response contains `report` (validated narrative sections) and `payload`
-(the deterministic model artifact). Export it with `POST /api/export/pdf`,
-passing the returned `payload` as `research_payload` and the validated `report`
-as `report`. The large institutional report remains available at
-`POST /api/research/generate`.
-
-> Yahoo Finance rate limits aggressively. If you hit a throttle the UI shows a clear
-> 503 with a retry hint; previously fetched tickers are served from the local cache
-> and explicitly flagged as possibly stale.
-
-## Deployment
-
-The frontend and API deploy separately; Vercel hosts the Next.js app and Render hosts
-the FastAPI service.
-
-**Backend (Render):** create a Blueprint from this repository and apply `render.yaml`.
-It builds `backend/` and serves Uvicorn at `/health`. The free plan sleeps after
-inactivity, so the first request can be slow. SQLite is ephemeral on Render: saved
-projects, model snapshots and database-configured AI providers reset on redeploy or
-restart. Use PostgreSQL (for example a managed Neon database) or a paid persistent
-disk for durable data. If you add a custom frontend domain, update `CORS_ORIGINS` in the Render
-dashboard. Optional AI keys (`OPENROUTER_API_KEY`, `GROQ_API_KEY`, `NVIDIA_API_KEY`)
-are set there too and never reach the browser.
-
-**Frontend (Vercel):** import the repository, set **Root Directory** to `frontend`,
-and add the environment variable `NEXT_PUBLIC_API_URL` with the Render service root
-(for example `https://apex-terminal-api.onrender.com`, no trailing slash and no
-`/api`). Redeploy after changing it because Next.js inlines `NEXT_PUBLIC_*` values at
-build time. Point `NEXT_PUBLIC_API_URL` at `http://localhost:8000` for local
-development.
-
-Yahoo Finance may throttle requests from cloud IP ranges; the deployed `DEMO` ticker
-still exercises the full workflow without external data.
+Deploy by hosting the `frontend/` directory on any static-capable Node host
+(Vercel, Netlify, a local build). There are no environment variables.
 
 ## Repository layout
 
 ```
-backend/
-  app/
-    main.py             FastAPI app, lifespan wiring
-    config.py           Settings (env-driven)
-    db.py               SQLAlchemy models + session
-    exceptions.py       Typed error hierarchy
-    routers/
-      core.py           company/data/metrics/forecast/valuation/sensitivity/advanced
-      ai.py             provider CRUD, connection test, generation, research, SSE, jobs
-      export.py         XLSX and PDF exports
-      projects.py       projects + saved models (full CRUD)
-    services/
-      yfinance_adapter.py  the only module allowed to call yfinance
-      normalizer.py        statement line-item mapping to canonical schema
-      metrics.py           financial ratios (deterministic, period-aligned)
-      calc_engine.py       three-statement forecast builder with revolver
-      valuation.py         DCF, reverse DCF, WACC, sensitivity
-      advanced.py          LBO, Black-Scholes, bond maths
-      data_access.py       normalized-data loading and refresh
-      demo.py              deterministic DEMO fixture
-      ai_gateway.py        provider-agnostic AI gateway
-      ai_state.py          gateway singleton + env seeding
-  tests/                pytest suites (see Testing)
 frontend/
-  app/                  App Router pages (home, company, modelling, ai, library, settings)
+  app/                  App Router pages (home, company, modelling, ai, library, research, settings)
   components/           Shell, ThemeProvider, shared UI primitives, charts
-  lib/                  api client, number/date formatting, class merge
-docs/                   ARCHITECTURE.md, MODELS.md
+  lib/
+    api.ts              in-browser engine: statements, forecast, valuation, reports, storage
+    exporters.ts        research note -> PDF / XLSX payload assembly
+    pdf.ts              minimal PDF 1.4 writer
+    xlsx.ts             minimal XLSX (ZIP + OOXML) writer
+    format.ts           number, percentage, currency and date formatting
+docs/                   ARCHITECTURE.md, MODELS.md (formula reference)
 ```
 
 ## Testing
 
-Backend (from `backend/`):
-
 ```powershell
-python -m pytest -q
-```
-
-Suites cover DCF, reverse DCF, WACC and sensitivity maths, Black–Scholes prices and
-Greeks, bond price/duration/convexity, LBO schedule identities, metric formulas and
-period alignment, revolver/cash-sweep/dilution behaviour in the three-statement
-engine, statement normalization, saved-model CRUD, XLSX/PDF bytes, and the HTTP API
-via TestClient (Yahoo is mocked; no live API keys are required for tests).
-
-Frontend:
-
-```powershell
+cd frontend
 npm run lint        # eslint
 npx tsc --noEmit    # typecheck
 npm run build       # production build
 ```
 
-## Configuration
-
-All configuration is environment-driven — see `backend/.env.example`. Provider keys
-are read server-side only and never returned to the client; models added via the AI
-Control Center are stored server-side (SQLite/Postgres) and masked in every list
-response. Models seeded from `.env` are read-only in the UI and protected from
-edit/delete by the API.
-
 ## Limitations
 
-- Data coverage matches what Yahoo Finance exposes per ticker; missing periods and
-  line items are surfaced in the data-quality panel rather than zero-filled.
+- Company data is generated by a deterministic in-browser fixture per ticker, so the
+  whole workflow is demonstrable offline. It is synthetic and must not be read as
+  real company data.
+- Coverage gaps and missing periods are surfaced in the data-quality panel rather
+  than zero-filled.
 - The three-statement forecast is a driver-based annual model (revenue growth,
   margins, working capital, capex, interest, cash revolver, optional excess-cash
   sweep) — not a tranche-level debt schedule.
 - LBO is a single-tranche annual sweep screening model; M&A, peer comps and Monte
   Carlo are on the roadmap.
-- Research reports require at least one configured AI model. Streaming is supported
-  by the API; the current UI uses the non-streaming endpoint.
-- The concise note (`/api/ai/research`) uses the same deterministic calculation core
-  as the institutional report, but renders a separate compact PDF. The two report
-  pathways and templates remain independent.
-- There is no authentication layer. Run locally or add auth/TLS before exposing the
-  service. Partner API admin endpoints additionally require `PARTNER_ADMIN_TOKEN`.
-
-## Partner artifact API
-
-The backend can expose selected immutable report artifacts to partners. Admin
-endpoints require the `PARTNER_ADMIN_TOKEN` header; partner endpoints require the
-server-issued `X-API-Key`.
-
-- `POST /api/partners` creates a partner and returns its key once.
-- `PATCH /api/partners/{id}` enables/disables a partner.
-- `POST /api/partners/{id}/artifacts` grants access to a `ReportRun` and assigns a
-  partner-facing `external_id`.
-- Partners can list, inspect, version and download artifacts:
-  - `GET /api/partner/artifacts`
-  - `GET /api/partner/artifacts/{external_id}`
-  - `GET /api/partner/artifacts/{external_id}/pdf`
-  - `GET /api/partner/artifacts/{external_id}/versions`
-- Partners can update only their own artifact metadata:
-  - `PATCH /api/partner/artifacts/{external_id}`
-
-The underlying report payload and PDF are immutable. Partner metadata is stored in
-`partner_artifacts`; access grants and key creation are audit-logged.
+- AI narrative generation requires a configured provider key, which stays in this
+  browser's `localStorage` and is only sent to the endpoint you chose.
+- There is no authentication layer: treat a shared browser profile as shared data.
