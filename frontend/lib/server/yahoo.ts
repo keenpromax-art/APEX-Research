@@ -116,6 +116,7 @@ const BALANCE_FIELDS: Record<string, string[]> = {
   accounts_payable: ["AccountsPayable"],
   goodwill: ["Goodwill"],
   shares_issued: ["ShareIssued", "OrdinarySharesNumber"],
+  total_non_current_assets: ["TotalNonCurrentAssets"],
 };
 
 const CASH_FLOW_FIELDS: Record<string, string[]> = {
@@ -561,6 +562,11 @@ export function normalizeYahooSnapshot(tickerInput: string, raw: YahooRaw, fx: F
           derivedPpe = true;
         } else {
           items.ppe_net = null;
+        }
+        if (isNum(items.total_assets) && isNum(items.equity)) {
+          items.total_liabilities = (items.total_assets as number) - (items.equity as number);
+        } else {
+          items.total_liabilities = null;
         }
         rows.push({ period_end: asOf, items });
       }

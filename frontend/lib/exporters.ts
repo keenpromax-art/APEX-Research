@@ -234,51 +234,57 @@ function sectionD_financials(doc: PdfDocument, payload: ExportPayload) {
   }
 
   const income: AnyRecord[] = Array.isArray(annual.income_statement) ? annual.income_statement : [];
-  if (income.length) {
-    doc.space(2).text("Income statement", { size: 9.5, bold: true, gray: 0.3, gap: 3 });
-    const incomeCols = [
-      { key: "period", label: "Period", x: 0, format: (r: AnyRecord) => yearOf(r) },
-      { key: "revenue", label: "Revenue", x: 90, align: "right" as const, format: (r: AnyRecord) => cellMoney(r.items?.revenue) },
-      { key: "gross_profit", label: "Gross profit", x: 165, align: "right" as const, format: (r: AnyRecord) => cellMoney(r.items?.gross_profit) },
-      { key: "operating_income", label: "Operating income", x: 250, align: "right" as const, format: (r: AnyRecord) => cellMoney(r.items?.operating_income) },
-      { key: "ebitda", label: "EBITDA", x: 340, align: "right" as const, format: (r: AnyRecord) => cellMoney(r.items?.ebitda) },
-      { key: "net_income", label: "Net income", x: 415, align: "right" as const, format: (r: AnyRecord) => cellMoney(r.items?.net_income) },
-      { key: "eps", label: "EPS", x: CONTENT_WIDTH, align: "right" as const, format: (r: AnyRecord) => (isNum(r.items?.diluted_eps) ? num(r.items.diluted_eps) : "—"), color: (_r: AnyRecord) => undefined },
-    ];
-    doc.dataTable(incomeCols, income, { fontSize: 8, headerFontSize: 7, sourceNote });
-  }
-
   const balance: AnyRecord[] = Array.isArray(annual.balance_sheet) ? annual.balance_sheet : [];
-  if (balance.length) {
-    doc.space(6).text("Balance sheet", { size: 9.5, bold: true, gray: 0.3, gap: 3 });
-    const balanceCols = [
-      { key: "period", label: "Period", x: 0, format: (r: AnyRecord) => yearOf(r) },
-      { key: "total_assets", label: "Total assets", x: 90, align: "right" as const, format: (r: AnyRecord) => cellMoney(r.items?.total_assets) },
-      { key: "cash", label: "Cash", x: 175, align: "right" as const, format: (r: AnyRecord) => cellMoney(r.items?.cash) },
-      { key: "total_debt", label: "Total debt", x: 250, align: "right" as const, format: (r: AnyRecord) => cellMoney(r.items?.total_debt) },
-      { key: "equity", label: "Equity", x: 330, align: "right" as const, format: (r: AnyRecord) => cellMoney(r.items?.equity) },
-      { key: "net_debt", label: "Net debt", x: CONTENT_WIDTH, align: "right" as const, format: (r: AnyRecord) => (isNum(r.items?.total_debt) ? cellMoney(r.items.total_debt - (r.items.cash ?? 0)) : "—") },
+  const cashflow: AnyRecord[] = Array.isArray(annual.cash_flow) ? annual.cash_flow : [];
+
+  const incomeKeys = [
+    "revenue", "cost_of_revenue", "gross_profit", "operating_expense", "operating_income",
+    "ebit", "da", "ebitda", "interest_expense", "pretax_income", "tax_expense", "net_income", "diluted_eps",
+  ];
+  const balanceKeys = [
+    "total_assets", "current_assets", "cash", "accounts_receivable", "inventory", "ppe_net",
+    "goodwill", "total_non_current_assets", "total_liabilities", "current_liabilities",
+    "accounts_payable", "total_debt", "equity", "shares_issued",
+  ];
+  const cashflowKeys = [
+    "operating_cash_flow", "capex", "change_in_wc", "da_cf", "free_cash_flow",
+  ];
+
+  function renderStatement(title: string, rows: AnyRecord[], keys: string[], emptyMsg: string) {
+    if (!rows.length) {
+      doc.space(4).callout(title + " unavailable", emptyMsg, { fill: PANEL, accent: AMBER, titleColor: AMBER });
+      return;
+    }
+    const periods = rows.slice(0, 6);
+    const presentKeys = keys.filter((key) => periods.some((row) => isNum(row.items?.[key])));
+    if (!presentKeys.length) return;
+    doc.space(6).text(title, { size: 9.5, bold: true, gray: 0.3, gap: 3 });
+    const labelWidth = 150;
+    const periodCount = periods.length;
+    const periodWidth = (CONTENT_WIDTH - labelWidth) / periodCount;
+    const cols: any[] = [
+      { key: "line", label: "Line item", x: 0, format: (r: AnyRecord) => String(r.label) },
     ];
-    doc.dataTable(balanceCols, balance, { fontSize: 8, headerFontSize: 7, sourceNote });
+    periods.forEach((period, index) => {
+      const rightEdge = labelWidth + (index + 1) * periodWidth;
+      cols.push({
+        key: `p${index}`,
+        label: yearOf(period),
+        x: rightEdge,
+        align: "right" as const,
+        format: (r: AnyRecord) => cellMoney(r.values[index]),
+      });
+    });
+    const tableRows = presentKeys.map((key) => ({
+      label: humanize(key),
+      values: periods.map((period) => period.items?.[key] ?? null),
+    }));
+    doc.dataTable(cols, tableRows, { fontSize: 7.5, headerFontSize: 7, sourceNote });
   }
 
-  const cashflow: AnyRecord[] = Array.isArray(annual.cash_flow) ? annual.cash_flow : [];
-  if (cashflow.length) {
-    doc.space(6).text("Cash-flow statement", { size: 9.5, bold: true, gray: 0.3, gap: 3 });
-    const cfCols = [
-      { key: "period", label: "Period", x: 0, format: (r: AnyRecord) => yearOf(r) },
-      { key: "ocf", label: "Operating CF", x: 110, align: "right" as const, format: (r: AnyRecord) => cellMoney(r.items?.operating_cash_flow) },
-      { key: "capex", label: "Capex", x: 220, align: "right" as const, format: (r: AnyRecord) => cellMoney(r.items?.capex) },
-      { key: "fcf", label: "Free cash flow", x: CONTENT_WIDTH, align: "right" as const, format: (r: AnyRecord) => cellMoney(r.items?.free_cash_flow), color: (r: AnyRecord) => trendColor(r.items?.free_cash_flow) },
-    ];
-    doc.dataTable(cfCols, cashflow, { fontSize: 8, headerFontSize: 7, sourceNote });
-  } else {
-    doc.space(4).callout(
-      "Cash-flow statement unavailable",
-      "The dataset carries no cash-flow statement for this company. Historical free cash flow, operating cash flow and capex are reported as null and are never estimated.",
-      { fill: PANEL, accent: AMBER, titleColor: AMBER },
-    );
-  }
+  renderStatement("Income statement", income, incomeKeys, "The dataset carries no income statement for this company.");
+  renderStatement("Balance sheet", balance, balanceKeys, "The dataset carries no balance sheet for this company.");
+  renderStatement("Cash-flow statement", cashflow, cashflowKeys, "The dataset carries no cash-flow statement for this company. Historical free cash flow, operating cash flow and capex are reported as null and are never estimated.");
 
   if (history.length) {
     doc.space(6).text("Key ratios", { size: 9.5, bold: true, gray: 0.3, gap: 3 });
@@ -883,7 +889,28 @@ export function buildResearchXlsx(payload: ExportPayload): Blob {
     });
   }
 
-  if (actuals) sheets.push({ name: "Actuals", rows: [["Metric", "Value"], ...keyValueRows(actuals)] });
+  const annualStmt: any = payload?.annual || {};
+  const stmtIncome: AnyRecord[] = Array.isArray(annualStmt.income_statement) ? annualStmt.income_statement : [];
+  const stmtBalance: AnyRecord[] = Array.isArray(annualStmt.balance_sheet) ? annualStmt.balance_sheet : [];
+  const stmtCash: AnyRecord[] = Array.isArray(annualStmt.cash_flow) ? annualStmt.cash_flow : [];
+  if (stmtIncome.length || stmtBalance.length || stmtCash.length) {
+    const incomeKeys = ["revenue", "cost_of_revenue", "gross_profit", "operating_expense", "operating_income", "ebit", "da", "ebitda", "interest_expense", "pretax_income", "tax_expense", "net_income", "diluted_eps"];
+    const balanceKeys = ["total_assets", "current_assets", "cash", "accounts_receivable", "inventory", "ppe_net", "goodwill", "total_non_current_assets", "total_liabilities", "current_liabilities", "accounts_payable", "total_debt", "equity", "shares_issued"];
+    const cashKeys = ["operating_cash_flow", "capex", "change_in_wc", "da_cf", "free_cash_flow"];
+    const allKeys = [...incomeKeys, ...balanceKeys, ...cashKeys];
+    const periods = (stmtIncome.length ? stmtIncome : stmtBalance.length ? stmtBalance : stmtCash).slice(0, 8);
+    const presentKeys = allKeys.filter((key) => [...stmtIncome, ...stmtBalance, ...stmtCash].some((row) => isNum(row?.items?.[key])));
+    const header = ["Line item", ...periods.map((row: AnyRecord) => yearOf(row))];
+    const rows: SheetValue[][] = [header];
+    presentKeys.forEach((key) => {
+      rows.push([humanize(key), ...periods.map((period: AnyRecord) => {
+        const src = (key in (stmtIncome[0]?.items || {})) ? stmtIncome : (key in (stmtBalance[0]?.items || {})) ? stmtBalance : stmtCash;
+        const row = src.find((r: AnyRecord) => r.period_end === period.period_end);
+        return (row?.items?.[key] ?? "") as SheetValue;
+      })]);
+    });
+    sheets.push({ name: "Statements", rows });
+  }
 
   const assumptions = payload?.assumptions || forecast?.assumptions || null;
   if (assumptions) {
