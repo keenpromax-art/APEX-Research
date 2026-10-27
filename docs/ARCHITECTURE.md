@@ -42,16 +42,19 @@ Principles enforced in code:
 4. **Provider-agnostic AI** — models configured on `/ai` use the OpenAI-compatible
    `/chat/completions` surface; keys live in this browser's `localStorage` and are
    only sent to the endpoint you configured.
-5. **Honest data origin** — every figure is either reported (provider snapshot),
-   derived (a calculation shown in the provenance table), or an explicitly
-   labelled synthetic/engine value. Provider failures degrade to a cached snapshot
-   or a clearly-marked synthetic fixture; they never fabricate reported figures.
+  5. **Honest data origin** — every figure is either reported (provider snapshot),
+    derived (a calculation shown in the provenance table), or an explicitly
+    labelled synthetic/engine value. Provider failures are retried with bounded
+    backoff and then degrade to a cached snapshot or an explicit "data
+    unavailable" report (rating withheld, no figures substituted); reported
+    numbers are never fabricated.
 
 ## Data flow: ticker to valuation
 
 ```
-ticker  ->  resolveFixture()                  provider snapshot | fresh cache | labelled synthetic
-             fetchTickerFixture()             GET /api/market/[ticker] (browser cache, 10 min TTL)
+ticker  ->  resolveFixture()                  provider snapshot | fresh cache | explicit "unavailable"
+             fetchTickerFixture()             GET /api/market/[ticker] (3 bounded retries w/ backoff;
+                                              localStorage cache, 10 min TTL)
         ->  buildMetrics()                    ratio table per period (None-safe, period-aligned)
         ->  buildForecast()                   linked IS/BS/CF; drivers derived from reported
              deriveAssumptions()              history where available (per-driver provenance labels)
@@ -88,9 +91,16 @@ Fixture resolution order (`resolveFixture` in `lib/api.ts`):
 2. **Fresh browser cache** — `apex_market_{TICKER}` in `localStorage`, 10-minute
    TTL, keeps reports reproducible when the provider is unreachable
    (`mode: "cache"` alert).
-3. **Labelled synthetic fallback** — `mockTickerData()` emits a deterministic
-   fixture marked `is_synthetic: true` with a demo banner in the UI, PDF and AI
-   prompts, so the workflow is demonstrable with no network access.
+3. **Explicitly labelled local sample** — the documented demo tickers (`SAMPLE*`,
+   `DEMO`) resolve to a deterministic fixture marked `is_synthetic: true` with a
+   demo banner in the UI, PDF and AI prompts. This is the only synthetic path and
+   is never used for real listings.
+4. **Explicitly unavailable** — when the provider still cannot deliver sufficient
+   real data after bounded retries (identity + price + at least one reported
+   statement period) and no cache exists, the report is issued as a preliminary
+   note with rating and target withheld. `unavailableFixture()` substitutes no
+   financials, prices or estimates; the data-quality alert states what is missing
+   and why.
 
 Forecast drivers are derived from reported history where inputs exist
 (`deriveAssumptions`): revenue growth from the reported revenue CAGR, margins from

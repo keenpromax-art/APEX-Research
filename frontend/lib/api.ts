@@ -399,16 +399,42 @@ function mockTickerData(ticker: string) {
   };
 }
 
-function syntheticFixture(ticker: string, error: string | null) {
-  const fixture = mockTickerData(ticker);
-  if (error) {
-    fixture.data_quality.alerts.push({
-      level: "warn",
-      mode: "local",
-      message: `Market-data provider fetch failed (${error}); this synthetic sample fixture was used instead. Figures are fabricated and are not for investment use.`,
-    });
-  }
-  return fixture;
+/**
+ * Explicit "data unavailable" fixture: carries only the ticker identity and a
+ * disclosure alert. It never fabricates financials, prices or company facts, so
+ * every downstream integrity gate (missing price, missing shares, missing
+ * history) correctly blocks a rating for this report.
+ */
+function unavailableFixture(ticker: string, error: string | null) {
+  const listing = parseListing(ticker);
+  return {
+    ticker,
+    is_synthetic: false,
+    unavailable: true,
+    provider: "Yahoo Finance",
+    retrieved_at: null,
+    info: {
+      currency: listing.currency,
+      exchange: listing.exchange,
+    },
+    annual: { income_statement: [], balance_sheet: [], cash_flow: [] },
+    quarterly: { income_statement: [], balance_sheet: [], cash_flow: [] },
+    price_history: [],
+    price_summary: { last_close: null, high_52w: null, low_52w: null, change_pct: null },
+    data_quality: {
+      alerts: [
+        {
+          level: "error",
+          mode: "provider",
+          message:
+            `Yahoo Finance did not return usable data for ${ticker}` +
+            (error ? ` (${error})` : "") +
+            " after bounded retries. No financial statements, prices or estimates are available, " +
+            "and no synthetic or estimated figures were substituted. The report is issued as preliminary without a rating.",
+        },
+      ],
+    },
+  };
 }
 
 async function resolveFixture(
@@ -416,12 +442,14 @@ async function resolveFixture(
   force = false,
 ): Promise<{ fixture: any; origin: string; error: string | null }> {
   const ticker = String(tickerInput || "SAMPLE").trim().toUpperCase() || "SAMPLE";
+  // Explicit local-sample tickers (SAMPLE*, DEMO) are the only synthetic path and
+  // are always labelled as such; every other ticker must come from the provider.
   if (parseListing(ticker).isDemo) {
     return { fixture: mockTickerData(ticker), origin: "synthetic", error: null };
   }
   try {
     const { result, error } = await fetchTickerFixture(ticker, force);
-    if (!result) return { fixture: syntheticFixture(ticker, error), origin: "synthetic", error };
+    if (!result) return { fixture: unavailableFixture(ticker, error), origin: "unavailable", error };
     const alerts = [...(result.fixture.data_quality?.alerts || [])];
     if (error) {
       alerts.push({
@@ -437,7 +465,7 @@ async function resolveFixture(
     };
   } catch (fetchError) {
     const error = getErrorMessage(fetchError);
-    return { fixture: syntheticFixture(ticker, error), origin: "synthetic", error };
+    return { fixture: unavailableFixture(ticker, error), origin: "unavailable", error };
   }
 }
 
@@ -446,7 +474,7 @@ function companySummary(fixture: any) {
   const income = fixture?.annual?.income_statement || [];
   return {
     ticker: String(fixture?.ticker || "SAMPLE").toUpperCase(),
-    name: info.longName,
+    name: info.longName || String(fixture?.ticker || "SAMPLE").toUpperCase(),
     exchange: info.exchange,
     currency: info.currency,
     sector: info.sector,
@@ -650,7 +678,7 @@ function resolveAssumptions(input: any, derived: Record<string, number> = {}): R
 }
 
 export function buildForecast(ticker: string, yearsInput: unknown, assumptionsInput: any, fixtureInput?: any) {
-  const fixture = fixtureInput || mockTickerData(ticker);
+  const fixture = fixtureInput || unavailableFixture(ticker, null);
   const years = Math.max(1, Math.min(25, Math.round(numberOr(yearsInput, 5))));
   const derived = deriveAssumptions(fixture);
   const a = resolveAssumptions(assumptionsInput, derived.values);
@@ -1340,7 +1368,7 @@ export function waccCompute(body: any) {
   };
 }
 
-async function mockAiResearch(body: any, fixtureInput?: any, origin = "synthetic") {
+async function mockAiResearch(body: any, fixtureInput?: any, origin = "unavailable") {
   const inputs = reportInputs({ ...body, years: numberOr(body?.years, 5) });
   const artifacts = await reportArtifacts(inputs, fixtureInput, origin);
   // Flatten structured risks/catalysts to strings for the legacy company-page UI.
@@ -1616,10 +1644,10 @@ function buildSectorModel(company: any, normalized: any, sector: any) {
   };
 }
 
-async function reportArtifacts(inputs: any, fixtureInput?: any, origin = "synthetic") {
+async function reportArtifacts(inputs: any, fixtureInput?: any, origin = "unavailable") {
   const ticker = inputs.ticker;
   const listing = parseListing(ticker);
-  const normalized = fixtureInput || mockTickerData(ticker);
+  const normalized = fixtureInput || unavailableFixture(ticker, null);
   const isSynthetic = normalized.is_synthetic !== false;
   const company = companySummary(normalized);
   const metricsHistory = buildMetrics(normalized);
@@ -1971,7 +1999,9 @@ function finishReportRecord(
       detail: `${meta.pages} page${meta.pages === 1 ? "" : "s"} rendered locally (${meta.size} bytes).`,
     },
     {
-      level: dcf.error ? "error" : "info",
+      // A DCF that failed despite having forecast flows is an error; when there
+      // were no flows at all (data unavailable) it is a disclosed limitation.
+      level: dcf.error ? (forecast.periods?.length ? "error" : "warn") : "info",
       check: "pdf.valuation",
       detail: dcf.error
         ? String(dcf.error)
@@ -2045,9 +2075,14 @@ async function buildReportRecordAsync(inputs: any, previousVersionId: number | n
   const artifacts = await reportArtifacts(inputs, fixture, origin);
   let narrativeSource = "deterministic-engine";
   const extraWarnings: string[] = [];
-  if (origin === "synthetic") {
+  if (origin === "unavailable") {
     extraWarnings.push(
-      `Market-data provider fetch failed (${error || "unavailable"}); the synthetic sample fixture was used. Figures are fabricated and must not be used for investment decisions.`,
+      `Market data for ${inputs.ticker} is unavailable (${error || "provider returned no usable data"}). ` +
+        "No synthetic, estimated or placeholder financials were substituted; the report is issued as a preliminary note without a rating or target.",
+    );
+  } else if (origin === "synthetic") {
+    extraWarnings.push(
+      `Explicit local-sample ticker: figures come from the labelled synthetic sample fixture and must not be used for investment decisions.`,
     );
   } else if (error) {
     extraWarnings.push(`Provider refresh failed (${error}); provider data retrieved ${fixture.retrieved_at} from the local cache was used.`);

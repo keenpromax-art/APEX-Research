@@ -44,7 +44,9 @@ export function parseListing(tickerInput: unknown): ListingProfile {
       isDemo: false,
     };
   }
-  if (raw === "SAMPLE" || raw.startsWith("SAMPLE")) {
+  // Explicit local-sample tickers only (documented demo endpoints): always
+  // labelled synthetic and never used for real listings.
+  if (raw === "SAMPLE" || raw.startsWith("SAMPLE") || raw === "DEMO" || raw.startsWith("DEMO")) {
     return {
       ticker: raw,
       baseTicker: raw,
