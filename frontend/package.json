@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test:research": "node --test scripts/verify_research.cjs"
+    "test:research": "node --test scripts/verify_research.cjs",
+    "test:finance": "node --test scripts/verify_finance.cjs",
+    "test": "node --test scripts/verify_research.cjs scripts/verify_finance.cjs"
   },
   "dependencies": {
     "@tanstack/react-table": "^8.21.3",

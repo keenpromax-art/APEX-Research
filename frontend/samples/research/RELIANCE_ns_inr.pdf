@@ -24,7 +24,7 @@ BT /F2 19 Tf 0.080 0.090 0.110 rg 1 0 0 1 52 734.54 Tm (RELIANCE.NS | Preliminar
 BT /F2 19 Tf 0.080 0.090 0.110 rg 1 0 0 1 52 707.94 Tm (outlook) Tj ET
 BT /F1 10 Tf 0.4 g 1 0 0 1 52 685.99 Tm (RELIANCE.NS | Reliance Industries Limited | Energy | Diversified Oil Gas & Chemicals) Tj ET
 BT /F1 9 Tf 0.45 g 1 0 0 1 52 670.84 Tm (NSE \(India\) | INR | 12M outlook | report date 2026-10-26) Tj ET
-BT /F1 8.5 Tf 0.5 g 1 0 0 1 52 656.66 Tm (Generated 27 Oct 2026, 04:14 pm - deterministic client engine) Tj ET
+BT /F1 8.5 Tf 0.5 g 1 0 0 1 52 656.66 Tm (Generated 28 Oct 2026, 12:21 am - deterministic client engine) Tj ET
 0.82 G 0.5 w 52 641.99 m 543.28 641.99 l S
 0.990 0.930 0.930 rg 52.00 565.03 491.28 68.96 re f
 0.720 0.160 0.160 rg 52.00 565.03 3.00 68.96 re f
@@ -393,7 +393,7 @@ endobj
 << /Type /Page /Parent 2 0 R /MediaBox [0 0 595.28 841.89] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 12 0 R >>
 endobj
 12 0 obj
-<< /Length 8571 >>
+<< /Length 8652 >>
 stream
 0.6 G 0.4 w 100 771.89 m 535.28 771.89 l S
 BT /F1 6.5 Tf 0.45 0.47 0.52 rg 1 0 0 1 91.39 769.69 Tm (0) Tj ET
@@ -510,7 +510,7 @@ BT /F1 9 Tf 0.45 g 1 0 0 1 52.00 98.50 Tm (Implied exit multiple on final EBITDA
 BT /F1 9 Tf 0.15 g 1 0 0 1 526.27 98.50 Tm (8.4x) Tj ET
 BT /F1 9 Tf 0.45 g 1 0 0 1 52.00 83.85 Tm (Implied upside vs last price) Tj ET
 BT /F1 9 Tf 0.060 0.450 0.290 rg 1 0 0 1 512.76 83.85 Tm (169.6%) Tj ET
-BT /F2 9 Tf 0.3 g 1 0 0 1 52 63.20 Tm (Sensitivity - WACC vs terminal growth) Tj ET
+BT /F1 8.5 Tf 0.35 g 1 0 0 1 58 69.62 Tm (! Terminal value contributes more than 75% of enterprise value; the valuation is sensitive to long-run assumptions.) Tj ET
 BT /F1 7.5 Tf 0.45 0.47 0.52 rg 1 0 0 1 397.12 801.89 Tm (RELIANCE.NS | Reliance Industries Limited) Tj ET
 0.85 G 0.4 w 52 795.89 m 543.28 795.89 l S
 0.85 G 0.4 w 52 38 m 543.28 38 l S
@@ -522,93 +522,111 @@ endobj
 << /Type /Page /Parent 2 0 R /MediaBox [0 0 595.28 841.89] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 14 0 R >>
 endobj
 14 0 obj
-<< /Length 8086 >>
+<< /Length 9025 >>
 stream
-0.945 0.955 0.972 rg 52.00 763.89 491.28 16.00 re f
-BT /F2 7 Tf 0.16 0.18 0.22 rg 1 0 0 1 52.00 773.59 Tm (WACC) Tj ET
-BT /F2 7 Tf 0.16 0.18 0.22 rg 1 0 0 1 190.30 773.59 Tm (1.5%) Tj ET
-BT /F2 7 Tf 0.16 0.18 0.22 rg 1 0 0 1 274.56 773.59 Tm (2.0%) Tj ET
-BT /F2 7 Tf 0.16 0.18 0.22 rg 1 0 0 1 358.82 773.59 Tm (2.5%) Tj ET
-BT /F2 7 Tf 0.16 0.18 0.22 rg 1 0 0 1 443.07 773.59 Tm (3.0%) Tj ET
-BT /F2 7 Tf 0.16 0.18 0.22 rg 1 0 0 1 527.33 773.59 Tm (3.5%) Tj ET
-0.75 G 0.5 w 52 763.89 m 543.28 763.89 l S
-BT /F1 8 Tf 0.15 0.16 0.19 rg 1 0 0 1 52.00 757.09 Tm (6.5%) Tj ET
-BT /F1 8 Tf 0.15 0.16 0.19 rg 1 0 0 1 170.67 757.09 Tm (27,116.28) Tj ET
-BT /F1 8 Tf 0.15 0.16 0.19 rg 1 0 0 1 254.93 757.09 Tm (29,712.69) Tj ET
-BT /F1 8 Tf 0.15 0.16 0.19 rg 1 0 0 1 339.18 757.09 Tm (32,958.21) Tj ET
-BT /F1 8 Tf 0.15 0.16 0.19 rg 1 0 0 1 423.44 757.09 Tm (37,131.02) Tj ET
-BT /F1 8 Tf 0.15 0.16 0.19 rg 1 0 0 1 507.70 757.09 Tm (42,694.77) Tj ET
-0.976 0.980 0.988 rg 52.00 733.89 491.28 15.00 re f
-BT /F1 8 Tf 0.15 0.16 0.19 rg 1 0 0 1 52.00 742.09 Tm (7.5%) Tj ET
-BT /F1 8 Tf 0.15 0.16 0.19 rg 1 0 0 1 170.67 742.09 Tm (22,421.25) Tj ET
-BT /F1 8 Tf 0.15 0.16 0.19 rg 1 0 0 1 254.93 742.09 Tm (24,126.58) Tj ET
-BT /F1 8 Tf 0.15 0.16 0.19 rg 1 0 0 1 339.18 742.09 Tm (26,172.97) Tj ET
-BT /F1 8 Tf 0.15 0.16 0.19 rg 1 0 0 1 423.44 742.09 Tm (28,674.12) Tj ET
-BT /F1 8 Tf 0.15 0.16 0.19 rg 1 0 0 1 507.70 742.09 Tm (31,800.55) Tj ET
-BT /F1 8 Tf 0.15 0.16 0.19 rg 1 0 0 1 52.00 727.09 Tm (8.5%) Tj ET
-BT /F1 8 Tf 0.15 0.16 0.19 rg 1 0 0 1 170.67 727.09 Tm (19,074.16) Tj ET
-BT /F1 8 Tf 0.15 0.16 0.19 rg 1 0 0 1 254.93 727.09 Tm (20,266.02) Tj ET
-BT /F1 8 Tf 0.15 0.16 0.19 rg 1 0 0 1 339.18 727.09 Tm (21,656.52) Tj ET
-BT /F1 8 Tf 0.15 0.16 0.19 rg 1 0 0 1 423.44 727.09 Tm (23,299.84) Tj ET
-BT /F1 8 Tf 0.15 0.16 0.19 rg 1 0 0 1 507.70 727.09 Tm (25,271.83) Tj ET
-0.976 0.980 0.988 rg 52.00 703.89 491.28 15.00 re f
-BT /F1 8 Tf 0.15 0.16 0.19 rg 1 0 0 1 52.00 712.09 Tm (9.5%) Tj ET
-BT /F1 8 Tf 0.15 0.16 0.19 rg 1 0 0 1 170.67 712.09 Tm (16,569.26) Tj ET
-BT /F1 8 Tf 0.15 0.16 0.19 rg 1 0 0 1 254.93 712.09 Tm (17,440.52) Tj ET
-BT /F1 8 Tf 0.15 0.16 0.19 rg 1 0 0 1 339.18 712.09 Tm (18,436.24) Tj ET
-BT /F1 8 Tf 0.15 0.16 0.19 rg 1 0 0 1 423.44 712.09 Tm (19,585.15) Tj ET
-BT /F1 8 Tf 0.15 0.16 0.19 rg 1 0 0 1 507.70 712.09 Tm (20,925.55) Tj ET
-BT /F1 8 Tf 0.15 0.16 0.19 rg 1 0 0 1 52.00 697.09 Tm (10.5%) Tj ET
-BT /F1 8 Tf 0.15 0.16 0.19 rg 1 0 0 1 170.67 697.09 Tm (14,625.58) Tj ET
-BT /F1 8 Tf 0.15 0.16 0.19 rg 1 0 0 1 254.93 697.09 Tm (15,284.51) Tj ET
-BT /F1 8 Tf 0.15 0.16 0.19 rg 1 0 0 1 339.18 697.09 Tm (16,025.82) Tj ET
-BT /F1 8 Tf 0.15 0.16 0.19 rg 1 0 0 1 423.44 697.09 Tm (16,865.97) Tj ET
-BT /F1 8 Tf 0.15 0.16 0.19 rg 1 0 0 1 507.70 697.09 Tm (17,826.13) Tj ET
-0.8 G 0.4 w 52 689.89 m 543.28 689.89 l S
-BT /F1 7 Tf 0.5 g 1 0 0 1 52 678.94 Tm (Source: Value per share \(INR\). Sensitivity maps model response to assumptions; it does not remove uncertainty.) Tj ET
-0.955 0.965 0.980 rg 52.00 611.50 491.28 56.64 re f
-0.130 0.350 0.850 rg 52.00 611.50 3.00 56.64 re f
-BT /F2 8 Tf 0.130 0.350 0.850 rg 1 0 0 1 64.00 653.34 Tm (Reverse DCF at the current market price) Tj ET
-BT /F1 8.8 Tf 0.2 g 1 0 0 1 64.00 638.66 Tm (At a market price of 8,032.50 INR the implied WACC is 17.82%, versus our stated 8.50%. The market discounts these) Tj ET
-BT /F1 8.8 Tf 0.2 g 1 0 0 1 64.00 626.34 Tm (cash flows more steeply than our cost of capital.) Tj ET
-BT /F2 9 Tf 0.3 g 1 0 0 1 52 593.85 Tm (Scenario analysis) Tj ET
-BT /F1 8.8 Tf 0.2 g 1 0 0 1 58 578.42 Tm (Bull: Bull case: not calculated - no base target is available.) Tj ET
-BT /F1 8.8 Tf 0.2 g 1 0 0 1 58 564.10 Tm (Base: Base case: not calculated - no base target is available.) Tj ET
-BT /F1 8.8 Tf 0.2 g 1 0 0 1 58 549.78 Tm (Bear: Bear case: not calculated - no base target is available.) Tj ET
-0.130 0.350 0.850 rg 52.00 540.44 26.00 2.50 re f
-BT /F2 11.5 Tf 0.080 0.090 0.110 rg 1 0 0 1 52 525.66 Tm (Risks & Catalysts) Tj ET
-BT /F2 9.5 Tf 0.3 g 1 0 0 1 52 504.26 Tm (Strengths) Tj ET
-BT /F1 9 Tf 0.2 g 1 0 0 1 60 488.39 Tm (- Revenue compounding of 15.4% CAGR on the base case, with EBITDA margin at 36.7% by the final forecast year.) Tj ET
-BT /F1 9 Tf 0.2 g 1 0 0 1 60 473.79 Tm (- Cash generation: 58.8% of final-year EBITDA converts to free cash flow \(225.46B INR\), self-funding reinvestment or) Tj ET
-BT /F1 9 Tf 0.2 g 1 0 0 1 60 461.19 Tm (capital returns.) Tj ET
-BT /F1 9 Tf 0.2 g 1 0 0 1 60 446.59 Tm (- Net cash of 25.50B INR provides balance-sheet flexibility through the cycle.) Tj ET
-BT /F1 9 Tf 0.2 g 1 0 0 1 60 431.99 Tm (- The three-statement forecast passes its balance-sheet identity check in every projected year.) Tj ET
-BT /F1 9 Tf 0.2 g 1 0 0 1 60 417.39 Tm (- Return on invested capital of 27.7% in 2025 indicates value-accretive reinvestment at the reported level.) Tj ET
-BT /F1 9 Tf 0.2 g 1 0 0 1 60 402.79 Tm (- Revenue scale of 510.00B INR provides operating leverage and absorbs fixed costs through the cycle.) Tj ET
-BT /F1 9 Tf 0.2 g 1 0 0 1 60 388.19 Tm (- Gross margin of 63.3% leaves room to absorb input-cost inflation without hitting operating profit.) Tj ET
-BT /F1 9 Tf 0.2 g 1 0 0 1 60 373.59 Tm (- Return on equity of 25.5% indicates efficient use of shareholder capital.) Tj ET
-BT /F1 9 Tf 0.2 g 1 0 0 1 60 358.99 Tm (- Earnings are positive and compounding alongside revenue growth, with diluted EPS of 793.05 INR.) Tj ET
-BT /F1 9 Tf 0.2 g 1 0 0 1 60 344.39 Tm (- Double-digit modelled revenue growth of 15.4% outpaces a low-single-digit nominal GDP benchmark.) Tj ET
-BT /F2 9.5 Tf 0.3 g 1 0 0 1 52 325.36 Tm (Risks) Tj ET
-BT /F2 9 Tf 0.720 0.160 0.160 rg 1 0 0 1 60 309.49 Tm (Terminal-value dependence) Tj ET
-BT /F1 8.7 Tf 0.2 g 1 0 0 1 66 295.64 Tm (Exposure: The present value of the terminal value is 79.5% of enterprise value.) Tj ET
-BT /F1 8.7 Tf 0.2 g 1 0 0 1 66 282.46 Tm (Impact: Small changes to the discount rate or long-run growth swing the target materially.) Tj ET
-BT /F1 8.7 Tf 0.35 g 1 0 0 1 66 269.28 Tm (Monitoring metric: WACC and terminal-growth assumptions versus the sensitivity grid) Tj ET
-BT /F1 8.7 Tf 0.35 g 1 0 0 1 66 256.10 Tm (Scenario: Value per share across the sensitivity grid ranges 14,625.58-42,694.77.) Tj ET
-BT /F1 8 Tf 0.45 g 1 0 0 1 66 243.52 Tm (Basis: fact) Tj ET
-BT /F2 9 Tf 0.720 0.160 0.160 rg 1 0 0 1 60 228.47 Tm (Growth execution) Tj ET
-BT /F1 8.7 Tf 0.2 g 1 0 0 1 66 214.62 Tm (Exposure: The base case assumes 15.4% revenue CAGR.) Tj ET
-BT /F1 8.7 Tf 0.2 g 1 0 0 1 66 201.44 Tm (Impact: A deceleration compresses both the cash-flow base and the applied multiple.) Tj ET
-BT /F1 8.7 Tf 0.35 g 1 0 0 1 66 188.26 Tm (Monitoring metric: Reported revenue growth versus the forecast path) Tj ET
-BT /F1 8.7 Tf 0.35 g 1 0 0 1 66 175.08 Tm (Scenario: Bear case assumes growth runs below plan \(see scenarios\).) Tj ET
-BT /F1 8 Tf 0.45 g 1 0 0 1 66 162.50 Tm (Basis: inference) Tj ET
-BT /F2 9 Tf 0.720 0.160 0.160 rg 1 0 0 1 60 147.45 Tm (Synthetic data provenance) Tj ET
-BT /F1 8.7 Tf 0.2 g 1 0 0 1 66 133.60 Tm (Exposure: All financial inputs come from the local deterministic fixture, not company filings.) Tj ET
-BT /F1 8.7 Tf 0.2 g 1 0 0 1 66 120.42 Tm (Impact: No conclusion in this report should be relied upon as a description of any real company.) Tj ET
-BT /F1 8.7 Tf 0.35 g 1 0 0 1 66 107.24 Tm (Monitoring metric: Data-status label on the cover of this report) Tj ET
-BT /F1 8 Tf 0.45 g 1 0 0 1 66 94.66 Tm (Basis: fact) Tj ET
-BT /F2 9 Tf 0.720 0.160 0.160 rg 1 0 0 1 60 79.61 Tm (Missing sector-specific evidence) Tj ET
-BT /F1 8.7 Tf 0.2 g 1 0 0 1 66 65.76 Tm (Exposure: Commodity price exposure, Reserves / production volumes, Project/asset pipeline are not available in the) Tj ET
+BT /F2 9 Tf 0.3 g 1 0 0 1 52 772.24 Tm (Sensitivity - WACC vs terminal growth) Tj ET
+0.945 0.955 0.972 rg 52.00 748.29 491.28 16.00 re f
+BT /F2 7 Tf 0.16 0.18 0.22 rg 1 0 0 1 52.00 757.99 Tm (WACC) Tj ET
+BT /F2 7 Tf 0.16 0.18 0.22 rg 1 0 0 1 190.30 757.99 Tm (1.5%) Tj ET
+BT /F2 7 Tf 0.16 0.18 0.22 rg 1 0 0 1 274.56 757.99 Tm (2.0%) Tj ET
+BT /F2 7 Tf 0.16 0.18 0.22 rg 1 0 0 1 358.82 757.99 Tm (2.5%) Tj ET
+BT /F2 7 Tf 0.16 0.18 0.22 rg 1 0 0 1 443.07 757.99 Tm (3.0%) Tj ET
+BT /F2 7 Tf 0.16 0.18 0.22 rg 1 0 0 1 527.33 757.99 Tm (3.5%) Tj ET
+0.75 G 0.5 w 52 748.29 m 543.28 748.29 l S
+BT /F1 8 Tf 0.15 0.16 0.19 rg 1 0 0 1 52.00 741.49 Tm (6.5%) Tj ET
+BT /F1 8 Tf 0.15 0.16 0.19 rg 1 0 0 1 170.67 741.49 Tm (27,116.28) Tj ET
+BT /F1 8 Tf 0.15 0.16 0.19 rg 1 0 0 1 254.93 741.49 Tm (29,712.69) Tj ET
+BT /F1 8 Tf 0.15 0.16 0.19 rg 1 0 0 1 339.18 741.49 Tm (32,958.21) Tj ET
+BT /F1 8 Tf 0.15 0.16 0.19 rg 1 0 0 1 423.44 741.49 Tm (37,131.02) Tj ET
+BT /F1 8 Tf 0.15 0.16 0.19 rg 1 0 0 1 507.70 741.49 Tm (42,694.77) Tj ET
+0.976 0.980 0.988 rg 52.00 718.29 491.28 15.00 re f
+BT /F1 8 Tf 0.15 0.16 0.19 rg 1 0 0 1 52.00 726.49 Tm (7.5%) Tj ET
+BT /F1 8 Tf 0.15 0.16 0.19 rg 1 0 0 1 170.67 726.49 Tm (22,421.25) Tj ET
+BT /F1 8 Tf 0.15 0.16 0.19 rg 1 0 0 1 254.93 726.49 Tm (24,126.58) Tj ET
+BT /F1 8 Tf 0.15 0.16 0.19 rg 1 0 0 1 339.18 726.49 Tm (26,172.97) Tj ET
+BT /F1 8 Tf 0.15 0.16 0.19 rg 1 0 0 1 423.44 726.49 Tm (28,674.12) Tj ET
+BT /F1 8 Tf 0.15 0.16 0.19 rg 1 0 0 1 507.70 726.49 Tm (31,800.55) Tj ET
+BT /F1 8 Tf 0.15 0.16 0.19 rg 1 0 0 1 52.00 711.49 Tm (8.5%) Tj ET
+BT /F1 8 Tf 0.15 0.16 0.19 rg 1 0 0 1 170.67 711.49 Tm (19,074.16) Tj ET
+BT /F1 8 Tf 0.15 0.16 0.19 rg 1 0 0 1 254.93 711.49 Tm (20,266.02) Tj ET
+BT /F1 8 Tf 0.15 0.16 0.19 rg 1 0 0 1 339.18 711.49 Tm (21,656.52) Tj ET
+BT /F1 8 Tf 0.15 0.16 0.19 rg 1 0 0 1 423.44 711.49 Tm (23,299.84) Tj ET
+BT /F1 8 Tf 0.15 0.16 0.19 rg 1 0 0 1 507.70 711.49 Tm (25,271.83) Tj ET
+0.976 0.980 0.988 rg 52.00 688.29 491.28 15.00 re f
+BT /F1 8 Tf 0.15 0.16 0.19 rg 1 0 0 1 52.00 696.49 Tm (9.5%) Tj ET
+BT /F1 8 Tf 0.15 0.16 0.19 rg 1 0 0 1 170.67 696.49 Tm (16,569.26) Tj ET
+BT /F1 8 Tf 0.15 0.16 0.19 rg 1 0 0 1 254.93 696.49 Tm (17,440.52) Tj ET
+BT /F1 8 Tf 0.15 0.16 0.19 rg 1 0 0 1 339.18 696.49 Tm (18,436.24) Tj ET
+BT /F1 8 Tf 0.15 0.16 0.19 rg 1 0 0 1 423.44 696.49 Tm (19,585.15) Tj ET
+BT /F1 8 Tf 0.15 0.16 0.19 rg 1 0 0 1 507.70 696.49 Tm (20,925.55) Tj ET
+BT /F1 8 Tf 0.15 0.16 0.19 rg 1 0 0 1 52.00 681.49 Tm (10.5%) Tj ET
+BT /F1 8 Tf 0.15 0.16 0.19 rg 1 0 0 1 170.67 681.49 Tm (14,625.58) Tj ET
+BT /F1 8 Tf 0.15 0.16 0.19 rg 1 0 0 1 254.93 681.49 Tm (15,284.51) Tj ET
+BT /F1 8 Tf 0.15 0.16 0.19 rg 1 0 0 1 339.18 681.49 Tm (16,025.82) Tj ET
+BT /F1 8 Tf 0.15 0.16 0.19 rg 1 0 0 1 423.44 681.49 Tm (16,865.97) Tj ET
+BT /F1 8 Tf 0.15 0.16 0.19 rg 1 0 0 1 507.70 681.49 Tm (17,826.13) Tj ET
+0.8 G 0.4 w 52 674.29 m 543.28 674.29 l S
+BT /F1 7 Tf 0.5 g 1 0 0 1 52 663.34 Tm (Source: Value per share \(INR\). Sensitivity maps model response to assumptions; it does not remove uncertainty.) Tj ET
+BT /F2 9 Tf 0.3 g 1 0 0 1 52 642.89 Tm (Scenario comparison) Tj ET
+0.945 0.955 0.972 rg 52.00 618.94 491.28 16.00 re f
+BT /F2 7 Tf 0.16 0.18 0.22 rg 1 0 0 1 52.00 628.64 Tm (Scenario) Tj ET
+BT /F2 7 Tf 0.16 0.18 0.22 rg 1 0 0 1 103.88 628.64 Tm (Rev growth) Tj ET
+BT /F2 7 Tf 0.16 0.18 0.22 rg 1 0 0 1 176.49 628.64 Tm (Gross margin) Tj ET
+BT /F2 7 Tf 0.16 0.18 0.22 rg 1 0 0 1 254.04 628.64 Tm (Value/share \(INR\)) Tj ET
+BT /F2 7 Tf 0.16 0.18 0.22 rg 1 0 0 1 384.00 628.64 Tm (EV \(INR\)) Tj ET
+0.75 G 0.5 w 52 618.94 m 543.28 618.94 l S
+BT /F1 8 Tf 0.15 0.16 0.19 rg 1 0 0 1 52.00 612.14 Tm (Bull) Tj ET
+BT /F1 8 Tf 0.15 0.16 0.19 rg 1 0 0 1 119.32 612.14 Tm (20.4%) Tj ET
+BT /F1 8 Tf 0.15 0.16 0.19 rg 1 0 0 1 199.32 612.14 Tm (66.3%) Tj ET
+BT /F1 8 Tf 0.15 0.16 0.19 rg 1 0 0 1 276.42 612.14 Tm (33,162.43) Tj ET
+BT /F1 8 Tf 0.15 0.16 0.19 rg 1 0 0 1 391.54 612.14 Tm (4.95T) Tj ET
+0.976 0.980 0.988 rg 52.00 588.94 491.28 15.00 re f
+BT /F1 8 Tf 0.15 0.16 0.19 rg 1 0 0 1 52.00 597.14 Tm (Base) Tj ET
+BT /F1 8 Tf 0.15 0.16 0.19 rg 1 0 0 1 119.32 597.14 Tm (15.4%) Tj ET
+BT /F1 8 Tf 0.15 0.16 0.19 rg 1 0 0 1 199.32 597.14 Tm (63.3%) Tj ET
+BT /F1 8 Tf 0.15 0.16 0.19 rg 1 0 0 1 276.42 597.14 Tm (21,656.52) Tj ET
+BT /F1 8 Tf 0.15 0.16 0.19 rg 1 0 0 1 391.54 597.14 Tm (3.22T) Tj ET
+BT /F1 8 Tf 0.15 0.16 0.19 rg 1 0 0 1 52.00 582.14 Tm (Bear) Tj ET
+BT /F1 8 Tf 0.15 0.16 0.19 rg 1 0 0 1 119.32 582.14 Tm (10.4%) Tj ET
+BT /F1 8 Tf 0.15 0.16 0.19 rg 1 0 0 1 199.32 582.14 Tm (60.3%) Tj ET
+BT /F1 8 Tf 0.15 0.16 0.19 rg 1 0 0 1 276.42 582.14 Tm (13,278.34) Tj ET
+BT /F1 8 Tf 0.15 0.16 0.19 rg 1 0 0 1 391.54 582.14 Tm (1.97T) Tj ET
+0.8 G 0.4 w 52 574.94 m 543.28 574.94 l S
+BT /F1 7 Tf 0.5 g 1 0 0 1 52 563.99 Tm (Source: Scenarios reflect distinct driver assumptions on revenue growth, margins, capex and tax; they are not price adjustments.) Tj ET
+0.955 0.965 0.980 rg 52.00 496.55 491.28 56.64 re f
+0.130 0.350 0.850 rg 52.00 496.55 3.00 56.64 re f
+BT /F2 8 Tf 0.130 0.350 0.850 rg 1 0 0 1 64.00 538.39 Tm (Reverse DCF at the current market price) Tj ET
+BT /F1 8.8 Tf 0.2 g 1 0 0 1 64.00 523.71 Tm (At a market price of 8,032.50 INR the implied WACC is 17.82%, versus our stated 8.50%. The market discounts these) Tj ET
+BT /F1 8.8 Tf 0.2 g 1 0 0 1 64.00 511.39 Tm (cash flows more steeply than our cost of capital.) Tj ET
+BT /F2 9 Tf 0.3 g 1 0 0 1 52 478.90 Tm (Scenario analysis) Tj ET
+BT /F1 8.8 Tf 0.2 g 1 0 0 1 58 463.47 Tm (Bull: Bull case: not calculated - no base target is available.) Tj ET
+BT /F1 8.8 Tf 0.2 g 1 0 0 1 58 449.15 Tm (Base: Base case: not calculated - no base target is available.) Tj ET
+BT /F1 8.8 Tf 0.2 g 1 0 0 1 58 434.83 Tm (Bear: Bear case: not calculated - no base target is available.) Tj ET
+0.130 0.350 0.850 rg 52.00 425.49 26.00 2.50 re f
+BT /F2 11.5 Tf 0.080 0.090 0.110 rg 1 0 0 1 52 410.71 Tm (Risks & Catalysts) Tj ET
+BT /F2 9.5 Tf 0.3 g 1 0 0 1 52 389.31 Tm (Strengths) Tj ET
+BT /F1 9 Tf 0.2 g 1 0 0 1 60 373.44 Tm (- Revenue compounding of 15.4% CAGR on the base case, with EBITDA margin at 36.7% by the final forecast year.) Tj ET
+BT /F1 9 Tf 0.2 g 1 0 0 1 60 358.84 Tm (- Cash generation: 58.8% of final-year EBITDA converts to free cash flow \(225.46B INR\), self-funding reinvestment or) Tj ET
+BT /F1 9 Tf 0.2 g 1 0 0 1 60 346.24 Tm (capital returns.) Tj ET
+BT /F1 9 Tf 0.2 g 1 0 0 1 60 331.64 Tm (- Net cash of 25.50B INR provides balance-sheet flexibility through the cycle.) Tj ET
+BT /F1 9 Tf 0.2 g 1 0 0 1 60 317.04 Tm (- The three-statement forecast passes its balance-sheet identity check in every projected year.) Tj ET
+BT /F1 9 Tf 0.2 g 1 0 0 1 60 302.44 Tm (- Return on invested capital of 27.7% in 2025 indicates value-accretive reinvestment at the reported level.) Tj ET
+BT /F1 9 Tf 0.2 g 1 0 0 1 60 287.84 Tm (- Revenue scale of 510.00B INR provides operating leverage and absorbs fixed costs through the cycle.) Tj ET
+BT /F1 9 Tf 0.2 g 1 0 0 1 60 273.24 Tm (- Gross margin of 63.3% leaves room to absorb input-cost inflation without hitting operating profit.) Tj ET
+BT /F1 9 Tf 0.2 g 1 0 0 1 60 258.64 Tm (- Return on equity of 25.5% indicates efficient use of shareholder capital.) Tj ET
+BT /F1 9 Tf 0.2 g 1 0 0 1 60 244.04 Tm (- Earnings are positive and compounding alongside revenue growth, with diluted EPS of 793.05 INR.) Tj ET
+BT /F1 9 Tf 0.2 g 1 0 0 1 60 229.44 Tm (- Double-digit modelled revenue growth of 15.4% outpaces a low-single-digit nominal GDP benchmark.) Tj ET
+BT /F2 9.5 Tf 0.3 g 1 0 0 1 52 210.41 Tm (Risks) Tj ET
+BT /F2 9 Tf 0.720 0.160 0.160 rg 1 0 0 1 60 194.54 Tm (Terminal-value dependence) Tj ET
+BT /F1 8.7 Tf 0.2 g 1 0 0 1 66 180.69 Tm (Exposure: The present value of the terminal value is 79.5% of enterprise value.) Tj ET
+BT /F1 8.7 Tf 0.2 g 1 0 0 1 66 167.51 Tm (Impact: Small changes to the discount rate or long-run growth swing the target materially.) Tj ET
+BT /F1 8.7 Tf 0.35 g 1 0 0 1 66 154.33 Tm (Monitoring metric: WACC and terminal-growth assumptions versus the sensitivity grid) Tj ET
+BT /F1 8.7 Tf 0.35 g 1 0 0 1 66 141.15 Tm (Scenario: Value per share across the sensitivity grid ranges 14,625.58-42,694.77.) Tj ET
+BT /F1 8 Tf 0.45 g 1 0 0 1 66 128.57 Tm (Basis: fact) Tj ET
+BT /F2 9 Tf 0.720 0.160 0.160 rg 1 0 0 1 60 113.52 Tm (Growth execution) Tj ET
+BT /F1 8.7 Tf 0.2 g 1 0 0 1 66 99.67 Tm (Exposure: The base case assumes 15.4% revenue CAGR.) Tj ET
+BT /F1 8.7 Tf 0.2 g 1 0 0 1 66 86.49 Tm (Impact: A deceleration compresses both the cash-flow base and the applied multiple.) Tj ET
+BT /F1 8.7 Tf 0.35 g 1 0 0 1 66 73.31 Tm (Monitoring metric: Reported revenue growth versus the forecast path) Tj ET
 BT /F1 7.5 Tf 0.45 0.47 0.52 rg 1 0 0 1 397.12 801.89 Tm (RELIANCE.NS | Reliance Industries Limited) Tj ET
 0.85 G 0.4 w 52 795.89 m 543.28 795.89 l S
 0.85 G 0.4 w 52 38 m 543.28 38 l S
@@ -620,60 +638,62 @@ endobj
 << /Type /Page /Parent 2 0 R /MediaBox [0 0 595.28 841.89] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 16 0 R >>
 endobj
 16 0 obj
-<< /Length 5643 >>
+<< /Length 6175 >>
 stream
-BT /F1 8.7 Tf 0.2 g 1 0 0 1 66 772.50 Tm (dataset.) Tj ET
-BT /F1 8.7 Tf 0.2 g 1 0 0 1 66 759.32 Tm (Impact: Sector-specific failure modes cannot be quantified.) Tj ET
-BT /F1 8.7 Tf 0.35 g 1 0 0 1 66 746.14 Tm (Monitoring metric: Disclosure of unavailable metrics in the industry section) Tj ET
-BT /F1 8 Tf 0.45 g 1 0 0 1 66 733.55 Tm (Basis: fact) Tj ET
-BT /F2 9 Tf 0.720 0.160 0.160 rg 1 0 0 1 60 718.50 Tm (Wide valuation dispersion) Tj ET
-BT /F1 8.7 Tf 0.2 g 1 0 0 1 66 704.66 Tm (Exposure: The sensitivity grid spans 129.6% of the base-case value per share.) Tj ET
-BT /F1 8.7 Tf 0.2 g 1 0 0 1 66 691.48 Tm (Impact: Small assumption changes move the target by a material margin.) Tj ET
-BT /F1 8.7 Tf 0.35 g 1 0 0 1 66 678.30 Tm (Monitoring metric: WACC and terminal-growth assumptions versus the sensitivity grid) Tj ET
-BT /F1 8 Tf 0.45 g 1 0 0 1 66 665.71 Tm (Basis: fact) Tj ET
-BT /F2 9.5 Tf 0.3 g 1 0 0 1 52 646.24 Tm (Catalysts) Tj ET
-BT /F2 9 Tf 0.060 0.450 0.290 rg 1 0 0 1 60 630.36 Tm (Revenue upside versus plan) Tj ET
-BT /F1 8.7 Tf 0.2 g 1 0 0 1 66 616.52 Tm (Event: Reported revenue tracking above the 15.4% base-case path) Tj ET
-BT /F1 8.7 Tf 0.2 g 1 0 0 1 66 603.34 Tm (Timing: Next reported annual period; exact timing is unknown) Tj ET
-BT /F1 8.7 Tf 0.35 g 1 0 0 1 66 590.16 Tm (Grounding: Each point of revenue upside converts at the 36.7% terminal-year EBITDA margin.) Tj ET
-BT /F2 9 Tf 0.060 0.450 0.290 rg 1 0 0 1 60 574.72 Tm (Capital returns from net cash) Tj ET
-BT /F1 8.7 Tf 0.2 g 1 0 0 1 66 560.88 Tm (Event: Buyback, special dividend or step-up in recurring distributions) Tj ET
-BT /F1 8.7 Tf 0.2 g 1 0 0 1 66 547.70 Tm (Timing: Timing unknown; requires board action) Tj ET
-BT /F1 8.7 Tf 0.35 g 1 0 0 1 66 534.52 Tm (Grounding: Net cash of 25.50B INR on the latest balance sheet would fund returns without new leverage.) Tj ET
-BT /F2 9 Tf 0.060 0.450 0.290 rg 1 0 0 1 60 519.08 Tm (Multiple re-rating) Tj ET
-BT /F1 8.7 Tf 0.2 g 1 0 0 1 66 505.24 Tm (Event: Market multiple moving toward the model-implied 8.4x exit level) Tj ET
-BT /F1 8.7 Tf 0.2 g 1 0 0 1 66 492.06 Tm (Timing: Timing unknown) Tj ET
-BT /F1 8.7 Tf 0.35 g 1 0 0 1 66 478.88 Tm (Grounding: The DCF embeds a 8.4x exit multiple on final-year EBITDA of 383.40B INR.) Tj ET
-BT /F2 9 Tf 0.060 0.450 0.290 rg 1 0 0 1 60 463.44 Tm (Operating leverage) Tj ET
-BT /F1 8.7 Tf 0.2 g 1 0 0 1 66 449.60 Tm (Event: Operating margin expands as fixed costs are absorbed by a larger revenue base) Tj ET
-BT /F1 8.7 Tf 0.2 g 1 0 0 1 66 436.42 Tm (Timing: Progressive across the forecast horizon) Tj ET
-BT /F1 8.7 Tf 0.35 g 1 0 0 1 66 423.24 Tm (Grounding: The model holds the opex ratio at 33.3% while revenue compounds, so incremental revenue largely drops to) Tj ET
-BT /F1 8.7 Tf 0.35 g 1 0 0 1 66 411.06 Tm (operating profit.) Tj ET
-0.130 0.350 0.850 rg 52.00 400.77 26.00 2.50 re f
-BT /F2 11.5 Tf 0.080 0.090 0.110 rg 1 0 0 1 52 386.00 Tm (Model Quality & Integrity Review) Tj ET
-0.955 0.965 0.980 rg 52.00 330.35 491.28 44.32 re f
-0.710 0.470 0.050 rg 52.00 330.35 3.00 44.32 re f
-BT /F2 8 Tf 0.710 0.470 0.050 rg 1 0 0 1 64.00 359.87 Tm (Conviction: LOW) Tj ET
-BT /F1 8.8 Tf 0.2 g 1 0 0 1 64.00 345.19 Tm (Conviction is low: data-integrity checks blocked the rating, or the evidence base \(history and valuation\) is insufficient.) Tj ET
-BT /F1 9 Tf 0.2 g 1 0 0 1 52 314.70 Tm (Data status: SYNTHETIC - deterministic local fixture. Figures are not company-reported. Reported coverage spans) Tj ET
-BT /F1 9 Tf 0.2 g 1 0 0 1 52 302.10 Tm (2022-2025 \(4 annual periods\). Sector metrics unavailable: Commodity price exposure, Reserves / production volumes,) Tj ET
-BT /F1 9 Tf 0.2 g 1 0 0 1 52 289.50 Tm (Project/asset pipeline. Balance-sheet identity holds in every projected year - necessary but not sufficient for economic) Tj ET
-BT /F1 9 Tf 0.2 g 1 0 0 1 52 276.90 Tm (correctness. Principal assumptions \(9 derived from reported history\): revenue growth 15.44%; gross margin 63.33%; opex) Tj ET
-BT /F1 9 Tf 0.2 g 1 0 0 1 52 264.30 Tm (ratio 33.33%; tax rate 20.00%; da pct 6.67%; capex pct 8.33%. Drivers derived from reported history: revenue growth,) Tj ET
-BT /F1 9 Tf 0.2 g 1 0 0 1 52 251.70 Tm (gross margin, opex ratio, tax rate; remaining drivers are documented engine defaults or user inputs.) Tj ET
-BT /F2 9 Tf 0.3 g 1 0 0 1 52 233.10 Tm (Automated checks) Tj ET
-BT /F1 9 Tf 0.45 g 1 0 0 1 52.00 217.50 Tm (Balance-sheet identity) Tj ET
-BT /F1 9 Tf 0.060 0.450 0.290 rg 1 0 0 1 523.27 217.50 Tm (Pass) Tj ET
-BT /F1 9 Tf 0.45 g 1 0 0 1 52.00 202.85 Tm (DCF produced a value) Tj ET
-BT /F1 9 Tf 0.060 0.450 0.290 rg 1 0 0 1 527.77 202.85 Tm (Yes) Tj ET
-BT /F1 9 Tf 0.45 g 1 0 0 1 52.00 188.20 Tm (Valuation warnings) Tj ET
-BT /F1 9 Tf 0.15 g 1 0 0 1 538.28 188.20 Tm (0) Tj ET
-BT /F1 9 Tf 0.45 g 1 0 0 1 52.00 173.55 Tm (Integrity errors \(blocking\)) Tj ET
-BT /F1 9 Tf 0.060 0.450 0.290 rg 1 0 0 1 538.28 173.55 Tm (0) Tj ET
-BT /F1 9 Tf 0.45 g 1 0 0 1 52.00 158.90 Tm (Integrity warnings) Tj ET
-BT /F1 9 Tf 0.710 0.470 0.050 rg 1 0 0 1 538.28 158.90 Tm (1) Tj ET
-BT /F2 8.5 Tf 0.35 g 1 0 0 1 52 142.68 Tm (Validation detail) Tj ET
-BT /F1 8 Tf 0.710 0.470 0.050 rg 1 0 0 1 58 129.20 Tm ([WARN] data.synthetic: Figures come from the deterministic local fixture \(synthetic sample data\).) Tj ET
+BT /F1 8.7 Tf 0.35 g 1 0 0 1 66 772.50 Tm (Scenario: Bear case assumes growth runs below plan \(see scenarios\).) Tj ET
+BT /F1 8 Tf 0.45 g 1 0 0 1 66 759.91 Tm (Basis: inference) Tj ET
+BT /F2 9 Tf 0.720 0.160 0.160 rg 1 0 0 1 60 744.86 Tm (Synthetic data provenance) Tj ET
+BT /F1 8.7 Tf 0.2 g 1 0 0 1 66 731.01 Tm (Exposure: All financial inputs come from the local deterministic fixture, not company filings.) Tj ET
+BT /F1 8.7 Tf 0.2 g 1 0 0 1 66 717.84 Tm (Impact: No conclusion in this report should be relied upon as a description of any real company.) Tj ET
+BT /F1 8.7 Tf 0.35 g 1 0 0 1 66 704.66 Tm (Monitoring metric: Data-status label on the cover of this report) Tj ET
+BT /F1 8 Tf 0.45 g 1 0 0 1 66 692.07 Tm (Basis: fact) Tj ET
+BT /F2 9 Tf 0.720 0.160 0.160 rg 1 0 0 1 60 677.02 Tm (Missing sector-specific evidence) Tj ET
+BT /F1 8.7 Tf 0.2 g 1 0 0 1 66 663.18 Tm (Exposure: Commodity price exposure, Reserves / production volumes, Project/asset pipeline are not available in the) Tj ET
+BT /F1 8.7 Tf 0.2 g 1 0 0 1 66 651.00 Tm (dataset.) Tj ET
+BT /F1 8.7 Tf 0.2 g 1 0 0 1 66 637.82 Tm (Impact: Sector-specific failure modes cannot be quantified.) Tj ET
+BT /F1 8.7 Tf 0.35 g 1 0 0 1 66 624.64 Tm (Monitoring metric: Disclosure of unavailable metrics in the industry section) Tj ET
+BT /F1 8 Tf 0.45 g 1 0 0 1 66 612.05 Tm (Basis: fact) Tj ET
+BT /F2 9 Tf 0.720 0.160 0.160 rg 1 0 0 1 60 597.00 Tm (Wide valuation dispersion) Tj ET
+BT /F1 8.7 Tf 0.2 g 1 0 0 1 66 583.16 Tm (Exposure: The sensitivity grid spans 129.6% of the base-case value per share.) Tj ET
+BT /F1 8.7 Tf 0.2 g 1 0 0 1 66 569.98 Tm (Impact: Small assumption changes move the target by a material margin.) Tj ET
+BT /F1 8.7 Tf 0.35 g 1 0 0 1 66 556.80 Tm (Monitoring metric: WACC and terminal-growth assumptions versus the sensitivity grid) Tj ET
+BT /F1 8 Tf 0.45 g 1 0 0 1 66 544.21 Tm (Basis: fact) Tj ET
+BT /F2 9.5 Tf 0.3 g 1 0 0 1 52 524.74 Tm (Catalysts) Tj ET
+BT /F2 9 Tf 0.060 0.450 0.290 rg 1 0 0 1 60 508.86 Tm (Revenue upside versus plan) Tj ET
+BT /F1 8.7 Tf 0.2 g 1 0 0 1 66 495.02 Tm (Event: Reported revenue tracking above the 15.4% base-case path) Tj ET
+BT /F1 8.7 Tf 0.2 g 1 0 0 1 66 481.84 Tm (Timing: Next reported annual period; exact timing is unknown) Tj ET
+BT /F1 8.7 Tf 0.35 g 1 0 0 1 66 468.66 Tm (Grounding: Each point of revenue upside converts at the 36.7% terminal-year EBITDA margin.) Tj ET
+BT /F2 9 Tf 0.060 0.450 0.290 rg 1 0 0 1 60 453.22 Tm (Capital returns from net cash) Tj ET
+BT /F1 8.7 Tf 0.2 g 1 0 0 1 66 439.38 Tm (Event: Buyback, special dividend or step-up in recurring distributions) Tj ET
+BT /F1 8.7 Tf 0.2 g 1 0 0 1 66 426.20 Tm (Timing: Timing unknown; requires board action) Tj ET
+BT /F1 8.7 Tf 0.35 g 1 0 0 1 66 413.02 Tm (Grounding: Net cash of 25.50B INR on the latest balance sheet would fund returns without new leverage.) Tj ET
+BT /F2 9 Tf 0.060 0.450 0.290 rg 1 0 0 1 60 397.58 Tm (Multiple re-rating) Tj ET
+BT /F1 8.7 Tf 0.2 g 1 0 0 1 66 383.74 Tm (Event: Market multiple moving toward the model-implied 8.4x exit level) Tj ET
+BT /F1 8.7 Tf 0.2 g 1 0 0 1 66 370.56 Tm (Timing: Timing unknown) Tj ET
+BT /F1 8.7 Tf 0.35 g 1 0 0 1 66 357.38 Tm (Grounding: The DCF embeds a 8.4x exit multiple on final-year EBITDA of 383.40B INR.) Tj ET
+BT /F2 9 Tf 0.060 0.450 0.290 rg 1 0 0 1 60 341.94 Tm (Operating leverage) Tj ET
+BT /F1 8.7 Tf 0.2 g 1 0 0 1 66 328.10 Tm (Event: Operating margin expands as fixed costs are absorbed by a larger revenue base) Tj ET
+BT /F1 8.7 Tf 0.2 g 1 0 0 1 66 314.92 Tm (Timing: Progressive across the forecast horizon) Tj ET
+BT /F1 8.7 Tf 0.35 g 1 0 0 1 66 301.74 Tm (Grounding: The model holds the opex ratio at 33.3% while revenue compounds, so incremental revenue largely drops to) Tj ET
+BT /F1 8.7 Tf 0.35 g 1 0 0 1 66 289.56 Tm (operating profit.) Tj ET
+0.130 0.350 0.850 rg 52.00 279.27 26.00 2.50 re f
+BT /F2 11.5 Tf 0.080 0.090 0.110 rg 1 0 0 1 52 264.50 Tm (Model Quality & Integrity Review) Tj ET
+0.955 0.965 0.980 rg 52.00 208.85 491.28 44.32 re f
+0.710 0.470 0.050 rg 52.00 208.85 3.00 44.32 re f
+BT /F2 8 Tf 0.710 0.470 0.050 rg 1 0 0 1 64.00 238.37 Tm (Conviction: LOW) Tj ET
+BT /F1 8.8 Tf 0.2 g 1 0 0 1 64.00 223.69 Tm (Conviction is low: data-integrity checks blocked the rating, or the evidence base \(history and valuation\) is insufficient.) Tj ET
+BT /F1 9 Tf 0.2 g 1 0 0 1 52 193.20 Tm (Data status: SYNTHETIC - deterministic local fixture. Figures are not company-reported. Reported coverage spans) Tj ET
+BT /F1 9 Tf 0.2 g 1 0 0 1 52 180.60 Tm (2022-2025 \(4 annual periods\). Sector metrics unavailable: Commodity price exposure, Reserves / production volumes,) Tj ET
+BT /F1 9 Tf 0.2 g 1 0 0 1 52 168.00 Tm (Project/asset pipeline. Balance-sheet identity holds in every projected year - necessary but not sufficient for economic) Tj ET
+BT /F1 9 Tf 0.2 g 1 0 0 1 52 155.40 Tm (correctness. Valuation warnings: Terminal value contributes more than 75% of enterprise value; the valuation is sensitive to) Tj ET
+BT /F1 9 Tf 0.2 g 1 0 0 1 52 142.80 Tm (long-run assumptions. Principal assumptions \(9 derived from reported history\): revenue growth 15.44%; gross margin) Tj ET
+BT /F1 9 Tf 0.2 g 1 0 0 1 52 130.20 Tm (63.33%; opex ratio 33.33%; tax rate 20.00%; da pct 6.67%; capex pct 8.33%. Drivers derived from reported history:) Tj ET
+BT /F1 9 Tf 0.2 g 1 0 0 1 52 117.60 Tm (revenue growth, gross margin, opex ratio, tax rate; remaining drivers are documented engine defaults or user inputs.) Tj ET
+BT /F2 9 Tf 0.3 g 1 0 0 1 52 99.00 Tm (Automated checks) Tj ET
+BT /F1 9 Tf 0.45 g 1 0 0 1 52.00 83.40 Tm (Balance-sheet identity) Tj ET
+BT /F1 9 Tf 0.060 0.450 0.290 rg 1 0 0 1 523.27 83.40 Tm (Pass) Tj ET
+BT /F1 9 Tf 0.45 g 1 0 0 1 52.00 68.75 Tm (DCF produced a value) Tj ET
+BT /F1 9 Tf 0.060 0.450 0.290 rg 1 0 0 1 527.77 68.75 Tm (Yes) Tj ET
 BT /F1 7.5 Tf 0.45 0.47 0.52 rg 1 0 0 1 397.12 801.89 Tm (RELIANCE.NS | Reliance Industries Limited) Tj ET
 0.85 G 0.4 w 52 795.89 m 543.28 795.89 l S
 0.85 G 0.4 w 52 38 m 543.28 38 l S
@@ -685,201 +705,204 @@ endobj
 << /Type /Page /Parent 2 0 R /MediaBox [0 0 595.28 841.89] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 18 0 R >>
 endobj
 18 0 obj
-<< /Length 15971 >>
+<< /Length 15978 >>
 stream
-0.130 0.350 0.850 rg 52.00 777.39 26.00 2.50 re f
-BT /F2 11.5 Tf 0.080 0.090 0.110 rg 1 0 0 1 52 762.62 Tm (Sources & Methodology) Tj ET
-BT /F2 9 Tf 0.3 g 1 0 0 1 52 741.64 Tm (Data sources \(numbered\)) Tj ET
-0.945 0.955 0.972 rg 52.00 717.69 491.28 16.00 re f
-BT /F2 6.5 Tf 0.16 0.18 0.22 rg 1 0 0 1 52.00 727.84 Tm (#) Tj ET
-BT /F2 6.5 Tf 0.16 0.18 0.22 rg 1 0 0 1 74.00 727.84 Tm (Metric) Tj ET
-BT /F2 6.5 Tf 0.16 0.18 0.22 rg 1 0 0 1 184.66 727.84 Tm (Value) Tj ET
-BT /F2 6.5 Tf 0.16 0.18 0.22 rg 1 0 0 1 267.00 727.84 Tm (Period) Tj ET
-BT /F2 6.5 Tf 0.16 0.18 0.22 rg 1 0 0 1 347.00 727.84 Tm (Status) Tj ET
-BT /F2 6.5 Tf 0.16 0.18 0.22 rg 1 0 0 1 412.00 727.84 Tm (Source) Tj ET
-0.75 G 0.5 w 52 717.69 m 543.28 717.69 l S
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 52.00 711.74 Tm (1) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 74.00 711.74 Tm (Revenue) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 149.46 711.74 Tm (510,000,000,000) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 267.00 711.74 Tm (2025-12-31) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 347.00 711.74 Tm (synthetic) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 412.00 711.74 Tm (APEX local deterministic fix) Tj ET
-0.976 0.980 0.988 rg 52.00 691.69 491.28 13.00 re f
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 52.00 698.74 Tm (2) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 74.00 698.74 Tm (Revenue growth) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 188.38 698.74 Tm (0.15) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 267.00 698.74 Tm (2025-12-31) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 347.00 698.74 Tm (derived) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 412.00 698.74 Tm (APEX local deterministic fix) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 52.00 685.74 Tm (3) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 74.00 685.74 Tm (Gross margin) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 188.38 685.74 Tm (0.63) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 267.00 685.74 Tm (2025-12-31) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 347.00 685.74 Tm (derived) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 412.00 685.74 Tm (APEX local deterministic fix) Tj ET
-0.976 0.980 0.988 rg 52.00 665.69 491.28 13.00 re f
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 52.00 672.74 Tm (4) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 74.00 672.74 Tm (Operating margin) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 192.27 672.74 Tm (0.3) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 267.00 672.74 Tm (2025-12-31) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 347.00 672.74 Tm (derived) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 412.00 672.74 Tm (APEX local deterministic fix) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 52.00 659.74 Tm (5) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 74.00 659.74 Tm (Net income) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 149.46 659.74 Tm (119,000,000,000) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 267.00 659.74 Tm (2025-12-31) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 347.00 659.74 Tm (synthetic) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 412.00 659.74 Tm (APEX local deterministic fix) Tj ET
-0.976 0.980 0.988 rg 52.00 639.69 491.28 13.00 re f
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 52.00 646.74 Tm (6) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 74.00 646.74 Tm (EBITDA) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 149.46 646.74 Tm (187,000,000,000) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 267.00 646.74 Tm (2025-12-31) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 347.00 646.74 Tm (synthetic) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 412.00 646.74 Tm (APEX local deterministic fix) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 52.00 633.74 Tm (7) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 74.00 633.74 Tm (Free cash flow) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 149.46 633.74 Tm (110,500,000,000) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 267.00 633.74 Tm (2025-12-31) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 347.00 633.74 Tm (synthetic) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 412.00 633.74 Tm (APEX local deterministic fix) Tj ET
-0.976 0.980 0.988 rg 52.00 613.69 491.28 13.00 re f
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 52.00 620.74 Tm (8) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 74.00 620.74 Tm (Net debt) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 151.02 620.74 Tm (-25,500,000,000) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 267.00 620.74 Tm (2025-12-31) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 347.00 620.74 Tm (derived) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 412.00 620.74 Tm (APEX local deterministic fix) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 52.00 607.74 Tm (9) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 74.00 607.74 Tm (Diluted EPS) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 180.59 607.74 Tm (793.05) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 267.00 607.74 Tm (2025-12-31) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 347.00 607.74 Tm (synthetic) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 412.00 607.74 Tm (APEX local deterministic fix) Tj ET
-0.976 0.980 0.988 rg 52.00 587.69 491.28 13.00 re f
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 52.00 594.74 Tm (10) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 74.00 594.74 Tm (Shares outstanding) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 163.08 594.74 Tm (150,000,000) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 267.00 594.74 Tm (2025-12-31) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 347.00 594.74 Tm (synthetic) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 412.00 594.74 Tm (APEX local deterministic fix) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 52.00 581.74 Tm (11) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 74.00 581.74 Tm (Assumption: revenue growth) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 172.81 581.74 Tm (0.154416) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 267.00 581.74 Tm (forecast horizon) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 347.00 581.74 Tm (derived) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 412.00 581.74 Tm (Derived from reported revenu) Tj ET
-0.976 0.980 0.988 rg 52.00 561.69 491.28 13.00 re f
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 52.00 568.74 Tm (12) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 74.00 568.74 Tm (Assumption: gross margin) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 172.81 568.74 Tm (0.633333) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 267.00 568.74 Tm (forecast horizon) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 347.00 568.74 Tm (derived) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 412.00 568.74 Tm (Derived from reported gross ) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 52.00 555.74 Tm (13) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 74.00 555.74 Tm (Assumption: opex ratio) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 172.81 555.74 Tm (0.333333) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 267.00 555.74 Tm (forecast horizon) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 347.00 555.74 Tm (derived) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 412.00 555.74 Tm (Derived from reported operat) Tj ET
-0.976 0.980 0.988 rg 52.00 535.69 491.28 13.00 re f
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 52.00 542.74 Tm (14) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 74.00 542.74 Tm (Assumption: tax rate) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 192.27 542.74 Tm (0.2) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 267.00 542.74 Tm (forecast horizon) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 347.00 542.74 Tm (derived) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 412.00 542.74 Tm (Derived from reported tax ex) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 52.00 529.74 Tm (15) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 74.00 529.74 Tm (Assumption: da pct) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 168.92 529.74 Tm (0.0666667) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 267.00 529.74 Tm (forecast horizon) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 347.00 529.74 Tm (derived) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 412.00 529.74 Tm (Derived from reported deprec) Tj ET
-0.976 0.980 0.988 rg 52.00 509.69 491.28 13.00 re f
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 52.00 516.74 Tm (16) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 74.00 516.74 Tm (Assumption: capex pct) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 168.92 516.74 Tm (0.0833333) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 267.00 516.74 Tm (forecast horizon) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 347.00 516.74 Tm (derived) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 412.00 516.74 Tm (Derived from reported capex ) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 52.00 503.74 Tm (17) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 74.00 503.74 Tm (Assumption: nwc pct) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 168.92 503.74 Tm (0.0333333) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 267.00 503.74 Tm (forecast horizon) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 347.00 503.74 Tm (derived) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 412.00 503.74 Tm (Derived from reported \(curre) Tj ET
-0.976 0.980 0.988 rg 52.00 483.69 491.28 13.00 re f
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 52.00 490.74 Tm (18) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 74.00 490.74 Tm (Assumption: interest rate) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 168.92 490.74 Tm (0.0416667) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 267.00 490.74 Tm (forecast horizon) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 347.00 490.74 Tm (derived) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 412.00 490.74 Tm (Derived from reported intere) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 52.00 477.74 Tm (19) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 74.00 477.74 Tm (Assumption: dividend payout) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 192.27 477.74 Tm (0.3) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 267.00 477.74 Tm (forecast horizon) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 347.00 477.74 Tm (assumption) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 412.00 477.74 Tm (Engine default \(documented a) Tj ET
-0.976 0.980 0.988 rg 52.00 457.69 491.28 13.00 re f
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 52.00 464.74 Tm (20) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 74.00 464.74 Tm (Assumption: excess cash sweep) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 198.11 464.74 Tm (0) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 267.00 464.74 Tm (forecast horizon) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 347.00 464.74 Tm (assumption) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 412.00 464.74 Tm (Engine default \(documented a) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 52.00 451.74 Tm (21) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 74.00 451.74 Tm (Assumption: share dilution) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 198.11 451.74 Tm (0) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 267.00 451.74 Tm (forecast horizon) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 347.00 451.74 Tm (derived) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 412.00 451.74 Tm (Derived from reported share ) Tj ET
-0.976 0.980 0.988 rg 52.00 431.69 491.28 13.00 re f
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 52.00 438.74 Tm (22) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 74.00 438.74 Tm (DCF value per share) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 170.86 438.74 Tm (21,656.52) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 267.00 438.74 Tm (valuation date) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 347.00 438.74 Tm (derived) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 412.00 438.74 Tm (APEX local deterministic fix) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 52.00 425.74 Tm (23) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 74.00 425.74 Tm (WACC) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 188.38 425.74 Tm (0.09) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 267.00 425.74 Tm (valuation date) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 347.00 425.74 Tm (assumption) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 412.00 425.74 Tm (APEX local deterministic fix) Tj ET
-0.976 0.980 0.988 rg 52.00 405.69 491.28 13.00 re f
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 52.00 412.74 Tm (24) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 74.00 412.74 Tm (Enterprise value) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 133.89 412.74 Tm (3,222,978,599,904.78) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 267.00 412.74 Tm (valuation date) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 347.00 412.74 Tm (derived) Tj ET
-BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 412.00 412.74 Tm (APEX local deterministic fix) Tj ET
-0.8 G 0.4 w 52 406.69 m 543.28 406.69 l S
-BT /F2 9 Tf 0.3 g 1 0 0 1 52 389.04 Tm (Methodology) Tj ET
-BT /F1 8.8 Tf 0.2 g 1 0 0 1 52 373.61 Tm (Forecast: a deterministic three-statement model driven by the documented assumptions in the forecast section. Valuation:) Tj ET
-BT /F1 8.8 Tf 0.2 g 1 0 0 1 52 361.29 Tm (unlevered free cash flows discounted at a CAPM-built WACC, with a Gordon-growth or exit-multiple terminal value. Rating: a) Tj ET
-BT /F1 8.8 Tf 0.2 g 1 0 0 1 52 348.97 Tm (mechanical band on model upside \(BUY >= +10%, HOLD within ?10%, SELL below -10%\), withheld entirely when integrity) Tj ET
-BT /F1 8.8 Tf 0.2 g 1 0 0 1 52 336.65 Tm (gates fail. Every figure is a model output; the deterministic engine writes the narrative from those outputs and never invents) Tj ET
-BT /F1 8.8 Tf 0.2 g 1 0 0 1 52 324.33 Tm (numbers.) Tj ET
-BT /F1 9 Tf 0.45 g 1 0 0 1 52.00 307.84 Tm (Peer set) Tj ET
-BT /F1 9 Tf 0.15 g 1 0 0 1 393.73 307.84 Tm (None supplied \(comparables omitted\)) Tj ET
-0.130 0.350 0.850 rg 52.00 298.34 26.00 2.50 re f
-BT /F2 11.5 Tf 0.080 0.090 0.110 rg 1 0 0 1 52 283.56 Tm (Conclusion) Tj ET
-BT /F1 9.5 Tf 0.18 g 1 0 0 1 52 264.16 Tm (On the evidence supplied we are measured. The thesis would be strengthened by revenue tracking at or above) Tj ET
-BT /F1 9.5 Tf 0.18 g 1 0 0 1 52 250.39 Tm (15.4%, cash conversion holding near 58.8% of EBITDA, ROIC sustained above 27.7%, healthy gross margins, a) Tj ET
-BT /F1 9.5 Tf 0.18 g 1 0 0 1 52 236.61 Tm (net-cash balance sheet; it would be weakened by rising terminal-value dependence, continued absence of) Tj ET
-BT /F1 9.5 Tf 0.18 g 1 0 0 1 52 222.84 Tm (sector-specific disclosure, reliance on synthetic sample data. Material unresolved questions are those listed as) Tj ET
-BT /F1 9.5 Tf 0.18 g 1 0 0 1 52 209.06 Tm (unavailable in the industry and model-quality sections; they are disclosed rather than estimated.) Tj ET
-BT /F2 9 Tf 0.3 g 1 0 0 1 52 188.71 Tm (Investment thesis) Tj ET
-BT /F1 9 Tf 0.2 g 1 0 0 1 52 173.11 Tm (Reliance Industries Limited offers Energy exposure \(Diversified Oil Gas & Chemicals\) with a 15.4% modelled revenue) Tj ET
-BT /F1 9 Tf 0.2 g 1 0 0 1 52 160.51 Tm (CAGR, a terminal-year EBITDA margin of 36.7% and 58.8% EBITDA-to-FCF conversion on the base case. Revenue) Tj ET
-BT /F1 9 Tf 0.2 g 1 0 0 1 52 147.91 Tm (scales from 510.00B INR to 1.05T INR across the forecast horizon, while the mechanical rating of NOT RATED reflects an) Tj ET
-BT /F1 9 Tf 0.2 g 1 0 0 1 52 135.31 Tm (undetermined target versus the 8,032.50 INR last close. The balance sheet carries 25.50B INR of net cash \(0.14x) Tj ET
-BT /F1 9 Tf 0.2 g 1 0 0 1 52 122.71 Tm (last-reported EBITDA\). Because data-integrity checks failed, no rating or target is attached to this thesis.) Tj ET
-BT /F2 9 Tf 0.3 g 1 0 0 1 52 105.11 Tm (Thesis drivers) Tj ET
-BT /F1 8.8 Tf 0.2 g 1 0 0 1 60 89.68 Tm (- Growth: revenue CAGR of 15.4% from 510.00B INR to 1.05T INR across the forecast horizon.) Tj ET
-BT /F1 8.8 Tf 0.2 g 1 0 0 1 60 75.36 Tm (- Margins: EBITDA margin of 36.7% rising to 36.7%, consistent with operating leverage on the modelled cost base.) Tj ET
-BT /F1 8.8 Tf 0.2 g 1 0 0 1 60 61.05 Tm (- Cash conversion: final-year free cash flow of 225.46B INR, 58.8% of EBITDA.) Tj ET
+BT /F1 9 Tf 0.45 g 1 0 0 1 52.00 772.24 Tm (Valuation warnings) Tj ET
+BT /F1 9 Tf 0.710 0.470 0.050 rg 1 0 0 1 538.28 772.24 Tm (1) Tj ET
+BT /F1 9 Tf 0.45 g 1 0 0 1 52.00 757.59 Tm (Integrity errors \(blocking\)) Tj ET
+BT /F1 9 Tf 0.060 0.450 0.290 rg 1 0 0 1 538.28 757.59 Tm (0) Tj ET
+BT /F1 9 Tf 0.45 g 1 0 0 1 52.00 742.94 Tm (Integrity warnings) Tj ET
+BT /F1 9 Tf 0.710 0.470 0.050 rg 1 0 0 1 538.28 742.94 Tm (1) Tj ET
+BT /F2 8.5 Tf 0.35 g 1 0 0 1 52 726.72 Tm (Validation detail) Tj ET
+BT /F1 8 Tf 0.710 0.470 0.050 rg 1 0 0 1 58 713.24 Tm ([WARN] data.synthetic: Figures come from the deterministic local fixture \(synthetic sample data\).) Tj ET
+0.130 0.350 0.850 rg 52.00 704.84 26.00 2.50 re f
+BT /F2 11.5 Tf 0.080 0.090 0.110 rg 1 0 0 1 52 690.07 Tm (Sources & Methodology) Tj ET
+BT /F2 9 Tf 0.3 g 1 0 0 1 52 669.09 Tm (Data sources \(numbered\)) Tj ET
+0.945 0.955 0.972 rg 52.00 645.14 491.28 16.00 re f
+BT /F2 6.5 Tf 0.16 0.18 0.22 rg 1 0 0 1 52.00 655.29 Tm (#) Tj ET
+BT /F2 6.5 Tf 0.16 0.18 0.22 rg 1 0 0 1 74.00 655.29 Tm (Metric) Tj ET
+BT /F2 6.5 Tf 0.16 0.18 0.22 rg 1 0 0 1 184.66 655.29 Tm (Value) Tj ET
+BT /F2 6.5 Tf 0.16 0.18 0.22 rg 1 0 0 1 267.00 655.29 Tm (Period) Tj ET
+BT /F2 6.5 Tf 0.16 0.18 0.22 rg 1 0 0 1 347.00 655.29 Tm (Status) Tj ET
+BT /F2 6.5 Tf 0.16 0.18 0.22 rg 1 0 0 1 412.00 655.29 Tm (Source) Tj ET
+0.75 G 0.5 w 52 645.14 m 543.28 645.14 l S
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 52.00 639.19 Tm (1) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 74.00 639.19 Tm (Revenue) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 149.46 639.19 Tm (510,000,000,000) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 267.00 639.19 Tm (2025-12-31) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 347.00 639.19 Tm (synthetic) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 412.00 639.19 Tm (APEX local deterministic fix) Tj ET
+0.976 0.980 0.988 rg 52.00 619.14 491.28 13.00 re f
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 52.00 626.19 Tm (2) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 74.00 626.19 Tm (Revenue growth) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 188.38 626.19 Tm (0.15) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 267.00 626.19 Tm (2025-12-31) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 347.00 626.19 Tm (derived) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 412.00 626.19 Tm (APEX local deterministic fix) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 52.00 613.19 Tm (3) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 74.00 613.19 Tm (Gross margin) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 188.38 613.19 Tm (0.63) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 267.00 613.19 Tm (2025-12-31) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 347.00 613.19 Tm (derived) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 412.00 613.19 Tm (APEX local deterministic fix) Tj ET
+0.976 0.980 0.988 rg 52.00 593.14 491.28 13.00 re f
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 52.00 600.19 Tm (4) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 74.00 600.19 Tm (Operating margin) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 192.27 600.19 Tm (0.3) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 267.00 600.19 Tm (2025-12-31) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 347.00 600.19 Tm (derived) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 412.00 600.19 Tm (APEX local deterministic fix) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 52.00 587.19 Tm (5) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 74.00 587.19 Tm (Net income) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 149.46 587.19 Tm (119,000,000,000) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 267.00 587.19 Tm (2025-12-31) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 347.00 587.19 Tm (synthetic) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 412.00 587.19 Tm (APEX local deterministic fix) Tj ET
+0.976 0.980 0.988 rg 52.00 567.14 491.28 13.00 re f
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 52.00 574.19 Tm (6) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 74.00 574.19 Tm (EBITDA) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 149.46 574.19 Tm (187,000,000,000) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 267.00 574.19 Tm (2025-12-31) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 347.00 574.19 Tm (synthetic) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 412.00 574.19 Tm (APEX local deterministic fix) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 52.00 561.19 Tm (7) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 74.00 561.19 Tm (Free cash flow) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 149.46 561.19 Tm (110,500,000,000) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 267.00 561.19 Tm (2025-12-31) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 347.00 561.19 Tm (synthetic) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 412.00 561.19 Tm (APEX local deterministic fix) Tj ET
+0.976 0.980 0.988 rg 52.00 541.14 491.28 13.00 re f
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 52.00 548.19 Tm (8) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 74.00 548.19 Tm (Net debt) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 151.02 548.19 Tm (-25,500,000,000) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 267.00 548.19 Tm (2025-12-31) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 347.00 548.19 Tm (derived) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 412.00 548.19 Tm (APEX local deterministic fix) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 52.00 535.19 Tm (9) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 74.00 535.19 Tm (Diluted EPS) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 180.59 535.19 Tm (793.05) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 267.00 535.19 Tm (2025-12-31) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 347.00 535.19 Tm (synthetic) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 412.00 535.19 Tm (APEX local deterministic fix) Tj ET
+0.976 0.980 0.988 rg 52.00 515.14 491.28 13.00 re f
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 52.00 522.19 Tm (10) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 74.00 522.19 Tm (Shares outstanding) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 163.08 522.19 Tm (150,000,000) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 267.00 522.19 Tm (2025-12-31) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 347.00 522.19 Tm (synthetic) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 412.00 522.19 Tm (APEX local deterministic fix) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 52.00 509.19 Tm (11) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 74.00 509.19 Tm (Assumption: revenue growth) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 172.81 509.19 Tm (0.154416) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 267.00 509.19 Tm (forecast horizon) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 347.00 509.19 Tm (derived) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 412.00 509.19 Tm (Derived from reported revenu) Tj ET
+0.976 0.980 0.988 rg 52.00 489.14 491.28 13.00 re f
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 52.00 496.19 Tm (12) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 74.00 496.19 Tm (Assumption: gross margin) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 172.81 496.19 Tm (0.633333) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 267.00 496.19 Tm (forecast horizon) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 347.00 496.19 Tm (derived) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 412.00 496.19 Tm (Derived from reported gross ) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 52.00 483.19 Tm (13) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 74.00 483.19 Tm (Assumption: opex ratio) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 172.81 483.19 Tm (0.333333) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 267.00 483.19 Tm (forecast horizon) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 347.00 483.19 Tm (derived) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 412.00 483.19 Tm (Derived from reported operat) Tj ET
+0.976 0.980 0.988 rg 52.00 463.14 491.28 13.00 re f
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 52.00 470.19 Tm (14) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 74.00 470.19 Tm (Assumption: tax rate) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 192.27 470.19 Tm (0.2) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 267.00 470.19 Tm (forecast horizon) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 347.00 470.19 Tm (derived) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 412.00 470.19 Tm (Derived from reported tax ex) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 52.00 457.19 Tm (15) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 74.00 457.19 Tm (Assumption: da pct) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 168.92 457.19 Tm (0.0666667) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 267.00 457.19 Tm (forecast horizon) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 347.00 457.19 Tm (derived) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 412.00 457.19 Tm (Derived from reported deprec) Tj ET
+0.976 0.980 0.988 rg 52.00 437.14 491.28 13.00 re f
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 52.00 444.19 Tm (16) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 74.00 444.19 Tm (Assumption: capex pct) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 168.92 444.19 Tm (0.0833333) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 267.00 444.19 Tm (forecast horizon) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 347.00 444.19 Tm (derived) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 412.00 444.19 Tm (Derived from reported capex ) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 52.00 431.19 Tm (17) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 74.00 431.19 Tm (Assumption: nwc pct) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 168.92 431.19 Tm (0.0333333) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 267.00 431.19 Tm (forecast horizon) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 347.00 431.19 Tm (derived) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 412.00 431.19 Tm (Derived from reported \(curre) Tj ET
+0.976 0.980 0.988 rg 52.00 411.14 491.28 13.00 re f
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 52.00 418.19 Tm (18) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 74.00 418.19 Tm (Assumption: interest rate) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 168.92 418.19 Tm (0.0416667) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 267.00 418.19 Tm (forecast horizon) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 347.00 418.19 Tm (derived) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 412.00 418.19 Tm (Derived from reported intere) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 52.00 405.19 Tm (19) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 74.00 405.19 Tm (Assumption: dividend payout) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 192.27 405.19 Tm (0.3) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 267.00 405.19 Tm (forecast horizon) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 347.00 405.19 Tm (assumption) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 412.00 405.19 Tm (Engine default \(documented a) Tj ET
+0.976 0.980 0.988 rg 52.00 385.14 491.28 13.00 re f
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 52.00 392.19 Tm (20) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 74.00 392.19 Tm (Assumption: excess cash sweep) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 198.11 392.19 Tm (0) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 267.00 392.19 Tm (forecast horizon) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 347.00 392.19 Tm (assumption) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 412.00 392.19 Tm (Engine default \(documented a) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 52.00 379.19 Tm (21) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 74.00 379.19 Tm (Assumption: share dilution) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 198.11 379.19 Tm (0) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 267.00 379.19 Tm (forecast horizon) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 347.00 379.19 Tm (derived) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 412.00 379.19 Tm (Derived from reported share ) Tj ET
+0.976 0.980 0.988 rg 52.00 359.14 491.28 13.00 re f
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 52.00 366.19 Tm (22) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 74.00 366.19 Tm (DCF value per share) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 170.86 366.19 Tm (21,656.52) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 267.00 366.19 Tm (valuation date) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 347.00 366.19 Tm (derived) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 412.00 366.19 Tm (APEX local deterministic fix) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 52.00 353.19 Tm (23) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 74.00 353.19 Tm (WACC) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 188.38 353.19 Tm (0.09) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 267.00 353.19 Tm (valuation date) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 347.00 353.19 Tm (assumption) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 412.00 353.19 Tm (APEX local deterministic fix) Tj ET
+0.976 0.980 0.988 rg 52.00 333.14 491.28 13.00 re f
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 52.00 340.19 Tm (24) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 74.00 340.19 Tm (Enterprise value) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 133.89 340.19 Tm (3,222,978,599,904.78) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 267.00 340.19 Tm (valuation date) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 347.00 340.19 Tm (derived) Tj ET
+BT /F1 7 Tf 0.15 0.16 0.19 rg 1 0 0 1 412.00 340.19 Tm (APEX local deterministic fix) Tj ET
+0.8 G 0.4 w 52 334.14 m 543.28 334.14 l S
+BT /F2 9 Tf 0.3 g 1 0 0 1 52 316.49 Tm (Methodology) Tj ET
+BT /F1 8.8 Tf 0.2 g 1 0 0 1 52 301.06 Tm (Forecast: a deterministic three-statement model driven by the documented assumptions in the forecast section. Valuation:) Tj ET
+BT /F1 8.8 Tf 0.2 g 1 0 0 1 52 288.74 Tm (unlevered free cash flows discounted at a CAPM-built WACC, with a Gordon-growth or exit-multiple terminal value. Rating: a) Tj ET
+BT /F1 8.8 Tf 0.2 g 1 0 0 1 52 276.42 Tm (mechanical band on model upside \(BUY >= +10%, HOLD within ?10%, SELL below -10%\), withheld entirely when integrity) Tj ET
+BT /F1 8.8 Tf 0.2 g 1 0 0 1 52 264.10 Tm (gates fail. Every figure is a model output; the deterministic engine writes the narrative from those outputs and never invents) Tj ET
+BT /F1 8.8 Tf 0.2 g 1 0 0 1 52 251.78 Tm (numbers.) Tj ET
+BT /F1 9 Tf 0.45 g 1 0 0 1 52.00 235.29 Tm (Peer set) Tj ET
+BT /F1 9 Tf 0.15 g 1 0 0 1 393.73 235.29 Tm (None supplied \(comparables omitted\)) Tj ET
+0.130 0.350 0.850 rg 52.00 225.79 26.00 2.50 re f
+BT /F2 11.5 Tf 0.080 0.090 0.110 rg 1 0 0 1 52 211.01 Tm (Conclusion) Tj ET
+BT /F1 9.5 Tf 0.18 g 1 0 0 1 52 191.62 Tm (On the evidence supplied we are measured. The thesis would be strengthened by revenue tracking at or above) Tj ET
+BT /F1 9.5 Tf 0.18 g 1 0 0 1 52 177.84 Tm (15.4%, cash conversion holding near 58.8% of EBITDA, ROIC sustained above 27.7%, healthy gross margins, a) Tj ET
+BT /F1 9.5 Tf 0.18 g 1 0 0 1 52 164.06 Tm (net-cash balance sheet; it would be weakened by rising terminal-value dependence, continued absence of) Tj ET
+BT /F1 9.5 Tf 0.18 g 1 0 0 1 52 150.29 Tm (sector-specific disclosure, reliance on synthetic sample data. Material unresolved questions are those listed as) Tj ET
+BT /F1 9.5 Tf 0.18 g 1 0 0 1 52 136.51 Tm (unavailable in the industry and model-quality sections; they are disclosed rather than estimated.) Tj ET
+BT /F2 9 Tf 0.3 g 1 0 0 1 52 116.16 Tm (Investment thesis) Tj ET
+BT /F1 9 Tf 0.2 g 1 0 0 1 52 100.56 Tm (Reliance Industries Limited offers Energy exposure \(Diversified Oil Gas & Chemicals\) with a 15.4% modelled revenue) Tj ET
+BT /F1 9 Tf 0.2 g 1 0 0 1 52 87.96 Tm (CAGR, a terminal-year EBITDA margin of 36.7% and 58.8% EBITDA-to-FCF conversion on the base case. Revenue) Tj ET
+BT /F1 9 Tf 0.2 g 1 0 0 1 52 75.36 Tm (scales from 510.00B INR to 1.05T INR across the forecast horizon, while the mechanical rating of NOT RATED reflects an) Tj ET
+BT /F1 9 Tf 0.2 g 1 0 0 1 52 62.76 Tm (undetermined target versus the 8,032.50 INR last close. The balance sheet carries 25.50B INR of net cash \(0.14x) Tj ET
 BT /F1 7.5 Tf 0.45 0.47 0.52 rg 1 0 0 1 397.12 801.89 Tm (RELIANCE.NS | Reliance Industries Limited) Tj ET
 0.85 G 0.4 w 52 795.89 m 543.28 795.89 l S
 0.85 G 0.4 w 52 38 m 543.28 38 l S
@@ -891,14 +914,19 @@ endobj
 << /Type /Page /Parent 2 0 R /MediaBox [0 0 595.28 841.89] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 20 0 R >>
 endobj
 20 0 obj
-<< /Length 1079 >>
+<< /Length 1727 >>
 stream
-BT /F1 8.8 Tf 0.2 g 1 0 0 1 60 772.41 Tm (- Balance sheet: net cash of 25.50B INR at 0.14x EBITDA limits financial risk premium.) Tj ET
-BT /F1 8.8 Tf 0.2 g 1 0 0 1 60 758.09 Tm (- Profitability: return on invested capital of 27.7% and return on equity of 25.5% in 2025.) Tj ET
-0.82 G 0.5 w 52 739.25 m 543.28 739.25 l S
-BT /F2 8.5 Tf 0.45 g 1 0 0 1 52 728.02 Tm (Disclaimer) Tj ET
-BT /F1 7.5 Tf 0.5 g 1 0 0 1 52 714.97 Tm (This report was produced by the APEX deterministic research engine running locally. All figures are model outputs derived from the stated inputs;) Tj ET
-BT /F1 7.5 Tf 0.5 g 1 0 0 1 52 704.47 Tm (they are not audited company disclosures and no investment advice is intended or implied.) Tj ET
+BT /F1 9 Tf 0.2 g 1 0 0 1 52 772.24 Tm (last-reported EBITDA\). Because data-integrity checks failed, no rating or target is attached to this thesis.) Tj ET
+BT /F2 9 Tf 0.3 g 1 0 0 1 52 754.64 Tm (Thesis drivers) Tj ET
+BT /F1 8.8 Tf 0.2 g 1 0 0 1 60 739.21 Tm (- Growth: revenue CAGR of 15.4% from 510.00B INR to 1.05T INR across the forecast horizon.) Tj ET
+BT /F1 8.8 Tf 0.2 g 1 0 0 1 60 724.89 Tm (- Margins: EBITDA margin of 36.7% rising to 36.7%, consistent with operating leverage on the modelled cost base.) Tj ET
+BT /F1 8.8 Tf 0.2 g 1 0 0 1 60 710.57 Tm (- Cash conversion: final-year free cash flow of 225.46B INR, 58.8% of EBITDA.) Tj ET
+BT /F1 8.8 Tf 0.2 g 1 0 0 1 60 696.25 Tm (- Balance sheet: net cash of 25.50B INR at 0.14x EBITDA limits financial risk premium.) Tj ET
+BT /F1 8.8 Tf 0.2 g 1 0 0 1 60 681.93 Tm (- Profitability: return on invested capital of 27.7% and return on equity of 25.5% in 2025.) Tj ET
+0.82 G 0.5 w 52 663.09 m 543.28 663.09 l S
+BT /F2 8.5 Tf 0.45 g 1 0 0 1 52 651.86 Tm (Disclaimer) Tj ET
+BT /F1 7.5 Tf 0.5 g 1 0 0 1 52 638.81 Tm (This report was produced by the APEX deterministic research engine running locally. All figures are model outputs derived from the stated inputs;) Tj ET
+BT /F1 7.5 Tf 0.5 g 1 0 0 1 52 628.31 Tm (they are not audited company disclosures and no investment advice is intended or implied.) Tj ET
 BT /F1 7.5 Tf 0.45 0.47 0.52 rg 1 0 0 1 397.12 801.89 Tm (RELIANCE.NS | Reliance Industries Limited) Tj ET
 0.85 G 0.4 w 52 795.89 m 543.28 795.89 l S
 0.85 G 0.4 w 52 38 m 543.28 38 l S
@@ -924,17 +952,17 @@ xref
 0000017652 00000 n 
 0000028190 00000 n 
 0000028334 00000 n 
-0000036958 00000 n 
-0000037102 00000 n 
-0000045241 00000 n 
-0000045385 00000 n 
-0000051081 00000 n 
-0000051225 00000 n 
-0000067250 00000 n 
-0000067394 00000 n 
-0000068526 00000 n 
+0000037039 00000 n 
+0000037183 00000 n 
+0000046261 00000 n 
+0000046405 00000 n 
+0000052633 00000 n 
+0000052777 00000 n 
+0000068809 00000 n 
+0000068953 00000 n 
+0000070733 00000 n 
 trailer
 << /Size 22 /Root 1 0 R /Info 21 0 R >>
 startxref
-68674
+70881
 %%EOF

@@ -355,6 +355,10 @@ export type IntegrityGates = {
   targetAllowed: boolean;
   blockers: ValidationIssue[];
   warnings: ValidationIssue[];
+  /** List of validation checks that were actually executed. */
+  checks_run?: string[];
+  /** True only when every executed check passed (no blockers). */
+  checks_passed?: boolean;
 };
 
 export function integrityGates(issues: ValidationIssue[]): IntegrityGates {
@@ -380,6 +384,12 @@ export type SectorProfile = {
   watchMetrics: { name: string; available: boolean; note?: string }[];
   /** Framing sentence used in the narrative when data is missing. */
   disclosure: string;
+  /** Valuation approach appropriate for this sector. */
+  valuationApproach?: string;
+  /** Valuation methods applicable given available data. */
+  applicableMethods?: string[];
+  /** Inputs required to run the sector-specific model. */
+  requiredInputs?: string[];
 };
 
 const SECTOR_RULES: { match: RegExp; build: (label: string) => SectorProfile }[] = [
@@ -471,14 +481,23 @@ const SECTOR_RULES: { match: RegExp; build: (label: string) => SectorProfile }[]
   },
 ];
 
+const SECTOR_VALUATION: Record<string, { approach: string; methods: string[]; inputs: string[] }> = {
+  bank: { approach: "Residual income / dividend discount with asset-quality and capital-adequacy overlays", methods: ["Residual income", "Dividend discount", "Price-to-book"], inputs: ["Net interest margin", "GNPA/NNPA", "CET-1", "Loan/deposit growth"] },
+  software: { approach: "DCF on recurring revenue with margin expansion", methods: ["DCF", "EV/Sales", "EV/EBITDA"], inputs: ["Revenue growth", "Gross margin", "Operating leverage", "Cash conversion"] },
+  energy: { approach: "Cycle-aware DCF with commodity price scenarios", methods: ["DCF", "EV/EBITDA", "NAV"], inputs: ["Realised prices", "Volumes", "Reserves", "Capex"] },
+  manufacturing: { approach: "Driver-based three-statement DCF", methods: ["DCF", "EV/EBITDA", "P/E"], inputs: ["Revenue", "EBITDA margin", "Capex intensity", "Working capital"] },
+  consumer: { approach: "Brand/mix-driven DCF", methods: ["DCF", "EV/EBITDA", "P/E"], inputs: ["Revenue growth", "Gross margin", "Volume vs price", "Working capital"] },
+  generic: { approach: "Standard three-statement DCF", methods: ["DCF", "EV/EBITDA"], inputs: ["Revenue", "Margins", "Capex", "Working capital"] },
+};
+
 export function sectorProfile(sector: unknown, industry: unknown): SectorProfile {
   const haystack = `${String(sector ?? "")} ${String(industry ?? "")}`;
   const rule = SECTOR_RULES.find((entry) => entry.match.test(haystack));
   const label = String(sector || industry || "General");
-  return rule
+  const base = rule
     ? rule.build(label)
     : {
-        key: "generic",
+        key: "generic" as const,
         label,
         watchMetrics: [
           { name: "Revenue growth", available: true },
@@ -491,4 +510,11 @@ export function sectorProfile(sector: unknown, industry: unknown): SectorProfile
           "No sector-specific data (segments, geographies, volumes) is available in the dataset; the analysis " +
           "is limited to consolidated reported and modelled figures.",
       };
+  const meta = SECTOR_VALUATION[base.key] || SECTOR_VALUATION.generic;
+  return {
+    ...base,
+    valuationApproach: meta.approach,
+    applicableMethods: meta.methods,
+    requiredInputs: meta.inputs,
+  };
 }

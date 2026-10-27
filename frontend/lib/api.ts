@@ -9,6 +9,7 @@ import {
 import {
   buildDeterministicNarrative,
   tryProviderNarrative,
+  PROMPT_VERSION,
 } from "./narrative";
 import { fetchTickerFixture } from "./marketData";
 
@@ -464,7 +465,7 @@ function companySummary(fixture: any) {
   };
 }
 
-function buildMetrics(normalized: any) {
+export function buildMetrics(normalized: any) {
   const incomeRows: any[] = normalized?.annual?.income_statement || [];
   const balanceByPeriod = new Map<string, any>(
     (normalized?.annual?.balance_sheet || []).map((row: any) => [row.period_end, row.items || {}]),
@@ -648,7 +649,7 @@ function resolveAssumptions(input: any, derived: Record<string, number> = {}): R
   return resolved;
 }
 
-function buildForecast(ticker: string, yearsInput: unknown, assumptionsInput: any, fixtureInput?: any) {
+export function buildForecast(ticker: string, yearsInput: unknown, assumptionsInput: any, fixtureInput?: any) {
   const fixture = fixtureInput || mockTickerData(ticker);
   const years = Math.max(1, Math.min(25, Math.round(numberOr(yearsInput, 5))));
   const derived = deriveAssumptions(fixture);
@@ -824,38 +825,61 @@ function buildForecast(ticker: string, yearsInput: unknown, assumptionsInput: an
   };
 }
 
-function dcfCompute(payload: any, waccOverride?: number) {
+export function dcfCompute(payload: any, waccOverride?: number) {
   const flows: number[] = Array.isArray(payload?.fcf)
     ? payload.fcf.map((value: unknown) => Number(value)).filter((value: number) => Number.isFinite(value))
     : [];
   if (!flows.length) return { error: "Run a forecast first to generate cash flows." };
 
   const warnings: string[] = [];
-  const discount = isFiniteNumber(waccOverride) ? waccOverride : numberOr(payload?.wacc, 0.1);
-  const wacc = discount > 0 ? discount : 0.1;
+  const rawDiscount = isFiniteNumber(waccOverride) ? waccOverride : numberOr(payload?.wacc, 0.1);
+  if (!Number.isFinite(rawDiscount) || rawDiscount <= 0) {
+    warnings.push("Discount rate is non-positive or invalid; the engine default of 10% was applied.");
+  }
+  const wacc = rawDiscount > 0 ? rawDiscount : 0.1;
   const netDebt = numberOr(payload?.net_debt, 0);
-  const shares = numberOr(payload?.shares, 0) || 1;
+  const rawShares = numberOr(payload?.shares, 0);
+  if (!rawShares || rawShares <= 0) warnings.push("Shares outstanding are missing or non-positive; per-share values use 1 share.");
+  const shares = rawShares > 0 ? rawShares : 1;
   const useExitMultiple =
     payload?.exit_multiple !== undefined && payload?.exit_multiple !== null && Number.isFinite(Number(payload.exit_multiple));
 
   let terminalGrowth: number | undefined;
   let terminalValue: number;
+  let terminalGrowthClamped = false;
   if (useExitMultiple) {
     terminalValue = Number(payload.exit_multiple) * numberOr(payload?.final_ebitda, 0);
+    if (!Number.isFinite(terminalValue)) terminalValue = 0;
   } else {
     let growth = numberOr(payload?.terminal_growth, 0.025);
-    if (growth >= wacc - 0.0005) {
+    if (growth >= wacc) {
       growth = Math.max(0, wacc - 0.005);
+      terminalGrowthClamped = true;
+      warnings.push("Terminal growth must stay below the discount rate; it was clamped for this calculation.");
+    } else if (growth < 0) {
+      growth = 0;
+      warnings.push("Terminal growth was negative; floored at zero.");
+    }
+    if (growth >= wacc - 0.0005 && !terminalGrowthClamped) {
+      growth = Math.max(0, wacc - 0.005);
+      terminalGrowthClamped = true;
       warnings.push("Terminal growth has to stay below the discount rate; it was clamped for this calculation.");
     }
     terminalGrowth = growth;
-    terminalValue = (flows[flows.length - 1] * (1 + growth)) / (wacc - growth);
+    const denom = wacc - growth;
+    terminalValue = denom > 0 ? (flows[flows.length - 1] * (1 + growth)) / denom : 0;
+    if (denom <= 0) warnings.push("Terminal-value denominator is non-positive; terminal value omitted.");
   }
 
   const pvCashFlows = flows.reduce((total, flow, index) => total + flow / Math.pow(1 + wacc, index + 1), 0);
   const pvTerminalValue = terminalValue / Math.pow(1 + wacc, flows.length);
   const enterpriseValue = pvCashFlows + pvTerminalValue;
   const equityValue = enterpriseValue - netDebt;
+  const valuePerShare = shares > 0 ? equityValue / shares : null;
+  const terminalShare = enterpriseValue !== 0 ? pvTerminalValue / enterpriseValue : null;
+  if (terminalShare !== null && Math.abs(terminalShare) > 0.75) {
+    warnings.push("Terminal value contributes more than 75% of enterprise value; the valuation is sensitive to long-run assumptions.");
+  }
 
   return {
     wacc,
@@ -863,47 +887,85 @@ function dcfCompute(payload: any, waccOverride?: number) {
     exit_multiple: useExitMultiple ? Number(payload.exit_multiple) : undefined,
     enterprise_value: enterpriseValue,
     equity_value: equityValue,
-    value_per_share: equityValue / shares,
+    value_per_share: valuePerShare,
     pv_cash_flows: pvCashFlows,
     pv_terminal_value: pvTerminalValue,
     net_debt: netDebt,
     shares,
     cash_flow_count: flows.length,
+    terminal_value_share_of_ev: terminalShare,
+    terminal_value_share: terminalShare,
+    tv_share_of_ev: terminalShare,
     warnings,
   };
 }
 
-function reverseDcfCompute(payload: any) {
+export function reverseDcfCompute(payload: any) {
   const price = numberOr(payload?.current_price, NaN);
   if (!Number.isFinite(price) || price <= 0) return { error: "A current market price is required for reverse DCF." };
 
-  let low = 0.0005;
-  let high = 1.5;
+  const tolerance = 1e-6;
+  const terminalGrowth = numberOr(payload?.terminal_growth, 0.025);
+  let low = 0.0001;
+  let high = 2.0;
   const valueAt = (wacc: number) => {
     const result = dcfCompute(payload, wacc);
     return "error" in result ? NaN : (result as any).value_per_share;
   };
   let sawValidFlow = false;
-  for (let iteration = 0; iteration < 90; iteration += 1) {
+  const lowValue = valueAt(low);
+  const highValue = valueAt(high);
+  if (!Number.isFinite(lowValue) || !Number.isFinite(highValue)) {
+    return { error: "Cannot imply a WACC without valid forecast cash flows." };
+  }
+  if (lowValue < price) {
+    return { error: "Implied WACC is below the searchable lower bound; the market price is above the model's maximum value." };
+  }
+  if (highValue > price) {
+    return { error: "Implied WACC is above the searchable upper bound; the market price is below the model's minimum value." };
+  }
+
+  let iterations = 0;
+  for (iterations = 0; iterations < 120; iterations += 1) {
     const midpoint = (low + high) / 2;
     const value = valueAt(midpoint);
     if (!Number.isFinite(value)) break;
     sawValidFlow = true;
     if (value > price) low = midpoint;
     else high = midpoint;
+    if (high - low < 1e-12) break;
   }
 
   if (!sawValidFlow) return { error: "Cannot imply a WACC without valid forecast cash flows." };
 
+  const impliedWacc = (low + high) / 2;
+  const reproduced = dcfCompute(payload, impliedWacc);
+  const reproducedValue = "error" in reproduced ? NaN : (reproduced as any).value_per_share;
+  const residual = Number.isFinite(reproducedValue) ? reproducedValue - price : NaN;
+  const converged = Number.isFinite(residual) && Math.abs(residual) <= Math.max(tolerance, tolerance * Math.abs(price));
+  const roundTripOk = converged;
+
   return {
-    implied_wacc: (low + high) / 2,
+    implied_wacc: impliedWacc,
+    impliedWacc,
     current_price: price,
-    terminal_growth: numberOr(payload?.terminal_growth, 0.025),
+    currentPrice: price,
+    terminal_growth: terminalGrowth,
+    terminalGrowth,
     cash_flow_count: Array.isArray(payload?.fcf) ? payload.fcf.length : 0,
+    iterations,
+    tolerance,
+    reproduced_value_per_share: reproducedValue,
+    reproduced_value: reproducedValue,
+    reproduced: converged,
+    converged,
+    round_trip_ok: roundTripOk,
+    residual,
+    residual_price: residual,
   };
 }
 
-function sensitivityCompute(payload: any) {
+export function sensitivityCompute(payload: any) {
   const waccValues: number[] = Array.isArray(payload?.wacc_values) ? payload.wacc_values.map((v: unknown) => Number(v)) : [];
   const terminalValues: number[] = Array.isArray(payload?.terminal_values)
     ? payload.terminal_values.map((v: unknown) => Number(v))
@@ -1049,6 +1111,104 @@ function bondCompute(body: any) {
   };
 }
 
+function bankModelCompute(body: any) {
+  const assets = numberOr(body?.total_assets, 0);
+  const loans = numberOr(body?.advances, numberOr(body?.loans, 0));
+  const deposits = numberOr(body?.deposits, 0);
+  const equity = numberOr(body?.equity, 0);
+  const nii = numberOr(body?.net_interest_income, 0);
+  const nim = assets ? nii / assets : null;
+  const creditCost = numberOr(body?.credit_cost, 0);
+  const gnpa = isFiniteNumber(body?.gnpa) ? body.gnpa : null;
+  const nnpa = isFiniteNumber(body?.nnpa) ? body.nnpa : null;
+  const car = isFiniteNumber(body?.capital_adequacy) ? body.capital_adequacy : null;
+  const roe = equity ? numberOr(body?.net_income, 0) / equity : null;
+  return {
+    model: "bank",
+    net_interest_margin: nim,
+    loan_to_deposit: deposits ? loans / deposits : null,
+    credit_cost: creditCost,
+    gnpa,
+    nnpa,
+    capital_adequacy: car,
+    roe,
+    missing: [
+      !body?.net_interest_income && "net_interest_income",
+      !body?.deposits && "deposits",
+      !body?.advances && "advances",
+      gnpa === null && "gnpa",
+      car === null && "capital_adequacy",
+    ].filter(Boolean),
+  };
+}
+
+function insurerModelCompute(body: any) {
+  const premiums = numberOr(body?.premiums, 0);
+  const claims = numberOr(body?.claims, 0);
+  const combinedRatio = premiums ? (claims + numberOr(body?.expenses, 0)) / premiums : null;
+  const investmentIncome = numberOr(body?.investment_income, 0);
+  const solvency = isFiniteNumber(body?.solvency_ratio) ? body.solvency_ratio : null;
+  return {
+    model: "insurer",
+    combined_ratio: combinedRatio,
+    loss_ratio: premiums ? claims / premiums : null,
+    investment_income: investmentIncome,
+    solvency_ratio: solvency,
+    missing: [
+      !body?.premiums && "premiums",
+      !body?.claims && "claims",
+      solvency === null && "solvency_ratio",
+    ].filter(Boolean),
+  };
+}
+
+function reitModelCompute(body: any) {
+  const noi = numberOr(body?.noi, numberOr(body?.net_operating_income, 0));
+  const ffo = numberOr(body?.ffo, 0);
+  const affo = numberOr(body?.affo, 0);
+  const nav = numberOr(body?.nav, 0);
+  const occupancy = isFiniteNumber(body?.occupancy) ? body.occupancy : null;
+  const distribution = numberOr(body?.distribution, 0);
+  return {
+    model: "reit",
+    noi,
+    ffo,
+    affo,
+    nav,
+    occupancy,
+    ffo_yield: nav ? ffo / nav : null,
+    affo_payout: affo ? distribution / affo : null,
+    missing: [
+      !body?.noi && !body?.net_operating_income && "noi",
+      !body?.ffo && "ffo",
+      !body?.nav && "nav",
+      occupancy === null && "occupancy",
+    ].filter(Boolean),
+  };
+}
+
+function commodityModelCompute(body: any) {
+  const volume = numberOr(body?.production_volume, 0);
+  const realizedPrice = numberOr(body?.realized_price, 0);
+  const revenue = volume * realizedPrice;
+  const unitCost = numberOr(body?.unit_cost, 0);
+  const ebitda = revenue - volume * unitCost;
+  return {
+    model: "commodity",
+    production_volume: volume,
+    realized_price: realizedPrice,
+    implied_revenue: revenue,
+    unit_cost: unitCost,
+    implied_ebitda: ebitda,
+    ebitda_margin: revenue ? ebitda / revenue : null,
+    missing: [
+      !body?.production_volume && "production_volume",
+      !body?.realized_price && "realized_price",
+      !body?.unit_cost && "unit_cost",
+    ].filter(Boolean),
+  };
+}
+
 function lboCompute(body: any) {
   const entryEbitda = numberOr(body?.entry_ebitda, 0);
   const entryMultiple = numberOr(body?.entry_multiple, 0);
@@ -1061,77 +1221,128 @@ function lboCompute(body: any) {
   const feesPct = Math.max(0, numberOr(body?.fees_pct, 0.02));
 
   const purchasePrice = entryEbitda * entryMultiple;
-  const debtPct = 0.6;
-  const debt = purchasePrice * debtPct;
   const fees = purchasePrice * feesPct;
   const totalSources = purchasePrice + fees;
+
+  const sponsorEquityPct = Math.min(0.99, Math.max(0.01, numberOr(body?.sponsor_equity_pct, 0.4)));
+  const debtPct = 1 - sponsorEquityPct;
+  const rawTranches = Array.isArray(body?.tranches) ? body.tranches : null;
+  const tranches = rawTranches && rawTranches.length
+    ? rawTranches.map((t: any, i: number) => ({
+        name: String(t?.name || "Tranche " + (i + 1)),
+        rate: Math.max(0, numberOr(t?.rate, 0.07)),
+        share: Math.max(0, numberOr(t?.share, 0)),
+        amortization: Math.min(1, Math.max(0, numberOr(t?.amortization, 0))),
+      }))
+    : [{ name: "Senior debt", rate: Math.max(0, numberOr(body?.interest_rate, 0.07)), share: 1, amortization: 0 }];
+  const shareSum = tranches.reduce((s: number, t: any) => s + t.share, 0) || 1;
+  tranches.forEach((t: any) => { t.share = t.share / shareSum; });
+  const debt = totalSources * debtPct;
+  tranches.forEach((t: any) => { t.principal = debt * t.share; });
   const equity = totalSources - debt;
 
-  let debtBalance = debt;
+  const balances = tranches.map((t: any) => t.principal);
+  let debtBalance = balances.reduce((s: number, v: number) => s + v, 0);
   const schedule: any[] = [];
   for (let year = 1; year <= holdYears; year += 1) {
     const ebitda = entryEbitda * Math.pow(1 + growth, year);
     const nopat = ebitda * (1 - taxRate);
-    const interest = debtBalance * interestRate;
+    const trancheInterest = tranches.map((t: any, i: number) => balances[i] * t.rate);
+    const interest = trancheInterest.reduce((s: number, v: number) => s + v, 0);
     const cashAvailable = nopat - interest;
-    const paydown = Math.min(debtBalance, Math.max(0, cashAvailable) * sweepShare);
-    debtBalance -= paydown;
+    const sweepPool = Math.max(0, cashAvailable) * sweepShare;
+    const mandatory = tranches.map((t: any, i: number) => Math.min(balances[i], balances[i] * t.amortization));
+    mandatory.forEach((m: number, i: number) => { balances[i] -= m; });
+    let sweepRemaining = sweepPool;
+    const sweepPaid = balances.map(() => 0);
+    for (let i = 0; i < tranches.length && sweepRemaining > 0; i += 1) {
+      const pay = Math.min(balances[i], sweepRemaining);
+      balances[i] -= pay;
+      sweepPaid[i] = pay;
+      sweepRemaining -= pay;
+    }
+    const totalPaydown = mandatory.reduce((s: number, v: number) => s + v, 0) + sweepPaid.reduce((s: number, v: number) => s + v, 0);
+    debtBalance = balances.reduce((s: number, v: number) => s + v, 0);
     schedule.push({
       year,
       ebitda,
       nopat,
       interest,
+      tranche_interest: trancheInterest,
       cash_available: cashAvailable,
-      debt_paydown: paydown,
+      mandatory_amortization: mandatory,
+      sweep_paydown: sweepPaid,
+      debt_paydown: totalPaydown,
       debt_balance: debtBalance,
+      tranche_balances: balances.slice(),
     });
   }
 
   const exitEbitda = entryEbitda * Math.pow(1 + growth, holdYears);
   const exitValue = exitEbitda * exitMultiple;
   const exitFees = exitValue * 0.01;
-  const netExitProceeds = exitValue - exitFees - debtBalance;
+  const remainingDebt = balances.reduce((s: number, v: number) => s + v, 0);
+  const netExitProceeds = exitValue - exitFees - remainingDebt;
   const moic = equity > 0 ? netExitProceeds / equity : 0;
   const irr = moic > 0 ? Math.pow(moic, 1 / holdYears) - 1 : -1;
 
   return {
     hold_years: holdYears,
+    sponsor_equity_pct: sponsorEquityPct,
     debt_pct: debtPct,
     purchase_price: purchasePrice,
-    total_sources: totalSources,
     fees,
+    total_sources: totalSources,
     debt,
     equity,
+    tranches: tranches.map((t: any, i: number) => ({ name: t.name, rate: t.rate, share: t.share, principal: t.principal, final_balance: balances[i] })),
+    schedule,
     exit_value: exitValue,
-    exit_ebitda: exitEbitda,
-    debt_balance_exit: debtBalance,
+    exit_fees: exitFees,
+    remaining_debt: remainingDebt,
     net_exit_proceeds: netExitProceeds,
     moic,
     irr,
-    schedule,
   };
 }
 
-function waccCompute(body: any) {
+export function waccCompute(body: any) {
   const riskFree = numberOr(body?.risk_free, 0.04);
   const beta = numberOr(body?.beta, 1);
   const marketPremium = numberOr(body?.market_premium, 0.055);
   const costOfDebt = numberOr(body?.cost_of_debt, 0.06);
-  const taxRate = numberOr(body?.tax_rate, 0.25);
-  const equityWeight = numberOr(body?.equity_weight, 0.7);
-  const debtWeight = numberOr(body?.debt_weight, 0.3);
+  const taxRate = Math.min(0.9, Math.max(0, numberOr(body?.tax_rate, 0.25)));
+  let equityWeight = numberOr(body?.equity_weight, 0.7);
+  let debtWeight = numberOr(body?.debt_weight, 0.3);
+  const totalWeight = equityWeight + debtWeight;
+  let normalized = false;
+  if (totalWeight > 0 && Math.abs(totalWeight - 1) > 1e-9) {
+    equityWeight = equityWeight / totalWeight;
+    debtWeight = debtWeight / totalWeight;
+    normalized = true;
+  }
+  if (equityWeight < 0) equityWeight = 0;
+  if (debtWeight < 0) debtWeight = 0;
+  const sum = equityWeight + debtWeight;
+  if (sum <= 0) {
+    equityWeight = 0.7;
+    debtWeight = 0.3;
+  }
   const costOfEquity = riskFree + beta * marketPremium;
   const afterTaxCostOfDebt = costOfDebt * (1 - taxRate);
   return {
     wacc: equityWeight * costOfEquity + debtWeight * afterTaxCostOfDebt,
     cost_of_equity: costOfEquity,
     after_tax_cost_of_debt: afterTaxCostOfDebt,
+    equity_weight: equityWeight,
+    debt_weight: debtWeight,
+    weights_normalized: normalized,
   };
 }
 
-function mockAiResearch(body: any, fixtureInput?: any, origin = "synthetic") {
+async function mockAiResearch(body: any, fixtureInput?: any, origin = "synthetic") {
   const inputs = reportInputs({ ...body, years: numberOr(body?.years, 5) });
-  const artifacts = reportArtifacts(inputs, fixtureInput, origin);
+  const artifacts = await reportArtifacts(inputs, fixtureInput, origin);
   // Flatten structured risks/catalysts to strings for the legacy company-page UI.
   const narrative = artifacts.narrative;
   const flatReport = {
@@ -1151,6 +1362,7 @@ function mockAiResearch(body: any, fixtureInput?: any, origin = "synthetic") {
 
 const REPORT_STORE_KEY = "apex_reports";
 const REPORT_WACC = 0.085;
+const ENGINE_VERSION = "2.0.0";
 const RATING_CODES = ["BUY", "HOLD", "SELL"];
 
 function getLocalReports(): any[] {
@@ -1189,7 +1401,222 @@ function reportInputs(body: any) {
   };
 }
 
-function reportArtifacts(inputs: any, fixtureInput?: any, origin = "synthetic") {
+function buildScenarios(ticker: string, inputs: any, fixture: any, price: number) {
+  const baseAssumptions = resolveAssumptions({}, deriveAssumptions(fixture).values);
+  const scenarios: Record<string, any> = {};
+  const definitions: { key: string; label: string; adjust: (a: Record<string, number>) => Record<string, number> }[] = [
+    {
+      key: "bull",
+      label: "Bull",
+      adjust: (a) => ({
+        ...a,
+        revenue_growth: Math.min(0.5, a.revenue_growth + 0.05),
+        gross_margin: Math.min(0.95, a.gross_margin + 0.03),
+        opex_ratio: Math.max(0.05, a.opex_ratio - 0.02),
+        capex_pct: Math.max(0, a.capex_pct - 0.01),
+        tax_rate: Math.max(0, a.tax_rate - 0.02),
+      }),
+    },
+    {
+      key: "base",
+      label: "Base",
+      adjust: (a) => ({ ...a }),
+    },
+    {
+      key: "bear",
+      label: "Bear",
+      adjust: (a) => ({
+        ...a,
+        revenue_growth: Math.max(-0.5, a.revenue_growth - 0.05),
+        gross_margin: Math.max(0.1, a.gross_margin - 0.03),
+        opex_ratio: Math.min(0.9, a.opex_ratio + 0.02),
+        capex_pct: Math.min(0.6, a.capex_pct + 0.01),
+        tax_rate: Math.min(0.6, a.tax_rate + 0.02),
+      }),
+    },
+  ];
+
+  for (const def of definitions) {
+    const adjusted = def.adjust({ ...baseAssumptions });
+    const forecast = buildForecast(ticker, inputs.years, adjusted, fixture);
+    const flows: number[] = (forecast.periods || []).map((p: any) => p.fcf);
+    const actuals = buildMetrics(fixture)[0] || null;
+    const netDebt = isFiniteNumber(actuals?.net_debt) ? actuals.net_debt : 0;
+    const shares = numberOr(fixture?.info?.sharesOutstanding, 0) || forecast.periods?.[0]?.shares || 1;
+    const dcfBody: any = {
+      fcf: flows,
+      wacc: inputs.wacc,
+      net_debt: netDebt,
+      shares,
+      final_ebitda: forecast.summary?.final_ebitda,
+    };
+    if (inputs.terminal_mode === "multiple") dcfBody.exit_multiple = inputs.exit_multiple;
+    else dcfBody.terminal_growth = inputs.terminal_growth;
+    const dcf = flows.length ? dcfCompute(dcfBody) : { error: "No cash flows" };
+    scenarios[def.key] = {
+      label: def.label,
+      assumptions: adjusted,
+      forecast_summary: forecast.summary || null,
+      dcf_value_per_share: dcf?.error ? null : dcf.value_per_share,
+      enterprise_value: dcf?.error ? null : dcf.enterprise_value,
+      rating: null,
+    };
+  }
+  return scenarios;
+}
+
+async function peerCompsCompute(ticker: string, peers: string[], targetPrice: number | null) {
+  const safePeers = Array.isArray(peers) ? peers.slice(0, 12) : [];
+  const rows: any[] = [];
+  const targetFixtureResolved = await resolveFixture(ticker, false).catch(() => null);
+  const targetMetrics = targetFixtureResolved ? buildMetrics(targetFixtureResolved.fixture)[0] : null;
+  const targetInfo = targetFixtureResolved?.fixture?.info || {};
+  const targetMarketCap = targetInfo.marketCap || (targetInfo.sharesOutstanding && targetFixtureResolved?.fixture?.price_summary?.last_close
+    ? targetInfo.sharesOutstanding * targetFixtureResolved.fixture.price_summary.last_close
+    : null);
+
+  for (const peer of safePeers) {
+    try {
+      const resolved = await resolveFixture(peer, false);
+      const fixture = resolved.fixture;
+      const m: any = buildMetrics(fixture)[0] || {};
+      const info = fixture.info || {};
+      const price = fixture.price_summary?.last_close;
+      const shares = numberOr(info.sharesOutstanding, 0);
+      const marketCap = numberOr(info.marketCap, shares && price ? shares * price : NaN);
+      const netDebt = numberOr(m?.net_debt, 0);
+      const ev = Number.isFinite(marketCap) ? marketCap + netDebt : marketCap;
+      rows.push({
+        ticker: peer,
+        name: info.longName || info.shortName || peer,
+        currency: fixture.info?.currency || parseListing(peer).currency,
+        price: Number.isFinite(price) ? price : null,
+        market_cap: Number.isFinite(marketCap) ? marketCap : null,
+        pe: Number.isFinite(marketCap) && Number.isFinite(m?.net_income) && m.net_income !== 0 ? marketCap / m.net_income : null,
+        ev_ebitda: Number.isFinite(ev) && Number.isFinite(m?.ebitda) && m.ebitda !== 0 ? ev / m.ebitda : null,
+        pb: Number.isFinite(price) && Number.isFinite(m?.book_value_per_share) && (m.book_value_per_share as number) !== 0 ? price / (m.book_value_per_share as number) : null,
+        ev_sales: Number.isFinite(ev) && Number.isFinite(m?.revenue) && m.revenue !== 0 ? ev / m.revenue : null,
+        revenue: Number.isFinite(m?.revenue) ? m.revenue : null,
+        net_margin: Number.isFinite(m?.net_margin) ? m.net_margin : null,
+      });
+    } catch {
+      rows.push({ ticker: peer, error: "peer data unavailable" });
+    }
+  }
+
+  const numeric = (key: string) => rows.map((r) => r[key]).filter((v) => Number.isFinite(v)).sort((a, b) => a - b);
+  const median = (arr: number[]) => (arr.length ? (arr.length % 2 ? arr[(arr.length - 1) / 2] : (arr[arr.length / 2 - 1] + arr[arr.length / 2]) / 2) : null);
+  const medians = {
+    pe: median(numeric("pe")),
+    ev_ebitda: median(numeric("ev_ebitda")),
+    pb: median(numeric("pb")),
+    ev_sales: median(numeric("ev_sales")),
+  };
+
+  const targetMultiples = targetMetrics ? {
+    pe: targetMarketCap && targetMetrics.net_income ? targetMarketCap / targetMetrics.net_income : null,
+    ev_ebitda: targetMarketCap && targetMetrics.net_debt !== null && targetMetrics.ebitda ? (targetMarketCap + targetMetrics.net_debt) / targetMetrics.ebitda : null,
+    pb: targetPrice && targetMetrics.book_value_per_share ? targetPrice / targetMetrics.book_value_per_share : null,
+    ev_sales: targetMarketCap && targetMetrics.net_debt !== null && targetMetrics.revenue ? (targetMarketCap + targetMetrics.net_debt) / targetMetrics.revenue : null,
+  } : null;
+
+  return {
+    target: { ticker, price: targetPrice, market_cap: targetMarketCap, multiples: targetMultiples },
+    peers: rows,
+    peer_count: rows.filter((r) => !r.error).length,
+    medians,
+    premium_discount_vs_median_pe: targetMultiples?.pe && medians.pe ? targetMultiples.pe / medians.pe - 1 : null,
+  };
+}
+
+function monteCarloCompute(baseInputs: any, fixture: any, iterations = 500) {
+  const derived = deriveAssumptions(fixture);
+  const base = resolveAssumptions(baseInputs?.assumptions || {}, derived.values);
+  const flows: number[] = [];
+  const values: number[] = [];
+  let seed = 12345;
+  const rand = () => {
+    seed = (seed * 1664525 + 1013904223) % 4294967296;
+    return seed / 4294967296;
+  };
+  const normal = () => {
+    const u = Math.max(1e-9, rand());
+    const v = rand();
+    return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+  };
+  for (let i = 0; i < iterations; i += 1) {
+    const a = { ...base };
+    a.revenue_growth = Math.min(0.5, Math.max(-0.5, base.revenue_growth + normal() * 0.05));
+    a.gross_margin = Math.min(0.95, Math.max(0.1, base.gross_margin + normal() * 0.03));
+    a.wacc = Math.min(0.3, Math.max(0.05, (baseInputs?.wacc || 0.085) + normal() * 0.015));
+    const terminalGrowth = Math.min(a.wacc - 0.005, Math.max(0, (baseInputs?.terminal_growth || 0.025) + normal() * 0.005));
+    const forecast = buildForecast(baseInputs?.ticker || "X", baseInputs?.years || 5, a, fixture);
+    const f = (forecast.periods || []).map((p: any) => p.fcf);
+    if (!f.length) continue;
+    const actuals = buildMetrics(fixture)[0] || null;
+    const netDebt = Number.isFinite(actuals?.net_debt) ? actuals.net_debt : 0;
+    const shares = numberOr(fixture?.info?.sharesOutstanding, 0) || forecast.periods?.[0]?.shares || 1;
+    const dcf = dcfCompute({ fcf: f, wacc: a.wacc, net_debt: netDebt, shares, terminal_growth: terminalGrowth, final_ebitda: forecast.summary?.final_ebitda });
+    if (dcf?.error || !Number.isFinite(dcf?.value_per_share)) continue;
+    values.push(dcf.value_per_share as number);
+  }
+  values.sort((x, y) => x - y);
+  const pct = (q: number) => values.length ? values[Math.min(values.length - 1, Math.floor(q * (values.length - 1)))] : null;
+  return {
+    iterations: values.length,
+    requested: iterations,
+    percentiles: {
+      p5: pct(0.05),
+      p25: pct(0.25),
+      p50: pct(0.5),
+      p75: pct(0.75),
+      p95: pct(0.95),
+    },
+    mean: values.length ? values.reduce((s, v) => s + v, 0) / values.length : null,
+    min: values.length ? values[0] : null,
+    max: values.length ? values[values.length - 1] : null,
+  };
+}
+
+function buildSectorModel(company: any, normalized: any, sector: any) {
+  const key = sector?.key || "generic";
+  const info = normalized?.info || {};
+  const metrics: any = buildMetrics(normalized)[0] || {};
+  const required = sector?.requiredInputs || [];
+  const available: string[] = [];
+  const missing: string[] = [];
+  const baseChecks: Record<string, boolean> = {
+    "Revenue": Number.isFinite(metrics.revenue),
+    "Margins": Number.isFinite(metrics.gross_margin),
+    "Cash flow": Number.isFinite(metrics.fcf),
+    "Balance sheet": Number.isFinite(metrics.net_debt),
+  };
+  Object.entries(baseChecks).forEach(([k, v]) => (v ? available.push(k) : missing.push(k)));
+  required.forEach((r: string) => {
+    if (!available.some((a) => a.toLowerCase().includes(r.toLowerCase().split(" ")[0]))) missing.push(r);
+  });
+  const modelOutputs: Record<string, any> = {};
+  if (key === "bank") {
+    modelOutputs.note = "Bank-specific metrics (NIM, GNPA/NNPA, CET-1, deposit/loan growth) are not present in the generic statement schema; only consolidated ROE/leverage are computed.";
+  } else if (key === "energy") {
+    modelOutputs.note = "Commodity price/volume splits, reserves and project pipelines are not present; cyclicality is assessed through reported revenue and margins.";
+  } else if (key === "manufacturing") {
+    modelOutputs.capex_intensity = Number.isFinite(metrics.revenue) && metrics.revenue ? (metrics.fcf !== null ? null : null) : null;
+  }
+  return {
+    key,
+    label: sector?.label || "General",
+    valuationApproach: sector?.valuationApproach || "Standard three-statement DCF",
+    applicableMethods: sector?.applicableMethods || ["DCF"],
+    requiredInputs: required,
+    availableInputs: [...new Set(available)],
+    missingInputs: [...new Set(missing)],
+    modelOutputs,
+    limitations: sector?.disclosure || "",
+  };
+}
+
+async function reportArtifacts(inputs: any, fixtureInput?: any, origin = "synthetic") {
   const ticker = inputs.ticker;
   const listing = parseListing(ticker);
   const normalized = fixtureInput || mockTickerData(ticker);
@@ -1250,9 +1677,74 @@ function reportArtifacts(inputs: any, fixtureInput?: any, origin = "synthetic") 
 
   const reverseDcf = price > 0 && flows.length > 0 ? (reverseDcfCompute({ ...dcfBody, current_price: price }) as any) : { error: "No forecast cash flows or market price available; implied WACC is suppressed." };
 
+  // Scenario analysis: distinct business assumptions, not price adjustments.
+  const scenarios = buildScenarios(ticker, inputs, normalized, price);
+  const peer_comps = (Array.isArray(inputs.peers) && inputs.peers.length)
+    ? await peerCompsCompute(ticker, inputs.peers, price)
+    : null;
+  const monte_carlo = monteCarloCompute(inputs, normalized, 300);
+
   // Provenance + integrity gates
   const issues = validateIdentity({ ticker, company, normalized, priceSummary: normalized.price_summary });
+  const executedChecks: string[] = ["identity"];
+  // DCF integrity: a failed or unusable DCF must never coexist with an actionable rating.
+  if (dcf?.error) {
+    issues.push({
+      severity: "error",
+      code: "valuation.dcf_failed",
+      message: `DCF could not be computed: ${dcf.error}`,
+      blocking: true,
+    });
+  } else {
+    if (!isFiniteNumber(dcf?.value_per_share)) {
+      issues.push({
+        severity: "error",
+        code: "valuation.dcf_invalid",
+        message: "DCF produced a non-finite value per share.",
+        blocking: true,
+      });
+    }
+    if (isFiniteNumber(dcf?.terminal_value_share_of_ev) && Math.abs(dcf.terminal_value_share_of_ev) > 0.85) {
+      issues.push({
+        severity: "warn",
+        code: "valuation.terminal_dominates",
+        message: `Terminal value contributes ${(dcf.terminal_value_share_of_ev * 100).toFixed(0)}% of enterprise value; the valuation is dominated by long-run assumptions.`,
+      });
+    }
+    if (isFiniteNumber(dcf?.wacc) && isFiniteNumber(dcf?.terminal_growth) && dcf.terminal_growth >= dcf.wacc) {
+      issues.push({
+        severity: "error",
+        code: "valuation.terminal_growth",
+        message: "Terminal growth is not below the discount rate.",
+        blocking: true,
+      });
+    }
+  }
+  executedChecks.push("valuation.dcf");
+  // Forecast consistency checks.
+  if (forecast?.summary) {
+    if (!forecast.summary.balance_ok) {
+      issues.push({
+        severity: "warn",
+        code: "forecast.balance_residual",
+        message: `Forecast balance-sheet residual of ${Number(forecast.summary.max_balance_check ?? 0).toPrecision(4)} exceeds tolerance.`,
+      });
+    }
+  }
+  executedChecks.push("forecast.consistency");
+  // Reverse DCF convergence check.
+  if (reverseDcf && !reverseDcf.error && reverseDcf.converged === false) {
+    issues.push({
+      severity: "warn",
+      code: "valuation.reverse_dcf_not_converged",
+      message: "Reverse DCF did not converge to the observed market price.",
+    });
+  }
+  executedChecks.push("valuation.reverse_dcf");
+
   const gates = integrityGates(issues);
+  gates.checks_run = executedChecks;
+  gates.checks_passed = gates.blockers.length === 0;
 
   // Synthetic (sample) data is never rated: publishing BUY/HOLD/SELL on fabricated
   // figures is exactly the integrity failure the gates exist to prevent.
@@ -1266,6 +1758,11 @@ function reportArtifacts(inputs: any, fixtureInput?: any, origin = "synthetic") 
       message: "Rating and target are withheld: figures come from the local sample fixture, not company-reported data.",
     });
     gates.warnings = gates.warnings.filter((issue) => issue.code !== "data.synthetic");
+  }
+  // A failed DCF must never coexist with an actionable rating/target.
+  if (dcf?.error) {
+    gates.ratingAllowed = false;
+    gates.targetAllowed = false;
   }
   const provenance = buildProvenanceRows({
     ticker,
@@ -1281,6 +1778,7 @@ function reportArtifacts(inputs: any, fixtureInput?: any, origin = "synthetic") 
     source: isSynthetic ? undefined : `${normalized.provider || "Configured market-data provider"} (retrieved ${normalized.retrieved_at})`,
   });
   const sector = sectorProfile(company.sector, company.industry);
+  const sector_model = buildSectorModel(company, normalized, sector);
 
   // Rating resolution — integrity gates block rating/target on failure.
   const modelTarget = !dcf.error && isFiniteNumber(dcf.value_per_share) ? dcf.value_per_share : null;
@@ -1377,9 +1875,16 @@ function reportArtifacts(inputs: any, fixtureInput?: any, origin = "synthetic") 
       targetAllowed: gates.targetAllowed,
       blockers: gates.blockers,
       warnings: gates.warnings,
+      checks_run: gates.checks_run || executedChecks,
+      checks_passed: gates.checks_passed ?? (gates.blockers.length === 0),
     },
     sector_profile: sector,
+    sector_model,
+    scenarios,
+    peer_comps,
+    monte_carlo,
     is_synthetic: isSynthetic,
+    engine_version: ENGINE_VERSION,
     data_source: isSynthetic ? null : normalized.provider || "Configured market-data provider",
     retrieved_at: normalized.retrieved_at || null,
     currency: company.currency || listing.currency,
@@ -1421,7 +1926,7 @@ function autoRating(upside: number | null): string {
 }
 
 function finishReportRecord(
-  artifacts: ReturnType<typeof reportArtifacts>,
+  artifacts: any,
   inputs: any,
   previousVersionId: number | null,
   narrativeSource: string,
@@ -1435,7 +1940,7 @@ function finishReportRecord(
       ? synthetic
         ? "Local engine: all figures come from the deterministic in-browser model."
         : `Provider data: ${payload.data_source || "market-data provider"}, retrieved ${payload.retrieved_at || "unknown"}. The stored snapshot is reused on export.`
-      : `Rating and target withheld: ${gates.blockers.map((b) => b.message).join(" ")}`,
+      : `Rating and target withheld: ${gates.blockers.map((b: any) => b.message).join(" ")}`,
   ];
   if (Array.isArray(dcf.warnings)) warnings.push(...dcf.warnings);
   if (inputs.force_refresh) {
@@ -1537,7 +2042,7 @@ function fixtureForRecord(fixture: any) {
 
 async function buildReportRecordAsync(inputs: any, previousVersionId: number | null = null) {
   const { fixture, origin, error } = await resolveFixture(inputs.ticker, inputs.force_refresh);
-  const artifacts = reportArtifacts(inputs, fixture, origin);
+  const artifacts = await reportArtifacts(inputs, fixture, origin);
   let narrativeSource = "deterministic-engine";
   const extraWarnings: string[] = [];
   if (origin === "synthetic") {
@@ -1555,22 +2060,57 @@ async function buildReportRecordAsync(inputs: any, previousVersionId: number | n
       const providerResult = await tryProviderNarrative(
         { name: model.name, provider: model.provider, base_url: model.base_url, api_key: model.api_key, model: model.model },
         {
+          // --- Report identity -------------------------------------------------
+          prompt_version: PROMPT_VERSION,
+          engine_version: ENGINE_VERSION,
           ticker: inputs.ticker,
           company: artifacts.company.name,
+          sector: artifacts.payload.sector_profile,
+          industry: artifacts.company.industry,
           currency: artifacts.payload.currency,
+          report_date: inputs.report_date,
+          horizon: inputs.horizon,
+          data_source: artifacts.payload.is_synthetic ? "SYNTHETIC local fixture — NOT company data" : artifacts.payload.data_source,
+          retrieved_at: artifacts.payload.retrieved_at,
+          is_synthetic: artifacts.payload.is_synthetic,
+          // --- Decision output (copy verbatim, never recompute) -----------------
           rating: artifacts.rating,
           target: artifacts.target,
           upside: artifacts.upside,
-          horizon: inputs.horizon,
+          current_price: artifacts.price,
+          rating_blocked: artifacts.gates.ratingAllowed === false,
+          rating_block_reason: artifacts.gates.ratingAllowed === false
+            ? artifacts.gates.blockers.map((b: any) => b.message).join(" ")
+            : null,
+          // --- Valuation evidence ----------------------------------------------
+          dcf: {
+            wacc: artifacts.dcf.wacc,
+            terminal_growth: artifacts.dcf.terminal_growth,
+            enterprise_value: artifacts.dcf.enterprise_value,
+            equity_value: artifacts.dcf.equity_value,
+            value_per_share: artifacts.dcf.value_per_share,
+            net_debt: artifacts.dcf.net_debt,
+            terminal_value_share_of_ev: artifacts.dcf.terminal_value_share_of_ev,
+            warnings: artifacts.dcf.warnings,
+          },
+          reverse_dcf: artifacts.reverseDcf?.error ? null : artifacts.reverseDcf,
+          sensitivity: artifacts.payload.sensitivity,
+          scenarios: artifacts.payload.scenarios,
+          peer_comps: artifacts.payload.peer_comps,
+          monte_carlo: artifacts.payload.monte_carlo,
+          // --- Forecast + assumption provenance ---------------------------------
           forecast_summary: artifacts.forecast.summary,
           forecast_assumptions: artifacts.forecast.assumptions,
           forecast_assumption_sources: artifacts.forecast.assumption_sources,
-          dcf: { wacc: artifacts.dcf.wacc, enterprise_value: artifacts.dcf.enterprise_value, value_per_share: artifacts.dcf.value_per_share },
+          forecast_gaps: artifacts.forecast.base_gaps,
           actuals: artifacts.actualsWithPb,
           history: artifacts.payload.history,
-          sector: artifacts.payload.sector_profile,
-          sensitivity: artifacts.payload.sensitivity,
-          peers: inputs.peers,
+          // --- Validation / integrity / disclosures ------------------------------
+          validation_issues: artifacts.payload.validation,
+          integrity_gates: artifacts.payload.integrity,
+          data_quality_alerts: artifacts.payload.data_quality?.alerts || [],
+          sector_model: artifacts.payload.sector_model,
+          provenance: artifacts.payload.provenance,
         },
       );
       if (providerResult?.narrative) {
@@ -1592,9 +2132,9 @@ function pctValue(value: unknown): string {
   return typeof value === "number" && Number.isFinite(value) ? `${(value * 100).toFixed(2)}%` : "—";
 }
 
-function reportExportPayload(record: any): ExportPayload {
+async function reportExportPayload(record: any): Promise<ExportPayload> {
   const inputs = record?.inputs || reportInputs({ ticker: record?.ticker });
-  const artifacts = reportArtifacts(inputs, record?.fixture || undefined, record?.origin || "synthetic");
+  const artifacts = await reportArtifacts(inputs, record?.fixture || undefined, record?.origin || "synthetic");
   if (record?.title) artifacts.payload.title = record.title;
   if (record?.created_at) artifacts.payload.generated_at = record.created_at;
   if (record?.narrative) artifacts.payload.report = record.narrative;
@@ -1816,6 +2356,10 @@ function handleClientMock(path: string, init?: RequestInit): any {
   if (cleanPath.startsWith("/api/advanced/option")) return optionCompute(body);
   if (cleanPath.startsWith("/api/advanced/bond")) return bondCompute(body);
   if (cleanPath.startsWith("/api/advanced/lbo")) return lboCompute(body);
+  if (cleanPath.startsWith("/api/advanced/bank")) return bankModelCompute(body);
+  if (cleanPath.startsWith("/api/advanced/insurer")) return insurerModelCompute(body);
+  if (cleanPath.startsWith("/api/advanced/reit")) return reitModelCompute(body);
+  if (cleanPath.startsWith("/api/advanced/commodity")) return commodityModelCompute(body);
   if (cleanPath.startsWith("/api/advanced/")) {
     return { result: "success", valuation: 120, irr: 0.22, summary: "Advanced model computed successfully by the local engine." };
   }
@@ -1894,7 +2438,10 @@ export async function apiBlob(path: string, body: unknown): Promise<Blob> {
   const reportPdf = path.match(/^\/api\/research\/reports\/(\d+)\/pdf/);
   if (reportPdf) {
     const record = getLocalReports().find((row) => numberOr(row?.id, 0) === Number(reportPdf[1]));
-    if (record) return buildResearchPdf(reportExportPayload(record));
+    if (record) {
+      const payload = await reportExportPayload(record);
+      return buildResearchPdf(payload);
+    }
   }
 
   return buildResearchPdf(payload);

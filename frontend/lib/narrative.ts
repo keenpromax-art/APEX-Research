@@ -1,4 +1,9 @@
 import { z } from "zod";
+
+// Prompt templates and the prompt version live in prompts.ts; re-exported here
+// so existing consumers keep a single import surface.
+export { PROMPT_VERSION, PROMPT_TEMPLATES } from "./prompts";
+import { SYSTEM_PROMPT, SAMPLING, buildUserPrompt } from "./prompts";
 import { fmt, isNum, num, pct } from "./format";
 import type { SectorProfile } from "./provenance";
 
@@ -764,21 +769,11 @@ export async function tryProviderNarrative(
       body: JSON.stringify({
         model: config.model || undefined,
         messages: [
-          {
-            role: "system",
-            content:
-              "You are an experienced equity research writer. Return ONLY JSON matching the provided schema. " +
-              "Write a detailed, institutional-quality research note: every prose section should be " +
-              "several sentences long and grounded in the supplied payload. Use specific figures from " +
-              "the payload (revenue, margins, CAGR, WACC, DCF value, net debt, multiples) wherever they " +
-              "are available; never invent financial figures. Explain what the numbers mean for the " +
-              "investment case, not just what they are. If a field is unknown, state it is unavailable " +
-              "rather than guessing. Ground risks, catalysts and the thesis in the reported data and " +
-              "model outputs provided.",
-          },
-          { role: "user", content: JSON.stringify(promptPayload) },
+          { role: "system", content: SYSTEM_PROMPT },
+          { role: "user", content: buildUserPrompt(promptPayload) },
         ],
-        temperature: 0.2,
+        temperature: SAMPLING.temperature,
+        max_tokens: SAMPLING.max_tokens,
       }),
       signal: controller.signal,
     });
