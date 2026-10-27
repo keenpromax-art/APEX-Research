@@ -167,8 +167,8 @@ export default function CompanyIndex() {
           <button type="submit" className="bg-accent text-black px-4 py-2.5 rounded-md text-sm font-medium">
             Open
           </button>
-          <Link href="/company/DEMO" className="border border-border rounded-md px-4 py-2.5 text-sm text-center hover:bg-panel">
-            Demo
+          <Link href="/company/SAMPLE" className="border border-border rounded-md px-4 py-2.5 text-sm text-center hover:bg-panel">
+            Sample company
           </Link>
         </form>
       </Card>

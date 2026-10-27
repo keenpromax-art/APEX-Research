@@ -27,7 +27,7 @@ browser's `localStorage`.
 - `/research` — Research Studio: build, version and export institutional notes
 - `/settings` — theme, engine status and shortcuts
 
-Use the `DEMO` ticker for the synthetic fixture.
+A local synthetic sample fixture is used automatically when the market-data provider is unreachable.
 
 ## Engine
 

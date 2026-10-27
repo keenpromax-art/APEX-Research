@@ -180,13 +180,13 @@ const KNOWN_IDENTITIES: Record<string, FixtureIdentity> = {
     business: "Manufactures wind turbine generators and provides turnkey wind power project development, construction and operations services in India.",
   },
   GAPCO: {
-    name: "GAPCO演示 sparse fixture".replace("演示 sparse fixture", " Demonstration Co."),
+    name: "GAPCO Sample Co.",
     sector: "Consumer Discretionary",
     industry: "Specialty Retail",
     country: "US",
     website: "https://example.invalid",
     employees: 4_200,
-    business: "Sparse demonstration fixture: only two annual income periods, no cash-flow statement and a partially blank price summary.",
+    business: "Sparse sample fixture: only two annual income periods, no cash-flow statement and a partially blank price summary.",
   },
 };
 
@@ -391,7 +391,7 @@ function mockTickerData(ticker: string) {
     data_quality: {
       alerts: [
         { level: "info", mode: "local", message: `Local engine: deterministic ${currency} financial profile for ${upper} on ${listing.venueLabel}` },
-        { level: "warn", mode: "local", message: "All figures are synthetic demonstration data, not company-reported financials." },
+        { level: "warn", mode: "local", message: "All figures are synthetic sample data, not company-reported financials." },
         ...sparseAlerts,
       ],
     },
@@ -404,7 +404,7 @@ function syntheticFixture(ticker: string, error: string | null) {
     fixture.data_quality.alerts.push({
       level: "warn",
       mode: "local",
-      message: `Market-data provider fetch failed (${error}); this synthetic demo fixture was used instead. Figures are fabricated and are not for investment use.`,
+      message: `Market-data provider fetch failed (${error}); this synthetic sample fixture was used instead. Figures are fabricated and are not for investment use.`,
     });
   }
   return fixture;
@@ -414,7 +414,7 @@ async function resolveFixture(
   tickerInput: string,
   force = false,
 ): Promise<{ fixture: any; origin: string; error: string | null }> {
-  const ticker = String(tickerInput || "DEMO").trim().toUpperCase() || "DEMO";
+  const ticker = String(tickerInput || "SAMPLE").trim().toUpperCase() || "SAMPLE";
   if (parseListing(ticker).isDemo) {
     return { fixture: mockTickerData(ticker), origin: "synthetic", error: null };
   }
@@ -444,7 +444,7 @@ function companySummary(fixture: any) {
   const info = fixture?.info || {};
   const income = fixture?.annual?.income_statement || [];
   return {
-    ticker: String(fixture?.ticker || "DEMO").toUpperCase(),
+    ticker: String(fixture?.ticker || "SAMPLE").toUpperCase(),
     name: info.longName,
     exchange: info.exchange,
     currency: info.currency,
@@ -1163,7 +1163,7 @@ function reportInputs(body: any) {
   const rawTarget = Number(body?.manual_target_price);
   const rawPeers = Array.isArray(body?.peers) ? body.peers : [];
   return {
-    ticker: String(body?.ticker || "DEMO").trim().toUpperCase() || "DEMO",
+    ticker: String(body?.ticker || "SAMPLE").trim().toUpperCase() || "SAMPLE",
     report_type: body?.report_type === "quick" ? "quick" : "full",
     title: rawTitle,
     years: Math.max(1, Math.min(10, Math.round(numberOr(body?.years, 5)))),
@@ -1494,7 +1494,7 @@ async function buildReportRecordAsync(inputs: any, previousVersionId: number | n
   const extraWarnings: string[] = [];
   if (origin === "synthetic") {
     extraWarnings.push(
-      `Market-data provider fetch failed (${error || "unavailable"}); the synthetic demo fixture was used. Figures are fabricated and must not be used for investment decisions.`,
+      `Market-data provider fetch failed (${error || "unavailable"}); the synthetic sample fixture was used. Figures are fabricated and must not be used for investment decisions.`,
     );
   } else if (error) {
     extraWarnings.push(`Provider refresh failed (${error}); provider data retrieved ${fixture.retrieved_at} from the local cache was used.`);
@@ -1513,10 +1513,16 @@ async function buildReportRecordAsync(inputs: any, previousVersionId: number | n
           rating: artifacts.rating,
           target: artifacts.target,
           upside: artifacts.upside,
+          horizon: inputs.horizon,
           forecast_summary: artifacts.forecast.summary,
+          forecast_assumptions: artifacts.forecast.assumptions,
+          forecast_assumption_sources: artifacts.forecast.assumption_sources,
           dcf: { wacc: artifacts.dcf.wacc, enterprise_value: artifacts.dcf.enterprise_value, value_per_share: artifacts.dcf.value_per_share },
           actuals: artifacts.actuals,
+          history: artifacts.payload.history,
           sector: artifacts.payload.sector_profile,
+          sensitivity: artifacts.payload.sensitivity,
+          peers: inputs.peers,
         },
       );
       if (providerResult?.narrative) {
@@ -1606,7 +1612,7 @@ const TICKER_SUGGESTIONS = [
   { symbol: "RELIANCE.NS", name: "Reliance Industries Limited", exchange: "NSE", quote_type: "EQUITY" },
   { symbol: "INFY.NS", name: "Infosys Limited", exchange: "NSE", quote_type: "EQUITY" },
   { symbol: "UPL.NS", name: "UPL Corporation Inc.", exchange: "NSE", quote_type: "EQUITY" },
-  { symbol: "DEMO", name: "APEX Synthetic Demo Company", exchange: "DEMO", quote_type: "EQUITY" },
+  { symbol: "SAMPLE", name: "APEX Sample Company", exchange: "SAMPLE", quote_type: "EQUITY" },
 ];
 
 function handleClientMock(path: string, init?: RequestInit): any {
@@ -1723,13 +1729,13 @@ function handleClientMock(path: string, init?: RequestInit): any {
   }
 
   if (cleanPath.startsWith("/api/company/")) {
-    const ticker = cleanPath.split("/")[3] || "DEMO";
+    const ticker = cleanPath.split("/")[3] || "SAMPLE";
     const force = query.get("refresh") === "true";
     return resolveFixture(ticker, force).then(({ fixture }) => companySummary(fixture));
   }
 
   if (cleanPath.startsWith("/api/data/")) {
-    const ticker = cleanPath.split("/")[3] || "DEMO";
+    const ticker = cleanPath.split("/")[3] || "SAMPLE";
     const force = query.get("refresh") === "true";
     return resolveFixture(ticker, force).then((resolved) => ({
       normalized: resolved.fixture,
@@ -1740,7 +1746,7 @@ function handleClientMock(path: string, init?: RequestInit): any {
   }
 
   if (cleanPath.startsWith("/api/forecast/")) {
-    const ticker = cleanPath.split("/")[3] || "DEMO";
+    const ticker = cleanPath.split("/")[3] || "SAMPLE";
     return resolveFixture(ticker, false).then((resolved) =>
       buildForecast(ticker, body?.years, body?.assumptions, resolved.fixture),
     );
@@ -1767,7 +1773,7 @@ function handleClientMock(path: string, init?: RequestInit): any {
   }
 
   if (cleanPath === "/api/ai/research") {
-    const ticker = String(body?.ticker || "DEMO").trim().toUpperCase() || "DEMO";
+    const ticker = String(body?.ticker || "SAMPLE").trim().toUpperCase() || "SAMPLE";
     return resolveFixture(ticker, false).then((resolved) =>
       mockAiResearch(body, resolved.fixture, resolved.origin),
     );

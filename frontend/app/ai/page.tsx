@@ -439,7 +439,7 @@ export default function AIPage() {
           title="Recent research jobs"
           subtitle="Persisted runs from the company workspace, most recent first"
           action={
-            <Link href="/company/DEMO" className="text-xs text-accent inline-flex items-center gap-1">
+            <Link href="/company/SAMPLE" className="text-xs text-accent inline-flex items-center gap-1">
               Open a workspace <ExternalLink size={12} />
             </Link>
           }

@@ -91,7 +91,7 @@ test("parseListing maps tickers to venue and currency", () => {
   assert.equal(parseListing("GAPCO").market, "US");
   assert.equal(parseListing("SHEL.L").currency, "GBp");
   assert.equal(parseListing("SHEL.L").market, "UK");
-  assert.equal(parseListing("DEMO").isDemo, true);
+  assert.equal(parseListing("SAMPLE").isDemo, true);
 });
 
 test("AAPL (US) report generates with rating, currency and clean layout", async () => {
@@ -407,7 +407,7 @@ test("live end-to-end: real Yahoo data drives company, forecast and report (skip
 
     const { bytes } = await pdfBytesForReport(record.id);
     const text = bytes.toString("latin1");
-    assert.ok(!text.includes("SYNTHETIC DATA"), "provider report carries no synthetic demo banner");
+    assert.ok(!text.includes("SYNTHETIC DATA"), "provider report carries no synthetic sample banner");
     assert.ok(text.includes("Yahoo Finance"), "cover cites the market-data source");
     assert.ok(!text.includes("NaN"), "PDF has no NaN");
     const layout = inspectPdfBytes(new Uint8Array(bytes));

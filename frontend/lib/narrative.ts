@@ -169,9 +169,18 @@ export function buildDeterministicNarrative(ctx: NarrativeContext): Narrative {
   })();
 
   const summaryParagraphs: string[] = [];
+  const lastClose = isNum(ctx.price.lastClose) ? ctx.price.lastClose : null;
+  const low52w = isNum(ctx.price.low52w) ? ctx.price.low52w : null;
+  const high52w = isNum(ctx.price.high52w) ? ctx.price.high52w : null;
+  const rangePosition =
+    lastClose !== null && low52w !== null && high52w !== null && high52w > low52w
+      ? pct((lastClose - low52w) / (high52w - low52w), 0)
+      : null;
+
   summaryParagraphs.push(
-    `${ctx.companyName} (${ctx.ticker}, ${ctx.exchange}) last closed at ${ctx.price.lastClose !== null ? `${num(ctx.price.lastClose)} ${c}` : "an unavailable price"}, ` +
-      `inside a 52-week range of ${ctx.price.low52w !== null ? num(ctx.price.low52w) : "n/a"}–${ctx.price.high52w !== null ? num(ctx.price.high52w) : "n/a"}. ` +
+    `${ctx.companyName} (${ctx.ticker}, ${ctx.exchange}) operates in the ${ctx.sectorProfile.label} sector ${ctx.industry ? `(${ctx.industry})` : ""} and last closed at ${lastClose !== null ? `${num(lastClose)} ${c}` : "an unavailable price"}, inside a 52-week range of ${low52w !== null ? num(low52w) : "n/a"}–${high52w !== null ? num(high52w) : "n/a"} (last close at ${rangePosition !== null ? rangePosition : "an unavailable position"} of the range). ` +
+      (ctx.marketCap !== null ? `The company carries a market capitalisation of ${fmtBn(ctx.marketCap, c)}. ` : "") +
+      (ctx.employees !== null ? `It employs approximately ${Math.round(ctx.employees).toLocaleString("en-US")} people. ` : "") +
       (ctx.ratingBlocked
         ? `Investment rating and target price are withheld: ${ctx.ratingBlockReason || "integrity checks failed"}.`
         : `Our ${ctx.horizon} view is ${ctx.rating} with a target of ${ctx.target !== null ? `${num(ctx.target)} ${c}` : "n/a"}, ${verdictPhrase}.`),
@@ -179,9 +188,7 @@ export function buildDeterministicNarrative(ctx: NarrativeContext): Narrative {
 
   if (periods.length && isNum(summary.revenue_cagr)) {
     summaryParagraphs.push(
-      `The base case compounds revenue from ${fmtBn(summary.base_revenue, c)} (last reported) to ${fmtBn(summary.final_revenue, c)} over ${periods.length} forecast year${periods.length === 1 ? "" : "s"} ` +
-        `— a ${pctStr(summary.revenue_cagr)} CAGR — with the EBITDA margin moving from ${pctStr(ebitdaMarginFirst)} in the first forecast year to ${pctStr(ebitdaMarginLast)} in the final year. ` +
-        `Final-year free cash flow of ${fmtBn(summary.final_fcf, c)} equals ${pctStr(fcfConversion)} of EBITDA and a ${pctStr(fcfMarginLast)} free-cash-flow margin.`,
+      `The base case compounds revenue from ${fmtBn(summary.base_revenue, c)} (last reported period) to ${fmtBn(summary.final_revenue, c)} over ${periods.length} forecast year${periods.length === 1 ? "" : "s"} — a ${pctStr(summary.revenue_cagr)} CAGR — while the EBITDA margin moves from ${pctStr(ebitdaMarginFirst)} in the first forecast year to ${pctStr(ebitdaMarginLast)} in the final year. Final-year free cash flow of ${fmtBn(summary.final_fcf, c)} equals ${pctStr(fcfConversion)} of EBITDA, a ${pctStr(fcfMarginLast)} free-cash-flow margin that supports reinvestment and any capital returns.`,
     );
   } else {
     summaryParagraphs.push(
@@ -195,26 +202,32 @@ export function buildDeterministicNarrative(ctx: NarrativeContext): Narrative {
         (dcf.exit_multiple !== null && dcf.exit_multiple !== undefined
           ? `with a ${num(dcf.exit_multiple)}x exit multiple `
           : `with ${pctStr(dcf.terminal_growth)} terminal growth `) +
-        `produces an enterprise value of ${fmtBn(dcf.enterprise_value, c)} and equity value of ${fmtBn(dcf.equity_value, c)}. ` +
+        `produces an enterprise value of ${fmtBn(dcf.enterprise_value, c)} and equity value of ${fmtBn(dcf.equity_value, c)}, implying ${num(dcf.value_per_share)} ${c} per share. ` +
         (pvTvShare !== null
           ? `The terminal value contributes ${pctStr(pvTvShare)} of enterprise value, so long-run assumptions dominate the estimate. `
           : "") +
         (reverseWacc !== null
-          ? `At the current market price the implied WACC is ${pctStr(reverseWacc, 2)}, i.e. the market discounts our cash flows more steeply than our stated cost of capital.`
+          ? `At the current market price of ${num(lastClose)} ${c} the implied WACC is ${pctStr(reverseWacc, 2)} versus our stated ${pctStr(dcf.wacc, 2)} — the market demands a higher return than our stated cost of capital.`
           : ""),
+    );
+  }
+
+  if (isNum(actuals.net_debt) && isNum(actuals.ebitda) && actuals.ebitda !== 0) {
+    summaryParagraphs.push(
+      `On the latest reported balance sheet, net debt stands at ${fmtBn(actuals.net_debt, c)} (${num(actuals.net_debt / actuals.ebitda, 2)}x last-reported EBITDA), with return on invested capital at ${pctStr(actuals.roic)} and return on equity at ${pctStr(actuals.roe)}.`,
     );
   }
 
   // ---- Investment thesis + drivers ---------------------------------------
   const investmentThesis =
-    `${ctx.sectorProfile.label} exposure with ${pctStr(summary.revenue_cagr)} modelled revenue growth, ` +
-    `${pctStr(ebitdaMarginLast)} terminal-year EBITDA margin and ${pctStr(fcfConversion)} EBITDA-to-FCF conversion. ` +
+    `${ctx.companyName} offers ${ctx.sectorProfile.label} exposure (${ctx.industry}) with a ${pctStr(summary.revenue_cagr)} modelled revenue CAGR, a terminal-year EBITDA margin of ${pctStr(ebitdaMarginLast)} and ${pctStr(fcfConversion)} EBITDA-to-FCF conversion on the base case. ` +
+    `Revenue scales from ${fmtBn(summary.base_revenue, c)} to ${fmtBn(summary.final_revenue, c)} across the forecast horizon, while the mechanical rating of ${ctx.rating} reflects ${ctx.upside !== null ? pct(ctx.upside) + " " + (ctx.upside >= 0 ? "upside" : "downside") : "an undetermined target"} versus the ${num(lastClose)} ${c} last close. ` +
     (netDebt !== null && netDebtEbitda !== null
-      ? `The balance sheet carries ${netDebt >= 0 ? `${fmtBn(netDebt, c)} of net debt` : `${fmtBn(Math.abs(netDebt), c)} of net cash`} (${num(Math.abs(netDebtEbitda), 2)}x last reported EBITDA). `
+      ? `The balance sheet carries ${netDebt >= 0 ? `${fmtBn(netDebt, c)} of net debt` : `${fmtBn(Math.abs(netDebt), c)} of net cash`} (${num(Math.abs(netDebtEbitda), 2)}x last-reported EBITDA). `
       : "Net debt could not be computed from the available statements. ") +
     (ctx.ratingBlocked
       ? "Because data-integrity checks failed, no rating or target is attached to this thesis."
-      : `The mechanical rating is ${ctx.rating}; the conviction basis is described below.`);
+      : `The conviction basis is described below.`);
 
   const thesisDrivers: string[] = [];
   if (isNum(summary.revenue_cagr)) {
@@ -240,6 +253,11 @@ export function buildDeterministicNarrative(ctx: NarrativeContext): Narrative {
   if (dcf && ctx.upside !== null) {
     thesisDrivers.push(
       `Valuation: DCF value of ${num(dcf.value_per_share)} ${c} per share versus a ${num(ctx.price.lastClose)} ${c} market price (${pct(ctx.upside)} ${ctx.upside >= 0 ? "upside" : "downside"}).`,
+    );
+  }
+  if (isNum(latestHistory.roic) && isNum(latestHistory.roe)) {
+    thesisDrivers.push(
+      `Profitability: return on invested capital of ${pctStr(latestHistory.roic)} and return on equity of ${pctStr(latestHistory.roe)} in ${yearOf(latestHistory)}.`,
     );
   }
   if (!thesisDrivers.length) {
@@ -274,24 +292,35 @@ export function buildDeterministicNarrative(ctx: NarrativeContext): Narrative {
 
   const financialParts: string[] = [coverageNote];
   if (isNum(latestHistory.revenue)) {
+    const ebitdaMargin = isNum(latestHistory.ebitda) && latestHistory.revenue ? latestHistory.ebitda / latestHistory.revenue : null;
     financialParts.push(
       `In ${yearOf(latestHistory)} revenue was ${fmtBn(latestHistory.revenue, c)}` +
         (isNum(latestHistory.revenue_growth) ? ` (${pctStr(latestHistory.revenue_growth)} year on year)` : "") +
-        `, with gross margin ${pctStr(latestHistory.gross_margin)}, operating margin ${pctStr(latestHistory.operating_margin)} and net margin ${pctStr(latestHistory.net_margin)}.`,
+        `, with gross margin ${pctStr(latestHistory.gross_margin)}, operating margin ${pctStr(latestHistory.operating_margin)}, EBITDA margin ${pctStr(ebitdaMargin)} and net margin ${pctStr(latestHistory.net_margin)}. ` +
+        `Reported EBITDA was ${fmtBn(latestHistory.ebitda, c)} and net income was ${fmtBn(latestHistory.net_income, c)}, with diluted EPS of ${isNum(latestHistory.eps_diluted) ? `${num(latestHistory.eps_diluted)} ${c}` : "not available"}.`,
     );
   }
   if (priorHistory && isNum(latestHistory.revenue) && isNum(priorHistory.revenue)) {
     const delta = latestHistory.revenue - priorHistory.revenue;
+    const ebitdaDelta = isNum(latestHistory.ebitda) && isNum(priorHistory.ebitda) ? latestHistory.ebitda - priorHistory.ebitda : null;
     financialParts.push(
       `Revenue moved by ${fmtBn(Math.abs(delta), c)} (${delta >= 0 ? "an increase" : "a decrease"}) versus ${yearOf(priorHistory)}, ` +
-        `which on the reported statements reflects volume/mix and pricing in aggregate; the dataset does not decompose the change.`,
+        `which on the reported statements reflects volume/mix and pricing in aggregate; the dataset does not decompose the change. ` +
+        (ebitdaDelta !== null
+          ? `EBITDA moved by ${fmtBn(Math.abs(ebitdaDelta), c)} (${ebitdaDelta >= 0 ? "an increase" : "a decrease"}) over the same period.`
+          : ""),
     );
   }
   if (isNum(latestHistory.roic)) {
-    financialParts.push(`Return on invested capital was ${pctStr(latestHistory.roic)}; return on equity ${pctStr(latestHistory.roe)}.`);
+    financialParts.push(`Return on invested capital was ${pctStr(latestHistory.roic)}, return on equity ${pctStr(latestHistory.roe)} and return on assets ${pctStr(latestHistory.roa)} in ${yearOf(latestHistory)}.`);
+  }
+  if (isNum(actuals.net_debt)) {
+    financialParts.push(
+      `The latest balance sheet carries net debt of ${fmtBn(actuals.net_debt, c)} with a current ratio of ${num(actuals.current_ratio, 2)}.`,
+    );
   }
   if (isNum(latestHistory.fcf)) {
-    financialParts.push(`Free cash flow in the latest period was ${fmtBn(latestHistory.fcf, c)}.`);
+    financialParts.push(`Free cash flow in the latest period was ${fmtBn(latestHistory.fcf, c)}; operating cash flow was ${isNum(latestHistory.ocf) ? fmtBn(latestHistory.ocf, c) : "not available"}.`);
   } else {
     financialParts.push("Free cash flow is not available for the latest reported period; cash conversion cannot be assessed from history.");
   }
@@ -319,6 +348,21 @@ export function buildDeterministicNarrative(ctx: NarrativeContext): Narrative {
   }
   if (isNum(latestHistory.roic) && latestHistory.roic > 0.1) {
     strengths.push(`Return on invested capital of ${pctStr(latestHistory.roic)} in ${yearOf(latestHistory)} indicates value-accretive reinvestment at the reported level.`);
+  }
+  if (isNum(summary.base_revenue) && summary.base_revenue > 1e9) {
+    strengths.push(`Revenue scale of ${fmtBn(summary.base_revenue, c)} provides operating leverage and absorbs fixed costs through the cycle.`);
+  }
+  if (isNum(latestHistory.gross_margin) && latestHistory.gross_margin > 0.5) {
+    strengths.push(`Gross margin of ${pctStr(latestHistory.gross_margin)} leaves room to absorb input-cost inflation without hitting operating profit.`);
+  }
+  if (isNum(latestHistory.roe) && latestHistory.roe > 0.15) {
+    strengths.push(`Return on equity of ${pctStr(latestHistory.roe)} indicates efficient use of shareholder capital.`);
+  }
+  if (isNum(latestHistory.eps_diluted) && latestHistory.eps_diluted > 0 && isNum(latestHistory.revenue_growth) && latestHistory.revenue_growth > 0) {
+    strengths.push(`Earnings are positive and compounding alongside revenue growth, with diluted EPS of ${num(latestHistory.eps_diluted)} ${c}.`);
+  }
+  if (isNum(summary.revenue_cagr) && summary.revenue_cagr > 0.1) {
+    strengths.push(`Double-digit modelled revenue growth of ${pctStr(summary.revenue_cagr)} outpaces a low-single-digit nominal GDP benchmark.`);
   }
   if (!strengths.length) strengths.push("No strength could be evidenced from the available metrics.");
 
@@ -383,6 +427,55 @@ export function buildDeterministicNarrative(ctx: NarrativeContext): Narrative {
       basis: "fact",
     });
   }
+  if (isNum(latestHistory.operating_margin) && latestHistory.operating_margin < 0) {
+    risks.push({
+      title: "Negative operating margin",
+      exposure: `Operating margin was ${pctStr(latestHistory.operating_margin)} in ${yearOf(latestHistory)} — the core business is loss-making before interest and tax.`,
+      impact: "Any further revenue deceleration widens operating losses and burns cash.",
+      monitoring_metric: "Reported operating margin period on period",
+      basis: "fact",
+    });
+  }
+  if (isNum(latestHistory.fcf) && latestHistory.fcf < 0) {
+    risks.push({
+      title: "Negative free cash flow",
+      exposure: `Free cash flow was ${fmtBn(latestHistory.fcf, c)} in ${yearOf(latestHistory)}, so the business is not yet self-funding.`,
+      impact: "Persistent negative FCF requires external financing or asset sales to continue operating.",
+      monitoring_metric: "Quarterly free cash flow trend",
+      basis: "fact",
+    });
+  }
+  if (isNum(assumptions.share_dilution) && assumptions.share_dilution > 0) {
+    risks.push({
+      title: "Share-count dilution",
+      exposure: `The model expands the share count at ${pctStr(assumptions.share_dilution)} per year, diluting existing holders.`,
+      impact: "Per-share value grows more slowly than enterprise value.",
+      monitoring_metric: "Reported diluted shares outstanding",
+      basis: "inference",
+    });
+  }
+  if (isNum(summary.revenue_cagr) && summary.revenue_cagr < 0) {
+    risks.push({
+      title: "Contracting revenue base",
+      exposure: `The base case assumes revenue declines at ${pctStr(Math.abs(summary.revenue_cagr))} per year.`,
+      impact: "A shrinking top line compresses operating leverage and terminal value.",
+      monitoring_metric: "Reported revenue year on year",
+      basis: "inference",
+    });
+  }
+  if (ctx.sensitivity && Array.isArray(ctx.sensitivity.table) && isNum(dcf?.value_per_share) && dcf.value_per_share > 0) {
+    const vals = ctx.sensitivity.table.flat().filter(isNum);
+    const spread = vals.length ? (Math.max(...vals) - Math.min(...vals)) / dcf.value_per_share : 0;
+    if (spread > 0.5) {
+      risks.push({
+        title: "Wide valuation dispersion",
+        exposure: `The sensitivity grid spans ${pctStr(spread)} of the base-case value per share.`,
+        impact: "Small assumption changes move the target by a material margin.",
+        monitoring_metric: "WACC and terminal-growth assumptions versus the sensitivity grid",
+        basis: "fact",
+      });
+    }
+  }
   if (!risks.length) {
     risks.push({
       title: "Model uncertainty",
@@ -426,6 +519,22 @@ export function buildDeterministicNarrative(ctx: NarrativeContext): Narrative {
       grounding: `The DCF embeds a ${num(exitMultiple, 1)}x exit multiple on final-year EBITDA of ${fmtBn(summary.final_ebitda, c)}.`,
     });
   }
+  if (isNum(latestHistory.fcf) && latestHistory.fcf < 0) {
+    catalysts.push({
+      title: "Free cash flow inflection",
+      event: "Free cash flow turns positive as the revenue base scales",
+      timing: "Next reported annual period; exact timing is unknown",
+      grounding: `Each point of revenue upside converts at the ${pctStr(ebitdaMarginLast)} terminal-year EBITDA margin, which feeds directly into FCF.`,
+    });
+  }
+  if (isNum(latestHistory.operating_margin) && isNum(assumptions.opex_ratio) && latestHistory.operating_margin < 1 - assumptions.opex_ratio - 0.05) {
+    catalysts.push({
+      title: "Operating leverage",
+      event: "Operating margin expands as fixed costs are absorbed by a larger revenue base",
+      timing: "Progressive across the forecast horizon",
+      grounding: `The model holds the opex ratio at ${pctStr(assumptions.opex_ratio)} while revenue compounds, so incremental revenue largely drops to operating profit.`,
+    });
+  }
   if (!catalysts.length) {
     catalysts.push({
       title: "No grounded catalyst identified",
@@ -459,8 +568,15 @@ export function buildDeterministicNarrative(ctx: NarrativeContext): Narrative {
       `The DCF discounts ${dcf.cash_flow_count || periods.length} annual free cash flows at ${pctStr(dcf.wacc, 2)}. ` +
         `Present value of explicit cash flows is ${fmtBn(dcf.pv_cash_flows, c)}; present value of the terminal value is ${fmtBn(dcf.pv_terminal_value, c)}. ` +
         `Enterprise value of ${fmtBn(dcf.enterprise_value, c)} bridges to equity value of ${fmtBn(dcf.equity_value, c)} ` +
-        `via net ${isNum(dcf.net_debt) && dcf.net_debt >= 0 ? "debt" : "cash"} of ${fmtBn(Math.abs(dcf.net_debt ?? 0), c)}, implying ${num(dcf.value_per_share)} ${c} per share on ${fmt(dcf.shares)} shares.`,
+        `via net ${isNum(dcf.net_debt) && dcf.net_debt >= 0 ? "debt" : "cash"} of ${fmtBn(Math.abs(dcf.net_debt ?? 0), c)}, implying ${num(dcf.value_per_share)} ${c} per share.`,
     );
+    const ebitdaMultiple =
+      isNum(dcf.enterprise_value) && isNum(summary.final_ebitda) && summary.final_ebitda !== 0
+        ? dcf.enterprise_value / summary.final_ebitda
+        : null;
+    if (ebitdaMultiple !== null) {
+      valuationParts.push(`That implies an EV/EBITDA multiple of ${num(ebitdaMultiple, 1)}x on final-year EBITDA of ${fmtBn(summary.final_ebitda, c)}.`);
+    }
     if (ctx.sensitivity && !ctx.sensitivity.error) {
       valuationParts.push(
         `The WACC-versus-${ctx.sensitivity.mode === "multiple" ? "exit-multiple" : "terminal-growth"} grid brackets a value-per-share range of ${sensitivityRange(ctx.sensitivity)}; sensitivity analysis maps the model's response to assumptions — it does not remove uncertainty.`,
@@ -509,6 +625,14 @@ export function buildDeterministicNarrative(ctx: NarrativeContext): Narrative {
         .map(([key, value]) => `${key.replaceAll("_", " ")} ${pctStr(value, 2)}`)
         .join("; ")}.`,
     );
+    const derivedDrivers = Object.entries(driverSources)
+      .filter(([, source]) => String(source).startsWith("Derived"))
+      .slice(0, 4);
+    if (derivedDrivers.length) {
+      qualityParts.push(
+        `Drivers derived from reported history: ${derivedDrivers.map(([key]) => key.replaceAll("_", " ")).join(", ")}; remaining drivers are documented engine defaults or user inputs.`,
+      );
+    }
   }
   const modelQuality = qualityParts.join(" ");
 
@@ -545,13 +669,17 @@ export function buildDeterministicNarrative(ctx: NarrativeContext): Narrative {
       isNum(summary.revenue_cagr) && `revenue tracking at or above ${pctStr(summary.revenue_cagr)}`,
       isNum(fcfConversion) && `cash conversion holding near ${pctStr(fcfConversion)} of EBITDA`,
       isNum(latestHistory.roic) && `ROIC sustained above ${pctStr(latestHistory.roic)}`,
+      isNum(latestHistory.gross_margin) && latestHistory.gross_margin > 0.5 && "healthy gross margins",
+      isNum(actuals.net_debt) && actuals.net_debt < 0 && "a net-cash balance sheet",
     ]
       .filter(Boolean)
       .join(", ");
     const weaken = [
       isNum(pvTvShare) && pvTvShare > 0.6 && "rising terminal-value dependence",
       missingSector.length && "continued absence of sector-specific disclosure",
-      ctx.isSynthetic && "reliance on synthetic demonstration data",
+      ctx.isSynthetic && "reliance on synthetic sample data",
+      isNum(latestHistory.operating_margin) && latestHistory.operating_margin < 0 && "persistent operating losses",
+      isNum(summary.revenue_cagr) && summary.revenue_cagr < 0.05 && "sub-par revenue growth",
     ]
       .filter(Boolean)
       .join(", ");
@@ -615,7 +743,7 @@ export type ProviderConfig = {
 export async function tryProviderNarrative(
   config: ProviderConfig | null | undefined,
   promptPayload: Record<string, unknown>,
-  timeoutMs = 8000,
+  timeoutMs = 25000,
 ): Promise<{ narrative: Narrative; issues: string[] } | null> {
   if (!config || !config.api_key) return null;
   const baseUrl = String(config.base_url || "").replace(/\/$/, "");
@@ -636,9 +764,14 @@ export async function tryProviderNarrative(
           {
             role: "system",
             content:
-              "You are an equity research writer. Return ONLY JSON matching the provided schema. " +
-              "Never invent financial figures: only use numbers present in the supplied payload. " +
-              "If a field is unknown, say it is unavailable.",
+              "You are an experienced equity research writer. Return ONLY JSON matching the provided schema. " +
+              "Write a detailed, institutional-quality research note: every prose section should be " +
+              "several sentences long and grounded in the supplied payload. Use specific figures from " +
+              "the payload (revenue, margins, CAGR, WACC, DCF value, net debt, multiples) wherever they " +
+              "are available; never invent financial figures. Explain what the numbers mean for the " +
+              "investment case, not just what they are. If a field is unknown, state it is unavailable " +
+              "rather than guessing. Ground risks, catalysts and the thesis in the reported data and " +
+              "model outputs provided.",
           },
           { role: "user", content: JSON.stringify(promptPayload) },
         ],

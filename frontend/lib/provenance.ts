@@ -6,7 +6,7 @@ import { isNum } from "./format";
 // INR figures are never silently mixed with USD figures.
 // ---------------------------------------------------------------------------
 
-export type Market = "US" | "IN" | "UK" | "JP" | "DE" | "DEMO";
+export type Market = "US" | "IN" | "UK" | "JP" | "DE" | "SAMPLE";
 
 export type ListingProfile = {
   ticker: string;
@@ -44,15 +44,15 @@ export function parseListing(tickerInput: unknown): ListingProfile {
       isDemo: false,
     };
   }
-  if (raw === "DEMO" || raw.startsWith("DEMO")) {
+  if (raw === "SAMPLE" || raw.startsWith("SAMPLE")) {
     return {
       ticker: raw,
       baseTicker: raw,
       suffix: "",
-      exchange: "DEMO",
+      exchange: "SAMPLE",
       currency: "USD",
-      market: "DEMO",
-      venueLabel: "Local demonstration fixture",
+      market: "SAMPLE",
+      venueLabel: "Local sample fixture",
       isDemo: true,
     };
   }
@@ -231,7 +231,7 @@ export function validateIdentity(ctx: IdentityContext): ValidationIssue[] {
     issues.push({
       severity: "warn",
       code: "data.synthetic",
-      message: "Figures come from the deterministic local fixture (synthetic demonstration data).",
+      message: "Figures come from the deterministic local fixture (synthetic sample data).",
     });
   }
 

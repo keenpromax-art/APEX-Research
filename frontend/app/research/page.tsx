@@ -48,7 +48,7 @@ function ResearchStudio() {
   const searchParams = useSearchParams();
   const initialTicker = (searchParams.get("ticker") || "").toUpperCase();
 
-  const [ticker, setTicker] = useState(initialTicker || "DEMO");
+  const [ticker, setTicker] = useState(initialTicker || "SAMPLE");
   const [title, setTitle] = useState("");
   const [reportType, setReportType] = useState<"quick" | "full">("full");
   const [years, setYears] = useState("5");

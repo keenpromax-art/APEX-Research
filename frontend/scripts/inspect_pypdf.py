@@ -8,7 +8,7 @@ for f in sorted(os.listdir(d)):
     print(f"=== {f} ({len(reader.pages)} pages) ===")
     for needle in ["Cover", "Investment Summary", "Company Overview", "Financials", "Forecast",
                    "Valuation", "Risks", "Model Quality", "Sources", "Conclusion",
-                   "DEMO", "NOT FOR INVESTMENT USE"]:
+                   "SYNTHETIC DATA", "NOT FOR INVESTMENT USE"]:
         print(f"  {'OK ' if needle in text else 'MISS'} {needle}")
     # currency sanity: INR file should mention INR, not a USD$ symbol mixing
     if "inr" in f.lower():

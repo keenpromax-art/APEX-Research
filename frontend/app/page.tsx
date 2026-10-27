@@ -106,10 +106,10 @@ export default function Home() {
               Open workspace
             </button>
             <Link
-              href="/company/DEMO"
+              href="/company/SAMPLE"
               className="border border-border rounded-md px-4 py-2.5 text-sm text-center hover:bg-panel whitespace-nowrap"
             >
-              Try demo
+                Try sample
             </Link>
           </form>
           <div className="mt-3 text-[11px] text-muted">

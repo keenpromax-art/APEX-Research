@@ -109,7 +109,7 @@ export function Shell({ children }: { children: ReactNode }) {
               ref={searchRef}
               value={q}
               onChange={(event) => setQ(event.target.value)}
-              placeholder="Search ticker (AAPL, MSFT, RELIANCE.NS, DEMO)"
+              placeholder="Search ticker (AAPL, MSFT, RELIANCE.NS)"
               className="w-full bg-panel border border-border rounded-md pl-9 pr-16 py-1.5 text-sm focus:border-accent outline-none"
               aria-label="Ticker search"
             />
@@ -118,11 +118,11 @@ export function Shell({ children }: { children: ReactNode }) {
             </kbd>
           </form>
           <Link
-            href="/company/DEMO"
+            href="/company/SAMPLE"
             className="hidden lg:inline-block text-xs text-muted hover:text-accent whitespace-nowrap"
-            title="Open the synthetic demo company"
+            title="Open the sample company"
           >
-            Try demo
+            Try sample
           </Link>
         </header>
         <main className="flex-1 overflow-auto">{children}</main>

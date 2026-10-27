@@ -371,7 +371,7 @@ export default function ModellingPage() {
             <Card>
               <CardHeader title="Seed from a company" subtitle="Pull year-1 EBITDA from the forecast engine" />
               <div className="p-4 space-y-2">
-                <Field label="Ticker" type="text" value={importTicker} placeholder="DEMO" onChange={setImportTicker} />
+                <Field label="Ticker" type="text" value={importTicker} placeholder="SAMPLE" onChange={setImportTicker} />
                 <button
                   onClick={importFromCompany}
                   disabled={importing || !importTicker.trim()}

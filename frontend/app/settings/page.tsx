@@ -185,7 +185,7 @@ export default function SettingsPage() {
             <div className="flex flex-wrap gap-3 pt-1">
               <Link href="/ai" className="text-accent">AI providers</Link>
               <Link href="/library" className="text-accent">Library</Link>
-              <Link href="/company/DEMO" className="text-accent">Demo workspace</Link>
+              <Link href="/company/SAMPLE" className="text-accent">Sample workspace</Link>
             </div>
           </div>
         </Card>

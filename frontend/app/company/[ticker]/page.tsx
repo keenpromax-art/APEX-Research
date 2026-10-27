@@ -597,7 +597,7 @@ export default function CompanyPage() {
       <div className="p-6 md:p-8 max-w-3xl mx-auto space-y-3">
         <ErrorBanner message={error} onRetry={() => loadData(true)} />
         <div className="text-xs text-muted">
-          Try <Link href="/company/DEMO" className="text-accent">the demo company</Link> to explore a fully populated fixture.
+          Try <Link href="/company/SAMPLE" className="text-accent">the sample company</Link> to explore a fully populated fixture.
         </div>
       </div>
     );
@@ -612,7 +612,7 @@ export default function CompanyPage() {
         <div className="min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <h1 className="text-xl font-semibold truncate">{company?.name || info.longName || ticker}</h1>
-            {isDemo ? <Badge tone="warn">Demo data</Badge> : null}
+            {isDemo ? <Badge tone="warn">Synthetic data</Badge> : null}
             {stale ? <Badge tone="warn">Stale cache</Badge> : null}
           </div>
           <div className="text-xs text-muted mt-1">
@@ -652,7 +652,7 @@ export default function CompanyPage() {
       {savedMsg ? <InfoBanner>{savedMsg}</InfoBanner> : null}
       {isDemo ? (
         <InfoBanner>
-          Synthetic demo fixture. Figures are fabricated for product evaluation and are not a real company.
+          Synthetic sample fixture. Figures are fabricated for product evaluation and are not a real company.
         </InfoBanner>
       ) : null}
       {stale ? (
