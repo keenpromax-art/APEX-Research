@@ -883,13 +883,17 @@ function reverseDcfCompute(payload: any) {
     const result = dcfCompute(payload, wacc);
     return "error" in result ? NaN : (result as any).value_per_share;
   };
+  let sawValidFlow = false;
   for (let iteration = 0; iteration < 90; iteration += 1) {
     const midpoint = (low + high) / 2;
     const value = valueAt(midpoint);
     if (!Number.isFinite(value)) break;
+    sawValidFlow = true;
     if (value > price) low = midpoint;
     else high = midpoint;
   }
+
+  if (!sawValidFlow) return { error: "Cannot imply a WACC without valid forecast cash flows." };
 
   return {
     implied_wacc: (low + high) / 2,
@@ -1229,7 +1233,12 @@ function reportArtifacts(inputs: any, fixtureInput?: any, origin = "synthetic") 
     };
   }
 
-  const sensitivity = sensitivityCompute({
+  const priceToBook = isFiniteNumber(actuals?.book_value_per_share) && isFiniteNumber(price) && price > 0
+    ? price / actuals.book_value_per_share
+    : null;
+  const actualsWithPb = actuals ? { ...actuals, price_to_book: priceToBook } : null;
+
+  const sensitivity = flows.length > 0 ? (sensitivityCompute({
     fcf: flows,
     shares,
     net_debt: netDebt,
@@ -1237,13 +1246,27 @@ function reportArtifacts(inputs: any, fixtureInput?: any, origin = "synthetic") 
     wacc_values: [-0.02, -0.01, 0, 0.01, 0.02].map((step) => Number((inputs.wacc + step).toFixed(4))),
     terminal_values: inputs.terminal_mode === "multiple" ? [8, 9, 10, 11, 12] : [0.015, 0.02, 0.025, 0.03, 0.035],
     mode: inputs.terminal_mode,
-  }) as any;
+  }) as any) : { error: "No forecast cash flows available; sensitivity grid is suppressed." };
 
-  const reverseDcf = price > 0 ? (reverseDcfCompute({ ...dcfBody, current_price: price }) as any) : { error: "No market price available for reverse DCF." };
+  const reverseDcf = price > 0 && flows.length > 0 ? (reverseDcfCompute({ ...dcfBody, current_price: price }) as any) : { error: "No forecast cash flows or market price available; implied WACC is suppressed." };
 
   // Provenance + integrity gates
   const issues = validateIdentity({ ticker, company, normalized, priceSummary: normalized.price_summary });
   const gates = integrityGates(issues);
+
+  // Synthetic (sample) data is never rated: publishing BUY/HOLD/SELL on fabricated
+  // figures is exactly the integrity failure the gates exist to prevent.
+  if (isSynthetic) {
+    gates.ratingAllowed = false;
+    gates.targetAllowed = false;
+    gates.blockers.push({
+      severity: "error",
+      code: "data.synthetic",
+      blocking: true,
+      message: "Rating and target are withheld: figures come from the local sample fixture, not company-reported data.",
+    });
+    gates.warnings = gates.warnings.filter((issue) => issue.code !== "data.synthetic");
+  }
   const provenance = buildProvenanceRows({
     ticker,
     listing,
@@ -1260,7 +1283,7 @@ function reportArtifacts(inputs: any, fixtureInput?: any, origin = "synthetic") 
   const sector = sectorProfile(company.sector, company.industry);
 
   // Rating resolution — integrity gates block rating/target on failure.
-  const modelTarget = isFiniteNumber(dcf.value_per_share) ? dcf.value_per_share : null;
+  const modelTarget = !dcf.error && isFiniteNumber(dcf.value_per_share) ? dcf.value_per_share : null;
   const manualCode = RATING_CODES.includes(inputs.manual_rating) ? inputs.manual_rating : "";
   let target = inputs.manual_target_price ?? modelTarget;
   let upside = target && price > 0 ? target / price - 1 : null;
@@ -1362,7 +1385,32 @@ function reportArtifacts(inputs: any, fixtureInput?: any, origin = "synthetic") 
     currency: company.currency || listing.currency,
   };
 
-  return { company, normalized, listing, forecast, dcf, sensitivity, reverseDcf, issues, gates, provenance, sector, narrative, payload, actuals, metricsHistory, rating, target, upside, ratingBlocked, ratingBlockReason, price, origin, baseGaps: forecast.base_gaps || [] };
+  return {
+    company,
+    normalized,
+    listing,
+    forecast,
+    dcf,
+    sensitivity,
+    reverseDcf,
+    issues,
+    gates,
+    provenance,
+    sector,
+    narrative,
+    payload,
+    actuals,
+    actualsWithPb,
+    metricsHistory,
+    rating,
+    target,
+    upside,
+    ratingBlocked,
+    ratingBlockReason,
+    price,
+    origin,
+    baseGaps: forecast.base_gaps || [],
+  };
 }
 
 function autoRating(upside: number | null): string {
@@ -1518,7 +1566,7 @@ async function buildReportRecordAsync(inputs: any, previousVersionId: number | n
           forecast_assumptions: artifacts.forecast.assumptions,
           forecast_assumption_sources: artifacts.forecast.assumption_sources,
           dcf: { wacc: artifacts.dcf.wacc, enterprise_value: artifacts.dcf.enterprise_value, value_per_share: artifacts.dcf.value_per_share },
-          actuals: artifacts.actuals,
+          actuals: artifacts.actualsWithPb,
           history: artifacts.payload.history,
           sector: artifacts.payload.sector_profile,
           sensitivity: artifacts.payload.sensitivity,

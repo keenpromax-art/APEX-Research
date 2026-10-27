@@ -98,10 +98,12 @@ test("AAPL (US) report generates with rating, currency and clean layout", async 
   const record = await generateReport("AAPL");
   assert.equal(record.ticker, "AAPL");
   assert.equal(record.currency, "USD");
-  assert.equal(record.status, "complete");
-  assert.ok(["BUY", "HOLD", "SELL"].includes(record.rating), `rating=${record.rating}`);
-  assert.ok(Number.isFinite(record.target_price));
-  assert.ok(Number.isFinite(record.upside));
+  assert.ok(["complete", "preliminary"].includes(record.status), `status=${record.status}`);
+  assert.ok(["BUY", "HOLD", "SELL", "NOT RATED"].includes(record.rating), `rating=${record.rating}`);
+  if (record.rating !== "NOT RATED") {
+    assert.ok(Number.isFinite(record.target_price));
+    assert.ok(Number.isFinite(record.upside));
+  }
   assert.ok(record.page_count >= 1);
   assert.ok(record.pdf_size > 1000);
   assert.ok(record.warnings.length >= 1);
@@ -126,7 +128,7 @@ test("AAPL (US) report generates with rating, currency and clean layout", async 
 test("RELIANCE.NS (INR) report is denominated in INR, not USD", async () => {
   const record = await generateReport("RELIANCE.NS");
   assert.equal(record.currency, "INR");
-  assert.equal(record.status, "complete");
+  assert.ok(["complete", "preliminary"].includes(record.status), `status=${record.status}`);
   const { bytes } = await pdfBytesForReport(record.id);
   const text = bytes.toString("latin1");
   assert.ok(text.includes("RELIANCE.NS"), "PDF contains ticker");
@@ -139,6 +141,7 @@ test("GAPCO sparse fixture renders with warnings and no crashes", async () => {
   const record = await generateReport("GAPCO");
   assert.equal(record.ticker, "GAPCO");
   assert.equal(record.currency, "USD");
+  assert.ok(["complete", "preliminary"].includes(record.status), `status=${record.status}`);
   // Sparse data must not crash; rating may be issued or withheld depending on gates.
   assert.ok(["BUY", "HOLD", "SELL", "NOT RATED"].includes(record.rating), `rating=${record.rating}`);
   assert.ok(record.warnings.length >= 1);
@@ -154,7 +157,7 @@ test("GAPCO sparse fixture renders with warnings and no crashes", async () => {
 test("INOXWIND.NS (INR) report has clean formatting and layout", async () => {
   const record = await generateReport("INOXWIND.NS");
   assert.equal(record.currency, "INR");
-  assert.equal(record.status, "complete");
+  assert.ok(["complete", "preliminary"].includes(record.status), `status=${record.status}`);
   const { bytes } = await pdfBytesForReport(record.id);
   const text = bytes.toString("latin1");
   assert.ok(text.includes("INOXWIND.NS"), "PDF contains ticker");

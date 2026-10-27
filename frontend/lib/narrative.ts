@@ -319,6 +319,9 @@ export function buildDeterministicNarrative(ctx: NarrativeContext): Narrative {
       `The latest balance sheet carries net debt of ${fmtBn(actuals.net_debt, c)} with a current ratio of ${num(actuals.current_ratio, 2)}.`,
     );
   }
+  if (isNum(actuals.price_to_book)) {
+    financialParts.push(`Price-to-book stands at ${num(actuals.price_to_book, 2)}x on the latest reported book value per share — a reference multiple often used for financial-sector names.`);
+  }
   if (isNum(latestHistory.fcf)) {
     financialParts.push(`Free cash flow in the latest period was ${fmtBn(latestHistory.fcf, c)}; operating cash flow was ${isNum(latestHistory.ocf) ? fmtBn(latestHistory.ocf, c) : "not available"}.`);
   } else {
