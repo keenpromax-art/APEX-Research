@@ -193,9 +193,6 @@ function sectionC_company(doc: PdfDocument, payload: ExportPayload) {
   }
 
   const report = payload.report || {};
-  if (report.business_overview) {
-    doc.text(String(report.business_overview), { size: 9.2, gray: 0.2, gap: 4, leading: 1.4 });
-  }
   if (report.industry_context) {
     doc.space(2).text("Industry context", { size: 9.5, bold: true, gray: 0.3, gap: 3 });
     doc.text(String(report.industry_context), { size: 9.2, gray: 0.2, gap: 4, leading: 1.4 });

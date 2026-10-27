@@ -65,6 +65,7 @@ function normalizeModel(row: any) {
     provider: row?.provider || "openrouter",
     model_id: row?.model_id || name,
     base_url: row?.base_url ?? null,
+    api_key: row?.api_key || null,
     enabled: row?.enabled !== false,
     has_key: Boolean(row?.has_key || row?.api_key),
     source: row?.source || "client",
