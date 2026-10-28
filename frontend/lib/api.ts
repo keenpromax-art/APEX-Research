@@ -1803,7 +1803,9 @@ async function reportArtifacts(inputs: any, fixtureInput?: any, origin = "unavai
     assumptionSources: forecast.assumption_sources,
     retrievedAt: normalized.retrieved_at,
     isSynthetic,
-    source: isSynthetic ? undefined : `${normalized.provider || "Configured market-data provider"} (retrieved ${normalized.retrieved_at})`,
+    source: isSynthetic
+      ? undefined
+      : `${normalized.provider || "Configured market-data provider"}${normalized.retrieved_at ? ` (retrieved ${normalized.retrieved_at})` : ""}`,
   });
   const sector = sectorProfile(company.sector, company.industry);
   const sector_model = buildSectorModel(company, normalized, sector);

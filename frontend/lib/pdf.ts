@@ -69,9 +69,6 @@ export type PdfTableOptions<Row> = {
   fontSize?: number;
   headerFontSize?: number;
   rowHeight?: number;
-  zebra?: boolean;
-  headerFill?: PdfColor;
-  zebraFill?: PdfColor;
   headerRule?: boolean;
   /** Minimum content height to keep with the heading before a break. */
   minHeadSpace?: number;
@@ -332,6 +329,27 @@ export class PdfDocument {
     return this;
   }
 
+  /** Horizontal rule `yTop` points below the cursor; does not move the cursor. */
+  hline(yTop: number, gray = 0.8, thickness = 0.5, color?: PdfColor) {
+    const y = this.cursorY - yTop;
+    const stroke = color
+      ? `${color.r.toFixed(3)} ${color.g.toFixed(3)} ${color.b.toFixed(3)} RG`
+      : `${gray} G`;
+    this.pages[this.pages.length - 1].push(
+      `${stroke} ${thickness} w ${MARGIN_LEFT} ${y.toFixed(2)} m ${(MARGIN_LEFT + CONTENT_WIDTH).toFixed(2)} ${y.toFixed(2)} l S`,
+    );
+    return this;
+  }
+
+  /** Vertical hairline at `x` from the content edge, running `length` down from `yTop`. */
+  vline(x: number, yTop: number, length: number, gray = 0.8, thickness = 0.5) {
+    const yTopAbs = this.cursorY - yTop;
+    this.pages[this.pages.length - 1].push(
+      `${gray} G ${thickness} w ${(MARGIN_LEFT + x).toFixed(2)} ${yTopAbs.toFixed(2)} m ${(MARGIN_LEFT + x).toFixed(2)} ${(yTopAbs - length).toFixed(2)} l S`,
+    );
+    return this;
+  }
+
   /** Short accent rule (section marker). */
   accentRule(color: PdfColor, width = 26, height = 2.5, gap = 5) {
     this.ensureSpace(height + gap);
@@ -369,7 +387,8 @@ export class PdfDocument {
 
   /**
    * Typeset a data table. Repeats the header row when the table splits across
-   * pages, applies zebra striping, and keeps a trailing source note attached.
+   * pages. Delimited by rules only (red accent bar on top, dark rule under the
+   * header, hairline row rules) — no fills, per data-ink discipline.
    */
   dataTable<Row>(
     columns: PdfColumn<Row>[],
@@ -380,15 +399,11 @@ export class PdfDocument {
     const headerFontSize = options.headerFontSize ?? 7;
     const rowHeight = options.rowHeight ?? Math.max(16, fontSize * 1.7);
     const headerHeight = Math.max(18, headerFontSize * 2.2);
-    const zebra = options.zebra ?? false;
-    const headerFill = options.headerFill ?? { r: 0.955, g: 0.955, b: 0.955 };
-    const zebraFill = options.zebraFill ?? { r: 0.972, g: 0.972, b: 0.972 };
 
     const drawHeader = () => {
       this.ensureSpace(headerHeight + rowHeight);
       // Red accent bar along the top edge of the table.
       this.rect(0, -2.5, CONTENT_WIDTH, 2.5, PDF_ACCENT);
-      this.rect(0, 0, CONTENT_WIDTH, headerHeight, headerFill);
       columns.forEach((column) => {
         const label = ascii(column.label.toUpperCase());
         const textWidth = measureText(label, headerFontSize, true);
@@ -396,7 +411,7 @@ export class PdfDocument {
           column.align === "right" ? MARGIN_LEFT + column.x - textWidth : MARGIN_LEFT + Math.max(0, column.x);
         this.pages[this.pages.length - 1].push(
           `BT /F2 ${headerFontSize} Tf 0.12 0.12 0.14 rg 1 0 0 1 ${x.toFixed(2)} ` +
-            `${(this.cursorY - headerFontSize * 0.9).toFixed(2)} Tm (${escapePdfText(label)}) Tj ET`,
+            `${(this.cursorY - headerFontSize * 1.5).toFixed(2)} Tm (${escapePdfText(label)}) Tj ET`,
         );
       });
       this.cursorY -= headerHeight;
@@ -413,7 +428,6 @@ export class PdfDocument {
         this.newPage();
         drawHeader();
       }
-      if (zebra && index % 2 === 1) this.rect(0, 0, CONTENT_WIDTH, rowHeight, zebraFill);
       const baseline = this.cursorY - fontSize * 0.85;
       columns.forEach((column) => {
         const cellText = ascii(column.format ? String(column.format(row, index) ?? "") : String((row as any)?.[column.key] ?? ""));
@@ -453,24 +467,28 @@ export class PdfDocument {
     return this;
   }
 
-  /** Callout panel with a light fill and body text. */
-  callout(title: string, body: string, options: { fill?: PdfColor; accent?: PdfColor; titleColor?: PdfColor } = {}) {
-    const fill = options.fill ?? { r: 0.96, g: 0.96, b: 0.96 };
+  /**
+   * Line-delimited note: semantic rule on top, coloured title, body, hairline
+   * closing rule. Lines instead of boxes — no panel fill, no left-border card.
+   */
+  callout(title: string, body: string, options: { accent?: PdfColor; titleColor?: PdfColor } = {}) {
     const accent = options.accent ?? PDF_ACCENT;
+    const titleColor = options.titleColor ?? accent;
     const bodySize = 8.8;
-    const bodyLines = wrapToWidth(ascii(body), CONTENT_WIDTH - 24, bodySize, false);
-    const height = 10 + (title ? 14 : 0) + bodyLines.length * bodySize * 1.4 + 8;
+    const bodyLines = wrapToWidth(ascii(body), CONTENT_WIDTH, bodySize, false);
+    const titleBlock = title ? 13 : 0;
+    const height = 7 + titleBlock + bodyLines.length * bodySize * 1.4 + 4;
     this.ensureSpace(height + 6);
-    this.rect(0, 0, CONTENT_WIDTH, height, fill);
-    this.rect(0, 0, 3, height, accent);
-    let used = 8;
+    this.hline(0, 0, 0.9, accent);
+    let used = 7;
     if (title) {
-      this.textAt(12, used, title, { size: 8, bold: true, color: accent });
-      used += 14;
+      this.textAt(0, used, title, { size: 8, bold: true, color: titleColor });
+      used += titleBlock;
     }
     bodyLines.forEach((line, index) => {
-      this.textAt(12, used + index * bodySize * 1.4, line, { size: bodySize, gray: 0.2 });
+      this.textAt(0, used + index * bodySize * 1.4, line, { size: bodySize, gray: 0.2 });
     });
+    this.hline(height, 0.72, 0.4);
     this.cursorY -= height + 6;
     return this;
   }
@@ -497,7 +515,8 @@ export class PdfDocument {
     this.ensureSpace(height + 18);
     const page = this.pages[this.pages.length - 1];
     const originY = this.cursorY; // top of the chart box
-    const yAbs = (value: number) => originY - plotTop - ((value - lo) / (hi - lo || 1)) * plotHeight;
+    // lo sits at the bottom of the plot, hi at the top (values grow upward).
+    const yAbs = (value: number) => originY - plotTop - plotHeight + ((value - lo) / (hi - lo || 1)) * plotHeight;
 
     // Gridlines + y-axis labels.
     for (let value = lo; value <= hi + step / 2; value += step) {
@@ -569,7 +588,8 @@ export class PdfDocument {
     const page = this.pages[this.pages.length - 1];
     const originY = this.cursorY;
     const xAt = (index: number) => MARGIN_LEFT + plotLeft + (labels.length === 1 ? plotWidth / 2 : (index / (labels.length - 1)) * plotWidth);
-    const yAbs = (value: number) => originY - plotTop - ((value - lo) / (hi - lo || 1)) * plotHeight;
+    // lo sits at the bottom of the plot, hi at the top (values grow upward).
+    const yAbs = (value: number) => originY - plotTop - plotHeight + ((value - lo) / (hi - lo || 1)) * plotHeight;
 
     for (let value = lo; value <= hi + step / 2; value += step) {
       const y = yAbs(value);
