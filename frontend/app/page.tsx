@@ -97,7 +97,7 @@ export default function Home() {
   return (
     <div className="relative z-10 mx-auto max-w-[1680px] px-5 md:px-8 lg:px-10 py-6 md:py-8 space-y-10">
       {/* Hero */}
-      <section>
+      <section className="hero-enter">
         <div className="flex flex-wrap items-center gap-2 mb-5">
           <Badge tone="accent">Equity research terminal</Badge>
           <Badge tone={health === "ok" ? "pos" : health === "down" ? "neg" : "muted"}>
@@ -136,7 +136,7 @@ export default function Home() {
       </section>
 
       {/* Overview strip */}
-      <section className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <section className="grid grid-cols-2 md:grid-cols-4 gap-3 stagger">
         {[
           { label: "Saved projects", value: loading ? "—" : projects.length, hint: "workspaces" },
           { label: "AI models enabled", value: loading ? "—" : enabledModels, hint: "providers" },
@@ -243,12 +243,12 @@ export default function Home() {
       {/* Workspaces */}
       <section>
         <h2 className="text-xl font-semibold tracking-tight mb-4">Workspaces</h2>
-        <nav aria-label="Application sections" className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3">
+        <nav aria-label="Application sections" className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3 stagger">
           {ENTRY_POINTS.map(({ href, label, body, icon: Icon, accent }) => (
             <Link
               key={href}
               href={href}
-              className="group relative rounded-xl border border-border bg-surface p-5 hover:border-accent/50 transition-all card-interactive flex flex-col gap-3 min-w-0 overflow-hidden"
+              className="group relative rounded-xl border border-border bg-surface p-5 hover:border-accent/50 card-interactive flex flex-col gap-3 min-w-0 overflow-hidden"
             >
               <div className={cn("absolute -top-8 -right-8 h-24 w-24 rounded-full bg-gradient-to-br opacity-60 blur-2xl", accent)} aria-hidden />
               <div className="relative grid place-items-center h-9 w-9 rounded-lg bg-panel border border-border text-accent group-hover:border-accent/40 transition-colors">
@@ -268,7 +268,7 @@ export default function Home() {
       <section>
         <h2 className="text-xl font-semibold tracking-tight mb-4">The workflow</h2>
         <div className="rounded-2xl border border-border bg-surface overflow-hidden shadow-xs">
-          <ol className="grid grid-cols-1 md:grid-cols-5 divide-y md:divide-y-0 md:divide-x divide-border">
+          <ol className="grid grid-cols-1 md:grid-cols-5 divide-y md:divide-y-0 md:divide-x divide-border stagger">
             {FLOW.map(({ title, body, icon: Icon }, index) => (
               <li key={title} className="p-5 flex flex-col gap-3 relative">
                 <div className="flex items-center gap-2.5">
