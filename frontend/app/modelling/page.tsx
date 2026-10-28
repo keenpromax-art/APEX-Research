@@ -3,9 +3,10 @@
 import { useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { BookOpen, Calculator, Save } from "lucide-react";
+import { BookOpen, Calculator, Save, Sparkles } from "lucide-react";
 import { api, getErrorMessage } from "@/lib/api";
 import { fmt, isNum, num, pct, tone } from "@/lib/format";
+import { suggestModelInputs, type SuggestTab } from "@/lib/suggest";
 import { Badge, Button, Card, CardHeader, EmptyState, ErrorBanner, Field, InfoBanner, Select, Spinner, Stat, TabPanel, TableWrap, Tabs, WarnBanner } from "@/components/ui";
 import { cn } from "@/lib/cn";
 
@@ -161,6 +162,14 @@ export default function ModellingPage() {
   const [importTicker, setImportTicker] = useState("");
   const [importing, setImporting] = useState(false);
 
+  const [models, setModels] = useState<any[]>([]);
+  const [aiModel, setAiModel] = useState("");
+  const [suggesting, setSuggesting] = useState<SuggestTab | null>(null);
+
+  useEffect(() => {
+    api<any[]>("/api/ai/models").then(setModels).catch(() => setModels([]));
+  }, []);
+
   useEffect(() => {
     if (!requestedModel) return;
     let active = true;
@@ -239,6 +248,68 @@ export default function ModellingPage() {
     }
   }
 
+  const enabledModels = models.filter((model) => model.enabled);
+  const usableModels = enabledModels.filter((model) => model.api_key);
+  const selectedModel = aiModel ? models.find((model) => model.name === aiModel) : usableModels[0];
+  const hasAI = Boolean(selectedModel?.api_key);
+
+  async function suggestTab(target: SuggestTab) {
+    if (!selectedModel?.api_key) return;
+    setSuggesting(target);
+    setError(null);
+    setNotice(null);
+    try {
+      const ticker = importTicker.trim().toUpperCase();
+      let company: Record<string, unknown> | null = null;
+      if (ticker) {
+        const [forecast, market] = await Promise.all([
+          api<any>("/api/forecast/" + encodeURIComponent(ticker), {
+            method: "POST",
+            body: JSON.stringify({ years: 1, assumptions: {} }),
+          }).catch(() => null),
+          api<any>("/api/market/" + encodeURIComponent(ticker)).catch(() => null),
+        ]);
+        company = {
+          ticker,
+          price: market?.price ?? market?.current_price ?? null,
+          market_cap: market?.market_cap ?? null,
+          beta: market?.beta ?? null,
+          currency: market?.currency ?? null,
+          revenue: forecast?.periods?.[0]?.revenue ?? null,
+          ebitda: forecast?.periods?.[0]?.ebitda ?? null,
+          ebit: forecast?.periods?.[0]?.ebit ?? null,
+          revenue_growth: forecast?.assumptions?.revenue_growth ?? null,
+          tax_rate: forecast?.assumptions?.tax_rate ?? null,
+          interest_rate: forecast?.assumptions?.interest_rate ?? null,
+        };
+      }
+      const current = target === "LBO" ? lboIn : target === "Options" ? optionIn : target === "Bond" ? bondIn : waccIn;
+      const result = await suggestModelInputs(
+        {
+          name: selectedModel.name,
+          base_url: selectedModel.base_url,
+          api_key: selectedModel.api_key,
+          model_id: selectedModel.model_id,
+        },
+        target,
+        { ticker: ticker || undefined, company, current },
+      );
+      if (!result.ok) throw new Error(result.error);
+      const suggested = stringify(result.values, current);
+      if (target === "LBO") setLboIn(suggested);
+      else if (target === "Options") setOptionIn(suggested);
+      else if (target === "Bond") setBondIn(suggested);
+      else setWaccIn(suggested);
+      setNotice(
+        `AI suggested ${target} inputs${ticker ? ` for ${ticker}` : ""}${result.reasoning ? ` — ${result.reasoning}` : ""}. Review them, then run the model.`,
+      );
+    } catch (suggestError) {
+      setError(getErrorMessage(suggestError));
+    } finally {
+      setSuggesting(null);
+    }
+  }
+
   const currentResult =
     tab === "LBO" ? lboResult : tab === "Options" ? optionResult : tab === "Bond" ? bondResult : waccResult;
 
@@ -274,6 +345,30 @@ export default function ModellingPage() {
   const kdAfterTax = numberFrom(waccIn, "cost_of_debt", 0.06) * (1 - numberFrom(waccIn, "tax_rate", 0.25));
   const weightTotal = numberFrom(waccIn, "equity_weight", 0.7) + numberFrom(waccIn, "debt_weight", 0.3);
 
+  function aiFillButton(target: SuggestTab) {
+    return (
+      <Button
+        variant="secondary"
+        size="sm"
+        onClick={() => void suggestTab(target)}
+        disabled={suggesting !== null || running !== null || !hasAI}
+        title={
+          hasAI
+            ? "Ask the AI to suggest well-grounded inputs for this model"
+            : "Configure an AI model with an API key in the AI Center first"
+        }
+      >
+        {suggesting === target ? (
+          <Spinner label="Thinking" />
+        ) : (
+          <>
+            <Sparkles size={13} /> AI fill
+          </>
+        )}
+      </Button>
+    );
+  }
+
   return (
     <div className="px-5 md:px-8 lg:px-10 py-6 md:py-8 max-w-[1680px] mx-auto space-y-6">
       <div className="flex flex-wrap items-start gap-3">
@@ -286,6 +381,20 @@ export default function ModellingPage() {
           </p>
         </div>
         <div className="ml-auto flex flex-wrap items-center gap-2">
+          <select
+            value={aiModel}
+            onChange={(event) => setAiModel(event.target.value)}
+            aria-label="AI model"
+            disabled={enabledModels.length === 0}
+            className="bg-panel border border-border px-2 py-1.5 text-xs w-44 focus:border-accent outline-none disabled:opacity-40"
+          >
+            <option value="">{usableModels.length ? "Default AI model" : "No AI model"}</option>
+            {enabledModels.map((model) => (
+              <option key={model.name} value={model.name}>
+                {model.name}{model.api_key ? "" : " (no key)"}
+              </option>
+            ))}
+          </select>
           <input
             value={modelLabel}
             onChange={(event) => setModelLabel(event.target.value)}
@@ -318,6 +427,7 @@ export default function ModellingPage() {
                 action={
                   <div className="flex items-center gap-2">
                     <Badge tone="accent">Inputs</Badge>
+                    {aiFillButton("LBO")}
                     <Button size="sm" onClick={() => runTab("LBO")} disabled={running !== null}>
                       {running === "LBO" ? "Running..." : "Run LBO"}
                     </Button>
@@ -362,7 +472,8 @@ export default function ModellingPage() {
                   {importing ? <Spinner label="Importing" /> : "Use company EBITDA"}
                 </Button>
                 <p className="text-[11px] text-muted">
-                  Imports the first forecast year&apos;s EBITDA and growth. It does not value the company automatically.
+                  Imports the first forecast year&apos;s EBITDA and growth. This ticker is also used to ground the
+                  &quot;AI fill&quot; suggestion with real company data.
                 </p>
               </div>
             </Card>
@@ -452,6 +563,7 @@ export default function ModellingPage() {
                 action={
                   <div className="flex items-center gap-2">
                     <Badge tone="accent">Inputs</Badge>
+                    {aiFillButton("Options")}
                     <Button size="sm" onClick={() => runTab("Options")} disabled={running !== null}>
                       {running === "Options" ? "Pricing..." : "Price option"}
                     </Button>
@@ -535,6 +647,7 @@ export default function ModellingPage() {
                 action={
                   <div className="flex items-center gap-2">
                     <Badge tone="accent">Inputs</Badge>
+                    {aiFillButton("Bond")}
                     <Button size="sm" onClick={() => runTab("Bond")} disabled={running !== null}>
                       {running === "Bond" ? "Valuing..." : "Value bond"}
                     </Button>
@@ -609,6 +722,7 @@ export default function ModellingPage() {
                 action={
                   <div className="flex items-center gap-2">
                     <Badge tone="accent">Inputs</Badge>
+                    {aiFillButton("WACC")}
                     <Button size="sm" onClick={() => runTab("WACC")} disabled={running !== null}>
                       {running === "WACC" ? "Calculating..." : "Calculate WACC"}
                     </Button>
