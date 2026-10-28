@@ -1,6 +1,16 @@
 export type SheetValue = string | number | boolean | null | undefined;
 export type SheetRow = SheetValue[];
-export type Sheet = { name: string; rows: SheetRow[] };
+export type SheetConditionalFormat = { sqref: string; type: "dataBar" | "colorScale"; color?: string };
+export type Sheet = {
+  name: string;
+  rows: SheetRow[];
+  columnWidths?: number[];
+  freeze?: { row: number; col: number };
+  numericColumns?: number[];
+  numberFormats?: Record<number, "money" | "percent" | "eps" | "number">;
+  zebra?: boolean;
+  conditionalFormats?: SheetConditionalFormat[];
+};
 
 const CRC_TABLE = (() => {
   const table = new Uint32Array(256);
@@ -35,7 +45,7 @@ function xmlEscape(value: string): string {
     .replace(/'/g, "&apos;");
 }
 
-function columnName(index: number): string {
+export function columnName(index: number): string {
   let current = index;
   let name = "";
   do {
@@ -45,32 +55,178 @@ function columnName(index: number): string {
   return name;
 }
 
-function cellXml(reference: string, value: SheetValue): string {
+function stringify(value: SheetValue): string {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) return "";
+    return Number(value.toPrecision(12)).toLocaleString("en-US", { maximumFractionDigits: 6 });
+  }
+  return String(value);
+}
+
+function isPercentHeader(header: string): boolean {
+  const h = header.toLowerCase();
+  return /margin|growth|roe|roic|roa|ratio|pct|%|cagr/.test(h);
+}
+
+function isEpsHeader(header: string): boolean {
+  return /eps/.test(header.toLowerCase());
+}
+
+function autoSheetMeta(sheet: Sheet) {
+  const rows = sheet.rows || [];
+  const colCount = rows.reduce((max, row) => Math.max(max, row.length), 0);
+  const headerRow = rows.length ? rows[0] : [];
+  const numericColumns = sheet.numericColumns
+    ? sheet.numericColumns
+    : Array.from({ length: colCount }, (_, c) => c).filter((c) =>
+        rows.slice(1).some((row) => typeof row[c] === "number" && Number.isFinite(row[c] as number)),
+      );
+  const numberFormats: Record<number, "money" | "percent" | "eps" | "number"> = { ...(sheet.numberFormats || {}) };
+  numericColumns.forEach((c) => {
+    if (numberFormats[c]) return;
+    const header = String(headerRow[c] ?? "");
+    if (isPercentHeader(header)) numberFormats[c] = "percent";
+    else if (isEpsHeader(header)) numberFormats[c] = "eps";
+    else numberFormats[c] = "money";
+  });
+  const columnWidths = sheet.columnWidths
+    ? sheet.columnWidths
+    : Array.from({ length: colCount }, (_, c) => {
+        let max = 8;
+        rows.forEach((row) => {
+          const len = stringify(row[c]).length;
+          if (len > max) max = len;
+        });
+        const headerLen = stringify(headerRow[c]).length;
+        if (headerLen > max) max = headerLen;
+        return Math.min(42, Math.max(10, max + 2));
+      });
+  const freeze = sheet.freeze ? sheet.freeze : rows.length > 1 && colCount > 1 ? { row: 1, col: 1 } : undefined;
+  const zebra = sheet.zebra !== false;
+  return { numericColumns, numberFormats, columnWidths, freeze, zebra, colCount };
+}
+
+// Style index constants (must match styles.xml generation)
+const STYLE_NORMAL = 0;
+const STYLE_HEADER = 1;
+const STYLE_LABEL = 2;
+const STYLE_MONEY = 3;
+const STYLE_EPS = 4;
+const STYLE_PERCENT = 5;
+const STYLE_LABEL_ZEBRA = 6;
+const STYLE_MONEY_ZEBRA = 7;
+const STYLE_EPS_ZEBRA = 8;
+const STYLE_PERCENT_ZEBRA = 9;
+const STYLE_NORMAL_ZEBRA = 10;
+
+function numberFormatId(format: "money" | "percent" | "eps" | "number"): number {
+  switch (format) {
+    case "percent":
+      return 166;
+    case "eps":
+      return 165;
+    case "number":
+      return 0;
+    default:
+      return 164;
+  }
+}
+
+function styleIndexFor(meta: ReturnType<typeof autoSheetMeta>, rowIndex: number, colIndex: number, value: SheetValue): number {
+  const isHeader = rowIndex === 0;
+  const isZebra = meta.zebra && rowIndex > 0 && rowIndex % 2 === 0;
+  if (isHeader) return STYLE_HEADER;
+  const isFirstCol = colIndex === 0;
+  const isNumeric = meta.numericColumns.includes(colIndex);
+  if (isFirstCol && !isNumeric) {
+    return isZebra ? STYLE_LABEL_ZEBRA : STYLE_LABEL;
+  }
+  if (isNumeric) {
+    const fmt = meta.numberFormats[colIndex] || "money";
+    const base =
+      fmt === "percent" ? STYLE_PERCENT : fmt === "eps" ? STYLE_EPS : fmt === "number" ? STYLE_NORMAL : STYLE_MONEY;
+    if (isZebra) {
+      if (fmt === "percent") return STYLE_PERCENT_ZEBRA;
+      if (fmt === "eps") return STYLE_EPS_ZEBRA;
+      if (fmt === "number") return STYLE_NORMAL_ZEBRA;
+      return STYLE_MONEY_ZEBRA;
+    }
+    return base;
+  }
+  return isZebra ? STYLE_NORMAL_ZEBRA : STYLE_NORMAL;
+}
+
+function cellXml(reference: string, value: SheetValue, styleIndex: number): string {
   if (value === null || value === undefined || value === "") return "";
+  const styleAttr = styleIndex > 0 ? ` s="${styleIndex}"` : "";
   if (typeof value === "number") {
     if (!Number.isFinite(value)) return "";
     const clean = Number(value.toPrecision(12));
-    return `<c r="${reference}"><v>${clean}</v></c>`;
+    return `<c r="${reference}"${styleAttr}><v>${clean}</v></c>`;
   }
   if (typeof value === "boolean") {
-    return `<c r="${reference}" t="b"><v>${value ? 1 : 0}</v></c>`;
+    return `<c r="${reference}"${styleAttr} t="b"><v>${value ? 1 : 0}</v></c>`;
   }
-  return `<c r="${reference}" t="inlineStr"><is><t xml:space="preserve">${xmlEscape(String(value))}</t></is></c>`;
+  return `<c r="${reference}"${styleAttr} t="inlineStr"><is><t xml:space="preserve">${xmlEscape(String(value))}</t></is></c>`;
 }
 
-function sheetXml(rows: SheetRow[]): string {
+function sheetXml(sheet: Sheet, meta: ReturnType<typeof autoSheetMeta>): string {
+  const rows = sheet.rows || [];
   const body = rows
     .map((row, rowIndex) => {
       const cells = row
-        .map((value, columnIndex) => cellXml(`${columnName(columnIndex)}${rowIndex + 1}`, value))
+        .map((value, columnIndex) => {
+          const idx = styleIndexFor(meta, rowIndex, columnIndex, value);
+          return cellXml(`${columnName(columnIndex)}${rowIndex + 1}`, value, idx);
+        })
         .join("");
       return `<row r="${rowIndex + 1}">${cells}</row>`;
     })
     .join("");
+
+  const colsXml = meta.columnWidths.length
+    ? `<cols>${meta.columnWidths
+        .map((width, index) => `<col min="${index + 1}" max="${index + 1}" width="${width}" customWidth="1"/>`)
+        .join("")}</cols>`
+    : "";
+
+  let freezeXml = "";
+  if (meta.freeze) {
+    const { row, col } = meta.freeze;
+    const topLeft = `${columnName(col)}${row + 1}`;
+    freezeXml =
+      `<sheetViews><sheetView workbookViewId="0">` +
+      `<pane xSplit="${col}" ySplit="${row}" topLeftCell="${topLeft}" activePane="bottomRight"/>` +
+      `<selection pane="bottomRight" activeCell="${topLeft}" sqref="${topLeft}"/>` +
+      `</sheetView></sheetViews>`;
+  }
+
+  let cfXml = "";
+  if (sheet.conditionalFormats && sheet.conditionalFormats.length) {
+    cfXml = sheet.conditionalFormats
+      .map((cf) => {
+        if (cf.type === "dataBar") {
+          return (
+            `<conditionalFormatting sqref="${cf.sqref}">` +
+            `<cfRule type="dataBar" priority="1">` +
+            `<dataBar><cfvo type="min"/><cfvo type="max"/><color rgb="${cf.color || "FF5B9BD5"}"/></dataBar>` +
+            `</cfRule></conditionalFormatting>`
+          );
+        }
+        return "";
+      })
+      .join("");
+  }
+
   return (
     '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
     '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
-    `<sheetData>${body}</sheetData></worksheet>`
+    freezeXml +
+    colsXml +
+    `<sheetData>${body}</sheetData>` +
+    cfXml +
+    "</worksheet>"
   );
 }
 
@@ -162,10 +318,54 @@ function buildZip(entries: ZipEntry[]) {
   return output;
 }
 
+const STYLES_XML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <numFmts count="3">
+    <numFmt numFmtId="164" formatCode="#,##0"/>
+    <numFmt numFmtId="165" formatCode="0.00"/>
+    <numFmt numFmtId="166" formatCode="0.0%"/>
+  </numFmts>
+  <fonts count="4">
+    <font><sz val="11"/><name val="Calibri"/></font>
+    <font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font>
+    <font><b/><sz val="11"/><name val="Calibri"/></font>
+    <font><b/><sz val="10"/><name val="Calibri"/></font>
+  </fonts>
+  <fills count="4">
+    <fill><patternFill patternType="none"/></fill>
+    <fill><patternFill patternType="gray125"/></fill>
+    <fill><patternFill patternType="solid"><fgColor rgb="FF1F3864"/></patternFill></fill>
+    <fill><patternFill patternType="solid"><fgColor rgb="FFF2F2F2"/></patternFill></fill>
+  </fills>
+  <borders count="2">
+    <border/>
+    <border><bottom style="thin"><color rgb="FFBFBFBF"/></bottom></border>
+  </borders>
+  <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
+  <cellXfs count="11">
+    <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
+    <xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
+    <xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment horizontal="left" vertical="center"/></xf>
+    <xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1" applyAlignment="1"><alignment horizontal="right"/></xf>
+    <xf numFmtId="165" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1" applyAlignment="1"><alignment horizontal="right"/></xf>
+    <xf numFmtId="166" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1" applyAlignment="1"><alignment horizontal="right"/></xf>
+    <xf numFmtId="0" fontId="2" fillId="3" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment horizontal="left" vertical="center"/></xf>
+    <xf numFmtId="164" fontId="0" fillId="3" borderId="0" xfId="0" applyNumberFormat="1" applyFill="1" applyAlignment="1"><alignment horizontal="right"/></xf>
+    <xf numFmtId="165" fontId="0" fillId="3" borderId="0" xfId="0" applyNumberFormat="1" applyFill="1" applyAlignment="1"><alignment horizontal="right"/></xf>
+    <xf numFmtId="166" fontId="0" fillId="3" borderId="0" xfId="0" applyNumberFormat="1" applyFill="1" applyAlignment="1"><alignment horizontal="right"/></xf>
+    <xf numFmtId="0" fontId="0" fillId="3" borderId="0" xfId="0" applyFill="1"/>
+  </cellXfs>
+  <cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
+  <dxfs count="0"/>
+  <tableStyles count="0" defaultTableStyle="TableStyleMedium2" defaultPivotStyle="PivotStyleLight16"/>
+</styleSheet>`;
+
 export function buildXlsx(sheets: Sheet[]) {
   const used = new Set<string>();
   const named = sheets.map((sheet) => ({ ...sheet, name: safeSheetName(sheet.name, used) }));
   const safeNames = named.map((sheet) => sheet.name);
+
+  const metas = named.map((sheet) => autoSheetMeta(sheet));
 
   const contentTypes =
     '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
@@ -212,29 +412,15 @@ export function buildXlsx(sheets: Sheet[]) {
     'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>' +
     "</Relationships>";
 
-  const styles =
-    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
-    '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
-    '<fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts>' +
-    '<fills count="2"><fill><patternFill patternType="none"/></fill>' +
-    '<fill><patternFill patternType="gray125"/></fill></fills>' +
-    '<borders count="1"><border/></borders>' +
-    '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>' +
-    '<cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs>' +
-    '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>' +
-    '<dxfs count="0"/>' +
-    '<tableStyles count="0" defaultTableStyle="TableStyleMedium2" defaultPivotStyle="PivotStyleLight16"/>' +
-    "</styleSheet>";
-
   const entries: ZipEntry[] = [
     { name: "[Content_Types].xml", bytes: encode(contentTypes) },
     { name: "_rels/.rels", bytes: encode(rootRels) },
     { name: "xl/workbook.xml", bytes: encode(workbook) },
     { name: "xl/_rels/workbook.xml.rels", bytes: encode(workbookRels) },
-    { name: "xl/styles.xml", bytes: encode(styles) },
+    { name: "xl/styles.xml", bytes: encode(STYLES_XML) },
     ...named.map((sheet, index) => ({
       name: `xl/worksheets/sheet${index + 1}.xml`,
-      bytes: encode(sheetXml(sheet.rows)),
+      bytes: encode(sheetXml(sheet, metas[index])),
     })),
   ];
 

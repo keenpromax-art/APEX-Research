@@ -1,6 +1,6 @@
 import { fmt, humanize, isNum, localDate, num, pct } from "./format";
 import { measureText, PdfColor, PdfDocument, CONTENT_WIDTH, MARGIN_LEFT, MARGIN_RIGHT, PAGE_WIDTH, PAGE_HEIGHT, MARGIN_TOP, MARGIN_BOTTOM } from "./pdf";
-import { buildXlsx, Sheet, SheetValue } from "./xlsx";
+import { buildXlsx, columnName, Sheet, SheetValue } from "./xlsx";
 
 type AnyRecord = Record<string, any>;
 
@@ -909,7 +909,14 @@ export function buildResearchXlsx(payload: ExportPayload): Blob {
         return (row?.items?.[key] ?? "") as SheetValue;
       })]);
     });
-    sheets.push({ name: "Statements", rows });
+    const lastCol = columnName(periods.length + 1);
+    const sqref = `B2:${lastCol}${rows.length}`;
+    sheets.push({
+      name: "Statements",
+      rows,
+      freeze: { row: 1, col: 1 },
+      conditionalFormats: [{ sqref, type: "dataBar", color: "FF5B9BD5" }],
+    });
   }
 
   const assumptions = payload?.assumptions || forecast?.assumptions || null;
