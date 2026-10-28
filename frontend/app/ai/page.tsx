@@ -315,7 +315,7 @@ export default function AIPage() {
                     const env = model.source === "env";
                     const result = testResults[model.name];
                     return (
-                      <tr key={model.name} className="border-t border-border hover:bg-panel/40 align-top">
+                      <tr key={model.name} className="border-t border-border hover:bg-hover/60 align-top">
                         <td className="px-3 py-2">
                           <div className="font-medium">{model.name}</div>
                           <div className="text-[10px] text-muted flex items-center gap-1 mt-0.5">
@@ -460,7 +460,7 @@ export default function AIPage() {
               </thead>
               <tbody>
                 {jobs.map((job) => (
-                  <tr key={job.id} className="border-t border-border hover:bg-panel/40">
+                  <tr key={job.id} className="border-t border-border hover:bg-hover/60">
                     <td className="px-3 py-2 text-muted">#{job.id}</td>
                     <td className="px-3 py-2">
                       <Link href={`/company/${encodeURIComponent(job.ticker)}`} className="text-accent">

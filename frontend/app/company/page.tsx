@@ -147,7 +147,7 @@ export default function CompanyIndex() {
                     onMouseEnter={() => setActiveIndex(index)}
                     className={cn(
                       "flex items-center gap-3 px-3 py-2 cursor-pointer border-b border-border last:border-b-0",
-                      index === activeIndex ? "bg-accent/15" : "hover:bg-panel/70",
+                      index === activeIndex ? "bg-accent/15" : "hover:bg-hover/60",
                     )}
                   >
                     <span className="text-xs font-semibold text-accent w-28 shrink-0 truncate">{row.symbol}</span>
@@ -167,7 +167,7 @@ export default function CompanyIndex() {
           <Button type="submit" className="sm:px-6 sm:py-2.5">
             Open
           </Button>
-          <Link href="/company/SAMPLE" className="border border-border rounded-md px-4 py-2.5 text-sm text-center hover:bg-panel">
+          <Link href="/company/SAMPLE" className="border border-border px-4 py-2.5 text-sm text-center hover:bg-hover">
             Sample company
           </Link>
         </form>
@@ -188,7 +188,7 @@ export default function CompanyIndex() {
                 <li key={project.id}>
                   <Link
                     href={`/company/${encodeURIComponent(project.ticker)}?project=${project.id}`}
-                    className="flex items-center gap-3 px-2 py-2.5 rounded-md hover:bg-panel"
+                    className="flex items-center gap-3 px-2 py-2.5 hover:bg-hover"
                   >
                     <span className="text-xs font-semibold text-accent w-20 truncate">{project.ticker}</span>
                     <span className="text-xs flex-1 truncate">{project.name}</span>

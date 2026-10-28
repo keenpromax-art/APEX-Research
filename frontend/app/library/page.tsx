@@ -205,7 +205,7 @@ export default function LibraryPage() {
           ) : (
             <ul className="divide-y divide-border">
               {filteredProjects.map((project) => (
-                <li key={project.id} className="flex items-start gap-3 px-4 py-3 hover:bg-panel/40">
+                <li key={project.id} className="flex items-start gap-3 px-4 py-3 hover:bg-hover/60">
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-xs font-semibold text-accent">{project.ticker}</span>
@@ -217,14 +217,14 @@ export default function LibraryPage() {
                   <div className="flex items-center gap-2 shrink-0">
                     <Link
                       href={`/company/${encodeURIComponent(project.ticker)}?project=${project.id}`}
-                      className="border border-border px-2.5 py-1 rounded-md text-[11px] hover:bg-panel inline-flex items-center gap-1"
+                      className="border border-border px-2.5 py-1 text-[11px] hover:bg-hover inline-flex items-center gap-1"
                     >
                       <FolderOpen size={12} /> Open
                     </Link>
                     <button
                       onClick={() => deleteProject(project)}
                       disabled={busy === `project-${project.id}`}
-                      className="text-neg p-1.5 hover:bg-panel rounded-md disabled:opacity-40"
+                      className="text-neg p-1.5 hover:bg-hover disabled:opacity-40"
                       title="Delete project"
                       aria-label={`Delete project ${project.name}`}
                     >
@@ -270,7 +270,7 @@ export default function LibraryPage() {
               {filteredModels.map((model) => {
                 const href = modelHref(model);
                 return (
-                  <li key={model.id} className="flex items-start gap-3 px-4 py-3 hover:bg-panel/40">
+                  <li key={model.id} className="flex items-start gap-3 px-4 py-3 hover:bg-hover/60">
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 flex-wrap">
                         <Badge tone={(model.kind || "").toLowerCase() === "three_statement" ? "accent" : "muted"}>{kindLabel(model.kind)}</Badge>
@@ -284,7 +284,7 @@ export default function LibraryPage() {
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
                       {href ? (
-                        <Link href={href} className="border border-border px-2.5 py-1 rounded-md text-[11px] hover:bg-panel inline-flex items-center gap-1">
+                        <Link href={href} className="border border-border px-2.5 py-1 text-[11px] hover:bg-hover inline-flex items-center gap-1">
                           <ExternalLink size={12} /> Open
                         </Link>
                       ) : (
@@ -293,7 +293,7 @@ export default function LibraryPage() {
                       <button
                         onClick={() => deleteModel(model)}
                         disabled={busy === `model-${model.id}`}
-                        className="text-neg p-1.5 hover:bg-panel rounded-md disabled:opacity-40"
+                        className="text-neg p-1.5 hover:bg-hover disabled:opacity-40"
                         title="Delete model"
                         aria-label={`Delete model ${model.name}`}
                       >

@@ -72,7 +72,7 @@ export default function SettingsPage() {
                   onClick={() => setTheme(value)}
                   className={cn(
                     "flex items-start gap-2 rounded-md border px-3 py-2.5 text-left transition-colors",
-                    theme === value ? "border-accent bg-accent/5" : "border-border hover:bg-panel",
+                    theme === value ? "border-accent bg-accent/5" : "border-border hover:bg-hover",
                   )}
                 >
                   <Icon size={15} className={theme === value ? "text-accent mt-0.5" : "text-muted mt-0.5"} />

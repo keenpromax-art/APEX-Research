@@ -33,7 +33,7 @@ function tooltipProps(cursorLine = true) {
       borderRadius: 6,
       fontSize: 11,
       color: "var(--text)",
-      boxShadow: "var(--shadow-md)",
+      boxShadow: "none",
       padding: "6px 10px",
     } as CSSProperties,
     itemStyle: { color: "var(--text)", fontSize: 11 } as CSSProperties,

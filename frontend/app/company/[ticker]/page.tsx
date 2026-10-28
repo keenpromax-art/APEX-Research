@@ -153,7 +153,7 @@ function StatementTable({ rows, label, currency }: { rows: any[]; label: string;
           </thead>
           <tbody>
             {keys.map((key) => (
-              <tr key={key} className="border-b border-border/70 hover:bg-panel/40">
+              <tr key={key} className="border-b border-border/70 hover:bg-hover/60">
                 <td className="px-3 py-1.5 sticky left-0 bg-surface z-10 whitespace-nowrap text-muted">{humanize(key)}</td>
                 {visible.map((row) => (
                   <td key={row.period_end} className="text-right px-3 py-1.5 tabular whitespace-nowrap">
@@ -665,15 +665,15 @@ export default function CompanyPage() {
     return (
       <div className="p-5 md:p-7 max-w-[1680px] mx-auto space-y-4">
         <Skeleton className="h-10 w-72" />
-        <Skeleton className="h-20 rounded-lg" />
+        <Skeleton className="h-20" />
         <div className="grid md:grid-cols-3 gap-3">
           {[0, 1, 2].map((item) => (
-            <Skeleton key={item} className="h-24 rounded-lg" />
+            <Skeleton key={item} className="h-24" />
           ))}
         </div>
         <div className="grid md:grid-cols-2 gap-3">
           {[0, 1].map((item) => (
-            <Skeleton key={item} className="h-56 rounded-lg" />
+            <Skeleton key={item} className="h-56" />
           ))}
         </div>
         <Spinner label={`Loading ${ticker}`} />
@@ -702,7 +702,7 @@ export default function CompanyPage() {
           <div className="flex items-start gap-3 min-w-0 flex-1">
             <div
               aria-hidden
-              className="hidden sm:flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-border bg-panel mono text-sm font-bold text-accent"
+              className="hidden sm:flex h-11 w-11 shrink-0 items-center justify-center border border-border bg-panel mono text-sm font-bold text-accent"
             >
               {ticker.slice(0, 4)}
             </div>
@@ -951,7 +951,7 @@ export default function CompanyPage() {
                 <button
                   key={option}
                   onClick={() => setPeriodicity(option)}
-                  className={`px-3 py-1.5 text-xs ${periodicity === option ? "btn-accent" : "text-muted hover:bg-panel"}`}
+                  className={`px-3 py-1.5 text-xs ${periodicity === option ? "btn-accent" : "text-muted hover:bg-hover"}`}
                 >
                   {option === "annual" ? "Annual" : "Quarterly"}
                 </button>
@@ -991,7 +991,7 @@ export default function CompanyPage() {
                 </thead>
                 <tbody>
                   {METRIC_KEYS.map((key) => (
-                    <tr key={key} className="border-b border-border/70 hover:bg-panel/40">
+                    <tr key={key} className="border-b border-border/70 hover:bg-hover/60">
                       <td className="px-3 py-1.5 sticky left-0 bg-surface z-10 text-muted whitespace-nowrap">{humanize(key)}</td>
                       {metricsPeriods.map((period: any) => (
                         <td key={period.period_end} className="text-right px-3 py-1.5 tabular whitespace-nowrap">
@@ -1137,7 +1137,7 @@ export default function CompanyPage() {
                     </thead>
                     <tbody>
                       {["revenue", "gross_profit", "ebitda", "ebit", "net_income", "ocf", "fcf", "capex", "cash", "debt", "equity", "eps", "balance_check"].map((key) => (
-                        <tr key={key} className="border-b border-border/70 hover:bg-panel/40">
+                        <tr key={key} className="border-b border-border/70 hover:bg-hover/60">
                           <td className="px-3 py-1.5 sticky left-0 bg-surface z-10 text-muted">{humanize(key)}</td>
                           {forecast.periods.map((period: any) => (
                             <td key={period.year} className="text-right px-3 py-1.5 tabular whitespace-nowrap">
@@ -1216,7 +1216,7 @@ export default function CompanyPage() {
                   />
                 ))}
                 <div className="col-span-2">
-                  <button onClick={applyWacc} className="w-full border border-border px-3 py-1.5 rounded-md text-xs hover:bg-panel">
+                  <button onClick={applyWacc} className="w-full border border-border px-3 py-1.5 text-xs hover:bg-hover">
                     Apply WACC
                   </button>
                 </div>
@@ -1315,7 +1315,7 @@ export default function CompanyPage() {
                     </thead>
                     <tbody>
                       {(sens.wacc_values || []).map((waccValue: number, rowIndex: number) => (
-                        <tr key={waccValue} className="border-b border-border/70 hover:bg-panel/30">
+                        <tr key={waccValue} className="border-b border-border/70 hover:bg-hover/50">
                           <th scope="row" className="text-left px-3 py-1.5 text-muted font-normal tabular whitespace-nowrap sticky left-0 bg-surface">
                             {pct(waccValue)}
                           </th>

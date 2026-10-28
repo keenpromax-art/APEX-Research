@@ -16,21 +16,21 @@ export function Button({
   size?: "sm" | "md" | "lg";
 }) {
   const variants: Record<string, string> = {
-    primary: "btn-accent border border-accent shadow-xs",
+    primary: "btn-accent border border-accent",
     secondary: "bg-panel text-fg hover:bg-hover border border-border hover:border-border-strong",
-    ghost: "bg-transparent text-muted hover:bg-panel hover:text-fg border border-transparent",
-    danger: "bg-neg/10 text-neg hover:bg-neg/20 border border-neg/40",
+    ghost: "bg-transparent text-muted hover:bg-hover hover:text-fg border border-transparent",
+    danger: "bg-neg/10 text-neg hover:bg-neg/15 border border-neg/40",
   };
   const sizes: Record<string, string> = {
-    sm: "px-3 py-1.5 text-xs",
-    md: "px-4 py-2 text-sm",
-    lg: "px-5 py-2.5 text-sm",
+    sm: "px-2 py-1 text-[11px]",
+    md: "px-3 py-1.5 text-[12px]",
+    lg: "px-4 py-2 text-[13px]",
   };
   return (
     <button
       {...props}
       className={cn(
-        "inline-flex items-center justify-center gap-2 rounded-lg font-medium transition-[background-color,border-color,transform,box-shadow,opacity,color] duration-150 ease-out disabled:opacity-40 disabled:cursor-not-allowed disabled:transform-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg active:scale-[0.97]",
+        "inline-flex items-center justify-center gap-1.5 font-medium transition-[background-color,border-color,transform,opacity,color] duration-100 ease-out disabled:opacity-30 disabled:cursor-not-allowed disabled:transform-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent active:scale-[0.97]",
         variants[variant],
         sizes[size],
         className,
@@ -40,8 +40,13 @@ export function Button({
     </button>
   );
 }
+
 export function Card({ children, className }: { children: ReactNode; className?: string }) {
-  return <div className={cn("bg-surface border border-border rounded-xl shadow-xs card-interactive", className)}>{children}</div>;
+  return (
+    <div className={cn("bg-elev border border-border card-interactive", className)}>
+      {children}
+    </div>
+  );
 }
 
 export function CardHeader({
@@ -54,12 +59,14 @@ export function CardHeader({
   action?: ReactNode;
 }) {
   return (
-    <div className="flex items-start gap-3 px-5 py-4 border-b border-border">
+    <div className="flex items-start gap-3 px-4 py-3 border-b border-border">
       <div className="min-w-0 flex-1">
-        <div className="text-sm font-semibold tracking-tight text-fg">{title}</div>
-        {subtitle ? <div className="text-xs text-muted mt-1 leading-relaxed">{subtitle}</div> : null}
+        <div className="text-[12px] font-semibold tracking-wide uppercase text-fg">{title}</div>
+        {subtitle ? (
+          <div className="text-[11px] text-muted mt-0.5 leading-relaxed">{subtitle}</div>
+        ) : null}
       </div>
-      {action ? <div className="shrink-0 flex items-center gap-2">{action}</div> : null}
+      {action ? <div className="shrink-0 flex items-center gap-1.5">{action}</div> : null}
     </div>
   );
 }
@@ -78,10 +85,25 @@ export function Stat({
   compact?: boolean;
 }) {
   return (
-    <div className={cn("bg-surface border border-border rounded-xl min-w-0 shadow-xs", compact ? "px-3 py-2" : "p-4")}>
-      <div className="text-[11px] uppercase tracking-[0.12em] text-muted truncate font-medium">{label}</div>
-      <div className={cn(compact ? "text-base" : "text-2xl", "font-semibold tabular mt-1.5 truncate leading-tight", tone)}>{value}</div>
-      {hint ? <div className="text-[11px] text-muted mt-1 truncate">{hint}</div> : null}
+    <div
+      className={cn(
+        "bg-elev border border-border min-w-0",
+        compact ? "px-3 py-2" : "p-4",
+      )}
+    >
+      <div className="text-[9px] uppercase tracking-[0.14em] text-dim truncate">
+        {label}
+      </div>
+      <div
+        className={cn(
+          compact ? "text-base" : "text-xl",
+          "font-semibold tabular mt-1 truncate leading-tight",
+          tone,
+        )}
+      >
+        {value}
+      </div>
+      {hint ? <div className="text-[10px] text-muted mt-0.5 truncate">{hint}</div> : null}
     </div>
   );
 }
@@ -95,13 +117,18 @@ export function Badge({
 }) {
   const tones: Record<string, string> = {
     muted: "border-border text-muted",
-    accent: "border-accent/40 text-accent bg-accent/10",
-    pos: "border-pos/40 text-pos bg-pos/10",
-    neg: "border-neg/40 text-neg bg-neg/10",
-    warn: "border-warn/40 text-warn bg-warn/10",
+    accent: "border-accent/40 text-accent bg-accent/8",
+    pos: "border-pos/40 text-pos bg-pos/8",
+    neg: "border-neg/40 text-neg bg-neg/8",
+    warn: "border-warn/40 text-warn bg-warn/8",
   };
   return (
-    <span className={cn("inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.1em]", tones[tone])}>
+    <span
+      className={cn(
+        "inline-flex items-center gap-1 border px-1.5 py-px text-[9px] font-medium uppercase tracking-[0.12em]",
+        tones[tone],
+      )}
+    >
       {children}
     </span>
   );
@@ -147,7 +174,7 @@ export function Tabs({
       ref={listRef}
       role="tablist"
       onKeyDown={onKeyDown}
-      className={cn("flex items-end gap-1 border-b border-border overflow-x-auto", className)}
+      className={cn("flex items-end gap-0 border-b border-border overflow-x-auto", className)}
     >
       {tabs.map((tab) => (
         <button
@@ -160,10 +187,10 @@ export function Tabs({
           tabIndex={value === tab ? 0 : -1}
           onClick={() => onChange(tab)}
           className={cn(
-            "px-4 py-2.5 text-sm whitespace-nowrap border-b-2 -mb-px transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded-t-md",
+            "px-3 py-2 text-[11px] whitespace-nowrap border-b-2 -mb-px transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent uppercase tracking-wider",
             value === tab
-              ? "border-accent text-fg font-semibold bg-accent/5"
-              : "border-transparent text-muted hover:text-fg hover:bg-panel/60",
+              ? "border-accent text-accent font-medium"
+              : "border-transparent text-dim hover:text-muted hover:bg-hover",
           )}
         >
           {tab}
@@ -211,11 +238,13 @@ export function EmptyState({
 }) {
   return (
     <div className="flex flex-col items-center justify-center gap-2 py-12 text-center px-4">
-      <div className="grid place-items-center h-10 w-10 rounded-xl bg-panel border border-border text-dim mb-1">
-        <Inbox size={18} aria-hidden />
+      <div className="grid place-items-center h-9 w-9 bg-panel border border-border text-dim mb-1">
+        <Inbox size={16} aria-hidden />
       </div>
-      <div className="text-sm font-semibold tracking-tight">{title}</div>
-      {body ? <div className="text-xs text-muted max-w-sm leading-relaxed">{body}</div> : null}
+      <div className="text-[12px] font-semibold uppercase tracking-wider">{title}</div>
+      {body ? (
+        <div className="text-[11px] text-muted max-w-sm leading-relaxed">{body}</div>
+      ) : null}
       {action ? <div className="mt-3">{action}</div> : null}
     </div>
   );
@@ -223,8 +252,8 @@ export function EmptyState({
 
 export function Spinner({ label }: { label?: string }) {
   return (
-    <span className="inline-flex items-center gap-2 text-xs text-muted" role="status">
-      <Loader2 size={14} className="animate-spin" aria-hidden />
+    <span className="inline-flex items-center gap-2 text-[11px] text-muted" role="status">
+      <Loader2 size={12} className="animate-spin" aria-hidden />
       {label || "Working..."}
     </span>
   );
@@ -234,9 +263,9 @@ export function ErrorBanner({ message, onRetry }: { message: string; onRetry?: (
   return (
     <div
       role="alert"
-      className="flex items-start gap-2 rounded-lg border border-neg/40 bg-neg/10 px-4 py-3 text-sm text-neg"
+      className="flex items-start gap-2 border border-neg/40 bg-neg/8 px-3 py-2 text-[12px] text-neg"
     >
-      <AlertTriangle size={14} className="mt-0.5 shrink-0" aria-hidden />
+      <AlertTriangle size={13} className="mt-0.5 shrink-0" aria-hidden />
       <span className="min-w-0 break-words">{message}</span>
       {onRetry ? (
         <button onClick={onRetry} className="ml-auto shrink-0 underline underline-offset-2">
@@ -251,9 +280,9 @@ export function WarnBanner({ children }: { children: ReactNode }) {
   return (
     <div
       role="status"
-      className="flex items-start gap-2 rounded-lg border border-warn/40 bg-warn/10 px-4 py-3 text-sm text-warn"
+      className="flex items-start gap-2 border border-warn/40 bg-warn/8 px-3 py-2 text-[12px] text-warn"
     >
-      <TriangleAlert size={14} className="mt-0.5 shrink-0" aria-hidden />
+      <TriangleAlert size={13} className="mt-0.5 shrink-0" aria-hidden />
       <div className="min-w-0 break-words">{children}</div>
     </div>
   );
@@ -261,14 +290,14 @@ export function WarnBanner({ children }: { children: ReactNode }) {
 
 export function InfoBanner({ children }: { children: ReactNode }) {
   return (
-    <div role="status" className="rounded-lg border border-accent/30 bg-accent/5 px-4 py-3 text-sm text-muted">
+    <div role="status" className="border border-accent/30 bg-accent/5 px-3 py-2 text-[12px] text-muted">
       {children}
     </div>
   );
 }
 
 export function Skeleton({ className }: { className?: string }) {
-  return <div aria-hidden className={cn("bg-panel rounded-md animate-pulse", className)} />;
+  return <div aria-hidden className={cn("skeleton", className)} />;
 }
 
 export function Field({
@@ -291,8 +320,8 @@ export function Field({
   className?: string;
 }) {
   return (
-    <label className={cn("flex flex-col gap-1 min-w-0", className)}>
-      <span className="text-[11px] text-muted truncate font-medium" title={humanize(label)}>
+    <label className={cn("flex flex-col gap-0.5 min-w-0", className)}>
+      <span className="text-[10px] text-dim uppercase tracking-[0.12em] truncate" title={humanize(label)}>
         {humanize(label)}
       </span>
       <input
@@ -301,9 +330,9 @@ export function Field({
         value={value}
         placeholder={placeholder}
         onChange={(event) => onChange(event.target.value)}
-        className="bg-panel border border-border rounded-lg px-3 py-2 text-sm focus:border-accent focus:bg-hover outline-none tabular transition-colors"
+        className="bg-bg border border-border px-2 py-1.5 text-[12px] focus:border-accent focus:bg-hover outline-none tabular transition-colors placeholder:text-dim"
       />
-      {hint ? <span className="text-[10px] text-muted">{hint}</span> : null}
+      {hint ? <span className="text-[9px] text-dim">{hint}</span> : null}
     </label>
   );
 }
@@ -320,12 +349,14 @@ export function Select({
   options: { value: string; label: string }[];
 }) {
   return (
-    <label className="flex flex-col gap-1 min-w-0">
-      <span className="text-[11px] text-muted truncate font-medium">{humanize(label)}</span>
+    <label className="flex flex-col gap-0.5 min-w-0">
+      <span className="text-[10px] text-dim uppercase tracking-[0.12em] truncate">
+        {humanize(label)}
+      </span>
       <select
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className="bg-panel border border-border rounded-lg px-3 py-2 text-sm focus:border-accent focus:bg-hover outline-none transition-colors"
+        className="bg-bg border border-border px-2 py-1.5 text-[12px] focus:border-accent focus:bg-hover outline-none transition-colors"
       >
         {options.map((option) => (
           <option key={option.value} value={option.value}>
@@ -336,5 +367,3 @@ export function Select({
     </label>
   );
 }
-
-

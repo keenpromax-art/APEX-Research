@@ -385,7 +385,7 @@ function ResearchStudio() {
                         key={row.id}
                         tabIndex={0}
                         aria-label={`Select version ${row.id} of the ${row.ticker} report`}
-                        className={`border-b border-border/60 hover:bg-panel cursor-pointer outline-none focus-visible:ring-1 focus-visible:ring-accent ${selected?.id === row.id ? "bg-panel" : ""}`}
+                        className={`border-b border-border/60 hover:bg-hover cursor-pointer outline-none focus-visible:ring-1 focus-visible:ring-accent ${selected?.id === row.id ? "bg-panel" : ""}`}
                         onClick={() => setSelected(row)}
                         onKeyDown={(event) => {
                           if (event.key === "Enter" || event.key === " ") {

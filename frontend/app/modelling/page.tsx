@@ -417,7 +417,7 @@ export default function ModellingPage() {
                   </thead>
                   <tbody>
                     {(lboResult.schedule || []).map((row: any) => (
-                      <tr key={row.year} className="border-b border-border/70 hover:bg-panel/40">
+                      <tr key={row.year} className="border-b border-border/70 hover:bg-hover/60">
                         <td className="px-3 py-1.5 text-muted">Year {row.year}</td>
                         <td className="text-right px-3 py-1.5 tabular">{fmt(row.ebitda)}</td>
                         <td className="text-right px-3 py-1.5 tabular">{fmt(row.nopat)}</td>

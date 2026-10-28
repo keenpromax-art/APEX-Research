@@ -34,16 +34,10 @@ const NAV = [
 
 const COMPACT_KEY = "apex-sidebar-compact";
 
-function ApexMark({ size = 22 }: { size?: number }) {
+function ApexMark({ size = 18 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden>
-      <defs>
-        <linearGradient id="apexMark" x1="0" y1="24" x2="24" y2="0" gradientUnits="userSpaceOnUse">
-          <stop stopColor="var(--accent)" />
-          <stop offset="1" stopColor="var(--cyan)" />
-        </linearGradient>
-      </defs>
-      <path d="M12 3 L21 20 H17.2 L12 10.6 L6.8 20 H3 Z" fill="url(#apexMark)" />
+      <path d="M12 3 L21 20 H17.2 L12 10.6 L6.8 20 H3 Z" fill="var(--accent)" />
       <path d="M12 3 L15.5 9.6 H8.5 Z" fill="var(--bg)" opacity="0.55" />
     </svg>
   );
@@ -53,6 +47,7 @@ export function Shell({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false);
   const [compact, setCompact] = useState(false);
   const [q, setQ] = useState("");
+  const [clock, setClock] = useState("");
   const pathname = usePathname();
   const router = useRouter();
   const { theme, toggleTheme } = useTheme();
@@ -62,9 +57,23 @@ export function Shell({ children }: { children: ReactNode }) {
   useEffect(() => {
     try {
       if (localStorage.getItem(COMPACT_KEY) === "1") setCompact(true);
-    } catch {
-      // storage unavailable — stay expanded
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    function tick() {
+      setClock(
+        new Date().toLocaleTimeString("en-US", {
+          hour12: false,
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+        }),
+      );
     }
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
   }, []);
 
   function toggleCompact() {
@@ -72,9 +81,7 @@ export function Shell({ children }: { children: ReactNode }) {
       const next = !current;
       try {
         localStorage.setItem(COMPACT_KEY, next ? "1" : "0");
-      } catch {
-        // ignore
-      }
+      } catch {}
       return next;
     });
   }
@@ -126,43 +133,59 @@ export function Shell({ children }: { children: ReactNode }) {
         ref={drawerRef}
         tabIndex={-1}
         className={cn(
-          "fixed inset-y-0 left-0 z-40 flex flex-col bg-surface border-r border-border md:static md:translate-x-0 transition-[transform,width] duration-200 [transition-timing-function:cubic-bezier(0.32,0.72,0,1)]",
-          compact ? "md:w-[68px]" : "md:w-[232px]",
-          "w-[260px]",
-          open ? "translate-x-0 shadow-2xl" : "-translate-x-full",
+          "fixed inset-y-0 left-0 z-40 flex flex-col bg-elev border-r border-border md:static md:translate-x-0 transition-[transform,width] duration-150 ease-out",
+          compact ? "md:w-[52px]" : "md:w-[200px]",
+          "w-[240px]",
+          open ? "translate-x-0" : "-translate-x-full",
         )}
         aria-label="Primary navigation"
       >
         {/* Brand */}
-        <div className={cn("h-14 flex items-center border-b border-border shrink-0", compact ? "md:justify-center px-3" : "px-4 gap-2.5")}>
-          <Link href="/" className="flex items-center gap-2.5 min-w-0" onClick={() => setOpen(false)} title="APEX Research — home">
-            <span className="shrink-0 grid place-items-center h-8 w-8 rounded-lg bg-gradient-to-br from-accent/20 to-cyan/10 border border-accent/30 shadow-xs">
-              <ApexMark size={18} />
+        <div
+          className={cn(
+            "h-11 flex items-center border-b border-border shrink-0",
+            compact ? "md:justify-center px-2" : "px-3 gap-2",
+          )}
+        >
+          <Link
+            href="/"
+            className="flex items-center gap-2 min-w-0"
+            onClick={() => setOpen(false)}
+            title="APEX Terminal — home"
+          >
+            <span className="shrink-0 grid place-items-center h-6 w-6 bg-accent/10 border border-accent/30">
+              <ApexMark size={14} />
             </span>
             <span className={cn("flex flex-col leading-none min-w-0", compact && "md:hidden")}>
-              <span className="font-semibold tracking-tight text-fg text-[15px]">APEX</span>
-              <span className="text-[9px] text-muted uppercase tracking-[0.22em] mt-0.5">Research</span>
+              <span className="text-accent text-xs font-semibold tracking-widest">APEX</span>
+              <span className="text-[8px] text-dim uppercase tracking-[0.2em] mt-px">Terminal</span>
             </span>
           </Link>
           <button
-            className="ml-auto md:hidden p-1.5 rounded-md hover:bg-panel text-muted"
+            className="ml-auto md:hidden p-1 hover:bg-hover text-muted"
             aria-label="Close navigation"
             onClick={() => setOpen(false)}
           >
-            <X size={18} />
+            <X size={16} />
           </button>
         </div>
 
         {/* Nav */}
-        <nav className="flex-1 overflow-auto py-3 px-2 space-y-5" aria-label="Sections">
+        <nav className="flex-1 overflow-auto py-2 px-1.5 space-y-4" aria-label="Sections">
           {groups.map((group) => (
             <div key={group}>
-              <div className={cn("px-2.5 mb-1.5 text-[10px] uppercase tracking-[0.16em] text-dim font-semibold", compact && "md:hidden")}>
+              <div
+                className={cn(
+                  "px-2 mb-1 text-[9px] uppercase tracking-[0.18em] text-dim",
+                  compact && "md:hidden",
+                )}
+              >
                 {group}
               </div>
-              <div className="space-y-0.5">
+              <div className="space-y-px">
                 {NAV.filter((n) => n.group === group).map(({ href, label, icon: Icon }) => {
-                  const active = href === "/" ? pathname === "/" : pathname === href || pathname.startsWith(href + "/");
+                  const active =
+                    href === "/" ? pathname === "/" : pathname === href || pathname.startsWith(href + "/");
                   return (
                     <Link
                       key={href}
@@ -171,21 +194,21 @@ export function Shell({ children }: { children: ReactNode }) {
                       title={label}
                       aria-current={active ? "page" : undefined}
                       className={cn(
-                        "group relative flex items-center gap-2.5 rounded-md text-sm transition-colors border-l-2",
-                        compact ? "md:justify-center md:px-2 md:py-2" : "px-2.5 py-2",
+                        "flex items-center gap-2 text-[11px] transition-colors border-l-2",
+                        compact ? "md:justify-center md:px-2 md:py-1.5" : "px-2 py-1.5",
                         active
-                          ? "bg-accent/10 text-fg border-accent"
-                          : "text-muted hover:bg-panel hover:text-fg border-transparent",
+                          ? "bg-accent/8 text-fg border-accent"
+                          : "text-muted hover:bg-hover hover:text-fg border-transparent",
                       )}
                     >
                       <Icon
-                        size={16}
-                        className={cn("shrink-0 transition-colors", active ? "text-accent" : "text-muted group-hover:text-fg")}
+                        size={14}
+                        className={cn("shrink-0", active ? "text-accent" : "text-dim")}
                         aria-hidden
                       />
                       <span className={cn("truncate", compact && "md:hidden")}>{label}</span>
                       {active && !compact ? (
-                        <span className="ml-auto h-1.5 w-1.5 rounded-full bg-accent shadow-[0_0_8px_var(--accent)]" aria-hidden />
+                        <span className="ml-auto status-dot live" aria-hidden />
                       ) : null}
                     </Link>
                   );
@@ -196,64 +219,71 @@ export function Shell({ children }: { children: ReactNode }) {
         </nav>
 
         {/* Footer controls */}
-        <div className={cn("border-t border-border shrink-0", compact ? "md:py-2 px-2 py-2.5" : "px-3 py-2.5")}>
-          <div className={cn("flex items-center gap-1", compact ? "md:flex-col" : "")}>
+        <div className={cn("border-t border-border shrink-0", compact ? "md:py-1.5 px-1.5" : "px-2 py-1.5")}>
+          <div className={cn("flex items-center gap-0.5", compact ? "md:flex-col" : "")}>
             <button
               onClick={toggleTheme}
-              className="p-2 rounded-md hover:bg-panel text-muted hover:text-fg transition-colors"
+              className="p-1.5 hover:bg-hover text-muted hover:text-fg transition-colors"
               aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}
               title={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}
             >
-              {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
+              {theme === "dark" ? <Sun size={14} /> : <Moon size={14} />}
             </button>
-            <span className={cn("text-xs text-muted capitalize", compact && "md:hidden")}>{theme} mode</span>
+            <span className={cn("text-[10px] text-dim uppercase tracking-wider", compact && "md:hidden")}>
+              {theme}
+            </span>
             <button
               onClick={toggleCompact}
-              className="hidden md:inline-flex p-2 rounded-md hover:bg-panel text-muted hover:text-fg transition-colors ml-auto"
+              className="hidden md:inline-flex p-1.5 hover:bg-hover text-muted hover:text-fg transition-colors ml-auto"
               aria-label={compact ? "Expand sidebar" : "Compact sidebar"}
               aria-pressed={compact}
               title={compact ? "Expand sidebar" : "Compact sidebar"}
             >
-              {compact ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
+              {compact ? <PanelLeftOpen size={14} /> : <PanelLeftClose size={14} />}
             </button>
           </div>
-          <div className={cn("mt-2 flex items-center justify-between", compact && "md:hidden")}>
-            <span className="text-[10px] text-dim border border-border rounded px-1.5 py-0.5">v0.2</span>
-            <span className="text-[10px] text-dim">Local engine</span>
+          <div className={cn("mt-1.5 flex items-center justify-between", compact && "md:hidden")}>
+            <span className="text-[9px] text-dim">v0.2</span>
+            <span className="text-[9px] text-dim">LOCAL</span>
           </div>
         </div>
       </aside>
 
       {open && (
         <div
-          className="fixed inset-0 z-30 bg-black/60 backdrop-blur-sm md:hidden"
+          className="fixed inset-0 z-30 bg-black/60 md:hidden"
           onClick={() => setOpen(false)}
           aria-hidden
         />
       )}
 
       <div className="flex-1 flex flex-col min-w-0 relative z-10">
-        <header className="h-14 border-b border-border flex items-center px-3 md:px-5 gap-3 bg-surface/80 backdrop-blur-md shrink-0">
+        {/* Ticker status bar */}
+        <header className="h-9 border-b border-border flex items-center px-2 md:px-3 gap-2 bg-elev shrink-0">
           <button
-            className="md:hidden p-2 -m-1 rounded-md hover:bg-panel min-w-[36px] min-h-[36px] flex items-center justify-center text-muted"
+            className="md:hidden p-1 -m-1 hover:bg-hover min-w-[28px] min-h-[28px] flex items-center justify-center text-muted"
             aria-label="Open navigation"
             aria-expanded={open}
             onClick={() => setOpen(true)}
           >
-            <Menu size={20} />
+            <Menu size={16} />
           </button>
 
-          <form onSubmit={submitSearch} className="flex-1 max-w-2xl relative" role="search">
-            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted pointer-events-none" aria-hidden />
+          <form onSubmit={submitSearch} className="flex-1 max-w-xl relative" role="search">
+            <Search
+              size={13}
+              className="absolute left-2.5 top-1/2 -translate-y-1/2 text-dim pointer-events-none"
+              aria-hidden
+            />
             <input
               ref={searchRef}
               value={q}
               onChange={(event) => setQ(event.target.value)}
-              placeholder="Search ticker — AAPL, MSFT, RELIANCE.NS"
-              className="w-full bg-panel border border-border rounded-lg pl-9 pr-20 py-2 text-sm focus:border-accent focus:bg-hover outline-none transition-colors"
+              placeholder="AAPL  MSFT  RELIANCE.NS"
+              className="w-full bg-bg border border-border pl-8 pr-14 py-1 text-[11px] focus:border-accent focus:bg-hover outline-none transition-colors placeholder:text-dim"
               aria-label="Ticker search"
             />
-            <kbd className="hidden sm:flex absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-muted border border-border rounded-md px-1.5 py-0.5 bg-surface items-center gap-1 pointer-events-none">
+            <kbd className="hidden sm:flex absolute right-1.5 top-1/2 -translate-y-1/2 text-[9px] text-dim border border-border px-1 py-px bg-elev items-center gap-1 pointer-events-none">
               <span>⌘K</span>
               <span className="text-dim">/</span>
             </kbd>
@@ -261,12 +291,19 @@ export function Shell({ children }: { children: ReactNode }) {
 
           <Link
             href="/company/SAMPLE"
-            className="hidden md:inline-flex items-center gap-1.5 text-xs text-muted hover:text-fg whitespace-nowrap border border-border rounded-lg px-3 py-2 hover:border-accent/50 hover:bg-panel transition-colors"
+            className="hidden md:inline-flex items-center gap-1.5 text-[10px] text-muted hover:text-accent whitespace-nowrap border border-border px-2 py-1 hover:border-accent/40 transition-colors uppercase tracking-wider"
             title="Open the sample company"
           >
-            <span className="h-1.5 w-1.5 rounded-full bg-cyan" aria-hidden />
-            Try sample
+            <span className="status-dot live" aria-hidden />
+            Sample
           </Link>
+
+          <div className="hidden md:flex items-center gap-2 ml-auto text-[10px] text-dim tabular">
+            <span className="status-dot live" aria-hidden />
+            <span>LIVE</span>
+            <span className="text-border-strong">│</span>
+            <span>{clock}</span>
+          </div>
         </header>
 
         <main className="flex-1 overflow-auto" id="main-content">
