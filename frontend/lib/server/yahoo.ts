@@ -140,7 +140,8 @@ const CASH_FLOW_FIELDS: Record<string, string[]> = {
   deferred_tax: ["DeferredIncomeTax", "DeferredTax"],
   dividends_paid: ["CashDividendsPaid", "DividendsPaid"],
   share_repurchase: ["RepurchaseOfCapitalStock", "PaymentsForRepurchaseOfCommonStock"],
-  net_borrowings: ["NetBorrowings", "LongTermDebtIssuance", "LongTermDebtPayments"],
+  debt_issuance: ["LongTermDebtIssuance"],
+  debt_repayment: ["LongTermDebtPayments"],
   end_cash: ["EndCashPosition"],
 };
 
@@ -601,6 +602,14 @@ export function normalizeYahooSnapshot(tickerInput: string, raw: YahooRaw, fx: F
           items.free_cash_flow = (items.operating_cash_flow as number) + (items.capex as number);
           derivedFcf += 1;
         }
+        // Net borrowings = proceeds from issuance less repayments (payments are negative).
+        if (isNum(items.debt_issuance) || isNum(items.debt_repayment)) {
+          items.net_borrowings =
+            (isNum(items.debt_issuance) ? (items.debt_issuance as number) : 0) +
+            (isNum(items.debt_repayment) ? (items.debt_repayment as number) : 0);
+        }
+        delete items.debt_issuance;
+        delete items.debt_repayment;
         rows.push({ period_end: asOf, items });
       }
       return rows;
