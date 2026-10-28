@@ -217,7 +217,7 @@ function ResearchStudio() {
           <input
             value={ticker}
             onChange={(event) => setTicker(event.target.value.toUpperCase())}
-            className="bg-panel border border-border rounded-md px-3 py-1.5 text-sm w-44 focus:border-accent outline-none uppercase"
+            className="bg-panel border border-border px-3 py-1.5 text-sm w-44 focus:border-accent outline-none uppercase"
             placeholder="Ticker"
             aria-label="Report ticker"
           />
@@ -297,7 +297,7 @@ function ResearchStudio() {
                   </InfoBanner>
                 ) : null}
                 {selectedQa.length ? (
-                  <div className="border border-border rounded-md p-3">
+                  <div className="border border-border p-3">
                     <div className="text-xs font-medium mb-1">PDF render QA</div>
                     <ul className="space-y-0.5">
                       {selectedQa.map((issue, index) => (
@@ -329,7 +329,7 @@ function ResearchStudio() {
                   {selected.ai_model ? <span className="text-[11px] text-muted self-center">AI narrative: {selected.ai_model}</span> : <span className="text-[11px] text-muted self-center">No AI narrative (deterministic)</span>}
                 </div>
                 {preview ? (
-                  <div className="border border-border rounded-md">
+                  <div className="border border-border">
                     <div className="flex items-center justify-between px-3 py-2 border-b border-border text-xs">
                       <span className="font-medium">Page preview</span>
                       <span className="text-muted">
@@ -346,7 +346,7 @@ function ResearchStudio() {
                             alt={`Report page ${page.number}`}
                             width={page.width}
                             height={page.height}
-                            className="w-full h-auto rounded border border-border/60 bg-white"
+                            className="w-full h-auto border border-border/60 bg-white"
                           />
                           <figcaption className="text-center text-[11px] text-muted mt-1">Page {page.number}</figcaption>
                         </figure>
@@ -404,16 +404,16 @@ function ResearchStudio() {
                         <td className="px-3 py-2 text-right whitespace-nowrap" onClick={(event) => event.stopPropagation()}>
                           <button
                             onClick={() => void downloadPdf(row.id, `apex_${row.ticker}_${row.id}.pdf`)}
-                            className="inline-flex p-1.5 rounded hover:bg-border/60"
+                            className="inline-flex p-1.5 hover:bg-border/60"
                             title="Download PDF"
                             aria-label="Download PDF"
                           >
                             <Download size={14} />
                           </button>
-                          <button onClick={() => void regenerate(row.id)} disabled={busy} className="inline-flex p-1.5 rounded hover:bg-border/60 disabled:opacity-50" title="Regenerate" aria-label="Regenerate report">
+                          <button onClick={() => void regenerate(row.id)} disabled={busy} className="inline-flex p-1.5 hover:bg-border/60 disabled:opacity-50" title="Regenerate" aria-label="Regenerate report">
                             <RefreshCw size={14} />
                           </button>
-                          <button onClick={() => void remove(row.id)} className="inline-flex p-1.5 rounded hover:bg-neg/10 text-neg" title="Delete" aria-label="Delete report">
+                          <button onClick={() => void remove(row.id)} className="inline-flex p-1.5 hover:bg-neg/10 text-neg" title="Delete" aria-label="Delete report">
                             <Trash2 size={14} />
                           </button>
                         </td>

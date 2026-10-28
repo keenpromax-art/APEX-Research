@@ -291,7 +291,7 @@ export default function ModellingPage() {
             onChange={(event) => setModelLabel(event.target.value)}
             placeholder="Model name (optional)"
             aria-label="Model name"
-            className="bg-panel border border-border rounded-md px-2 py-1.5 text-xs w-48 focus:border-accent outline-none"
+            className="bg-panel border border-border px-2 py-1.5 text-xs w-48 focus:border-accent outline-none"
           />
           <Button variant="secondary" size="sm" onClick={saveCurrent} disabled={saving || !currentResult}>
             <Save size={13} /> {saving ? "Saving..." : "Save result"}

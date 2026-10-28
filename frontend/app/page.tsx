@@ -9,7 +9,6 @@ import {
   BarChart3,
   BookOpen,
   Calculator,
-  Clock,
   Cpu,
   Database,
   FileText,
@@ -19,7 +18,7 @@ import {
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { localDate } from "@/lib/format";
-import { Badge, Button, EmptyState, Skeleton, Spinner } from "@/components/ui";
+import { Badge, Button, EmptyState, SectionBar, Skeleton, Spinner } from "@/components/ui";
 
 type Project = { id: number; name: string; ticker: string; description?: string | null; updated_at: string };
 type Model = { name: string; provider: string; enabled: boolean; source: string };
@@ -91,11 +90,11 @@ export default function Home() {
   const enabledModels = models.filter((model) => model.enabled).length;
 
   return (
-    <div className="relative z-10 mx-auto max-w-[1680px] px-4 md:px-6 py-4 md:py-5 space-y-6">
-      {/* Hero — terminal command prompt */}
-      <section className="hero-enter">
-        <div className="flex flex-wrap items-center gap-2 mb-4">
-          <Badge tone="accent">Equity research terminal</Badge>
+    <div className="relative z-10 mx-auto max-w-[1600px] px-0 py-0">
+      {/* Hero */}
+      <section className="px-6 md:px-10 py-10 md:py-14 border-b border-border">
+        <div className="flex flex-wrap items-center gap-2 mb-5">
+          <Badge tone="accent">Equity research platform</Badge>
           <Badge tone={health === "ok" ? "pos" : health === "down" ? "neg" : "muted"}>
             {health === "ok" ? "Engine ready" : health === "down" ? "Engine error" : "Starting engine"}
           </Badge>
@@ -103,22 +102,22 @@ export default function Home() {
             <Badge tone="muted">{enabledModels} AI model{enabledModels === 1 ? "" : "s"}</Badge>
           ) : null}
         </div>
-        <h1 className="display text-gradient max-w-3xl">
-          Ticker in. Investment view out.
+        <h1 className="display max-w-3xl">
+          Ticker in.
+          <br />
+          Investment view out.
         </h1>
-        <p className="text-[13px] text-muted mt-2 max-w-2xl leading-relaxed">
-          Financials, forecast, valuation, research note. Every number produced by tested code — AI only writes the narrative.
+        <p className="text-[14px] text-muted mt-4 max-w-xl leading-relaxed">
+          Financials, forecast, valuation, research note. Every number produced by tested code.
+          AI only writes the narrative.
         </p>
-        <form onSubmit={openTicker} className="mt-5 flex flex-col sm:flex-row gap-1.5 max-w-xl" role="search">
+        <form onSubmit={openTicker} className="mt-6 flex flex-col sm:flex-row gap-2 max-w-xl" role="search">
           <div className="relative flex-1">
-            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-accent pointer-events-none text-xs font-semibold">
-              &gt;
-            </span>
             <input
               value={ticker}
               onChange={(event) => setTicker(event.target.value)}
-              placeholder="AAPL  MSFT  RELIANCE.NS"
-              className="w-full bg-elev border border-border pl-8 pr-3 py-2 text-[13px] focus:border-accent focus:bg-hover outline-none transition-colors placeholder:text-dim mono"
+              placeholder="AAPL   MSFT   RELIANCE.NS"
+              className="w-full bg-elev border border-border px-3 py-2.5 text-[13px] focus:border-accent outline-none transition-colors placeholder:text-dim"
               aria-label="Ticker"
             />
           </div>
@@ -127,41 +126,43 @@ export default function Home() {
             Sample
           </Button>
         </form>
-        <p className="mt-2 text-[10px] text-dim uppercase tracking-wider">
+        <p className="mt-3 text-[10px] text-dim uppercase tracking-wider">
           All computation local — no data leaves this browser
         </p>
       </section>
 
-      {/* Overview strip */}
-      <section className="grid grid-cols-2 md:grid-cols-4 gap-px bg-border border border-border stagger">
-        {[
-          { label: "Projects", value: loading ? "—" : projects.length, hint: "saved" },
-          { label: "AI models", value: loading ? "—" : enabledModels, hint: "enabled" },
-          { label: "Engine", value: health === "ok" ? "OK" : health === "down" ? "ERR" : "...", hint: "local" },
-          { label: "Integrity", value: "Deterministic", hint: "tested" },
-        ].map((m) => (
-          <div key={m.label} className="bg-elev px-4 py-3">
-            <div className="text-[9px] uppercase tracking-[0.14em] text-dim">{m.label}</div>
-            <div className="text-lg font-semibold tabular mt-0.5 leading-tight text-fg">{m.value}</div>
-            <div className="text-[9px] text-dim mt-px uppercase tracking-wider">{m.hint}</div>
-          </div>
-        ))}
+      {/* 01 Overview */}
+      <section>
+        <SectionBar num="01" title="Overview" />
+        <div className="grid-visible grid-cols-2 md:grid-cols-4">
+          {[
+            { label: "Projects", value: loading ? "—" : projects.length, hint: "saved" },
+            { label: "AI models", value: loading ? "—" : enabledModels, hint: "enabled" },
+            { label: "Engine", value: health === "ok" ? "OK" : health === "down" ? "ERR" : "...", hint: "local" },
+            { label: "Integrity", value: "Deterministic", hint: "tested" },
+          ].map((m) => (
+            <div key={m.label} className="px-4 py-4">
+              <div className="text-[9px] uppercase tracking-[0.14em] text-dim">{m.label}</div>
+              <div className="text-xl font-bold tabular mt-1 leading-tight text-fg">{m.value}</div>
+              <div className="text-[9px] text-dim mt-px uppercase tracking-wider">{m.hint}</div>
+            </div>
+          ))}
+        </div>
       </section>
 
-      {/* Continue working */}
+      {/* 02 Continue working */}
       <section>
-        <div className="flex items-end justify-between gap-3 mb-3">
-          <div>
-            <h2 className="eyebrow flex items-center gap-1.5">
-              <Clock size={11} className="text-accent" aria-hidden /> Continue working
-            </h2>
-          </div>
-          <Link href="/library" className="text-[11px] text-accent inline-flex items-center gap-1 whitespace-nowrap hover:underline uppercase tracking-wider">
-            Library <ArrowRight size={11} />
-          </Link>
-        </div>
-        <div className="grid lg:grid-cols-3 gap-px bg-border border border-border">
-          <div className="lg:col-span-2 bg-elev">
+        <SectionBar
+          num="02"
+          title="Continue working"
+          action={
+            <Link href="/library" className="text-white/80 text-[10px] uppercase tracking-wider hover:text-white inline-flex items-center gap-1">
+              Library <ArrowRight size={10} />
+            </Link>
+          }
+        />
+        <div className="grid lg:grid-cols-3">
+          <div className="lg:col-span-2 border-r border-border">
             <div className="px-4 py-2 border-b border-border flex items-center justify-between gap-3">
               <span className="text-[10px] uppercase tracking-[0.14em] text-dim">Saved projects</span>
               {loading ? <Spinner label="Loading" /> : <span className="text-[11px] tabular text-dim">{projects.length}</span>}
@@ -189,14 +190,14 @@ export default function Home() {
                 }
               />
             ) : (
-              <ul className="divide-y divide-border">
+              <ul>
                 {projects.slice(0, 7).map((project) => (
-                  <li key={project.id}>
+                  <li key={project.id} className="border-b border-border last:border-b-0">
                     <Link
                       href={`/company/${encodeURIComponent(project.ticker)}?project=${project.id}`}
                       className="flex items-center gap-3 px-4 py-2 hover:bg-hover transition-colors group"
                     >
-                      <span className="text-[11px] font-semibold text-accent w-24 shrink-0 truncate mono">{project.ticker}</span>
+                      <span className="text-[11px] font-bold text-accent w-24 shrink-0 truncate">{project.ticker}</span>
                       <span className="text-[12px] truncate flex-1 min-w-0">{project.name}</span>
                       <span className="text-[10px] text-dim whitespace-nowrap hidden sm:block tabular">{localDate(project.updated_at)}</span>
                       <ArrowUpRight size={12} className="text-dim shrink-0 group-hover:text-accent transition-colors" aria-hidden />
@@ -207,7 +208,7 @@ export default function Home() {
             )}
           </div>
 
-          <div className="bg-elev">
+          <div>
             <div className="px-4 py-2 border-b border-border flex items-center justify-between gap-3">
               <span className="text-[10px] uppercase tracking-[0.14em] text-dim">Recently opened</span>
               <span className="text-[11px] tabular text-dim">{recent.length}</span>
@@ -217,14 +218,14 @@ export default function Home() {
                 Workspaces open here
               </div>
             ) : (
-              <ul className="divide-y divide-border">
+              <ul>
                 {recent.map((item) => (
-                  <li key={item}>
+                  <li key={item} className="border-b border-border last:border-b-0">
                     <Link
                       href={`/company/${encodeURIComponent(item)}`}
                       className="flex items-center gap-2 px-4 py-2 hover:bg-hover transition-colors group"
                     >
-                      <span className="text-[12px] font-semibold text-accent mono">{item}</span>
+                      <span className="text-[12px] font-bold text-accent">{item}</span>
                       <span className="text-[10px] text-dim ml-auto uppercase tracking-wider">Open</span>
                       <ArrowUpRight size={11} className="text-dim group-hover:text-accent transition-colors" aria-hidden />
                     </Link>
@@ -236,21 +237,21 @@ export default function Home() {
         </div>
       </section>
 
-      {/* Workspaces */}
+      {/* 03 Workspaces */}
       <section>
-        <h2 className="eyebrow mb-3">Workspaces</h2>
-        <nav aria-label="Application sections" className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-px bg-border border border-border stagger">
+        <SectionBar num="03" title="Workspaces" />
+        <nav aria-label="Application sections" className="grid-visible grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
           {ENTRY_POINTS.map(({ href, label, body, icon: Icon }) => (
             <Link
               key={href}
               href={href}
-              className="group bg-elev p-4 hover:bg-hover transition-colors flex flex-col gap-2 min-w-0"
+              className="group p-4 hover:bg-hover transition-colors flex flex-col gap-2 min-w-0"
             >
-              <div className="grid place-items-center h-7 w-7 bg-accent/8 border border-accent/25 text-accent group-hover:border-accent/50 transition-colors shrink-0">
+              <div className="grid place-items-center h-7 w-7 bg-accent/10 border border-accent/30 text-accent group-hover:border-accent transition-colors shrink-0">
                 <Icon size={14} aria-hidden />
               </div>
               <div>
-                <span className="text-[12px] font-semibold leading-snug block uppercase tracking-wide">{label}</span>
+                <span className="text-[12px] font-bold leading-snug block uppercase tracking-wide">{label}</span>
                 <span className="text-[10px] text-dim leading-snug mt-0.5 block">{body}</span>
               </div>
               <ArrowUpRight size={12} className="text-dim group-hover:text-accent transition-colors mt-auto" aria-hidden />
@@ -259,79 +260,75 @@ export default function Home() {
         </nav>
       </section>
 
-      {/* Workflow pipeline */}
+      {/* 04 Pipeline */}
       <section>
-        <h2 className="eyebrow mb-3">Pipeline</h2>
-        <div className="border border-border bg-elev overflow-hidden">
-          <ol className="grid grid-cols-1 md:grid-cols-5 divide-y md:divide-y-0 md:divide-x divide-border stagger">
-            {FLOW.map(({ title, body, icon: Icon }, index) => (
-              <li key={title} className="p-4 flex flex-col gap-2">
-                <div className="flex items-center gap-2">
-                  <span className="grid place-items-center h-6 w-6 bg-accent/8 border border-accent/25 text-accent text-[10px] font-semibold mono shrink-0">
-                    {index + 1}
-                  </span>
-                  <Icon size={13} className="text-accent" aria-hidden />
-                  <span className="text-[11px] font-semibold uppercase tracking-wider">{title}</span>
-                </div>
-                <p className="text-[11px] text-muted leading-relaxed">{body}</p>
-              </li>
-            ))}
-          </ol>
+        <SectionBar num="04" title="Pipeline" />
+        <div className="grid-visible grid-cols-1 md:grid-cols-5">
+          {FLOW.map(({ title, body, icon: Icon }, index) => (
+            <div key={title} className="p-4 flex flex-col gap-2">
+              <div className="flex items-center gap-2">
+                <span className="grid place-items-center h-6 w-6 bg-accent text-white text-[10px] font-bold shrink-0">
+                  {index + 1}
+                </span>
+                <Icon size={13} className="text-accent" aria-hidden />
+                <span className="text-[11px] font-bold uppercase tracking-wider">{title}</span>
+              </div>
+              <p className="text-[11px] text-muted leading-relaxed">{body}</p>
+            </div>
+          ))}
         </div>
       </section>
 
-      {/* Status + AI */}
-      <section className="grid lg:grid-cols-3 gap-px bg-border border border-border">
-        <div className="lg:col-span-2 bg-elev p-4">
-          <h3 className="text-[11px] uppercase tracking-[0.14em] text-dim mb-3 flex items-center gap-1.5">
-            <ShieldCheck size={12} className="text-pos" aria-hidden /> System status
-          </h3>
-          <dl className="grid sm:grid-cols-2 gap-x-8 gap-y-2 text-[12px]">
-            <div className="flex items-center justify-between gap-3">
-              <dt className="text-dim">Saved projects</dt>
-              <dd className="tabular font-medium">{loading ? "—" : projects.length}</dd>
+      {/* 05 Status */}
+      <section>
+        <SectionBar num="05" title="System status" />
+        <div className="grid lg:grid-cols-3">
+          <div className="lg:col-span-2 p-4 border-r border-border">
+            <dl className="grid sm:grid-cols-2 gap-x-8 gap-y-2 text-[12px]">
+              <div className="flex items-center justify-between gap-3">
+                <dt className="text-dim">Saved projects</dt>
+                <dd className="tabular font-medium">{loading ? "—" : projects.length}</dd>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <dt className="text-dim">AI models enabled</dt>
+                <dd className="tabular font-medium">{loading ? "—" : enabledModels}</dd>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <dt className="text-dim">Data engine</dt>
+                <dd>
+                  <Badge tone={health === "ok" ? "pos" : health === "down" ? "neg" : "muted"}>
+                    {health === "ok" ? "ready" : health === "down" ? "error" : "starting"}
+                  </Badge>
+                </dd>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <dt className="text-dim">Model integrity</dt>
+                <dd className="flex items-center gap-1.5 text-pos font-medium">
+                  <ShieldCheck size={12} aria-hidden /> Deterministic
+                </dd>
+              </div>
+            </dl>
+            <div className="mt-3 pt-3 border-t border-border flex flex-wrap gap-x-4 gap-y-1 text-[10px] uppercase tracking-wider">
+              <Link href="/library" className="text-accent inline-flex items-center gap-1 hover:underline">Library <ArrowRight size={10} /></Link>
+              <Link href="/ai" className="text-accent inline-flex items-center gap-1 hover:underline">AI Center <ArrowRight size={10} /></Link>
+              <Link href="/company" className="text-accent inline-flex items-center gap-1 hover:underline">Company <ArrowRight size={10} /></Link>
             </div>
-            <div className="flex items-center justify-between gap-3">
-              <dt className="text-dim">AI models enabled</dt>
-              <dd className="tabular font-medium">{loading ? "—" : enabledModels}</dd>
-            </div>
-            <div className="flex items-center justify-between gap-3">
-              <dt className="text-dim">Data engine</dt>
-              <dd>
-                <Badge tone={health === "ok" ? "pos" : health === "down" ? "neg" : "muted"}>
-                  {health === "ok" ? "ready" : health === "down" ? "error" : "starting"}
-                </Badge>
-              </dd>
-            </div>
-            <div className="flex items-center justify-between gap-3">
-              <dt className="text-dim">Model integrity</dt>
-              <dd className="flex items-center gap-1.5 text-pos font-medium">
-                <ShieldCheck size={12} aria-hidden /> Deterministic
-              </dd>
-            </div>
-          </dl>
-          <div className="mt-3 pt-3 border-t border-border flex flex-wrap gap-x-4 gap-y-1 text-[11px] uppercase tracking-wider">
-            <Link href="/library" className="text-accent inline-flex items-center gap-1 hover:underline">Library <ArrowRight size={10} /></Link>
-            <Link href="/ai" className="text-accent inline-flex items-center gap-1 hover:underline">AI Center <ArrowRight size={10} /></Link>
-            <Link href="/company" className="text-accent inline-flex items-center gap-1 hover:underline">Company <ArrowRight size={10} /></Link>
+          </div>
+
+          <div className="p-4">
+            <h3 className="text-[11px] uppercase tracking-[0.14em] text-dim mb-2">AI optional</h3>
+            <p className="text-[11px] text-muted leading-relaxed">
+              Research reports need at least one configured model (OpenRouter, Groq, NVIDIA NIM or any OpenAI-compatible
+              endpoint). Keys stay in local storage. Without a model, every deterministic workflow still works.
+            </p>
+            <Link href="/ai" className="text-[11px] text-accent inline-flex items-center gap-1 mt-2 hover:underline uppercase tracking-wider">
+              Configure providers <ArrowRight size={10} />
+            </Link>
           </div>
         </div>
-
-        <div className="bg-elev p-4">
-          <h3 className="text-[11px] uppercase tracking-[0.14em] text-dim flex items-center gap-1.5">
-            <Cpu size={12} className="text-accent" aria-hidden /> AI optional
-          </h3>
-          <p className="text-[11px] text-muted mt-2 leading-relaxed">
-            Research reports need at least one configured model (OpenRouter, Groq, NVIDIA NIM or any OpenAI-compatible
-            endpoint). Keys stay in local storage. Without a model, every deterministic workflow still works.
-          </p>
-          <Link href="/ai" className="text-[11px] text-accent inline-flex items-center gap-1 mt-2 hover:underline uppercase tracking-wider">
-            Configure providers <ArrowRight size={10} />
-          </Link>
-        </div>
       </section>
 
-      <footer className="text-[10px] text-dim border-t border-border pt-3 flex flex-wrap items-center justify-between gap-2 uppercase tracking-wider">
+      <footer className="text-[10px] text-dim border-t border-border px-6 md:px-10 py-3 flex flex-wrap items-center justify-between gap-2 uppercase tracking-wider">
         <span>
           Formulas in <span className="text-muted">docs/MODELS.md</span> · Architecture in <span className="text-muted">docs/ARCHITECTURE.md</span>
         </span>

@@ -420,7 +420,7 @@ export default function AIPage() {
               ) : null}
             </div>
             <Field label="api_key" type="password" value={form.api_key} placeholder="sk-…" onChange={(value) => setForm({ ...form, api_key: value })} />
-            <div className="rounded-md border border-border bg-panel/50 px-2.5 py-2 text-[10px] text-muted">
+            <div className="border border-border bg-panel/50 px-2.5 py-2 text-[10px] text-muted">
               The key is stored in this browser&apos;s local storage (unencrypted) and sent only to the provider endpoint you configured. Treat this browser profile as sensitive.
             </div>
             <Button type="submit" className="w-full" disabled={adding}>

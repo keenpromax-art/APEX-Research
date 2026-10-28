@@ -5,6 +5,27 @@ import { AlertTriangle, Inbox, Loader2, TriangleAlert } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { humanize } from "@/lib/format";
 
+/* ── Swiss section bar — signature move ── */
+export function SectionBar({
+  num,
+  title,
+  action,
+  className,
+}: {
+  num?: string;
+  title: string;
+  action?: ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className={cn("section-bar", className)}>
+      {num ? <span className="section-num">{num}</span> : null}
+      <span>{title}</span>
+      {action ? <div className="ml-auto flex items-center gap-2">{action}</div> : null}
+    </div>
+  );
+}
+
 export function Button({
   children,
   className,
@@ -17,7 +38,7 @@ export function Button({
 }) {
   const variants: Record<string, string> = {
     primary: "btn-accent border border-accent",
-    secondary: "bg-panel text-fg hover:bg-hover border border-border hover:border-border-strong",
+    secondary: "bg-elev text-fg hover:bg-hover border border-border hover:border-border-strong",
     ghost: "bg-transparent text-muted hover:bg-hover hover:text-fg border border-transparent",
     danger: "bg-neg/10 text-neg hover:bg-neg/15 border border-neg/40",
   };
@@ -30,7 +51,7 @@ export function Button({
     <button
       {...props}
       className={cn(
-        "inline-flex items-center justify-center gap-1.5 font-medium transition-[background-color,border-color,transform,opacity,color] duration-100 ease-out disabled:opacity-30 disabled:cursor-not-allowed disabled:transform-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent active:scale-[0.97]",
+        "inline-flex items-center justify-center gap-1.5 font-medium transition-[background-color,border-color,opacity,color] duration-80 ease-linear disabled:opacity-30 disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-accent",
         variants[variant],
         sizes[size],
         className,
@@ -43,7 +64,7 @@ export function Button({
 
 export function Card({ children, className }: { children: ReactNode; className?: string }) {
   return (
-    <div className={cn("bg-elev border border-border card-interactive", className)}>
+    <div className={cn("bg-elev border border-border", className)}>
       {children}
     </div>
   );
@@ -61,7 +82,7 @@ export function CardHeader({
   return (
     <div className="flex items-start gap-3 px-4 py-3 border-b border-border">
       <div className="min-w-0 flex-1">
-        <div className="text-[12px] font-semibold tracking-wide uppercase text-fg">{title}</div>
+        <div className="text-[12px] font-bold uppercase tracking-[0.1em] text-fg">{title}</div>
         {subtitle ? (
           <div className="text-[11px] text-muted mt-0.5 leading-relaxed">{subtitle}</div>
         ) : null}
@@ -87,7 +108,7 @@ export function Stat({
   return (
     <div
       className={cn(
-        "bg-elev border border-border min-w-0",
+        "bg-elev min-w-0",
         compact ? "px-3 py-2" : "p-4",
       )}
     >
@@ -97,13 +118,13 @@ export function Stat({
       <div
         className={cn(
           compact ? "text-base" : "text-xl",
-          "font-semibold tabular mt-1 truncate leading-tight",
+          "font-bold tabular mt-0.5 truncate leading-tight",
           tone,
         )}
       >
         {value}
       </div>
-      {hint ? <div className="text-[10px] text-muted mt-0.5 truncate">{hint}</div> : null}
+      {hint ? <div className="text-[10px] text-muted mt-px truncate">{hint}</div> : null}
     </div>
   );
 }
@@ -117,15 +138,15 @@ export function Badge({
 }) {
   const tones: Record<string, string> = {
     muted: "border-border text-muted",
-    accent: "border-accent/40 text-accent bg-accent/8",
-    pos: "border-pos/40 text-pos bg-pos/8",
-    neg: "border-neg/40 text-neg bg-neg/8",
-    warn: "border-warn/40 text-warn bg-warn/8",
+    accent: "border-accent text-white bg-accent",
+    pos: "border-pos/50 text-pos bg-pos/8",
+    neg: "border-neg/50 text-neg bg-neg/8",
+    warn: "border-warn/50 text-warn bg-warn/8",
   };
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1 border px-1.5 py-px text-[9px] font-medium uppercase tracking-[0.12em]",
+        "inline-flex items-center gap-1 border px-1.5 py-px text-[9px] font-bold uppercase tracking-[0.12em]",
         tones[tone],
       )}
     >
@@ -187,9 +208,9 @@ export function Tabs({
           tabIndex={value === tab ? 0 : -1}
           onClick={() => onChange(tab)}
           className={cn(
-            "px-3 py-2 text-[11px] whitespace-nowrap border-b-2 -mb-px transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent uppercase tracking-wider",
+            "px-3 py-2 text-[11px] whitespace-nowrap border-b-2 -mb-px transition-colors focus-visible:outline-2 focus-visible:outline-accent uppercase tracking-wider font-medium",
             value === tab
-              ? "border-accent text-accent font-medium"
+              ? "border-accent text-accent"
               : "border-transparent text-dim hover:text-muted hover:bg-hover",
           )}
         >
@@ -241,7 +262,7 @@ export function EmptyState({
       <div className="grid place-items-center h-9 w-9 bg-panel border border-border text-dim mb-1">
         <Inbox size={16} aria-hidden />
       </div>
-      <div className="text-[12px] font-semibold uppercase tracking-wider">{title}</div>
+      <div className="text-[12px] font-bold uppercase tracking-wider">{title}</div>
       {body ? (
         <div className="text-[11px] text-muted max-w-sm leading-relaxed">{body}</div>
       ) : null}
@@ -290,7 +311,7 @@ export function WarnBanner({ children }: { children: ReactNode }) {
 
 export function InfoBanner({ children }: { children: ReactNode }) {
   return (
-    <div role="status" className="border border-accent/30 bg-accent/5 px-3 py-2 text-[12px] text-muted">
+    <div role="status" className="border border-border bg-panel px-3 py-2 text-[12px] text-muted">
       {children}
     </div>
   );
@@ -330,7 +351,7 @@ export function Field({
         value={value}
         placeholder={placeholder}
         onChange={(event) => onChange(event.target.value)}
-        className="bg-bg border border-border px-2 py-1.5 text-[12px] focus:border-accent focus:bg-hover outline-none tabular transition-colors placeholder:text-dim"
+        className="bg-bg border border-border px-2 py-1.5 text-[12px] focus:border-accent outline-none tabular transition-colors placeholder:text-dim"
       />
       {hint ? <span className="text-[9px] text-dim">{hint}</span> : null}
     </label>
@@ -356,7 +377,7 @@ export function Select({
       <select
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className="bg-bg border border-border px-2 py-1.5 text-[12px] focus:border-accent focus:bg-hover outline-none transition-colors"
+        className="bg-bg border border-border px-2 py-1.5 text-[12px] focus:border-accent outline-none transition-colors"
       >
         {options.map((option) => (
           <option key={option.value} value={option.value}>

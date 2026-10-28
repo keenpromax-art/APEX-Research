@@ -711,7 +711,7 @@ export default function CompanyPage() {
                 <h1 className="text-xl md:text-2xl font-semibold tracking-tight truncate">
                   {company?.name || info.longName || ticker}
                 </h1>
-                <span className="mono text-xs font-semibold text-accent border border-accent/40 bg-accent/10 rounded px-1.5 py-0.5 shrink-0">
+                <span className="mono text-xs font-semibold text-accent border border-accent/40 bg-accent/10 px-1.5 py-0.5 shrink-0">
                   {ticker}
                 </span>
                 {isDemo ? <Badge tone="warn">Synthetic data</Badge> : null}
@@ -946,7 +946,7 @@ export default function CompanyPage() {
       {tab === "Statements" ? (
         <div className="space-y-3">
           <div className="flex items-center gap-2">
-            <div className="inline-flex border border-border rounded-md overflow-hidden">
+            <div className="inline-flex border border-border overflow-hidden">
               {(["annual", "quarterly"] as const).map((option) => (
                 <button
                   key={option}
@@ -1032,7 +1032,7 @@ export default function CompanyPage() {
                   max={25}
                   value={years}
                   onChange={(event) => setYears(event.target.value)}
-                  className="w-16 bg-panel border border-border rounded-md px-2 py-1.5 text-xs focus:border-accent outline-none"
+                  className="w-16 bg-panel border border-border px-2 py-1.5 text-xs focus:border-accent outline-none"
                 />
                 <Button size="sm" onClick={runForecast}>Run forecast</Button>
                 <Button
@@ -1286,7 +1286,7 @@ export default function CompanyPage() {
                     value={sensMode}
                     onChange={(event) => setSensMode(event.target.value)}
                     aria-label="Terminal assumption axis"
-                    className="bg-panel border border-border rounded-md px-2 py-1.5 text-xs focus:border-accent outline-none"
+                    className="bg-panel border border-border px-2 py-1.5 text-xs focus:border-accent outline-none"
                   >
                     <option value="growth">Terminal growth</option>
                     <option value="multiple">Exit multiple</option>
@@ -1400,7 +1400,7 @@ export default function CompanyPage() {
                     value={modelName}
                     onChange={(event) => setModelName(event.target.value)}
                     aria-label="AI model"
-                    className="bg-panel border border-border rounded-md px-2 py-1.5 text-xs max-w-56 focus:border-accent outline-none"
+                    className="bg-panel border border-border px-2 py-1.5 text-xs max-w-56 focus:border-accent outline-none"
                   >
                     <option value="">Default model</option>
                     {enabledModels.map((model) => (
@@ -1417,7 +1417,7 @@ export default function CompanyPage() {
                   </Button>
                   <Link
                     href={`/research?ticker=${encodeURIComponent(ticker)}`}
-                    className="border border-accent/50 text-accent px-3 py-1.5 rounded-md text-xs hover:bg-accent/10 inline-flex items-center"
+                    className="border border-accent/50 text-accent px-3 py-1.5 text-xs hover:bg-accent/10 inline-flex items-center"
                     title="Open the full institutional research studio versioned generator"
                   >
                     Research Studio
@@ -1434,7 +1434,7 @@ export default function CompanyPage() {
                   body={enabledModels.length ? "Generate a research draft when you are ready." : "Configure an AI provider to generate research drafts."}
                   action={
                     enabledModels.length ? null : (
-                      <Link href="/ai" className="btn-accent px-3 py-1.5 rounded-md text-xs font-medium inline-flex items-center">
+                      <Link href="/ai" className="btn-accent px-3 py-1.5 text-xs font-medium inline-flex items-center">
                         Configure AI
                       </Link>
                     )

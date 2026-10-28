@@ -142,7 +142,7 @@ export default function LibraryPage() {
               onChange={(event) => setQuery(event.target.value)}
               placeholder="Filter by ticker, name or kind"
               aria-label="Filter library"
-              className="bg-panel border border-border rounded-md pl-8 pr-2 py-1.5 text-xs w-60 focus:border-accent outline-none"
+              className="bg-panel border border-border pl-8 pr-2 py-1.5 text-xs w-60 focus:border-accent outline-none"
             />
           </div>
           <Button variant="secondary" size="sm" onClick={load}>
@@ -196,7 +196,7 @@ export default function LibraryPage() {
                     Clear filter
                   </Button>
                 ) : (
-                  <Link href="/company" className="btn-accent px-3 py-1.5 rounded-md text-xs font-medium">
+                  <Link href="/company" className="btn-accent px-3 py-1.5 text-xs font-medium">
                     Browse companies
                   </Link>
                 )
@@ -259,7 +259,7 @@ export default function LibraryPage() {
                     Clear filter
                   </Button>
                 ) : (
-                  <Link href="/modelling" className="btn-accent px-3 py-1.5 rounded-md text-xs font-medium">
+                  <Link href="/modelling" className="btn-accent px-3 py-1.5 text-xs font-medium">
                     Open modelling
                   </Link>
                 )

@@ -71,7 +71,7 @@ export default function SettingsPage() {
                   key={value}
                   onClick={() => setTheme(value)}
                   className={cn(
-                    "flex items-start gap-2 rounded-md border px-3 py-2.5 text-left transition-colors",
+                    "flex items-start gap-2 border px-3 py-2.5 text-left transition-colors",
                     theme === value ? "border-accent bg-accent/5" : "border-border hover:bg-hover",
                   )}
                 >
@@ -144,7 +144,7 @@ export default function SettingsPage() {
             </div>
             {health === "checking" ? <Spinner label="Checking engine" /> : null}
             {health === "down" ? (
-              <div className="rounded-md border border-warn/40 bg-warn/10 px-2.5 py-2 text-[11px] text-warn">
+              <div className="border border-warn/40 bg-warn/10 px-2.5 py-2 text-[11px] text-warn">
                 The local engine did not respond. Reload the page — nothing is installed on a server.
               </div>
             ) : null}
@@ -159,7 +159,7 @@ export default function SettingsPage() {
             {SHORTCUTS.map((shortcut) => (
               <div key={shortcut.keys} className="flex items-center justify-between gap-3 text-xs">
                 <span className="text-muted">{shortcut.action}</span>
-                <kbd className="mono text-[10px] border border-border rounded px-1.5 py-0.5 bg-panel whitespace-nowrap">{shortcut.keys}</kbd>
+                <kbd className="mono text-[10px] border border-border px-1.5 py-0.5 bg-panel whitespace-nowrap">{shortcut.keys}</kbd>
               </div>
             ))}
             <div className="text-[11px] text-muted pt-1 flex items-center gap-1.5">

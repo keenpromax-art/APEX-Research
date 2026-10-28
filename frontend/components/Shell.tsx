@@ -34,11 +34,10 @@ const NAV = [
 
 const COMPACT_KEY = "apex-sidebar-compact";
 
-function ApexMark({ size = 18 }: { size?: number }) {
+function ApexMark({ size = 16 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden>
-      <path d="M12 3 L21 20 H17.2 L12 10.6 L6.8 20 H3 Z" fill="var(--accent)" />
-      <path d="M12 3 L15.5 9.6 H8.5 Z" fill="var(--bg)" opacity="0.55" />
+      <path d="M12 3 L21 20 H17.2 L12 10.6 L6.8 20 H3 Z" fill="#FFFFFF" />
     </svg>
   );
 }
@@ -129,12 +128,13 @@ export function Shell({ children }: { children: ReactNode }) {
 
   return (
     <div className="flex h-screen overflow-hidden bg-bg text-fg">
+      {/* Sidebar */}
       <aside
         ref={drawerRef}
         tabIndex={-1}
         className={cn(
-          "fixed inset-y-0 left-0 z-40 flex flex-col bg-elev border-r border-border md:static md:translate-x-0 transition-[transform,width] duration-150 ease-out",
-          compact ? "md:w-[52px]" : "md:w-[200px]",
+          "fixed inset-y-0 left-0 z-40 flex flex-col bg-elev border-r border-border md:static md:translate-x-0 transition-[transform,width] duration-100 ease-linear",
+          compact ? "md:w-[56px]" : "md:w-[208px]",
           "w-[240px]",
           open ? "translate-x-0" : "-translate-x-full",
         )}
@@ -143,26 +143,26 @@ export function Shell({ children }: { children: ReactNode }) {
         {/* Brand */}
         <div
           className={cn(
-            "h-11 flex items-center border-b border-border shrink-0",
-            compact ? "md:justify-center px-2" : "px-3 gap-2",
+            "flex items-center border-b border-border shrink-0 bg-accent",
+            compact ? "md:justify-center h-11 px-2" : "h-11 px-3 gap-2.5",
           )}
         >
           <Link
             href="/"
             className="flex items-center gap-2 min-w-0"
             onClick={() => setOpen(false)}
-            title="APEX Terminal — home"
+            title="APEX Research — home"
           >
-            <span className="shrink-0 grid place-items-center h-6 w-6 bg-accent/10 border border-accent/30">
-              <ApexMark size={14} />
+            <span className="shrink-0 grid place-items-center h-6 w-6 bg-white/15">
+              <ApexMark size={13} />
             </span>
             <span className={cn("flex flex-col leading-none min-w-0", compact && "md:hidden")}>
-              <span className="text-accent text-xs font-semibold tracking-widest">APEX</span>
-              <span className="text-[8px] text-dim uppercase tracking-[0.2em] mt-px">Terminal</span>
+              <span className="text-white text-[13px] font-bold tracking-[0.08em]">APEX</span>
+              <span className="text-white/60 text-[8px] uppercase tracking-[0.22em] mt-px">Research</span>
             </span>
           </Link>
           <button
-            className="ml-auto md:hidden p-1 hover:bg-hover text-muted"
+            className="ml-auto md:hidden p-1 text-white/70 hover:text-white"
             aria-label="Close navigation"
             onClick={() => setOpen(false)}
           >
@@ -171,18 +171,18 @@ export function Shell({ children }: { children: ReactNode }) {
         </div>
 
         {/* Nav */}
-        <nav className="flex-1 overflow-auto py-2 px-1.5 space-y-4" aria-label="Sections">
-          {groups.map((group) => (
-            <div key={group}>
+        <nav className="flex-1 overflow-auto py-2 px-0" aria-label="Sections">
+          {groups.map((group, gi) => (
+            <div key={group} className={cn(gi > 0 && "border-t border-border mt-2 pt-2")}>
               <div
                 className={cn(
-                  "px-2 mb-1 text-[9px] uppercase tracking-[0.18em] text-dim",
+                  "px-3 mb-1 text-[9px] uppercase tracking-[0.18em] text-dim font-medium",
                   compact && "md:hidden",
                 )}
               >
                 {group}
               </div>
-              <div className="space-y-px">
+              <div>
                 {NAV.filter((n) => n.group === group).map(({ href, label, icon: Icon }) => {
                   const active =
                     href === "/" ? pathname === "/" : pathname === href || pathname.startsWith(href + "/");
@@ -194,10 +194,10 @@ export function Shell({ children }: { children: ReactNode }) {
                       title={label}
                       aria-current={active ? "page" : undefined}
                       className={cn(
-                        "flex items-center gap-2 text-[11px] transition-colors border-l-2",
-                        compact ? "md:justify-center md:px-2 md:py-1.5" : "px-2 py-1.5",
+                        "flex items-center gap-2.5 text-[12px] transition-colors border-l-3",
+                        compact ? "md:justify-center md:px-2 md:py-2" : "px-3 py-1.5",
                         active
-                          ? "bg-accent/8 text-fg border-accent"
+                          ? "bg-hover text-fg border-accent font-medium"
                           : "text-muted hover:bg-hover hover:text-fg border-transparent",
                       )}
                     >
@@ -207,9 +207,6 @@ export function Shell({ children }: { children: ReactNode }) {
                         aria-hidden
                       />
                       <span className={cn("truncate", compact && "md:hidden")}>{label}</span>
-                      {active && !compact ? (
-                        <span className="ml-auto status-dot live" aria-hidden />
-                      ) : null}
                     </Link>
                   );
                 })}
@@ -219,8 +216,8 @@ export function Shell({ children }: { children: ReactNode }) {
         </nav>
 
         {/* Footer controls */}
-        <div className={cn("border-t border-border shrink-0", compact ? "md:py-1.5 px-1.5" : "px-2 py-1.5")}>
-          <div className={cn("flex items-center gap-0.5", compact ? "md:flex-col" : "")}>
+        <div className={cn("border-t border-border shrink-0", compact ? "md:py-2 px-2" : "px-3 py-2")}>
+          <div className={cn("flex items-center gap-1", compact ? "md:flex-col" : "")}>
             <button
               onClick={toggleTheme}
               className="p-1.5 hover:bg-hover text-muted hover:text-fg transition-colors"
@@ -251,15 +248,16 @@ export function Shell({ children }: { children: ReactNode }) {
 
       {open && (
         <div
-          className="fixed inset-0 z-30 bg-black/60 md:hidden"
+          className="fixed inset-0 z-30 bg-black/50 md:hidden"
           onClick={() => setOpen(false)}
           aria-hidden
         />
       )}
 
+      {/* Main column */}
       <div className="flex-1 flex flex-col min-w-0 relative z-10">
-        {/* Ticker status bar */}
-        <header className="h-9 border-b border-border flex items-center px-2 md:px-3 gap-2 bg-elev shrink-0">
+        {/* Top bar */}
+        <header className="h-10 border-b border-border flex items-center px-2 md:px-3 gap-2 bg-elev shrink-0">
           <button
             className="md:hidden p-1 -m-1 hover:bg-hover min-w-[28px] min-h-[28px] flex items-center justify-center text-muted"
             aria-label="Open navigation"
@@ -269,7 +267,7 @@ export function Shell({ children }: { children: ReactNode }) {
             <Menu size={16} />
           </button>
 
-          <form onSubmit={submitSearch} className="flex-1 max-w-xl relative" role="search">
+          <form onSubmit={submitSearch} className="flex-1 max-w-md relative" role="search">
             <Search
               size={13}
               className="absolute left-2.5 top-1/2 -translate-y-1/2 text-dim pointer-events-none"
@@ -279,29 +277,28 @@ export function Shell({ children }: { children: ReactNode }) {
               ref={searchRef}
               value={q}
               onChange={(event) => setQ(event.target.value)}
-              placeholder="AAPL  MSFT  RELIANCE.NS"
-              className="w-full bg-bg border border-border pl-8 pr-14 py-1 text-[11px] focus:border-accent focus:bg-hover outline-none transition-colors placeholder:text-dim"
+              placeholder="Ticker search"
+              className="w-full bg-bg border border-border pl-8 pr-14 py-1 text-[12px] focus:border-accent outline-none transition-colors placeholder:text-dim"
               aria-label="Ticker search"
             />
             <kbd className="hidden sm:flex absolute right-1.5 top-1/2 -translate-y-1/2 text-[9px] text-dim border border-border px-1 py-px bg-elev items-center gap-1 pointer-events-none">
               <span>⌘K</span>
-              <span className="text-dim">/</span>
+              <span>/</span>
             </kbd>
           </form>
 
           <Link
             href="/company/SAMPLE"
-            className="hidden md:inline-flex items-center gap-1.5 text-[10px] text-muted hover:text-accent whitespace-nowrap border border-border px-2 py-1 hover:border-accent/40 transition-colors uppercase tracking-wider"
+            className="hidden md:inline-flex items-center gap-1.5 text-[10px] text-muted hover:text-accent whitespace-nowrap border border-border px-2 py-1 hover:border-accent transition-colors uppercase tracking-wider"
             title="Open the sample company"
           >
-            <span className="status-dot live" aria-hidden />
             Sample
           </Link>
 
           <div className="hidden md:flex items-center gap-2 ml-auto text-[10px] text-dim tabular">
             <span className="status-dot live" aria-hidden />
             <span>LIVE</span>
-            <span className="text-border-strong">│</span>
+            <span className="text-border-strong">|</span>
             <span>{clock}</span>
           </div>
         </header>

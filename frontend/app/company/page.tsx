@@ -128,13 +128,13 @@ export default function CompanyIndex() {
               aria-controls="ticker-suggestions"
               aria-activedescendant={activeIndex >= 0 ? `ticker-option-${activeIndex}` : undefined}
               aria-autocomplete="list"
-              className="w-full bg-panel border border-border rounded-md pl-9 pr-3 py-2.5 text-sm focus:border-accent outline-none"
+              className="w-full bg-panel border border-border pl-9 pr-3 py-2.5 text-sm focus:border-accent outline-none"
             />
             {showSuggestions && suggestions.length > 0 ? (
               <ul
                 id="ticker-suggestions"
                 role="listbox"
-                className="absolute left-0 right-0 top-full mt-1 z-30 max-h-72 overflow-y-auto rounded-md border border-border bg-panel shadow-xl"
+                className="absolute left-0 right-0 top-full mt-1 z-30 max-h-72 overflow-y-auto border border-border bg-panel"
               >
                 {suggestions.map((row, index) => (
                   <li
