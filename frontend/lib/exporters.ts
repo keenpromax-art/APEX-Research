@@ -47,19 +47,42 @@ export type ExportPayload = {
 
 export type PdfLayoutIssue = { level: "error" | "warn" | "info"; check: string; detail: string };
 
-const INK: PdfColor = { r: 0.08, g: 0.09, b: 0.11 };
-const ACCENT: PdfColor = { r: 0.13, g: 0.35, b: 0.85 };
-const POS: PdfColor = { r: 0.06, g: 0.45, b: 0.29 };
-const NEG: PdfColor = { r: 0.72, g: 0.16, b: 0.16 };
+const INK: PdfColor = { r: 0.05, g: 0.05, b: 0.05 };
+const ACCENT: PdfColor = { r: 0.886, g: 0.137, b: 0.102 }; // Swiss red #E2231A
+const POS: PdfColor = { r: 0.09, g: 0.42, b: 0.23 }; // restrained green for pass/BUY only
+const NEG: PdfColor = { r: 0.75, g: 0.11, b: 0.11 };
 const AMBER: PdfColor = { r: 0.71, g: 0.47, b: 0.05 };
-const PANEL: PdfColor = { r: 0.955, g: 0.965, b: 0.98 };
-const ZEBRA: PdfColor = { r: 0.976, g: 0.98, b: 0.988 };
-const DEMO_FILL: PdfColor = { r: 0.99, g: 0.93, b: 0.93 };
+const PANEL: PdfColor = { r: 0.955, g: 0.955, b: 0.955 };
+const ZEBRA: PdfColor = { r: 0.972, g: 0.972, b: 0.972 };
+const DEMO_FILL: PdfColor = { r: 0.99, g: 0.94, b: 0.94 };
 const RULE_GRAY = 0.82;
 
+/** Negatives are flagged red; positives stay ink for a clean Swiss look. */
 function trendColor(value?: number | null): PdfColor | undefined {
   if (!isNum(value) || value === 0) return undefined;
-  return value > 0 ? POS : NEG;
+  return value < 0 ? NEG : undefined;
+}
+
+/**
+ * Build one formatter for a whole table column so magnitudes share a single
+ * unit (e.g. every cell in millions) instead of mixing 1.68B with 686.61M.
+ */
+function moneyColumnFormatter(values: unknown[]): (value: unknown) => string {
+  const nums = values.filter(isNum) as number[];
+  const maxAbs = nums.length ? Math.max(...nums.map((n) => Math.abs(n))) : 0;
+  let div = 1;
+  let suffix = "";
+  if (maxAbs >= 1e12) { div = 1e12; suffix = "T"; }
+  else if (maxAbs >= 1e9) { div = 1e9; suffix = "B"; }
+  else if (maxAbs >= 1e6) { div = 1e6; suffix = "M"; }
+  else if (maxAbs >= 1e3) { div = 1e3; suffix = "K"; }
+  return (value: unknown) => {
+    if (!isNum(value)) return "—";
+    if (div === 1) return num(value, Math.abs(value) < 100 ? 1 : 0);
+    const scaled = value / div;
+    const digits = Math.abs(scaled) < 10 ? 2 : Math.abs(scaled) < 100 ? 1 : 0;
+    return `${num(scaled, digits)}${suffix}`;
+  };
 }
 
 function label(value: unknown, fallback = "—"): string {
@@ -288,14 +311,15 @@ function sectionD_financials(doc: PdfDocument, payload: ExportPayload) {
 
   if (history.length) {
     doc.space(6).text("Key ratios", { size: 9.5, bold: true, gray: 0.3, gap: 3 });
+    const fcfFmt = moneyColumnFormatter(history.map((r) => r.fcf));
     const ratioCols = [
-      { key: "period", label: "Period", x: 0, format: (r: AnyRecord) => yearOf(r) },
+      { key: "period", label: "Period", x: 0, format: (r: AnyRecord) => yearOf(r), bold: () => true },
       { key: "revenue_growth", label: "Rev growth", x: 80, align: "right" as const, format: (r: AnyRecord) => pct(r.revenue_growth), color: (r: AnyRecord) => trendColor(r.revenue_growth) },
       { key: "gross_margin", label: "Gross margin", x: 165, align: "right" as const, format: (r: AnyRecord) => pct(r.gross_margin) },
       { key: "operating_margin", label: "Op margin", x: 255, align: "right" as const, format: (r: AnyRecord) => pct(r.operating_margin) },
       { key: "net_margin", label: "Net margin", x: 330, align: "right" as const, format: (r: AnyRecord) => pct(r.net_margin) },
       { key: "roic", label: "ROIC", x: 405, align: "right" as const, format: (r: AnyRecord) => pct(r.roic) },
-      { key: "fcf", label: "FCF", x: CONTENT_WIDTH, align: "right" as const, format: (r: AnyRecord) => cellMoney(r.fcf), color: (r: AnyRecord) => trendColor(r.fcf) },
+      { key: "fcf", label: "FCF", x: CONTENT_WIDTH, align: "right" as const, format: (r: AnyRecord) => fcfFmt(r.fcf) },
     ];
     doc.dataTable(ratioCols, history, { fontSize: 8, headerFontSize: 7, sourceNote: "Derived from reported statements. Nulls preserved where data is missing." });
   }
@@ -330,13 +354,18 @@ function sectionE_forecast(doc: PdfDocument, payload: ExportPayload) {
     return;
   }
 
+  const revFmt = moneyColumnFormatter(periods.map((r) => r.revenue));
+  const ebitdaFmt = moneyColumnFormatter(periods.map((r) => r.ebitda));
+  const ebitFmt = moneyColumnFormatter(periods.map((r) => r.ebit));
+  const niFmt = moneyColumnFormatter(periods.map((r) => r.net_income));
+  const fcfFmt = moneyColumnFormatter(periods.map((r) => r.free_cash_flow));
   const fcCols = [
-    { key: "year", label: "Year", x: 0, format: (r: AnyRecord) => `Y${isNum(r.year) ? Math.round(r.year) : label(r.year)}` },
-    { key: "revenue", label: "Revenue", x: 80, align: "right" as const, format: (r: AnyRecord) => cellMoney(r.revenue) },
-    { key: "ebitda", label: "EBITDA", x: 160, align: "right" as const, format: (r: AnyRecord) => cellMoney(r.ebitda) },
-    { key: "ebit", label: "EBIT", x: 230, align: "right" as const, format: (r: AnyRecord) => cellMoney(r.ebit) },
-    { key: "net_income", label: "Net income", x: 310, align: "right" as const, format: (r: AnyRecord) => cellMoney(r.net_income), color: (r: AnyRecord) => trendColor(r.net_income) },
-    { key: "free_cash_flow", label: "FCF", x: 400, align: "right" as const, format: (r: AnyRecord) => cellMoney(r.free_cash_flow), color: (r: AnyRecord) => trendColor(r.free_cash_flow) },
+    { key: "year", label: "Year", x: 0, format: (r: AnyRecord) => `Y${isNum(r.year) ? Math.round(r.year) : label(r.year)}`, bold: () => true },
+    { key: "revenue", label: "Revenue", x: 80, align: "right" as const, format: (r: AnyRecord) => revFmt(r.revenue) },
+    { key: "ebitda", label: "EBITDA", x: 160, align: "right" as const, format: (r: AnyRecord) => ebitdaFmt(r.ebitda) },
+    { key: "ebit", label: "EBIT", x: 230, align: "right" as const, format: (r: AnyRecord) => ebitFmt(r.ebit) },
+    { key: "net_income", label: "Net income", x: 310, align: "right" as const, format: (r: AnyRecord) => niFmt(r.net_income), color: (r: AnyRecord) => trendColor(r.net_income) },
+    { key: "free_cash_flow", label: "FCF", x: 400, align: "right" as const, format: (r: AnyRecord) => fcfFmt(r.free_cash_flow), color: (r: AnyRecord) => trendColor(r.free_cash_flow) },
     { key: "shares", label: "Shares", x: CONTENT_WIDTH, align: "right" as const, format: (r: AnyRecord) => (isNum(r.shares) ? fmt(r.shares) : "—") },
   ];
   doc.dataTable(fcCols, periods, { fontSize: 8, headerFontSize: 7, sourceNote: `Forecast figures in ${currency}. Deterministic model output.` });
@@ -416,11 +445,14 @@ function sectionF_valuation(doc: PdfDocument, payload: ExportPayload) {
   const periods: AnyRecord[] = Array.isArray(forecast?.periods) ? forecast.periods : [];
   const flows: number[] = Array.isArray(forecast?.periods) ? forecast.periods.map((p: AnyRecord) => p.fcf) : [];
   if (flows.length) {
+    const pvFlows = flows.map((f) => (isNum(f) ? f / Math.pow(1 + dcf.wacc, flows.indexOf(f) + 1) : null));
+    const discFcfFmt = moneyColumnFormatter(flows);
+    const discPvFmt = moneyColumnFormatter(pvFlows);
     const discCols = [
-      { key: "year", label: "Year", x: 0, format: (_r: AnyRecord, i: number) => `Y${i + 1}` },
-      { key: "fcf", label: "Free cash flow", x: 90, align: "right" as const, format: (_r: AnyRecord, i: number) => cellMoney(flows[i]), color: (_r: AnyRecord, i: number) => trendColor(flows[i]) },
+      { key: "year", label: "Year", x: 0, format: (_r: AnyRecord, i: number) => `Y${i + 1}`, bold: () => true },
+      { key: "fcf", label: "Free cash flow", x: 90, align: "right" as const, format: (_r: AnyRecord, i: number) => discFcfFmt(flows[i]), color: (_r: AnyRecord, i: number) => trendColor(flows[i]) },
       { key: "df", label: "Discount factor", x: 210, align: "right" as const, format: (_r: AnyRecord, i: number) => num(1 / Math.pow(1 + dcf.wacc, i + 1), 4) },
-      { key: "pv", label: "Present value", x: CONTENT_WIDTH, align: "right" as const, format: (_r: AnyRecord, i: number) => cellMoney(flows[i] / Math.pow(1 + dcf.wacc, i + 1)) },
+      { key: "pv", label: "Present value", x: CONTENT_WIDTH, align: "right" as const, format: (_r: AnyRecord, i: number) => discPvFmt(pvFlows[i]) },
     ];
     doc.dataTable(discCols, flows.map((f, i) => ({ fcf: f, i })), { fontSize: 8, headerFontSize: 7 });
   }

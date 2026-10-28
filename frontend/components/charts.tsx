@@ -30,7 +30,7 @@ function tooltipProps(cursorLine = true) {
     contentStyle: {
       background: "var(--bg-elev)",
       border: "1px solid var(--border-strong)",
-      borderRadius: 6,
+      borderRadius: 0,
       fontSize: 11,
       color: "var(--text)",
       boxShadow: "none",
@@ -72,7 +72,7 @@ export function PriceChart({ data }: { data: PricePoint[] }) {
             <stop offset="100%" stopColor="var(--accent)" stopOpacity={0.02} />
           </linearGradient>
         </defs>
-        <CartesianGrid stroke={grid} strokeOpacity={0.7} strokeDasharray="3 3" vertical={false} />
+        <CartesianGrid stroke={grid} strokeOpacity={1} vertical={false} />
         <XAxis
           dataKey="date"
           {...axisTick}
@@ -123,7 +123,7 @@ export function RevenueChart({ data, unit }: { data: PeriodMetric[]; unit?: stri
   return (
     <ResponsiveContainer width="100%" height="100%">
       <LineChart data={data} margin={margin}>
-        <CartesianGrid stroke={grid} strokeOpacity={0.7} strokeDasharray="3 3" vertical={false} />
+        <CartesianGrid stroke={grid} strokeOpacity={1} vertical={false} />
         <XAxis
           dataKey="label"
           {...axisTick}
@@ -184,7 +184,7 @@ export function MarginChart({ data }: { data: PeriodMetric[] }) {
   return (
     <ResponsiveContainer width="100%" height="100%">
       <LineChart data={data} margin={margin}>
-        <CartesianGrid stroke={grid} strokeOpacity={0.7} strokeDasharray="3 3" vertical={false} />
+        <CartesianGrid stroke={grid} strokeOpacity={1} vertical={false} />
         <XAxis
           dataKey="label"
           {...axisTick}
@@ -255,7 +255,7 @@ export function ForecastChart({ data, unit }: { data: ForecastPeriod[]; unit?: s
   return (
     <ResponsiveContainer width="100%" height="100%">
       <BarChart data={data} margin={margin} barGap={2} maxBarSize={30}>
-        <CartesianGrid stroke={grid} strokeOpacity={0.7} strokeDasharray="3 3" vertical={false} />
+        <CartesianGrid stroke={grid} strokeOpacity={1} vertical={false} />
         <XAxis
           dataKey="year"
           {...axisTick}
@@ -275,9 +275,9 @@ export function ForecastChart({ data, unit }: { data: ForecastPeriod[]; unit?: s
           formatter={(value: number, name: string) => [`${fmt(value)}${suffix}`, name]}
         />
         <Legend {...legendBar} />
-        <Bar dataKey="revenue" name="Revenue" fill="var(--accent)" radius={[3, 3, 0, 0]} />
-        <Bar dataKey="ebitda" name="EBITDA" fill="var(--pos)" radius={[3, 3, 0, 0]} />
-        <Bar dataKey="fcf" name="FCF" fill="var(--warn)" radius={[3, 3, 0, 0]} />
+        <Bar dataKey="revenue" name="Revenue" fill="var(--accent)" />
+        <Bar dataKey="ebitda" name="EBITDA" fill="var(--pos)" />
+        <Bar dataKey="fcf" name="FCF" fill="var(--warn)" />
       </BarChart>
     </ResponsiveContainer>
   );

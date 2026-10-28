@@ -39,6 +39,9 @@ const HELVETICA_BOLD_WIDTHS: Record<number, number> = {
 
 export type PdfColor = { r: number; g: number; b: number };
 
+/** Swiss red accent (#E2231A) used for section bars and table headers. */
+export const PDF_ACCENT: PdfColor = { r: 0.886, g: 0.137, b: 0.102 };
+
 export type PdfTextOptions = {
   size?: number;
   bold?: boolean;
@@ -359,7 +362,7 @@ export class PdfDocument {
     const minContentBelow = options.minContentBelow ?? 74;
     const needed = leading + 6 + minContentBelow; // heading + gap + first content block
     if (this.cursorY - needed < MARGIN_BOTTOM) this.newPage();
-    this.accentRule(options.color ?? { r: 0.13, g: 0.35, b: 0.85 }, 26, 2.5, 5);
+    this.accentRule(options.color ?? PDF_ACCENT, 26, 2.5, 5);
     this.text(title, { size, bold: true, color: options.color ?? { r: 0.08, g: 0.09, b: 0.11 }, gap: options.gap ?? 5 });
     return this;
   }
@@ -374,30 +377,32 @@ export class PdfDocument {
     options: PdfTableOptions<Row> = {},
   ) {
     const fontSize = options.fontSize ?? 8.5;
-    const headerFontSize = options.headerFontSize ?? 7.5;
-    const rowHeight = options.rowHeight ?? Math.max(15, fontSize * 1.65);
-    const headerHeight = Math.max(16, headerFontSize * 2.1);
-    const zebra = options.zebra ?? true;
-    const headerFill = options.headerFill ?? { r: 0.945, g: 0.955, b: 0.972 };
-    const zebraFill = options.zebraFill ?? { r: 0.976, g: 0.98, b: 0.988 };
+    const headerFontSize = options.headerFontSize ?? 7;
+    const rowHeight = options.rowHeight ?? Math.max(16, fontSize * 1.7);
+    const headerHeight = Math.max(18, headerFontSize * 2.2);
+    const zebra = options.zebra ?? false;
+    const headerFill = options.headerFill ?? { r: 0.955, g: 0.955, b: 0.955 };
+    const zebraFill = options.zebraFill ?? { r: 0.972, g: 0.972, b: 0.972 };
 
     const drawHeader = () => {
       this.ensureSpace(headerHeight + rowHeight);
+      // Red accent bar along the top edge of the table.
+      this.rect(0, -2.5, CONTENT_WIDTH, 2.5, PDF_ACCENT);
       this.rect(0, 0, CONTENT_WIDTH, headerHeight, headerFill);
       columns.forEach((column) => {
-        const label = ascii(column.label);
+        const label = ascii(column.label.toUpperCase());
         const textWidth = measureText(label, headerFontSize, true);
         const x =
           column.align === "right" ? MARGIN_LEFT + column.x - textWidth : MARGIN_LEFT + Math.max(0, column.x);
         this.pages[this.pages.length - 1].push(
-          `BT /F2 ${headerFontSize} Tf 0.16 0.18 0.22 rg 1 0 0 1 ${x.toFixed(2)} ` +
+          `BT /F2 ${headerFontSize} Tf 0.12 0.12 0.14 rg 1 0 0 1 ${x.toFixed(2)} ` +
             `${(this.cursorY - headerFontSize * 0.9).toFixed(2)} Tm (${escapePdfText(label)}) Tj ET`,
         );
       });
       this.cursorY -= headerHeight;
       if (options.headerRule !== false) {
         const y = this.cursorY;
-        this.pages[this.pages.length - 1].push(`0.75 G 0.5 w ${MARGIN_LEFT} ${y.toFixed(2)} m ${(MARGIN_LEFT + CONTENT_WIDTH).toFixed(2)} ${y.toFixed(2)} l S`);
+        this.pages[this.pages.length - 1].push(`0.2 G 0.6 w ${MARGIN_LEFT} ${y.toFixed(2)} m ${(MARGIN_LEFT + CONTENT_WIDTH).toFixed(2)} ${y.toFixed(2)} l S`);
       }
     };
 
@@ -419,18 +424,23 @@ export class PdfDocument {
           column.align === "right" ? MARGIN_LEFT + column.x - textWidth : MARGIN_LEFT + Math.max(0, column.x);
         const paint = cellColor
           ? `${cellColor.r.toFixed(3)} ${cellColor.g.toFixed(3)} ${cellColor.b.toFixed(3)} rg`
-          : "0.15 0.16 0.19 rg";
+          : "0.12 0.12 0.14 rg";
         this.pages[this.pages.length - 1].push(
           `BT /${bold ? "F2" : "F1"} ${fontSize} Tf ${paint} 1 0 0 1 ${x.toFixed(2)} ` +
             `${baseline.toFixed(2)} Tm (${escapePdfText(cellText)}) Tj ET`,
         );
       });
       this.cursorY -= rowHeight;
+      // Hairline rule between rows for legibility.
+      if (index < rows.length - 1) {
+        const y = this.cursorY;
+        this.pages[this.pages.length - 1].push(`0.9 G 0.3 w ${MARGIN_LEFT} ${y.toFixed(2)} m ${(MARGIN_LEFT + CONTENT_WIDTH).toFixed(2)} ${y.toFixed(2)} l S`);
+      }
     });
 
-    // Hairline under the table.
+    // Solid rule under the table.
     const y = this.cursorY + 1;
-    this.pages[this.pages.length - 1].push(`0.8 G 0.4 w ${MARGIN_LEFT} ${y.toFixed(2)} m ${(MARGIN_LEFT + CONTENT_WIDTH).toFixed(2)} ${y.toFixed(2)} l S`);
+    this.pages[this.pages.length - 1].push(`0.2 G 0.6 w ${MARGIN_LEFT} ${y.toFixed(2)} m ${(MARGIN_LEFT + CONTENT_WIDTH).toFixed(2)} ${y.toFixed(2)} l S`);
     this.cursorY -= 4;
 
     if (options.sourceNote) this.sourceNote(options.sourceNote);
@@ -445,8 +455,8 @@ export class PdfDocument {
 
   /** Callout panel with a light fill and body text. */
   callout(title: string, body: string, options: { fill?: PdfColor; accent?: PdfColor; titleColor?: PdfColor } = {}) {
-    const fill = options.fill ?? { r: 0.955, g: 0.965, b: 0.98 };
-    const accent = options.accent ?? { r: 0.13, g: 0.35, b: 0.85 };
+    const fill = options.fill ?? { r: 0.96, g: 0.96, b: 0.96 };
+    const accent = options.accent ?? PDF_ACCENT;
     const bodySize = 8.8;
     const bodyLines = wrapToWidth(ascii(body), CONTENT_WIDTH - 24, bodySize, false);
     const height = 10 + (title ? 14 : 0) + bodyLines.length * bodySize * 1.4 + 8;
@@ -492,8 +502,10 @@ export class PdfDocument {
     // Gridlines + y-axis labels.
     for (let value = lo; value <= hi + step / 2; value += step) {
       const y = yAbs(value);
-      const grid = Math.abs(value) < 1e-12 ? 0.6 : 0.9;
-      page.push(`${grid} G 0.4 w ${MARGIN_LEFT + plotLeft} ${y.toFixed(2)} m ${MARGIN_LEFT + plotLeft + plotWidth} ${y.toFixed(2)} l S`);
+      const isZero = Math.abs(value) < 1e-12;
+      const grid = isZero ? 0.55 : 0.9;
+      const weight = isZero ? 0.5 : 0.3;
+      page.push(`${grid} G ${weight} w ${MARGIN_LEFT + plotLeft} ${y.toFixed(2)} m ${MARGIN_LEFT + plotLeft + plotWidth} ${y.toFixed(2)} l S`);
       const label = formatAxis(value);
       const labelWidth = measureText(label, 6.5, false);
       page.push(
@@ -561,8 +573,10 @@ export class PdfDocument {
 
     for (let value = lo; value <= hi + step / 2; value += step) {
       const y = yAbs(value);
-      const grid = Math.abs(value) < 1e-12 ? 0.6 : 0.9;
-      page.push(`${grid} G 0.4 w ${MARGIN_LEFT + plotLeft} ${y.toFixed(2)} m ${MARGIN_LEFT + plotLeft + plotWidth} ${y.toFixed(2)} l S`);
+      const isZero = Math.abs(value) < 1e-12;
+      const grid = isZero ? 0.55 : 0.9;
+      const weight = isZero ? 0.5 : 0.3;
+      page.push(`${grid} G ${weight} w ${MARGIN_LEFT + plotLeft} ${y.toFixed(2)} m ${MARGIN_LEFT + plotLeft + plotWidth} ${y.toFixed(2)} l S`);
       const label = formatAxis(value);
       const labelWidth = measureText(label, 6.5, false);
       page.push(
