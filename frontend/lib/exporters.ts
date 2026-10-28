@@ -333,7 +333,7 @@ function sectionD_financials(doc: PdfDocument, payload: ExportPayload) {
   renderStatement("Cash-flow statement", cashflow, cashflowKeys, "The dataset carries no cash-flow statement for this company. Historical free cash flow, operating cash flow and capex are reported as null and are never estimated.");
 
   if (history.length) {
-    doc.space(6).text("Key ratios", { size: 9.5, bold: true, gray: 0.3, gap: 3 });
+    doc.space(6).text("Key ratios - growth & margins", { size: 9.5, bold: true, gray: 0.3, gap: 3 });
     const fcfFmt = moneyColumnFormatter(history.map((r) => r.fcf));
     const ratioCols = [
       { key: "period", label: "Period", x: 0, format: (r: AnyRecord) => yearOf(r), bold: () => true },
@@ -341,10 +341,24 @@ function sectionD_financials(doc: PdfDocument, payload: ExportPayload) {
       { key: "gross_margin", label: "Gross margin", x: 165, align: "right" as const, format: (r: AnyRecord) => pct(r.gross_margin) },
       { key: "operating_margin", label: "Op margin", x: 255, align: "right" as const, format: (r: AnyRecord) => pct(r.operating_margin) },
       { key: "net_margin", label: "Net margin", x: 330, align: "right" as const, format: (r: AnyRecord) => pct(r.net_margin) },
-      { key: "roic", label: "ROIC", x: 405, align: "right" as const, format: (r: AnyRecord) => pct(r.roic) },
+      { key: "ebitda_margin", label: "EBITDA margin", x: 415, align: "right" as const, format: (r: AnyRecord) => (isNum(r.ebitda) && isNum(r.revenue) && r.revenue ? pct(r.ebitda / r.revenue) : "—") },
+      { key: "roic", label: "ROIC", x: 450, align: "right" as const, format: (r: AnyRecord) => pct(r.roic) },
       { key: "fcf", label: "FCF", x: CONTENT_WIDTH, align: "right" as const, format: (r: AnyRecord) => fcfFmt(r.fcf) },
     ];
     doc.dataTable(ratioCols, history, { fontSize: 8, headerFontSize: 7, sourceNote: "Derived from reported statements. Nulls preserved where data is missing." });
+
+    doc.space(6).text("Key ratios - returns, leverage & per-share", { size: 9.5, bold: true, gray: 0.3, gap: 3 });
+    const ndFmt = moneyColumnFormatter(history.map((r) => r.net_debt));
+    const creditCols = [
+      { key: "period", label: "Period", x: 0, format: (r: AnyRecord) => yearOf(r), bold: () => true },
+      { key: "roe", label: "ROE", x: 80, align: "right" as const, format: (r: AnyRecord) => pct(r.roe), color: (r: AnyRecord) => trendColor(r.roe) },
+      { key: "eps_diluted", label: "EPS", x: 145, align: "right" as const, format: (r: AnyRecord) => (isNum(r.eps_diluted) ? num(r.eps_diluted, 2) : "—"), color: (r: AnyRecord) => trendColor(r.eps_diluted) },
+      { key: "current_ratio", label: "Current ratio", x: 240, align: "right" as const, format: (r: AnyRecord) => (isNum(r.current_ratio) ? num(r.current_ratio, 2) : "—") },
+      { key: "net_debt", label: "Net debt", x: 330, align: "right" as const, format: (r: AnyRecord) => ndFmt(r.net_debt) },
+      { key: "nd_ebitda", label: "Net debt/EBITDA", x: 415, align: "right" as const, format: (r: AnyRecord) => (isNum(r.net_debt) && isNum(r.ebitda) && r.ebitda ? `${num(r.net_debt / r.ebitda, 1)}x` : "—") },
+      { key: "book_value_per_share", label: "Book value/sh", x: CONTENT_WIDTH, align: "right" as const, format: (r: AnyRecord) => (isNum(r.book_value_per_share) ? num(r.book_value_per_share, 2) : "—"), color: (r: AnyRecord) => trendColor(r.book_value_per_share) },
+    ];
+    doc.dataTable(creditCols, history, { fontSize: 8, headerFontSize: 7, sourceNote: "Returns, leverage and per-share ratios derived from reported statements. Nulls preserved where data is missing." });
   }
 
   // Trend chart across reported history.
