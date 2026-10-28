@@ -119,6 +119,14 @@ button { font: inherit; color: inherit; }
   border-radius: var(--radius-lg);
 }
 
+/* Utility: accent action button — text color follows the theme so it passes AA contrast */
+.btn-accent {
+  background: var(--accent);
+  color: var(--bg);
+  transition: background-color 150ms ease, opacity 150ms ease;
+}
+.btn-accent:hover { background: var(--accent-strong); }
+
 /* Chart palette */
 .chart-grid { stroke: var(--border); stroke-opacity: 0.6; }
 .chart-axis { fill: var(--text-muted); font-size: 11px; }

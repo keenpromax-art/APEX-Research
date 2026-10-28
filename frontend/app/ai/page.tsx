@@ -426,7 +426,7 @@ export default function AIPage() {
             <button
               type="submit"
               disabled={adding}
-              className="w-full bg-accent text-black px-3 py-2 rounded-md text-xs font-medium hover:opacity-90 disabled:opacity-40"
+              className="w-full btn-accent px-3 py-2 rounded-md text-xs font-medium hover:opacity-90 disabled:opacity-40"
             >
               {adding ? "Adding..." : "Add model"}
             </button>

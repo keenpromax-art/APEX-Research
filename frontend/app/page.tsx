@@ -102,7 +102,7 @@ export default function Home() {
                 aria-label="Ticker"
               />
             </div>
-            <button type="submit" className="bg-accent text-black px-4 py-2.5 rounded-md text-sm font-medium hover:opacity-90">
+            <button type="submit" className="btn-accent px-4 py-2.5 rounded-md text-sm font-medium hover:opacity-90">
               Open workspace
             </button>
             <Link

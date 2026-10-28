@@ -6,7 +6,7 @@ import { useSearchParams } from "next/navigation";
 import { BookOpen, Calculator, Save } from "lucide-react";
 import { api, getErrorMessage } from "@/lib/api";
 import { fmt, isNum, num, pct, tone } from "@/lib/format";
-import { Badge, Card, CardHeader, EmptyState, ErrorBanner, Field, InfoBanner, Select, Spinner, Stat, TableWrap, Tabs } from "@/components/ui";
+import { Badge, Card, CardHeader, EmptyState, ErrorBanner, Field, InfoBanner, Select, Spinner, Stat, TableWrap, Tabs, WarnBanner } from "@/components/ui";
 
 const TABS = ["LBO", "Options", "Bond", "WACC"] as const;
 
@@ -347,7 +347,7 @@ export default function ModellingPage() {
                 title="Leveraged buyout"
                 subtitle="Annual debt sweep; debt_paydown_pct is the share of post-interest cash swept to debt."
                 action={
-                  <button onClick={() => runTab("LBO")} disabled={running !== null} className="bg-accent text-black px-3 py-1.5 rounded-md text-xs font-medium disabled:opacity-40">
+                  <button onClick={() => runTab("LBO")} disabled={running !== null} className="btn-accent px-3 py-1.5 rounded-md text-xs font-medium disabled:opacity-40">
                     {running === "LBO" ? "Running..." : "Run LBO"}
                   </button>
                 }
@@ -416,12 +416,17 @@ export default function ModellingPage() {
                 <Stat label="Net exit proceeds" value={fmt(lboResult.net_exit_proceeds)} tone={tone(lboResult.net_exit_proceeds)} />
                 <Stat label="MOIC" value={isNum(lboResult.moic) ? `${num(lboResult.moic)}x` : "—"} tone={tone(lboResult.moic)} />
               </div>
-              <TableWrap>
-                <table className="w-full text-xs">
+              <TableWrap className="max-h-[440px]">
+                <table className="w-full min-w-[560px] text-xs">
+                  <caption className="sr-only">LBO annual schedule: EBITDA, NOPAT, interest, cash sweep and closing debt balance by year</caption>
                   <thead>
-                    <tr className="bg-panel/60">
+                    <tr className="sticky top-0 z-10">
                       {["Year", "EBITDA", "NOPAT", "Interest", "Cash available", "Debt paydown", "Debt balance"].map((heading) => (
-                        <th key={heading} className="text-right px-3 py-2 first:text-left">
+                        <th
+                          key={heading}
+                          scope="col"
+                          className={`px-3 py-2 bg-surface border-b border-border ${heading === "Year" ? "text-left" : "text-right"}`}
+                        >
                           {heading}
                         </th>
                       ))}
@@ -429,7 +434,7 @@ export default function ModellingPage() {
                   </thead>
                   <tbody>
                     {(lboResult.schedule || []).map((row: any) => (
-                      <tr key={row.year} className="border-t border-border hover:bg-panel/40">
+                      <tr key={row.year} className="border-b border-border/70 hover:bg-panel/40">
                         <td className="px-3 py-1.5 text-muted">Year {row.year}</td>
                         <td className="text-right px-3 py-1.5 tabular">{fmt(row.ebitda)}</td>
                         <td className="text-right px-3 py-1.5 tabular">{fmt(row.nopat)}</td>
@@ -462,7 +467,7 @@ export default function ModellingPage() {
                 title="Black-Scholes option value"
                 subtitle="European option with a continuous dividend yield."
                 action={
-                  <button onClick={() => runTab("Options")} disabled={running !== null} className="bg-accent text-black px-3 py-1.5 rounded-md text-xs font-medium disabled:opacity-40">
+                  <button onClick={() => runTab("Options")} disabled={running !== null} className="btn-accent px-3 py-1.5 rounded-md text-xs font-medium disabled:opacity-40">
                     {running === "Options" ? "Pricing..." : "Price option"}
                   </button>
                 }
@@ -528,7 +533,9 @@ export default function ModellingPage() {
                 <Stat label="P(d1)" value={pct(optionResult.d1_probability)} hint="risk-neutral ITM proxy" />
                 <Stat label="P(d2)" value={pct(optionResult.d2_probability)} />
               </div>
-              {optionResult.warning ? <div className="px-4 pb-3 text-xs text-warn">• {optionResult.warning}</div> : null}
+              {optionResult.warning ? (
+                <div className="mx-4 mb-4"><WarnBanner>{optionResult.warning}</WarnBanner></div>
+              ) : null}
             </Card>
           ) : running !== "Options" ? (
             <Card>
@@ -546,7 +553,7 @@ export default function ModellingPage() {
                 title="Bond pricing"
                 subtitle="Fixed-coupon bond priced from a yield to maturity."
                 action={
-                  <button onClick={() => runTab("Bond")} disabled={running !== null} className="bg-accent text-black px-3 py-1.5 rounded-md text-xs font-medium disabled:opacity-40">
+                  <button onClick={() => runTab("Bond")} disabled={running !== null} className="btn-accent px-3 py-1.5 rounded-md text-xs font-medium disabled:opacity-40">
                     {running === "Bond" ? "Valuing..." : "Value bond"}
                   </button>
                 }
@@ -612,7 +619,7 @@ export default function ModellingPage() {
                 title="WACC calculator"
                 subtitle="CAPM cost of equity plus after-tax cost of debt."
                 action={
-                  <button onClick={() => runTab("WACC")} disabled={running !== null} className="bg-accent text-black px-3 py-1.5 rounded-md text-xs font-medium disabled:opacity-40">
+                  <button onClick={() => runTab("WACC")} disabled={running !== null} className="btn-accent px-3 py-1.5 rounded-md text-xs font-medium disabled:opacity-40">
                     {running === "WACC" ? "Calculating..." : "Calculate WACC"}
                   </button>
                 }

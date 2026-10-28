@@ -16,10 +16,12 @@ import {
   Field,
   InfoBanner,
   Select,
+  Skeleton,
   Spinner,
   Stat,
   TableWrap,
   Tabs,
+  WarnBanner,
 } from "@/components/ui";
 
 const TABS = ["Overview", "Business", "Statements", "History", "Forecast", "Valuation", "Sensitivity", "Risks", "Report", "Sources"];
@@ -116,7 +118,8 @@ function fmtMetric(key: string, value: unknown) {
   return fmt(value);
 }
 
-function StatementTable({ rows }: { rows: any[] }) {
+function StatementTable({ rows, label, currency }: { rows: any[]; label: string; currency: string }) {
+  const [showAll, setShowAll] = useState(false);
   if (!rows.length) {
     return <EmptyState title="No periods for this statement" body="The local engine has no periods for this statement in the selected range." />;
   }
@@ -129,34 +132,51 @@ function StatementTable({ rows }: { rows: any[] }) {
     if (bi === -1) return -1;
     return ai - bi;
   });
-  const visible = rows.slice(0, 8);
+  const visible = showAll ? rows : rows.slice(0, 8);
+  const hiddenCount = rows.length - visible.length;
   return (
-    <TableWrap>
-      <table className="w-full text-xs">
-        <thead>
-          <tr className="bg-panel/60">
-            <th className="text-left px-3 py-2 sticky left-0 bg-surface z-10">Line item</th>
-            {visible.map((row) => (
-              <th key={row.period_end} className="text-right px-3 py-2 whitespace-nowrap">
-                {periodLabel(row.period_end)}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {keys.map((key) => (
-            <tr key={key} className="border-t border-border hover:bg-panel/40">
-              <td className="px-3 py-1.5 sticky left-0 bg-surface z-10 whitespace-nowrap text-muted">{humanize(key)}</td>
+    <>
+      <TableWrap className="max-h-[480px]">
+        <table className="w-full min-w-[560px] text-xs">
+          <caption className="sr-only">{`${label} by reporting period, latest first`}</caption>
+          <thead>
+            <tr className="sticky top-0 z-10">
+              <th className="text-left px-3 py-2 sticky left-0 top-0 z-20 bg-surface border-b border-border">Line item</th>
               {visible.map((row) => (
-                <td key={row.period_end} className="text-right px-3 py-1.5 tabular whitespace-nowrap">
-                  {fmt(row.items?.[key])}
-                </td>
+                <th key={row.period_end} className="text-right px-3 py-2 whitespace-nowrap bg-surface border-b border-border tabular">
+                  {periodLabel(row.period_end)}
+                </th>
               ))}
             </tr>
-          ))}
-        </tbody>
-      </table>
-    </TableWrap>
+          </thead>
+          <tbody>
+            {keys.map((key) => (
+              <tr key={key} className="border-b border-border/70 hover:bg-panel/40">
+                <td className="px-3 py-1.5 sticky left-0 bg-surface z-10 whitespace-nowrap text-muted">{humanize(key)}</td>
+                {visible.map((row) => (
+                  <td key={row.period_end} className="text-right px-3 py-1.5 tabular whitespace-nowrap">
+                    {fmt(row.items?.[key])}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </TableWrap>
+      <div className="flex items-center justify-between gap-3 px-4 py-2 border-t border-border text-[11px] text-muted">
+        <span>
+          Values in {currency}. Showing latest {visible.length} of {rows.length} periods{hiddenCount > 0 ? ` · ${hiddenCount} older hidden` : ""}.
+        </span>
+        {rows.length > 8 ? (
+          <button
+            onClick={() => setShowAll((current) => !current)}
+            className="text-accent hover:underline whitespace-nowrap"
+          >
+            {showAll ? "Show latest 8" : `Show all ${rows.length} periods`}
+          </button>
+        ) : null}
+      </div>
+    </>
   );
 }
 
@@ -583,12 +603,17 @@ export default function CompanyPage() {
 
   if (loading) {
     return (
-      <div className="p-6 md:p-8 max-w-7xl mx-auto space-y-4">
-        <div className="h-10 w-64 rounded bg-panel animate-pulse" />
-        <div className="h-24 rounded-lg bg-panel animate-pulse" />
+      <div className="p-5 md:p-7 max-w-7xl mx-auto space-y-4">
+        <Skeleton className="h-10 w-72" />
+        <Skeleton className="h-20 rounded-lg" />
         <div className="grid md:grid-cols-3 gap-3">
           {[0, 1, 2].map((item) => (
-            <div key={item} className="h-24 rounded-lg bg-panel animate-pulse" />
+            <Skeleton key={item} className="h-24 rounded-lg" />
+          ))}
+        </div>
+        <div className="grid md:grid-cols-2 gap-3">
+          {[0, 1].map((item) => (
+            <Skeleton key={item} className="h-56 rounded-lg" />
           ))}
         </div>
         <Spinner label={`Loading ${ticker}`} />
@@ -645,7 +670,7 @@ export default function CompanyPage() {
           <button
             onClick={runReport}
             disabled={reportLoading || enabledModels.length === 0}
-            className="bg-accent text-black px-3 py-1.5 rounded-md text-xs font-medium hover:opacity-90 disabled:opacity-40 inline-flex items-center gap-1.5"
+            className="btn-accent px-3 py-1.5 rounded-md text-xs font-medium hover:opacity-90 disabled:opacity-40 inline-flex items-center gap-1.5"
             title={enabledModels.length === 0 ? "Configure an AI model first" : "Generate a research draft"}
           >
             {reportLoading ? <Spinner label="Writing" /> : <><Sparkles size={13} /> Research note</>}
@@ -735,7 +760,7 @@ export default function CompanyPage() {
             <Card>
               <CardHeader title="Revenue, net income and FCF" subtitle="Annual reported history" />
               <div className="h-64 p-2">
-                <RevenueChart data={chartData} />
+                <RevenueChart data={chartData} unit={currency} />
               </div>
             </Card>
             <Card>
@@ -800,7 +825,7 @@ export default function CompanyPage() {
                 <button
                   key={option}
                   onClick={() => setPeriodicity(option)}
-                  className={`px-3 py-1.5 text-xs ${periodicity === option ? "bg-accent text-black" : "text-muted hover:bg-panel"}`}
+                  className={`px-3 py-1.5 text-xs ${periodicity === option ? "btn-accent" : "text-muted hover:bg-panel"}`}
                 >
                   {option === "annual" ? "Annual" : "Quarterly"}
                 </button>
@@ -810,8 +835,8 @@ export default function CompanyPage() {
           </div>
           {STATEMENTS.map((statement) => (
             <Card key={statement.key}>
-              <CardHeader title={statement.label} subtitle={`${(statementSet[statement.key] || []).length} periods available`} />
-              <StatementTable rows={statementSet[statement.key] || []} />
+              <CardHeader title={statement.label} subtitle={`${(statementSet[statement.key] || []).length} periods available · latest first`} />
+              <StatementTable rows={statementSet[statement.key] || []} label={statement.label} currency={currency} />
             </Card>
           ))}
         </div>
@@ -820,14 +845,15 @@ export default function CompanyPage() {
       {tab === "History" ? (
         <div className="space-y-4">
           <Card>
-            <CardHeader title="Operating history" subtitle="Reported metrics, most recent first" />
-            <TableWrap>
-              <table className="w-full text-xs">
+            <CardHeader title="Operating history" subtitle="Reported metrics, most recent first · scroll for older periods" />
+            <TableWrap className="max-h-[520px]">
+              <table className="w-full min-w-[560px] text-xs">
+                <caption className="sr-only">Reported metrics by reporting period, most recent first</caption>
                 <thead>
-                  <tr className="bg-panel/60">
-                    <th className="text-left px-3 py-2 sticky left-0 bg-surface z-10">Metric</th>
+                  <tr className="sticky top-0 z-10">
+                    <th className="text-left px-3 py-2 sticky left-0 top-0 z-20 bg-surface border-b border-border">Metric</th>
                     {metricsPeriods.map((period: any) => (
-                      <th key={period.period_end} className="text-right px-3 py-2 whitespace-nowrap">
+                      <th key={period.period_end} className="text-right px-3 py-2 whitespace-nowrap bg-surface border-b border-border tabular">
                         {periodLabel(period.period_end)}
                       </th>
                     ))}
@@ -835,7 +861,7 @@ export default function CompanyPage() {
                 </thead>
                 <tbody>
                   {METRIC_KEYS.map((key) => (
-                    <tr key={key} className="border-t border-border hover:bg-panel/40">
+                    <tr key={key} className="border-b border-border/70 hover:bg-panel/40">
                       <td className="px-3 py-1.5 sticky left-0 bg-surface z-10 text-muted whitespace-nowrap">{humanize(key)}</td>
                       {metricsPeriods.map((period: any) => (
                         <td key={period.period_end} className="text-right px-3 py-1.5 tabular whitespace-nowrap">
@@ -874,7 +900,7 @@ export default function CompanyPage() {
                     onChange={(event) => setYears(event.target.value)}
                     className="w-16 bg-panel border border-border rounded-md px-2 py-1 text-xs"
                   />
-                  <button onClick={runForecast} className="bg-accent text-black px-3 py-1.5 rounded-md text-xs font-medium">
+                  <button onClick={runForecast} className="btn-accent px-3 py-1.5 rounded-md text-xs font-medium">
                     Run forecast
                   </button>
                   <button
@@ -938,25 +964,26 @@ export default function CompanyPage() {
                   }
                 />
                 <div className="h-64 p-2">
-                  <ForecastChart data={forecast.periods} />
+                  <ForecastChart data={forecast.periods} unit={currency} />
                 </div>
               </Card>
 
               <Card>
-                <CardHeader title="Projected statements" subtitle="Selected lines; the full model is in the export" />
-                <TableWrap>
-                  <table className="w-full text-xs">
+                <CardHeader title="Projected statements" subtitle="Selected lines; the full model is in the Excel export" />
+                <TableWrap className="max-h-[520px]">
+                  <table className="w-full min-w-[520px] text-xs">
+                    <caption className="sr-only">Projected financial lines by forecast year</caption>
                     <thead>
-                      <tr className="bg-panel/60">
-                        <th className="text-left px-3 py-2 sticky left-0 bg-surface z-10">Line</th>
+                      <tr className="sticky top-0 z-10">
+                        <th className="text-left px-3 py-2 sticky left-0 top-0 z-20 bg-surface border-b border-border">Line</th>
                         {forecast.periods.map((period: any) => (
-                          <th key={period.year} className="text-right px-3 py-2">Y{period.year}</th>
+                          <th key={period.year} className="text-right px-3 py-2 bg-surface border-b border-border tabular">Y{period.year}</th>
                         ))}
                       </tr>
                     </thead>
                     <tbody>
                       {["revenue", "gross_profit", "ebitda", "ebit", "net_income", "ocf", "fcf", "capex", "cash", "debt", "equity", "eps", "balance_check"].map((key) => (
-                        <tr key={key} className="border-t border-border hover:bg-panel/40">
+                        <tr key={key} className="border-b border-border/70 hover:bg-panel/40">
                           <td className="px-3 py-1.5 sticky left-0 bg-surface z-10 text-muted">{humanize(key)}</td>
                           {forecast.periods.map((period: any) => (
                             <td key={period.year} className="text-right px-3 py-1.5 tabular whitespace-nowrap">
@@ -1000,7 +1027,7 @@ export default function CompanyPage() {
                 <Field label="Shares outstanding" value={sharesInput} placeholder={String(Math.round(derivedShares))} onChange={setSharesInput} />
                 <Field label="Net debt (debt − cash)" value={netDebtInput} placeholder={String(Math.round(derivedNetDebt))} onChange={setNetDebtInput} />
                 <div className="md:col-span-2 flex flex-wrap gap-2">
-                  <button onClick={() => runDcf(false)} disabled={dcfLoading} className="bg-accent text-black px-3 py-1.5 rounded-md text-xs font-medium disabled:opacity-40">
+                  <button onClick={() => runDcf(false)} disabled={dcfLoading} className="btn-accent px-3 py-1.5 rounded-md text-xs font-medium disabled:opacity-40">
                     Run DCF
                   </button>
                   <button onClick={() => runDcf(true)} disabled={dcfLoading || !hasForecast} className="border border-border px-3 py-1.5 rounded-md text-xs hover:bg-panel disabled:opacity-40">
@@ -1059,10 +1086,14 @@ export default function CompanyPage() {
                 <Stat label="Net debt" value={fmt(dcf.net_debt)} />
               </div>
               {dcf.warnings?.length ? (
-                <div className="px-4 pb-4 space-y-1">
-                  {dcf.warnings.map((warning: string, index: number) => (
-                    <div key={index} className="text-xs text-warn">• {warning}</div>
-                  ))}
+                <div className="mx-4 mb-4">
+                  <WarnBanner>
+                    <ul className="list-disc pl-4 space-y-0.5">
+                      {dcf.warnings.map((warning: string, index: number) => (
+                        <li key={index}>{warning}</li>
+                      ))}
+                    </ul>
+                  </WarnBanner>
                 </div>
               ) : null}
               <div className="px-4 pb-4 text-[11px] text-muted">
@@ -1107,7 +1138,7 @@ export default function CompanyPage() {
                     <option value="growth">Terminal growth</option>
                     <option value="multiple">Exit multiple</option>
                   </select>
-                  <button onClick={runSensitivity} disabled={sensLoading} className="bg-accent text-black px-3 py-1.5 rounded-md text-xs font-medium disabled:opacity-40">
+                  <button onClick={runSensitivity} disabled={sensLoading} className="btn-accent px-3 py-1.5 rounded-md text-xs font-medium disabled:opacity-40">
                     Run
                   </button>
                 </div>
@@ -1116,13 +1147,16 @@ export default function CompanyPage() {
             <div className="p-4 space-y-3">
               {sensError ? <ErrorBanner message={sensError} /> : null}
               {sens ? (
-                <TableWrap>
-                  <table className="w-full text-xs">
+                <TableWrap className="max-h-[520px]">
+                  <table className="w-full min-w-[520px] text-xs">
+                    <caption className="sr-only">Share value across WACC and terminal assumptions {currentPrice ? `against the current price ${num(currentPrice)}` : ""}</caption>
                     <thead>
-                      <tr className="bg-panel/60">
-                        <th className="text-left px-3 py-2">WACC \ {sensMode === "growth" ? "growth" : "multiple"}</th>
+                      <tr className="sticky top-0 z-10">
+                        <th scope="col" className="text-left px-3 py-2 bg-surface border-b border-border whitespace-nowrap sticky left-0 top-0 z-20">
+                          WACC \ {sensMode === "growth" ? "growth" : "multiple"}
+                        </th>
                         {(sens.terminal_values || []).map((value: number) => (
-                          <th key={value} className="text-right px-3 py-2">
+                          <th key={value} scope="col" className="text-right px-3 py-2 bg-surface border-b border-border tabular whitespace-nowrap">
                             {sensMode === "growth" ? pct(value) : `${value.toFixed(1)}x`}
                           </th>
                         ))}
@@ -1130,16 +1164,33 @@ export default function CompanyPage() {
                     </thead>
                     <tbody>
                       {(sens.wacc_values || []).map((waccValue: number, rowIndex: number) => (
-                        <tr key={waccValue} className="border-t border-border">
-                          <td className="px-3 py-1.5 text-muted">{pct(waccValue)}</td>
-                          {(sens.table[rowIndex] || []).map((value: any, columnIndex: number) => (
-                            <td
-                              key={columnIndex}
-                              className={`text-right px-3 py-1.5 tabular ${isNum(value) && isNum(currentPrice) ? (value >= currentPrice ? "text-pos" : "text-neg") : ""}`}
-                            >
-                              {fmt(value)}
-                            </td>
-                          ))}
+                        <tr key={waccValue} className="border-b border-border/70 hover:bg-panel/30">
+                          <th scope="row" className="text-left px-3 py-1.5 text-muted font-normal tabular whitespace-nowrap sticky left-0 bg-surface">
+                            {pct(waccValue)}
+                          </th>
+                          {(sens.table[rowIndex] || []).map((value: any, columnIndex: number) => {
+                            const above = isNum(value) && isNum(currentPrice) ? value >= currentPrice : null;
+                            const spread = above !== null ? Math.abs(value / currentPrice - 1) : null;
+                            const tint =
+                              above !== null && spread !== null
+                                ? `color-mix(in srgb, ${above ? "var(--pos)" : "var(--neg)"} ${Math.round(6 + Math.min(1, spread) * 26)}%, transparent)`
+                                : undefined;
+                            return (
+                              <td
+                                key={columnIndex}
+                                style={{ background: tint }}
+                                className={`text-right px-3 py-1.5 tabular whitespace-nowrap ${above === null ? "" : above ? "text-pos" : "text-neg"}`}
+                              >
+                                {above !== null ? (
+                                  <>
+                                    <span aria-hidden className="mr-1 text-[9px] align-[1px]">{above ? "▲" : "▼"}</span>
+                                    <span className="sr-only">{above ? "above" : "below"} current price: </span>
+                                  </>
+                                ) : null}
+                                {fmt(value)}
+                              </td>
+                            );
+                          })}
                         </tr>
                       ))}
                     </tbody>
@@ -1148,7 +1199,9 @@ export default function CompanyPage() {
               ) : (
                 <EmptyState title="No sensitivity table yet" body="Run the table to test how the share value responds to discount rate and terminal assumptions." />
               )}
-              <div className="text-[11px] text-muted">Green = above the current share price; red = below.</div>
+              <div className="text-[11px] text-muted">
+                ▲ above the current share price · ▼ below · deeper tint = larger spread.
+              </div>
             </div>
           </Card>
         </div>
@@ -1169,7 +1222,7 @@ export default function CompanyPage() {
                 title="Risks are generated from verified data"
                 body="Generate the AI research note to see the risk, catalyst and strength sections. The underlying numbers still come from the deterministic engine."
                 action={
-                  <button onClick={runReport} disabled={reportLoading || enabledModels.length === 0} className="bg-accent text-black px-3 py-1.5 rounded-md text-xs font-medium disabled:opacity-40 inline-flex items-center gap-1.5">
+                  <button onClick={runReport} disabled={reportLoading || enabledModels.length === 0} className="btn-accent px-3 py-1.5 rounded-md text-xs font-medium disabled:opacity-40 inline-flex items-center gap-1.5">
                     {reportLoading ? <Spinner label="Writing" /> : <><Sparkles size={13} /> Generate report</>}
                   </button>
                 }
@@ -1204,7 +1257,7 @@ export default function CompanyPage() {
                       </option>
                     ))}
                   </select>
-                  <button onClick={runReport} disabled={reportLoading || enabledModels.length === 0} className="bg-accent text-black px-3 py-1.5 rounded-md text-xs font-medium disabled:opacity-40">
+                  <button onClick={runReport} disabled={reportLoading || enabledModels.length === 0} className="btn-accent px-3 py-1.5 rounded-md text-xs font-medium disabled:opacity-40">
                     {reportLoading ? "Generating..." : "Generate"}
                   </button>
                   <button onClick={() => exportFile("pdf")} disabled={exporting !== null} className="border border-border px-3 py-1.5 rounded-md text-xs hover:bg-panel disabled:opacity-40">
@@ -1229,7 +1282,7 @@ export default function CompanyPage() {
                   body={enabledModels.length ? "Generate a research draft when you are ready." : "Configure an AI provider to generate research drafts."}
                   action={
                     enabledModels.length ? null : (
-                      <Link href="/ai" className="bg-accent text-black px-3 py-1.5 rounded-md text-xs font-medium">
+                      <Link href="/ai" className="btn-accent px-3 py-1.5 rounded-md text-xs font-medium">
                         Configure AI
                       </Link>
                     )

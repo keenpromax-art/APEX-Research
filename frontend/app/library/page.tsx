@@ -195,7 +195,7 @@ export default function LibraryPage() {
                     Clear filter
                   </button>
                 ) : (
-                  <Link href="/company" className="bg-accent text-black px-3 py-1.5 rounded-md text-xs font-medium">
+                  <Link href="/company" className="btn-accent px-3 py-1.5 rounded-md text-xs font-medium">
                     Browse companies
                   </Link>
                 )
@@ -258,7 +258,7 @@ export default function LibraryPage() {
                     Clear filter
                   </button>
                 ) : (
-                  <Link href="/modelling" className="bg-accent text-black px-3 py-1.5 rounded-md text-xs font-medium">
+                  <Link href="/modelling" className="btn-accent px-3 py-1.5 rounded-md text-xs font-medium">
                     Open modelling
                   </Link>
                 )

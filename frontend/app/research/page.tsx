@@ -7,8 +7,6 @@ import { api, apiBlob, downloadBlob, getErrorMessage } from "@/lib/api";
 import { fmt, money, pct } from "@/lib/format";
 import { Card, CardHeader, EmptyState, ErrorBanner, Field, InfoBanner, Select, Spinner, Stat } from "@/components/ui";
 
-type Rating = "BUY" | "HOLD" | "SELL" | "NOT RATED";
-
 type ReportSummary = {
   id: number;
   ticker: string;
@@ -263,7 +261,7 @@ function ResearchStudio() {
               Force fresh provider fetch (ignore cache)
             </label>
             <div className="col-span-2 flex items-center gap-3 pt-1">
-              <button onClick={() => void generate()} disabled={busy} className="bg-accent text-white rounded-md px-4 py-2 text-sm font-medium disabled:opacity-50 inline-flex items-center gap-2">
+              <button onClick={() => void generate()} disabled={busy} className="btn-accent rounded-md px-4 py-2 text-sm font-medium disabled:opacity-50 inline-flex items-center gap-2">
                 {busy ? <Spinner label="Building..." /> : "Generate report"}
               </button>
               <span className="text-[11px] text-muted">The pipeline never invents numbers; QC runs on every build.</span>
