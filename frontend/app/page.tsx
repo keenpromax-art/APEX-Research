@@ -18,15 +18,6 @@ import {
   Sparkles,
   TrendingUp,
 } from "lucide-react";
-import {
-  Area,
-  AreaChart,
-  CartesianGrid,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
 import { api } from "@/lib/api";
 import { localDate } from "@/lib/format";
 import { Badge, Button, EmptyState, Skeleton, Spinner } from "@/components/ui";
@@ -51,18 +42,6 @@ const FLOW = [
   { title: "Build the forecast", body: "Linked three-statement model with a cash revolver; flex growth, margins and working capital.", icon: TrendingUp },
   { title: "Value the business", body: "DCF, reverse DCF, WACC and two-way sensitivity — deterministic, tested code.", icon: Calculator },
   { title: "Write the note", body: "AI-assisted research draft grounded in verified metrics, exported to Excel or PDF.", icon: Sparkles },
-];
-
-// Clearly-labelled sample data for the hero visual — never presented as live market data.
-const SAMPLE_SERIES = [
-  { d: "2020", rev: 274, fcf: 80 },
-  { d: "2021", rev: 316, fcf: 96 },
-  { d: "2022", rev: 342, fcf: 104 },
-  { d: "2023", rev: 383, fcf: 118 },
-  { d: "2024", rev: 412, fcf: 132 },
-  { d: "2025", rev: 458, fcf: 150 },
-  { d: "2026E", rev: 501, fcf: 168 },
-  { d: "2027E", rev: 548, fcf: 186 },
 ];
 
 export default function Home() {
@@ -118,104 +97,42 @@ export default function Home() {
   return (
     <div className="relative z-10 mx-auto max-w-[1680px] px-5 md:px-8 lg:px-10 py-6 md:py-8 space-y-10">
       {/* Hero */}
-      <section className="grid lg:grid-cols-[1.05fr_1fr] gap-8 items-center">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2 mb-5">
-            <Badge tone="accent">Equity research terminal</Badge>
-            <Badge tone={health === "ok" ? "pos" : health === "down" ? "neg" : "muted"}>
-              {health === "ok" ? "Engine ready" : health === "down" ? "Engine error" : "Starting engine"}
-            </Badge>
-            {!loading && enabledModels > 0 ? (
-              <Badge tone="muted">{enabledModels} AI model{enabledModels === 1 ? "" : "s"}</Badge>
-            ) : null}
-          </div>
-          <h1 className="display text-gradient">
-            Ticker to investment view, without spreadsheet archaeology.
-          </h1>
-          <p className="text-base md:text-lg text-muted mt-4 max-w-xl leading-relaxed">
-            Pull the financials, build a linked forecast, value the business, and draft a research note.
-            Every number is produced by tested code — AI only writes the narrative.
-          </p>
-          <form onSubmit={openTicker} className="mt-7 flex flex-col sm:flex-row gap-2 max-w-xl" role="search">
-            <div className="relative flex-1">
-              <Search size={17} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted pointer-events-none" aria-hidden />
-              <input
-                value={ticker}
-                onChange={(event) => setTicker(event.target.value)}
-                placeholder="Enter a ticker, e.g. AAPL, MSFT, RELIANCE.NS"
-                className="w-full bg-surface border border-border rounded-xl pl-10 pr-3 py-3 text-sm focus:border-accent focus:bg-hover outline-none transition-colors shadow-xs"
-                aria-label="Ticker"
-              />
-            </div>
-            <Button type="submit" size="lg">Open workspace</Button>
-            <Button type="button" variant="secondary" size="lg" onClick={() => router.push("/company/SAMPLE")}>
-              Try sample
-            </Button>
-          </form>
-          <p className="mt-3 text-xs text-dim">
-            Everything runs in this browser — fundamentals, forecasts, valuation and exports come from the local engine.
-          </p>
+      <section>
+        <div className="flex flex-wrap items-center gap-2 mb-5">
+          <Badge tone="accent">Equity research terminal</Badge>
+          <Badge tone={health === "ok" ? "pos" : health === "down" ? "neg" : "muted"}>
+            {health === "ok" ? "Engine ready" : health === "down" ? "Engine error" : "Starting engine"}
+          </Badge>
+          {!loading && enabledModels > 0 ? (
+            <Badge tone="muted">{enabledModels} AI model{enabledModels === 1 ? "" : "s"}</Badge>
+          ) : null}
         </div>
-
-        {/* Hero visual — a real rendered financial chart on sample data */}
-        <div className="relative min-w-0">
-          <div className="absolute inset-0 hero-grid rounded-2xl" aria-hidden />
-          <div className="relative rounded-2xl border border-border bg-surface/70 backdrop-blur-sm shadow-md overflow-hidden">
-            <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-              <div className="flex items-center gap-2">
-                <span className="h-2 w-2 rounded-full bg-accent shadow-[0_0_8px_var(--accent)]" aria-hidden />
-                <span className="text-xs font-semibold tracking-tight">Revenue &amp; free cash flow</span>
-              </div>
-              <Badge tone="muted">Sample data</Badge>
-            </div>
-            <div className="h-[260px] px-2 py-3">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={SAMPLE_SERIES} margin={{ top: 8, right: 12, left: 0, bottom: 2 }}>
-                  <defs>
-                    <linearGradient id="heroRev" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="var(--accent)" stopOpacity={0.35} />
-                      <stop offset="100%" stopColor="var(--accent)" stopOpacity={0.02} />
-                    </linearGradient>
-                    <linearGradient id="heroFcf" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="var(--pos)" stopOpacity={0.25} />
-                      <stop offset="100%" stopColor="var(--pos)" stopOpacity={0.02} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid stroke="var(--border)" strokeOpacity={0.5} strokeDasharray="3 3" vertical={false} />
-                  <XAxis dataKey="d" tick={{ fill: "var(--text-dim)", fontSize: 10 }} tickLine={false} axisLine={{ stroke: "var(--border)" }} />
-                  <YAxis tick={{ fill: "var(--text-dim)", fontSize: 10 }} tickLine={false} axisLine={false} width={34} />
-                  <Tooltip
-                    contentStyle={{
-                      background: "var(--bg-elev)",
-                      border: "1px solid var(--border-strong)",
-                      borderRadius: 8,
-                      fontSize: 11,
-                      color: "var(--text)",
-                      boxShadow: "var(--shadow-md)",
-                    }}
-                  />
-                  <Area type="monotone" dataKey="rev" name="Revenue" stroke="var(--accent)" strokeWidth={2} fill="url(#heroRev)" dot={false} />
-                  <Area type="monotone" dataKey="fcf" name="FCF" stroke="var(--pos)" strokeWidth={1.6} strokeDasharray="4 3" fill="url(#heroFcf)" dot={false} />
-                </AreaChart>
-              </ResponsiveContainer>
-            </div>
-            <div className="grid grid-cols-3 gap-px bg-border">
-              {[
-                { label: "Revenue CAGR", value: "10.4%" },
-                { label: "FCF margin", value: "32.7%" },
-                { label: "Net debt / EBITDA", value: "0.6x" },
-              ].map((m) => (
-                <div key={m.label} className="bg-surface px-3 py-2.5">
-                  <div className="text-[10px] uppercase tracking-wide text-dim font-medium">{m.label}</div>
-                  <div className="text-sm font-semibold tabular mt-0.5 text-fg">{m.value}</div>
-                </div>
-              ))}
-            </div>
+        <h1 className="display text-gradient max-w-3xl">
+          Ticker to investment view, without spreadsheet archaeology.
+        </h1>
+        <p className="text-base md:text-lg text-muted mt-4 max-w-2xl leading-relaxed">
+          Pull the financials, build a linked forecast, value the business, and draft a research note.
+          Every number is produced by tested code — AI only writes the narrative.
+        </p>
+        <form onSubmit={openTicker} className="mt-7 flex flex-col sm:flex-row gap-2 max-w-xl" role="search">
+          <div className="relative flex-1">
+            <Search size={17} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted pointer-events-none" aria-hidden />
+            <input
+              value={ticker}
+              onChange={(event) => setTicker(event.target.value)}
+              placeholder="Enter a ticker, e.g. AAPL, MSFT, RELIANCE.NS"
+              className="w-full bg-surface border border-border rounded-xl pl-10 pr-3 py-3 text-sm focus:border-accent focus:bg-hover outline-none transition-colors shadow-xs"
+              aria-label="Ticker"
+            />
           </div>
-          <p className="mt-2 text-[10px] text-dim text-right">
-            Illustrative sample series — labelled, not live market data.
-          </p>
-        </div>
+          <Button type="submit" size="lg">Open workspace</Button>
+          <Button type="button" variant="secondary" size="lg" onClick={() => router.push("/company/SAMPLE")}>
+            Try sample
+          </Button>
+        </form>
+        <p className="mt-3 text-xs text-dim">
+          Everything runs in this browser — fundamentals, forecasts, valuation and exports come from the local engine.
+        </p>
       </section>
 
       {/* Overview strip */}
