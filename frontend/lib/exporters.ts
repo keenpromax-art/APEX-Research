@@ -467,15 +467,21 @@ function sectionF_valuation(doc: PdfDocument, payload: ExportPayload) {
 
   doc.space(2).text("WACC build-up (CAPM, documented defaults)", { size: 9, bold: true, gray: 0.3, gap: 3 });
   const comps = dcf.wacc_components || {};
-  pair(doc, "Risk-free rate", pct(comps.risk_free, 2));
-  pair(doc, "Equity beta", num(comps.beta, 2));
-  pair(doc, "Market risk premium", pct(comps.market_premium, 2));
-  pair(doc, "Cost of equity (Rf + β × MRP)", pct(comps.cost_of_equity, 2));
-  pair(doc, "Pre-tax cost of debt", pct(comps.cost_of_debt, 2));
-  pair(doc, "Tax rate", pct(comps.tax_rate, 2));
-  pair(doc, "After-tax cost of debt", pct(comps.after_tax_cost_of_debt, 2));
-  pair(doc, "Equity / debt weight", `${pct(comps.equity_weight, 0)} / ${pct(comps.debt_weight, 0)}`);
-  pair(doc, "WACC applied", pct(dcf.wacc, 2), INK);
+  const waccRows = [
+    { component: "Risk-free rate", value: pct(comps.risk_free, 2) },
+    { component: "Equity beta", value: num(comps.beta, 2) },
+    { component: "Market risk premium", value: pct(comps.market_premium, 2) },
+    { component: "Cost of equity (Rf + beta x MRP)", value: pct(comps.cost_of_equity, 2) },
+    { component: "Pre-tax cost of debt", value: pct(comps.cost_of_debt, 2) },
+    { component: "Tax rate", value: pct(comps.tax_rate, 2) },
+    { component: "After-tax cost of debt", value: pct(comps.after_tax_cost_of_debt, 2) },
+    { component: "Equity / debt weight", value: `${pct(comps.equity_weight, 0)} / ${pct(comps.debt_weight, 0)}` },
+    { component: "WACC applied", value: pct(dcf.wacc, 2), bold: true, color: INK },
+  ];
+  doc.dataTable([
+    { key: "component", label: "Component", x: 0, format: (r: AnyRecord) => r.component, bold: (r: AnyRecord) => r.bold },
+    { key: "value", label: "Value", x: 300, align: "right" as const, format: (r: AnyRecord) => r.value, color: (r: AnyRecord) => r.color },
+  ], waccRows, { fontSize: 8.5, headerFontSize: 7 });
 
   doc.space(4).text("Free cash flows and discounting", { size: 9, bold: true, gray: 0.3, gap: 3 });
   const forecast = payload.forecast || null;
