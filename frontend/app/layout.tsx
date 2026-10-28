@@ -16,7 +16,7 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  themeColor: "#0B0D10",
+  themeColor: "#090D12",
 };
 
 const themeBootScript = `try{var t=localStorage.getItem("apex-theme");if(t==="light"){document.documentElement.classList.add("light");document.documentElement.style.colorScheme="light"}}catch(e){}`;

@@ -5,8 +5,41 @@ import { AlertTriangle, Inbox, Loader2 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { humanize } from "@/lib/format";
 
+export function Button({
+  children,
+  className,
+  variant = "primary",
+  size = "md",
+  ...props
+}: React.ButtonHTMLAttributes<HTMLButtonElement> & {
+  variant?: "primary" | "secondary" | "ghost" | "danger";
+  size?: "sm" | "md" | "lg";
+}) {
+  const variants: Record<string, string> = {
+    primary: "bg-accent text-white hover:bg-accent-strong border border-accent",
+    secondary: "bg-panel text-fg hover:bg-hover border border-border",
+    ghost: "bg-transparent text-muted hover:bg-panel hover:text-fg border border-transparent",
+    danger: "bg-neg/10 text-neg hover:bg-neg/20 border border-neg/40",
+  };
+  const sizes: Record<string, string> = {
+    sm: "px-2.5 py-1 text-xs",
+    md: "px-3.5 py-2 text-sm",
+    lg: "px-5 py-2.5 text-sm",
+  };
+  return (
+    <button
+      {...props}
+      className={cn(
+        "inline-flex items-center justify-center gap-2 rounded-md font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent",
+        variants[variant],
+        sizes[size],
+        className,
+      )}
+    />
+  );
+}
 export function Card({ children, className }: { children: ReactNode; className?: string }) {
-  return <div className={cn("bg-surface border border-border rounded-lg", className)}>{children}</div>;
+  return <div className={cn("bg-surface border border-border rounded-lg shadow-sm", className)}>{children}</div>;
 }
 
 export function CardHeader({
