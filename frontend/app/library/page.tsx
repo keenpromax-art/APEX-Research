@@ -5,7 +5,7 @@ import Link from "next/link";
 import { BookOpen, ExternalLink, FolderOpen, RefreshCw, Search, Trash2 } from "lucide-react";
 import { api, getErrorMessage } from "@/lib/api";
 import { localDate } from "@/lib/format";
-import { Badge, Card, CardHeader, EmptyState, ErrorBanner, InfoBanner, Spinner } from "@/components/ui";
+import { Badge, Button, Card, CardHeader, EmptyState, ErrorBanner, InfoBanner, Spinner } from "@/components/ui";
 
 type Project = {
   id: number;
@@ -141,12 +141,13 @@ export default function LibraryPage() {
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               placeholder="Filter by ticker, name or kind"
+              aria-label="Filter library"
               className="bg-panel border border-border rounded-md pl-8 pr-2 py-1.5 text-xs w-60 focus:border-accent outline-none"
             />
           </div>
-          <button onClick={load} className="border border-border px-3 py-1.5 rounded-md text-xs hover:bg-panel inline-flex items-center gap-1.5">
+          <Button variant="secondary" size="sm" onClick={load}>
             <RefreshCw size={13} /> Refresh
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -191,9 +192,9 @@ export default function LibraryPage() {
               body={projects.length ? "Clear the filter to see every saved workspace." : "Open a ticker workspace and save the project to keep its assumptions."}
               action={
                 projects.length ? (
-                  <button onClick={() => setQuery("")} className="border border-border px-3 py-1.5 rounded-md text-xs hover:bg-panel">
+                  <Button variant="secondary" size="sm" onClick={() => setQuery("")}>
                     Clear filter
-                  </button>
+                  </Button>
                 ) : (
                   <Link href="/company" className="btn-accent px-3 py-1.5 rounded-md text-xs font-medium">
                     Browse companies
@@ -254,9 +255,9 @@ export default function LibraryPage() {
               }
               action={
                 models.length ? (
-                  <button onClick={() => setQuery("")} className="border border-border px-3 py-1.5 rounded-md text-xs hover:bg-panel">
+                  <Button variant="secondary" size="sm" onClick={() => setQuery("")}>
                     Clear filter
-                  </button>
+                  </Button>
                 ) : (
                   <Link href="/modelling" className="btn-accent px-3 py-1.5 rounded-md text-xs font-medium">
                     Open modelling

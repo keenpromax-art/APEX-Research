@@ -1,12 +1,22 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { BookOpen, Calculator, Save } from "lucide-react";
 import { api, getErrorMessage } from "@/lib/api";
 import { fmt, isNum, num, pct, tone } from "@/lib/format";
-import { Badge, Card, CardHeader, EmptyState, ErrorBanner, Field, InfoBanner, Select, Spinner, Stat, TableWrap, Tabs, WarnBanner } from "@/components/ui";
+import { Badge, Button, Card, CardHeader, EmptyState, ErrorBanner, Field, InfoBanner, Select, Spinner, Stat, TabPanel, TableWrap, Tabs, WarnBanner } from "@/components/ui";
+import { cn } from "@/lib/cn";
+
+function InputGroup({ title, children, className }: { title: string; children: ReactNode; className?: string }) {
+  return (
+    <fieldset className={cn("min-w-0", className)}>
+      <legend className="text-[10px] uppercase tracking-[0.16em] text-dim font-medium mb-1.5 px-0">{title}</legend>
+      <div className="grid grid-cols-2 gap-2">{children}</div>
+    </fieldset>
+  );
+}
 
 const TABS = ["LBO", "Options", "Bond", "WACC"] as const;
 
@@ -49,45 +59,6 @@ const WACC_DEFAULTS: Record<string, string> = {
   equity_weight: "0.7",
   debt_weight: "0.3",
 };
-
-const LBO_FIELDS = [
-  { key: "entry_ebitda", step: "1" },
-  { key: "entry_multiple", step: "0.5" },
-  { key: "exit_multiple", step: "0.5" },
-  { key: "hold_years", step: "1" },
-  { key: "revenue_growth", step: "0.01" },
-  { key: "tax_rate", step: "0.01" },
-  { key: "interest_rate", step: "0.01" },
-  { key: "debt_paydown_pct", step: "0.05" },
-  { key: "fees_pct", step: "0.005" },
-];
-
-const OPTION_FIELDS = [
-  { key: "S", step: "1" },
-  { key: "K", step: "1" },
-  { key: "T", step: "0.25" },
-  { key: "r", step: "0.01" },
-  { key: "sigma", step: "0.01" },
-  { key: "q", step: "0.01" },
-];
-
-const BOND_FIELDS = [
-  { key: "face", step: "100" },
-  { key: "coupon_rate", step: "0.005" },
-  { key: "ytm", step: "0.005" },
-  { key: "years", step: "0.5" },
-  { key: "freq", step: "1" },
-];
-
-const WACC_FIELDS = [
-  { key: "risk_free", step: "0.001" },
-  { key: "beta", step: "0.05" },
-  { key: "market_premium", step: "0.001" },
-  { key: "cost_of_debt", step: "0.001" },
-  { key: "tax_rate", step: "0.01" },
-  { key: "equity_weight", step: "0.05" },
-  { key: "debt_weight", step: "0.05" },
-];
 
 function numberFrom(state: Record<string, string>, key: string, fallback: number) {
   const parsed = Number(state[key]);
@@ -319,15 +290,12 @@ export default function ModellingPage() {
             value={modelLabel}
             onChange={(event) => setModelLabel(event.target.value)}
             placeholder="Model name (optional)"
+            aria-label="Model name"
             className="bg-panel border border-border rounded-md px-2 py-1.5 text-xs w-48 focus:border-accent outline-none"
           />
-          <button
-            onClick={saveCurrent}
-            disabled={saving || !currentResult}
-            className="border border-border px-3 py-1.5 rounded-md text-xs hover:bg-panel disabled:opacity-40 inline-flex items-center gap-1.5"
-          >
+          <Button variant="secondary" size="sm" onClick={saveCurrent} disabled={saving || !currentResult}>
             <Save size={13} /> {saving ? "Saving..." : "Save result"}
-          </button>
+          </Button>
           <Link href="/library" className="text-xs text-accent inline-flex items-center gap-1">
             Library <BookOpen size={12} />
           </Link>
@@ -337,8 +305,9 @@ export default function ModellingPage() {
       {error ? <ErrorBanner message={error} /> : null}
       {notice ? <InfoBanner>{notice}</InfoBanner> : null}
 
-      <Tabs tabs={TABS} value={tab} onChange={setTab} />
+      <Tabs idBase="model-tabs" tabs={TABS} value={tab} onChange={setTab} />
 
+      <TabPanel idBase="model-tabs" active={tab} className="space-y-4">
       {tab === "LBO" ? (
         <div className="space-y-4">
           <div className="grid lg:grid-cols-3 gap-4">
@@ -347,21 +316,32 @@ export default function ModellingPage() {
                 title="Leveraged buyout"
                 subtitle="Annual debt sweep; debt_paydown_pct is the share of post-interest cash swept to debt."
                 action={
-                  <button onClick={() => runTab("LBO")} disabled={running !== null} className="btn-accent px-3 py-1.5 rounded-md text-xs font-medium disabled:opacity-40">
-                    {running === "LBO" ? "Running..." : "Run LBO"}
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <Badge tone="accent">Inputs</Badge>
+                    <Button size="sm" onClick={() => runTab("LBO")} disabled={running !== null}>
+                      {running === "LBO" ? "Running..." : "Run LBO"}
+                    </Button>
+                  </div>
                 }
               />
-              <div className="p-4 grid grid-cols-2 md:grid-cols-3 gap-2">
-                {LBO_FIELDS.map((field) => (
-                  <Field
-                    key={field.key}
-                    label={field.key}
-                    step={field.step}
-                    value={lboIn[field.key]}
-                    onChange={(value) => setLboIn((current) => ({ ...current, [field.key]: value }))}
-                  />
-                ))}
+              <div className="p-4 grid sm:grid-cols-2 lg:grid-cols-3 gap-x-4 gap-y-3">
+                <InputGroup title="Entry">
+                  <Field key="entry_ebitda" label="entry_ebitda" step="1" value={lboIn.entry_ebitda} onChange={(value) => setLboIn((current) => ({ ...current, entry_ebitda: value }))} />
+                  <Field key="entry_multiple" label="entry_multiple" step="0.5" value={lboIn.entry_multiple} onChange={(value) => setLboIn((current) => ({ ...current, entry_multiple: value }))} />
+                </InputGroup>
+                <InputGroup title="Operating performance">
+                  <Field key="revenue_growth" label="revenue_growth" step="0.01" value={lboIn.revenue_growth} onChange={(value) => setLboIn((current) => ({ ...current, revenue_growth: value }))} />
+                  <Field key="tax_rate" label="tax_rate" step="0.01" value={lboIn.tax_rate} onChange={(value) => setLboIn((current) => ({ ...current, tax_rate: value }))} />
+                </InputGroup>
+                <InputGroup title="Financing">
+                  <Field key="interest_rate" label="interest_rate" step="0.01" value={lboIn.interest_rate} onChange={(value) => setLboIn((current) => ({ ...current, interest_rate: value }))} />
+                  <Field key="debt_paydown_pct" label="debt_paydown_pct" step="0.05" value={lboIn.debt_paydown_pct} onChange={(value) => setLboIn((current) => ({ ...current, debt_paydown_pct: value }))} />
+                  <Field key="fees_pct" label="fees_pct" step="0.005" value={lboIn.fees_pct} onChange={(value) => setLboIn((current) => ({ ...current, fees_pct: value }))} />
+                </InputGroup>
+                <InputGroup title="Hold and exit">
+                  <Field key="hold_years" label="hold_years" step="1" value={lboIn.hold_years} onChange={(value) => setLboIn((current) => ({ ...current, hold_years: value }))} />
+                  <Field key="exit_multiple" label="exit_multiple" step="0.5" value={lboIn.exit_multiple} onChange={(value) => setLboIn((current) => ({ ...current, exit_multiple: value }))} />
+                </InputGroup>
               </div>
               <div className="px-4 pb-4 text-[11px] text-muted">
                 EBITDA grows at the revenue-growth rate. Exit fees are 1% of exit value. Percentages are decimals.
@@ -372,13 +352,15 @@ export default function ModellingPage() {
               <CardHeader title="Seed from a company" subtitle="Pull year-1 EBITDA from the forecast engine" />
               <div className="p-4 space-y-2">
                 <Field label="Ticker" type="text" value={importTicker} placeholder="SAMPLE" onChange={setImportTicker} />
-                <button
+                <Button
+                  variant="secondary"
+                  size="sm"
                   onClick={importFromCompany}
                   disabled={importing || !importTicker.trim()}
-                  className="w-full border border-border px-3 py-1.5 rounded-md text-xs hover:bg-panel disabled:opacity-40"
+                  className="w-full"
                 >
                   {importing ? <Spinner label="Importing" /> : "Use company EBITDA"}
-                </button>
+                </Button>
                 <p className="text-[11px] text-muted">
                   Imports the first forecast year&apos;s EBITDA and growth. It does not value the company automatically.
                 </p>
@@ -397,6 +379,7 @@ export default function ModellingPage() {
                 }`}
                 action={
                   <div className="flex items-center gap-2">
+                    <Badge tone="muted">Calculated</Badge>
                     <Badge tone={lboResult.moic >= 2 ? "pos" : lboResult.moic >= 1 ? "muted" : "neg"}>
                       MOIC {isNum(lboResult.moic) ? `${num(lboResult.moic)}x` : "—"}
                     </Badge>
@@ -467,30 +450,26 @@ export default function ModellingPage() {
                 title="Black-Scholes option value"
                 subtitle="European option with a continuous dividend yield."
                 action={
-                  <button onClick={() => runTab("Options")} disabled={running !== null} className="btn-accent px-3 py-1.5 rounded-md text-xs font-medium disabled:opacity-40">
-                    {running === "Options" ? "Pricing..." : "Price option"}
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <Badge tone="accent">Inputs</Badge>
+                    <Button size="sm" onClick={() => runTab("Options")} disabled={running !== null}>
+                      {running === "Options" ? "Pricing..." : "Price option"}
+                    </Button>
+                  </div>
                 }
               />
-              <div className="p-4 grid grid-cols-2 md:grid-cols-3 gap-2">
-                {OPTION_FIELDS.map((field) => (
-                  <Field
-                    key={field.key}
-                    label={field.key}
-                    step={field.step}
-                    value={optionIn[field.key]}
-                    onChange={(value) => setOptionIn((current) => ({ ...current, [field.key]: value }))}
-                  />
-                ))}
-                <Select
-                  label="Option type"
-                  value={optionIn.option_type}
-                  onChange={(value) => setOptionIn((current) => ({ ...current, option_type: value }))}
-                  options={[
-                    { value: "call", label: "Call" },
-                    { value: "put", label: "Put" },
-                  ]}
-                />
+              <div className="p-4 grid sm:grid-cols-2 lg:grid-cols-3 gap-x-4 gap-y-3">
+                <InputGroup title="Instrument">
+                  <Field key="S" label="S" step="1" value={optionIn.S} onChange={(value) => setOptionIn((current) => ({ ...current, S: value }))} />
+                  <Field key="K" label="K" step="1" value={optionIn.K} onChange={(value) => setOptionIn((current) => ({ ...current, K: value }))} />
+                  <Field key="T" label="T" step="0.25" value={optionIn.T} onChange={(value) => setOptionIn((current) => ({ ...current, T: value }))} />
+                  <Select label="Option type" value={optionIn.option_type} onChange={(value) => setOptionIn((current) => ({ ...current, option_type: value }))} options={[{ value: "call", label: "Call" }, { value: "put", label: "Put" }]} />
+                </InputGroup>
+                <InputGroup title="Rates and volatility">
+                  <Field key="r" label="r" step="0.01" value={optionIn.r} onChange={(value) => setOptionIn((current) => ({ ...current, r: value }))} />
+                  <Field key="q" label="q" step="0.01" value={optionIn.q} onChange={(value) => setOptionIn((current) => ({ ...current, q: value }))} />
+                  <Field key="sigma" label="sigma" step="0.01" value={optionIn.sigma} onChange={(value) => setOptionIn((current) => ({ ...current, sigma: value }))} />
+                </InputGroup>
               </div>
               <div className="px-4 pb-4 text-[11px] text-muted">
                 S and K are prices, T is years, r and q are continuous rates, sigma is annualised volatility. Theta is per year, vega per 1.00 of volatility.
@@ -515,9 +494,10 @@ export default function ModellingPage() {
                 title="Option result"
                 subtitle={optionIn.option_type === "put" ? "European put" : "European call"}
                 action={
-                  <Badge tone="accent">
-                    Price {num(optionResult.price)}
-                  </Badge>
+                  <div className="flex items-center gap-2">
+                    <Badge tone="muted">Calculated</Badge>
+                    <Badge tone="accent">Price {num(optionResult.price)}</Badge>
+                  </div>
                 }
               />
               <div className="p-4 grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -553,21 +533,24 @@ export default function ModellingPage() {
                 title="Bond pricing"
                 subtitle="Fixed-coupon bond priced from a yield to maturity."
                 action={
-                  <button onClick={() => runTab("Bond")} disabled={running !== null} className="btn-accent px-3 py-1.5 rounded-md text-xs font-medium disabled:opacity-40">
-                    {running === "Bond" ? "Valuing..." : "Value bond"}
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <Badge tone="accent">Inputs</Badge>
+                    <Button size="sm" onClick={() => runTab("Bond")} disabled={running !== null}>
+                      {running === "Bond" ? "Valuing..." : "Value bond"}
+                    </Button>
+                  </div>
                 }
               />
-              <div className="p-4 grid grid-cols-2 md:grid-cols-3 gap-2">
-                {BOND_FIELDS.map((field) => (
-                  <Field
-                    key={field.key}
-                    label={field.key}
-                    step={field.step}
-                    value={bondIn[field.key]}
-                    onChange={(value) => setBondIn((current) => ({ ...current, [field.key]: value }))}
-                  />
-                ))}
+              <div className="p-4 grid sm:grid-cols-2 lg:grid-cols-3 gap-x-4 gap-y-3">
+                <InputGroup title="Instrument">
+                  <Field key="face" label="face" step="100" value={bondIn.face} onChange={(value) => setBondIn((current) => ({ ...current, face: value }))} />
+                  <Field key="coupon_rate" label="coupon_rate" step="0.005" value={bondIn.coupon_rate} onChange={(value) => setBondIn((current) => ({ ...current, coupon_rate: value }))} />
+                  <Field key="years" label="years" step="0.5" value={bondIn.years} onChange={(value) => setBondIn((current) => ({ ...current, years: value }))} />
+                  <Field key="freq" label="freq" step="1" value={bondIn.freq} onChange={(value) => setBondIn((current) => ({ ...current, freq: value }))} />
+                </InputGroup>
+                <InputGroup title="Market yield">
+                  <Field key="ytm" label="ytm" step="0.005" value={bondIn.ytm} onChange={(value) => setBondIn((current) => ({ ...current, ytm: value }))} />
+                </InputGroup>
               </div>
               <div className="px-4 pb-4 text-[11px] text-muted">
                 freq is coupons per year (2 = semiannual). Price is the present value of coupons and principal; accrued interest is not modelled.
@@ -590,7 +573,12 @@ export default function ModellingPage() {
               <CardHeader
                 title="Bond result"
                 subtitle={`${bondResult.periods ?? "—"} coupon periods`}
-                action={<Badge tone="accent">Price {num(bondResult.price)}</Badge>}
+                action={
+                  <div className="flex items-center gap-2">
+                    <Badge tone="muted">Calculated</Badge>
+                    <Badge tone="accent">Price {num(bondResult.price)}</Badge>
+                  </div>
+                }
               />
               <div className="p-4 grid grid-cols-2 md:grid-cols-4 gap-3">
                 <Stat label="Price" value={num(bondResult.price)} tone="text-accent" />
@@ -619,21 +607,28 @@ export default function ModellingPage() {
                 title="WACC calculator"
                 subtitle="CAPM cost of equity plus after-tax cost of debt."
                 action={
-                  <button onClick={() => runTab("WACC")} disabled={running !== null} className="btn-accent px-3 py-1.5 rounded-md text-xs font-medium disabled:opacity-40">
-                    {running === "WACC" ? "Calculating..." : "Calculate WACC"}
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <Badge tone="accent">Inputs</Badge>
+                    <Button size="sm" onClick={() => runTab("WACC")} disabled={running !== null}>
+                      {running === "WACC" ? "Calculating..." : "Calculate WACC"}
+                    </Button>
+                  </div>
                 }
               />
-              <div className="p-4 grid grid-cols-2 md:grid-cols-3 gap-2">
-                {WACC_FIELDS.map((field) => (
-                  <Field
-                    key={field.key}
-                    label={field.key}
-                    step={field.step}
-                    value={waccIn[field.key]}
-                    onChange={(value) => setWaccIn((current) => ({ ...current, [field.key]: value }))}
-                  />
-                ))}
+              <div className="p-4 grid sm:grid-cols-2 lg:grid-cols-3 gap-x-4 gap-y-3">
+                <InputGroup title="Cost of equity (CAPM)">
+                  <Field key="risk_free" label="risk_free" step="0.001" value={waccIn.risk_free} onChange={(value) => setWaccIn((current) => ({ ...current, risk_free: value }))} />
+                  <Field key="beta" label="beta" step="0.05" value={waccIn.beta} onChange={(value) => setWaccIn((current) => ({ ...current, beta: value }))} />
+                  <Field key="market_premium" label="market_premium" step="0.001" value={waccIn.market_premium} onChange={(value) => setWaccIn((current) => ({ ...current, market_premium: value }))} />
+                </InputGroup>
+                <InputGroup title="Cost of debt">
+                  <Field key="cost_of_debt" label="cost_of_debt" step="0.001" value={waccIn.cost_of_debt} onChange={(value) => setWaccIn((current) => ({ ...current, cost_of_debt: value }))} />
+                  <Field key="tax_rate" label="tax_rate" step="0.01" value={waccIn.tax_rate} onChange={(value) => setWaccIn((current) => ({ ...current, tax_rate: value }))} />
+                </InputGroup>
+                <InputGroup title="Capital weights">
+                  <Field key="equity_weight" label="equity_weight" step="0.05" value={waccIn.equity_weight} onChange={(value) => setWaccIn((current) => ({ ...current, equity_weight: value }))} />
+                  <Field key="debt_weight" label="debt_weight" step="0.05" value={waccIn.debt_weight} onChange={(value) => setWaccIn((current) => ({ ...current, debt_weight: value }))} />
+                </InputGroup>
               </div>
               {Math.abs(weightTotal - 1) > 0.001 ? (
                 <div className="px-4 pb-3 text-xs text-warn">
@@ -669,7 +664,7 @@ export default function ModellingPage() {
 
           {waccResult ? (
             <Card>
-              <CardHeader title="WACC result" subtitle="Use this rate in the DCF tab of a company workspace." />
+              <CardHeader title="WACC result" subtitle="Use this rate in the DCF tab of a company workspace." action={<Badge tone="muted">Calculated</Badge>} />
               <div className="p-4 grid grid-cols-2 md:grid-cols-3 gap-3">
                 <Stat label="WACC" value={pct(waccResult.wacc, 2)} tone="text-accent" />
                 <Stat label="Cost of equity" value={pct(ke, 2)} />
@@ -683,6 +678,7 @@ export default function ModellingPage() {
           ) : null}
         </div>
       ) : null}
+      </TabPanel>
 
       <div className="text-[11px] text-muted">
         Outputs are screening estimates for research use, not investment advice. Saved models reopen from the library.

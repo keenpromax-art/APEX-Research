@@ -9,6 +9,7 @@ import { fmt, humanize, isNum, localDate, num, pct, periodLabel, safeNumber, ton
 import { ForecastChart, MarginChart, PriceChart, RevenueChart } from "@/components/charts";
 import {
   Badge,
+  Button,
   Card,
   CardHeader,
   EmptyState,
@@ -19,6 +20,7 @@ import {
   Skeleton,
   Spinner,
   Stat,
+  TabPanel,
   TableWrap,
   Tabs,
   WarnBanner,
@@ -180,21 +182,70 @@ function StatementTable({ rows, label, currency }: { rows: any[]; label: string;
   );
 }
 
-function ReportBlock({ section, content }: { section: string; content: unknown }) {
-  return (
-    <Card className="p-4">
-      <div className="text-sm font-medium mb-2">{humanize(section)}</div>
-      {Array.isArray(content) ? (
+function ReportValue({ value }: { value: unknown }) {
+  if (value === null || value === undefined || value === "") return <span className="text-dim">—</span>;
+  if (typeof value === "string") return <span className="break-words">{value}</span>;
+  if (typeof value === "number" || typeof value === "boolean") return <span className="mono tabular">{String(value)}</span>;
+  if (Array.isArray(value)) {
+    if (value.every((item) => typeof item === "string" || typeof item === "number")) {
+      return <span className="break-words">{value.map((item) => String(item)).join(" · ")}</span>;
+    }
+    return <span className="mono text-[11px] break-all">{JSON.stringify(value)}</span>;
+  }
+  return <span className="mono text-[11px] break-all">{JSON.stringify(value)}</span>;
+}
+
+function ReportContent({ content }: { content: unknown }) {
+  if (content === null || content === undefined || content === "") {
+    return <p className="text-xs text-dim">Not available for this report.</p>;
+  }
+  if (typeof content === "string") {
+    return <p className="text-sm text-muted whitespace-pre-wrap leading-relaxed">{content}</p>;
+  }
+  if (typeof content === "number" || typeof content === "boolean") {
+    return <p className="mono text-sm">{String(content)}</p>;
+  }
+  if (Array.isArray(content)) {
+    if (content.every((item) => typeof item === "string" || typeof item === "number")) {
+      return (
         <ul className="list-disc pl-5 text-sm space-y-1.5 text-muted">
           {content.map((item, index) => (
             <li key={index}>{String(item)}</li>
           ))}
         </ul>
-      ) : content && typeof content === "object" ? (
-        <pre className="text-xs overflow-auto text-muted whitespace-pre-wrap">{JSON.stringify(content, null, 2)}</pre>
-      ) : (
-        <p className="text-sm text-muted whitespace-pre-wrap leading-relaxed">{String(content ?? "")}</p>
-      )}
+      );
+    }
+    return (
+      <div className="space-y-3">
+        {content.map((item, index) => (
+          <div key={index} className="border-l-2 border-border pl-3">
+            <ReportContent content={item} />
+          </div>
+        ))}
+      </div>
+    );
+  }
+  const entries = Object.entries(content as Record<string, unknown>);
+  if (!entries.length) return <p className="text-xs text-dim">No content.</p>;
+  return (
+    <dl className="grid sm:grid-cols-2 gap-x-6 text-xs">
+      {entries.map(([key, value]) => (
+        <div key={key} className="flex justify-between gap-3 border-b border-border/60 py-1.5 min-w-0">
+          <dt className="text-muted shrink-0">{humanize(key)}</dt>
+          <dd className="text-right min-w-0">
+            <ReportValue value={value} />
+          </dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+function ReportBlock({ section, content }: { section: string; content: unknown }) {
+  return (
+    <Card className="p-4">
+      <div className="text-sm font-medium mb-2">{humanize(section)}</div>
+      <ReportContent content={content} />
     </Card>
   );
 }
@@ -271,6 +322,15 @@ export default function CompanyPage() {
         ]);
         setCompany(companyData);
         setData(fundamentalData);
+        try {
+          const raw = localStorage.getItem("apex-recent-tickers");
+          const parsed = raw ? JSON.parse(raw) : [];
+          const list: string[] = Array.isArray(parsed) ? parsed.filter((item) => typeof item === "string") : [];
+          const next = [ticker, ...list.filter((item) => item !== ticker)].slice(0, 8);
+          localStorage.setItem("apex-recent-tickers", JSON.stringify(next));
+        } catch {
+          // history is best-effort; storage may be unavailable
+        }
       } catch (loadError) {
         setError(getErrorMessage(loadError));
       } finally {
@@ -636,73 +696,139 @@ export default function CompanyPage() {
   const upsides = dcf?.value_per_share && isNum(currentPrice) ? dcf.value_per_share / currentPrice - 1 : null;
 
   return (
-    <div className="p-5 md:p-7 max-w-7xl mx-auto space-y-4">
-      <div className="flex flex-wrap items-start gap-3">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <h1 className="text-xl font-semibold truncate">{company?.name || info.longName || ticker}</h1>
-            {isDemo ? <Badge tone="warn">Synthetic data</Badge> : null}
-            {stale ? <Badge tone="warn">Stale cache</Badge> : null}
-          </div>
-          <div className="text-xs text-muted mt-1">
-            {ticker} · {company?.exchange || info.exchange || "—"} · {currency} · {company?.sector || info.sector || "—"}
-          </div>
-        </div>
-        <div className="ml-auto flex flex-wrap items-center gap-2">
-          {isNum(currentPrice) ? (
-            <div className="text-right mr-2">
-              <div className="text-lg font-semibold tabular">{num(currentPrice)}</div>
-              <div className={`text-[11px] tabular ${tone(changePct)}`}>
-                {isNum(changePct) ? pct(changePct) : "—"} today
+    <div className="max-w-7xl mx-auto">
+      <header className="px-5 md:px-7 pt-5 pb-4 border-b border-border">
+        <div className="flex flex-wrap items-start gap-4">
+          <div className="flex items-start gap-3 min-w-0 flex-1">
+            <div
+              aria-hidden
+              className="hidden sm:flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-border bg-panel mono text-sm font-bold text-accent"
+            >
+              {ticker.slice(0, 4)}
+            </div>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap min-w-0">
+                <h1 className="text-lg md:text-xl font-semibold tracking-tight truncate">
+                  {company?.name || info.longName || ticker}
+                </h1>
+                <span className="mono text-xs font-semibold text-accent border border-accent/40 bg-accent/10 rounded px-1.5 py-0.5 shrink-0">
+                  {ticker}
+                </span>
+                {isDemo ? <Badge tone="warn">Synthetic data</Badge> : null}
+                {stale ? <Badge tone="warn">Stale cache</Badge> : null}
+              </div>
+              <div className="text-[11px] text-muted mt-1 flex flex-wrap gap-x-2 gap-y-0.5">
+                <span>{company?.exchange || info.exchange || "—"}</span>
+                <span aria-hidden>·</span>
+                <span>{company?.sector || info.sector || "—"}</span>
+                <span aria-hidden>·</span>
+                <span>Reporting currency {currency}</span>
+                {company?.last_data_date ? (
+                  <>
+                    <span aria-hidden>·</span>
+                    <span>Data through {company.last_data_date}</span>
+                  </>
+                ) : null}
               </div>
             </div>
-          ) : null}
-          <button
-            onClick={() => loadData(true)}
-            className="border border-border px-3 py-1.5 rounded-md text-xs hover:bg-panel inline-flex items-center gap-1.5"
-            title={isDemo ? "Recompute every figure from the local engine" : "Re-fetch market data from the provider, bypassing the cache"}
-          >
-            <RefreshCw size={13} /> Refresh
-          </button>
-          <button onClick={saveProject} className="border border-border px-3 py-1.5 rounded-md text-xs hover:bg-panel inline-flex items-center gap-1.5">
-            <Save size={13} /> {activeProjectId ? "Update project" : "Save project"}
-          </button>
-          <button
-            onClick={runReport}
-            disabled={reportLoading || enabledModels.length === 0}
-            className="btn-accent px-3 py-1.5 rounded-md text-xs font-medium hover:opacity-90 disabled:opacity-40 inline-flex items-center gap-1.5"
-            title={enabledModels.length === 0 ? "Configure an AI model first" : "Generate a research draft"}
-          >
-            {reportLoading ? <Spinner label="Writing" /> : <><Sparkles size={13} /> Research note</>}
-          </button>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {isNum(currentPrice) ? (
+              <div className="text-right mr-2">
+                <div className="text-lg font-semibold tabular">{num(currentPrice)}</div>
+                <div className={`text-[11px] tabular ${tone(changePct)}`}>
+                  {isNum(changePct) ? pct(changePct) : "—"} today
+                </div>
+              </div>
+            ) : null}
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => loadData(true)}
+              title={isDemo ? "Recompute every figure from the local engine" : "Re-fetch market data from the provider, bypassing the cache"}
+            >
+              <RefreshCw size={13} /> Refresh
+            </Button>
+            <Button variant="secondary" size="sm" onClick={saveProject}>
+              <Save size={13} /> {activeProjectId ? "Update project" : "Save project"}
+            </Button>
+            <Button
+              size="sm"
+              onClick={runReport}
+              disabled={reportLoading || enabledModels.length === 0}
+              title={enabledModels.length === 0 ? "Configure an AI model first" : "Generate a research draft"}
+            >
+              {reportLoading ? <Spinner label="Writing" /> : <><Sparkles size={13} /> Research note</>}
+            </Button>
+          </div>
         </div>
-      </div>
+      </header>
 
-      {savedMsg ? <InfoBanner>{savedMsg}</InfoBanner> : null}
-      {isDemo ? (
-        <InfoBanner>
-          Synthetic sample fixture. Figures are fabricated for product evaluation and are not a real company.
-        </InfoBanner>
-      ) : null}
-      {stale ? (
-        <InfoBanner>
-          Some periods are incomplete for this ticker. Check the data-quality panel before relying on it.
-        </InfoBanner>
-      ) : null}
-      {exportError ? <ErrorBanner message={exportError} /> : null}
+      <div className="px-5 md:px-7 pb-6">
+        {savedMsg ? <div className="mt-4"><InfoBanner>{savedMsg}</InfoBanner></div> : null}
+        {isDemo ? (
+          <div className="mt-4">
+            <InfoBanner>
+              Synthetic sample fixture. Figures are fabricated for product evaluation and are not a real company.
+            </InfoBanner>
+          </div>
+        ) : null}
+        {stale ? (
+          <div className="mt-4">
+            <InfoBanner>
+              Some periods are incomplete for this ticker. Check the data-quality panel before relying on it.
+            </InfoBanner>
+          </div>
+        ) : null}
+        {exportError ? <div className="mt-4"><ErrorBanner message={exportError} /></div> : null}
 
-      <Tabs tabs={TABS} value={tab} onChange={setTab} />
+        <div className="sticky top-0 z-20 -mx-5 px-5 md:-mx-7 md:px-7 mt-4 py-1 bg-bg/95 backdrop-blur-sm border-b border-border">
+          <Tabs idBase="company-tabs" tabs={TABS} value={tab} onChange={setTab} className="border-b-0" />
+        </div>
+
+        <TabPanel idBase="company-tabs" active={tab} className="pt-4">
 
       {tab === "Overview" ? (
         <div className="space-y-4">
-          <div className="grid grid-cols-2 lg:grid-cols-4 xl:grid-cols-6 gap-3">
-            <Stat label="Market cap" value={fmt(company?.market_cap || info.marketCap)} hint={currency} />
-            <Stat label="Revenue (latest)" value={fmt(latest.revenue)} hint={periodLabel(latest.period_end)} />
-            <Stat label="Net margin" value={pct(latest.net_margin)} />
-            <Stat label="ROE" value={pct(latest.roe)} />
-            <Stat label="FCF" value={fmt(latest.fcf)} hint="Latest reported" />
-            <Stat label="Net debt" value={fmt(latest.net_debt)} tone={isNum(latest.net_debt) && latest.net_debt < 0 ? "text-pos" : undefined} />
-          </div>
+          <section aria-label="Primary metrics">
+            <div className="text-[10px] uppercase tracking-[0.16em] text-dim font-medium mb-2">Headline · latest reported period {periodLabel(latest.period_end)}</div>
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+              <Stat label="Market cap" value={fmt(company?.market_cap || info.marketCap)} hint={currency} />
+              <Stat label="Revenue" value={fmt(latest.revenue)} hint={periodLabel(latest.period_end)} />
+              <Stat label="Net margin" value={pct(latest.net_margin)} hint="Latest reported" />
+              <Stat label="Free cash flow" value={fmt(latest.fcf)} hint={periodLabel(latest.period_end)} />
+            </div>
+          </section>
+
+          {(() => {
+            const SECONDARY = [
+              { key: "roe", label: "ROE" },
+              { key: "roa", label: "ROA" },
+              { key: "roic", label: "ROIC" },
+              { key: "eps_diluted", label: "EPS diluted" },
+              { key: "revenue_growth", label: "Revenue growth" },
+              { key: "current_ratio", label: "Current ratio" },
+              { key: "net_debt", label: "Net debt" },
+              { key: "book_value_per_share", label: "Book value / share" },
+            ].filter((metric) => isNum(latest[metric.key]));
+            if (!SECONDARY.length) return null;
+            return (
+              <section aria-label="Secondary metrics">
+                <div className="text-[10px] uppercase tracking-[0.16em] text-dim font-medium mb-2">Returns, leverage and per-share · derived from reported statements</div>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                  {SECONDARY.map((metric) => (
+                    <Stat
+                      key={metric.key}
+                      compact
+                      label={metric.label}
+                      value={fmtMetric(metric.key, latest[metric.key])}
+                      tone={metric.key === "net_debt" && isNum(latest.net_debt) && latest.net_debt < 0 ? "text-pos" : undefined}
+                    />
+                  ))}
+                </div>
+              </section>
+            );
+          })()}
 
           <div className="grid lg:grid-cols-3 gap-4">
             <Card className="lg:col-span-2">
@@ -835,7 +961,11 @@ export default function CompanyPage() {
           </div>
           {STATEMENTS.map((statement) => (
             <Card key={statement.key}>
-              <CardHeader title={statement.label} subtitle={`${(statementSet[statement.key] || []).length} periods available · latest first`} />
+              <CardHeader
+                title={statement.label}
+                subtitle={`${(statementSet[statement.key] || []).length} periods available · latest first`}
+                action={<Badge tone="muted">Reported</Badge>}
+              />
               <StatementTable rows={statementSet[statement.key] || []} label={statement.label} currency={currency} />
             </Card>
           ))}
@@ -889,48 +1019,69 @@ export default function CompanyPage() {
             <CardHeader
               title="Three-statement forecast"
               subtitle="Driver-based annual model with a cash revolver and a reported balance check."
-              action={
-                <div className="flex items-center gap-2">
-                  <label className="text-[11px] text-muted">Years</label>
-                  <input
-                    type="number"
-                    min={1}
-                    max={25}
-                    value={years}
-                    onChange={(event) => setYears(event.target.value)}
-                    className="w-16 bg-panel border border-border rounded-md px-2 py-1 text-xs"
-                  />
-                  <button onClick={runForecast} className="btn-accent px-3 py-1.5 rounded-md text-xs font-medium">
-                    Run forecast
-                  </button>
-                  <button
-                    onClick={() => {
-                      setAssumptions({});
-                      setYears("5");
-                    }}
-                    className="border border-border px-3 py-1.5 rounded-md text-xs hover:bg-panel"
-                  >
-                    Reset
-                  </button>
-                </div>
-              }
+              action={<Badge tone="accent">Inputs</Badge>}
             />
-            <div className="p-4 space-y-3">
+            <div className="p-4 space-y-4">
               {forecastError ? <ErrorBanner message={forecastError} /> : null}
-              <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2">
-                {ASSUMPTION_FIELDS.map((field) => (
-                  <Field
-                    key={field.key}
-                    label={field.label}
-                    step={field.step}
-                    value={assumptions[field.key] ?? ""}
-                    placeholder={String(forecast?.assumptions?.[field.key] ?? "default")}
-                    onChange={(value) =>
-                      setAssumptions((current) => ({ ...current, [field.key]: value === "" ? "" : value }))
-                    }
-                  />
-                ))}
+              <div className="flex flex-wrap items-center gap-2">
+                <label className="text-[11px] text-muted" htmlFor="forecast-years">Years</label>
+                <input
+                  id="forecast-years"
+                  type="number"
+                  min={1}
+                  max={25}
+                  value={years}
+                  onChange={(event) => setYears(event.target.value)}
+                  className="w-16 bg-panel border border-border rounded-md px-2 py-1.5 text-xs focus:border-accent outline-none"
+                />
+                <Button size="sm" onClick={runForecast}>Run forecast</Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => {
+                    setAssumptions({});
+                    setYears("5");
+                  }}
+                >
+                  Reset
+                </Button>
               </div>
+              {[
+                {
+                  title: "Growth and profitability",
+                  keys: ["revenue_growth", "gross_margin", "opex_ratio", "tax_rate"],
+                },
+                {
+                  title: "Cash flow drivers",
+                  keys: ["da_pct", "capex_pct", "nwc_pct", "interest_rate"],
+                },
+                {
+                  title: "Capital returns and shares",
+                  keys: ["dividend_payout", "excess_cash_sweep", "share_dilution"],
+                },
+              ].map((group) => (
+                <fieldset key={group.title} className="min-w-0">
+                  <legend className="text-[10px] uppercase tracking-[0.16em] text-dim font-medium mb-1.5 px-0">{group.title}</legend>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                    {group.keys.map((key) => {
+                      const field = ASSUMPTION_FIELDS.find((item) => item.key === key);
+                      if (!field) return null;
+                      return (
+                        <Field
+                          key={field.key}
+                          label={field.label}
+                          step={field.step}
+                          value={assumptions[field.key] ?? ""}
+                          placeholder={String(forecast?.assumptions?.[field.key] ?? "default")}
+                          onChange={(value) =>
+                            setAssumptions((current) => ({ ...current, [field.key]: value === "" ? "" : value }))
+                          }
+                        />
+                      );
+                    })}
+                  </div>
+                </fieldset>
+              ))}
               <div className="text-[11px] text-muted">
                 Blank fields use the base-year value inferred from the latest statements. Percentages are decimals (0.05 = 5%).
               </div>
@@ -958,9 +1109,12 @@ export default function CompanyPage() {
                   title="Forecast summary"
                   subtitle="Revenue, EBITDA and free cash flow"
                   action={
-                    <button onClick={saveModel} className="border border-border px-3 py-1.5 rounded-md text-xs hover:bg-panel inline-flex items-center gap-1.5">
-                      <Save size={13} /> Save model
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <Badge tone="muted">Calculated</Badge>
+                      <Button variant="secondary" size="sm" onClick={saveModel}>
+                        <Save size={13} /> Save model
+                      </Button>
+                    </div>
                   }
                 />
                 <div className="h-64 p-2">
@@ -1007,7 +1161,7 @@ export default function CompanyPage() {
         <div className="space-y-4">
           <div className="grid lg:grid-cols-3 gap-4">
             <Card className="lg:col-span-2">
-              <CardHeader title="DCF assumptions" subtitle="Discount the forecast free cash flow to equity value." />
+              <CardHeader title="DCF assumptions" subtitle="Discount the forecast free cash flow to equity value." action={<Badge tone="accent">Inputs</Badge>} />
               <div className="p-4 grid md:grid-cols-2 gap-3">
                 {dcfError ? <div className="md:col-span-2"><ErrorBanner message={dcfError} /></div> : null}
                 <Field label="WACC" value={wacc} step="0.001" onChange={setWacc} hint={waccNote || "Decimal, e.g. 0.10"} />
@@ -1027,18 +1181,16 @@ export default function CompanyPage() {
                 <Field label="Shares outstanding" value={sharesInput} placeholder={String(Math.round(derivedShares))} onChange={setSharesInput} />
                 <Field label="Net debt (debt − cash)" value={netDebtInput} placeholder={String(Math.round(derivedNetDebt))} onChange={setNetDebtInput} />
                 <div className="md:col-span-2 flex flex-wrap gap-2">
-                  <button onClick={() => runDcf(false)} disabled={dcfLoading} className="btn-accent px-3 py-1.5 rounded-md text-xs font-medium disabled:opacity-40">
-                    Run DCF
-                  </button>
-                  <button onClick={() => runDcf(true)} disabled={dcfLoading || !hasForecast} className="border border-border px-3 py-1.5 rounded-md text-xs hover:bg-panel disabled:opacity-40">
+                  <Button size="sm" onClick={() => runDcf(false)} disabled={dcfLoading}>Run DCF</Button>
+                  <Button variant="secondary" size="sm" onClick={() => runDcf(true)} disabled={dcfLoading || !hasForecast}>
                     Implied WACC at market price
-                  </button>
-                  <button onClick={() => exportFile("xlsx")} disabled={exporting !== null} className="border border-border px-3 py-1.5 rounded-md text-xs hover:bg-panel disabled:opacity-40 inline-flex items-center gap-1.5">
+                  </Button>
+                  <Button variant="secondary" size="sm" onClick={() => exportFile("xlsx")} disabled={exporting !== null}>
                     <Download size={13} /> {exporting === "xlsx" ? "Exporting..." : "Excel"}
-                  </button>
-                  <button onClick={() => exportFile("pdf")} disabled={exporting !== null} className="border border-border px-3 py-1.5 rounded-md text-xs hover:bg-panel disabled:opacity-40 inline-flex items-center gap-1.5">
+                  </Button>
+                  <Button variant="secondary" size="sm" onClick={() => exportFile("pdf")} disabled={exporting !== null}>
                     <FileText size={13} /> {exporting === "pdf" ? "Exporting..." : "PDF"}
-                  </button>
+                  </Button>
                 </div>
               </div>
             </Card>
@@ -1074,7 +1226,7 @@ export default function CompanyPage() {
 
           {dcf && !dcf.error ? (
             <Card>
-              <CardHeader title="Valuation bridge" subtitle={`Perpetuity growth ${pct(dcf.terminal_growth)}`} />
+              <CardHeader title="Valuation bridge" subtitle={`Perpetuity growth ${pct(dcf.terminal_growth)}`} action={<Badge tone="muted">Calculated</Badge>} />
               <div className="p-4 grid grid-cols-2 md:grid-cols-4 gap-3">
                 <Stat label="PV of cash flows" value={fmt(dcf.pv_cash_flows)} />
                 <Stat label="PV of terminal value" value={fmt(dcf.pv_terminal_value)} />
@@ -1104,7 +1256,7 @@ export default function CompanyPage() {
 
           {reverse ? (
             <Card>
-              <CardHeader title="Reverse DCF" subtitle="The discount rate implied by today's share price." />
+              <CardHeader title="Reverse DCF" subtitle="The discount rate implied by today's share price." action={<Badge tone="muted">Calculated</Badge>} />
               <div className="p-4 grid grid-cols-2 md:grid-cols-3 gap-3">
                 <Stat label="Implied WACC" value={pct(reverse.implied_wacc, 2)} tone="text-accent" />
                 <Stat label="Current price" value={num(reverse.current_price)} />
@@ -1133,14 +1285,13 @@ export default function CompanyPage() {
                   <select
                     value={sensMode}
                     onChange={(event) => setSensMode(event.target.value)}
-                    className="bg-panel border border-border rounded-md px-2 py-1.5 text-xs"
+                    aria-label="Terminal assumption axis"
+                    className="bg-panel border border-border rounded-md px-2 py-1.5 text-xs focus:border-accent outline-none"
                   >
                     <option value="growth">Terminal growth</option>
                     <option value="multiple">Exit multiple</option>
                   </select>
-                  <button onClick={runSensitivity} disabled={sensLoading} className="btn-accent px-3 py-1.5 rounded-md text-xs font-medium disabled:opacity-40">
-                    Run
-                  </button>
+                  <Button size="sm" onClick={runSensitivity} disabled={sensLoading}>Run</Button>
                 </div>
               }
             />
@@ -1222,9 +1373,9 @@ export default function CompanyPage() {
                 title="Risks are generated from verified data"
                 body="Generate the AI research note to see the risk, catalyst and strength sections. The underlying numbers still come from the deterministic engine."
                 action={
-                  <button onClick={runReport} disabled={reportLoading || enabledModels.length === 0} className="btn-accent px-3 py-1.5 rounded-md text-xs font-medium disabled:opacity-40 inline-flex items-center gap-1.5">
+                  <Button size="sm" onClick={runReport} disabled={reportLoading || enabledModels.length === 0}>
                     {reportLoading ? <Spinner label="Writing" /> : <><Sparkles size={13} /> Generate report</>}
-                  </button>
+                  </Button>
                 }
               />
               {enabledModels.length === 0 ? (
@@ -1248,7 +1399,8 @@ export default function CompanyPage() {
                   <select
                     value={modelName}
                     onChange={(event) => setModelName(event.target.value)}
-                    className="bg-panel border border-border rounded-md px-2 py-1.5 text-xs max-w-56"
+                    aria-label="AI model"
+                    className="bg-panel border border-border rounded-md px-2 py-1.5 text-xs max-w-56 focus:border-accent outline-none"
                   >
                     <option value="">Default model</option>
                     {enabledModels.map((model) => (
@@ -1257,15 +1409,15 @@ export default function CompanyPage() {
                       </option>
                     ))}
                   </select>
-                  <button onClick={runReport} disabled={reportLoading || enabledModels.length === 0} className="btn-accent px-3 py-1.5 rounded-md text-xs font-medium disabled:opacity-40">
+                  <Button size="sm" onClick={runReport} disabled={reportLoading || enabledModels.length === 0}>
                     {reportLoading ? "Generating..." : "Generate"}
-                  </button>
-                  <button onClick={() => exportFile("pdf")} disabled={exporting !== null} className="border border-border px-3 py-1.5 rounded-md text-xs hover:bg-panel disabled:opacity-40">
+                  </Button>
+                  <Button variant="secondary" size="sm" onClick={() => exportFile("pdf")} disabled={exporting !== null}>
                     Export PDF
-                  </button>
+                  </Button>
                   <Link
                     href={`/research?ticker=${encodeURIComponent(ticker)}`}
-                    className="border border-accent/50 text-accent px-3 py-1.5 rounded-md text-xs hover:bg-accent/10"
+                    className="border border-accent/50 text-accent px-3 py-1.5 rounded-md text-xs hover:bg-accent/10 inline-flex items-center"
                     title="Open the full institutional research studio versioned generator"
                   >
                     Research Studio
@@ -1282,7 +1434,7 @@ export default function CompanyPage() {
                   body={enabledModels.length ? "Generate a research draft when you are ready." : "Configure an AI provider to generate research drafts."}
                   action={
                     enabledModels.length ? null : (
-                      <Link href="/ai" className="btn-accent px-3 py-1.5 rounded-md text-xs font-medium">
+                      <Link href="/ai" className="btn-accent px-3 py-1.5 rounded-md text-xs font-medium inline-flex items-center">
                         Configure AI
                       </Link>
                     )
@@ -1348,6 +1500,8 @@ export default function CompanyPage() {
           </Card>
         </div>
       ) : null}
+        </TabPanel>
+      </div>
     </div>
   );
 }

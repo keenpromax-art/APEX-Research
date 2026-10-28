@@ -111,7 +111,7 @@ export function Shell({ children }: { children: ReactNode }) {
         ref={drawerRef}
         tabIndex={-1}
         className={cn(
-          "fixed inset-y-0 left-0 z-40 flex flex-col bg-surface border-r border-border transition-transform duration-200 md:static md:translate-x-0",
+          "fixed inset-y-0 left-0 z-40 flex w-64 flex-col bg-surface border-r border-border transition-transform duration-200 md:static md:translate-x-0",
           compact ? "md:w-14" : "md:w-60",
           open ? "translate-x-0" : "-translate-x-full",
         )}

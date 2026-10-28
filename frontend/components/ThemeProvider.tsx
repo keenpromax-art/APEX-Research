@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useState } from "react";
 
 type Theme = "dark" | "light";
 
@@ -22,10 +22,15 @@ function applyTheme(theme: Theme) {
   }
 }
 
+// Layout effect on the client so the saved theme applies before the first
+// post-hydration paint (the boot script in layout.tsx covers pre-hydration);
+// plain effect on the server to avoid the SSR useLayoutEffect warning.
+const useIsomorphicLayoutEffect = typeof window !== "undefined" ? useLayoutEffect : useEffect;
+
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [theme, setThemeState] = useState<Theme>("dark");
 
-  useEffect(() => {
+  useIsomorphicLayoutEffect(() => {
     let stored: string | null = null;
     try {
       stored = localStorage.getItem("apex-theme");
@@ -35,7 +40,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     if (stored === "light" || stored === "dark") setThemeState(stored);
   }, []);
 
-  useEffect(() => {
+  useIsomorphicLayoutEffect(() => {
     applyTheme(theme);
   }, [theme]);
 

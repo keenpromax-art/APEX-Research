@@ -5,7 +5,7 @@ import Link from "next/link";
 import { Check, Keyboard, Moon, RefreshCw, Server, ShieldCheck, Sun } from "lucide-react";
 import { api } from "@/lib/api";
 import { useTheme } from "@/components/ThemeProvider";
-import { Badge, Card, CardHeader, InfoBanner, Spinner } from "@/components/ui";
+import { Badge, Button, Card, CardHeader, InfoBanner, Spinner } from "@/components/ui";
 import { cn } from "@/lib/cn";
 
 type Health = { status?: string; service?: string; version?: string };
@@ -87,19 +87,20 @@ export default function SettingsPage() {
               ))}
             </div>
             <div className="flex items-center gap-2">
-              <button
-                onClick={() => {
-                  try {
-                    localStorage.removeItem("apex-theme");
-                  } catch {
-                    // ignore
-                  }
-                  setTheme("dark");
-                }}
-                className="border border-border px-3 py-1.5 rounded-md text-xs hover:bg-panel"
-              >
-                Reset preference
-              </button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => {
+                    try {
+                      localStorage.removeItem("apex-theme");
+                    } catch {
+                      // ignore
+                    }
+                    setTheme("dark");
+                  }}
+                >
+                  Reset preference
+                </Button>
               <span className="text-[11px] text-muted">Theme choice never leaves this device.</span>
             </div>
           </div>
@@ -110,9 +111,9 @@ export default function SettingsPage() {
             title="Local engine"
             subtitle="Every calculation runs in this browser — no server required"
             action={
-              <button onClick={check} className="border border-border px-2.5 py-1 rounded-md text-[11px] hover:bg-panel inline-flex items-center gap-1">
+              <Button variant="secondary" size="sm" onClick={check}>
                 <RefreshCw size={12} /> Recheck
-              </button>
+              </Button>
             }
           />
           <div className="p-4 space-y-2.5 text-xs">

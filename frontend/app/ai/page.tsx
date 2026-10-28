@@ -5,7 +5,7 @@ import Link from "next/link";
 import { CheckCircle2, Cpu, ExternalLink, RefreshCw, ShieldCheck, Trash2, XCircle } from "lucide-react";
 import { api, getErrorMessage } from "@/lib/api";
 import { localDate } from "@/lib/format";
-import { Badge, Card, CardHeader, EmptyState, ErrorBanner, Field, InfoBanner, Select, Spinner, TableWrap } from "@/components/ui";
+import { Badge, Button, Card, CardHeader, EmptyState, ErrorBanner, Field, InfoBanner, Select, Spinner, TableWrap } from "@/components/ui";
 import { cn } from "@/lib/cn";
 
 type Model = {
@@ -269,9 +269,9 @@ export default function AIPage() {
         </div>
         <div className="ml-auto flex items-center gap-2">
           <Badge tone={enabled ? "pos" : "warn"}>{enabled} enabled</Badge>
-          <button onClick={load} className="border border-border px-3 py-1.5 rounded-md text-xs hover:bg-panel inline-flex items-center gap-1.5">
+          <Button variant="secondary" size="sm" onClick={load}>
             <RefreshCw size={13} /> Refresh
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -423,13 +423,9 @@ export default function AIPage() {
             <div className="rounded-md border border-border bg-panel/50 px-2.5 py-2 text-[10px] text-muted">
               The key is stored in this browser&apos;s local storage (unencrypted) and sent only to the provider endpoint you configured. Treat this browser profile as sensitive.
             </div>
-            <button
-              type="submit"
-              disabled={adding}
-              className="w-full btn-accent px-3 py-2 rounded-md text-xs font-medium hover:opacity-90 disabled:opacity-40"
-            >
+            <Button type="submit" className="w-full" disabled={adding}>
               {adding ? "Adding..." : "Add model"}
-            </button>
+            </Button>
           </form>
         </Card>
       </div>

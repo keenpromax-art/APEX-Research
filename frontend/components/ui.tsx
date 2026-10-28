@@ -69,16 +69,18 @@ export function Stat({
   value,
   hint,
   tone,
+  compact,
 }: {
   label: string;
   value: ReactNode;
   hint?: ReactNode;
   tone?: string;
+  compact?: boolean;
 }) {
   return (
-    <div className="bg-surface border border-border rounded-md p-3 min-w-0">
+    <div className={cn("bg-surface border border-border rounded-md min-w-0", compact ? "px-3 py-2" : "p-3")}>
       <div className="text-[11px] uppercase tracking-wide text-muted truncate">{label}</div>
-      <div className={cn("text-lg font-semibold tabular mt-1 truncate", tone)}>{value}</div>
+      <div className={cn(compact ? "text-sm" : "text-lg", "font-semibold tabular mt-1 truncate", tone)}>{value}</div>
       {hint ? <div className="text-[11px] text-muted mt-0.5 truncate">{hint}</div> : null}
     </div>
   );
@@ -105,16 +107,22 @@ export function Badge({
   );
 }
 
+export function tabId(base: string, tab: string) {
+  return `${base}-tab-${tab.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+}
+
 export function Tabs({
   tabs,
   value,
   onChange,
   className,
+  idBase = "tabs",
 }: {
   tabs: readonly string[];
   value: string;
   onChange: (tab: string) => void;
   className?: string;
+  idBase?: string;
 }) {
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -144,9 +152,11 @@ export function Tabs({
       {tabs.map((tab) => (
         <button
           key={tab}
+          id={tabId(idBase, tab)}
           role="tab"
           type="button"
           aria-selected={value === tab}
+          aria-controls={`${idBase}-panel`}
           tabIndex={value === tab ? 0 : -1}
           onClick={() => onChange(tab)}
           className={cn(
@@ -159,6 +169,29 @@ export function Tabs({
           {tab}
         </button>
       ))}
+    </div>
+  );
+}
+
+export function TabPanel({
+  idBase = "tabs",
+  active,
+  children,
+  className,
+}: {
+  idBase?: string;
+  active: string;
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <div
+      role="tabpanel"
+      id={`${idBase}-panel`}
+      aria-labelledby={tabId(idBase, active)}
+      className={className}
+    >
+      {children}
     </div>
   );
 }

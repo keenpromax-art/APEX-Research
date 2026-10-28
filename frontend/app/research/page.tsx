@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Download, Eye, FileText, RefreshCw, Trash2 } from "lucide-react";
 import { api, apiBlob, downloadBlob, getErrorMessage } from "@/lib/api";
 import { fmt, money, pct } from "@/lib/format";
-import { Card, CardHeader, EmptyState, ErrorBanner, Field, InfoBanner, Select, Spinner, Stat } from "@/components/ui";
+import { Card, CardHeader, Button, EmptyState, ErrorBanner, Field, InfoBanner, Select, Spinner, Stat } from "@/components/ui";
 
 type ReportSummary = {
   id: number;
@@ -230,10 +230,12 @@ function ResearchStudio() {
         <Card className="lg:col-span-1 self-start">
           <CardHeader title="Report configuration" subtitle="Everything here is recorded as provenance S5." />
           <div className="p-4 grid grid-cols-2 gap-3">
+            <div className="col-span-2 text-[10px] uppercase tracking-[0.16em] text-dim font-medium border-b border-border pb-1.5">Report identity</div>
             <Field label="Title" type="text" value={title} onChange={setTitle} placeholder="Auto from company + rating" className="col-span-2" />
-            <Field label="Peers" type="text" value={peers} onChange={setPeers} placeholder="MSFT, AAPL, GOOGL" hint="comma-separated, optional" className="col-span-2" />
             <Field label="Report date" type="date" value={reportDate} onChange={setReportDate} hint="defaults to today" />
             <Select label="Note type" value={reportType} onChange={(value) => setReportType(value as "quick" | "full")} options={[{ value: "full", label: "Full institutional note" }, { value: "quick", label: "Quick note (3-5 pages)" }]} />
+
+            <div className="col-span-2 text-[10px] uppercase tracking-[0.16em] text-dim font-medium border-b border-border pb-1.5 pt-2">Forecast and valuation</div>
             <Field label="Forecast years" value={years} onChange={setYears} hint="1-10" />
             <Field label="Horizon" type="text" value={horizon} onChange={setHorizon} hint="e.g. 12M" />
             <Select label="Terminal value" value={terminalMode} onChange={(value) => setTerminalMode(value as "growth" | "multiple")} options={[{ value: "growth", label: "Perpetuity growth" }, { value: "multiple", label: "Exit multiple" }]} />
@@ -243,13 +245,18 @@ function ResearchStudio() {
               Override WACC (CAPM inputs are otherwise used and listed in the PDF)
             </label>
             {waccEnabled ? <Field label="WACC" value={wacc} onChange={setWacc} hint="e.g. 0.08 = 8%" /> : null}
+
+            <div className="col-span-2 text-[10px] uppercase tracking-[0.16em] text-dim font-medium border-b border-border pb-1.5 pt-2">Rating</div>
             <Select label="Rating" value={ratingMode} onChange={(value) => setRatingMode(value as "auto" | "manual")} options={[{ value: "auto", label: "Auto from DCF bands" }, { value: "manual", label: "Manual (documented)" }]} />
             {ratingMode === "manual" ? (
               <>
                 <Select label="Manual rating" value={manualRating} onChange={setManualRating} options={["BUY", "HOLD", "SELL"].map((code) => ({ value: code, label: code }))} />
-                <Field label="Manual target" value={manualTarget} onChange={setManualTarget} placeholder="Leave empty to keep model target" />
+                <Field label="Manual target" value={manualTarget} onChange={setManualTarget} placeholder="Leave empty to keep model target" className="col-span-2" />
               </>
             ) : null}
+
+            <div className="col-span-2 text-[10px] uppercase tracking-[0.16em] text-dim font-medium border-b border-border pb-1.5 pt-2">Data and AI</div>
+            <Field label="Peers" type="text" value={peers} onChange={setPeers} placeholder="MSFT, AAPL, GOOGL" hint="comma-separated, optional" className="col-span-2" />
             <Select
               label="AI narrative"
               value={aiModel}
@@ -260,10 +267,10 @@ function ResearchStudio() {
               <input type="checkbox" checked={forceRefresh} onChange={(event) => setForceRefresh(event.target.checked)} className="accent-[var(--accent)]" />
               Force fresh provider fetch (ignore cache)
             </label>
-            <div className="col-span-2 flex items-center gap-3 pt-1">
-              <button onClick={() => void generate()} disabled={busy} className="btn-accent rounded-md px-4 py-2 text-sm font-medium disabled:opacity-50 inline-flex items-center gap-2">
+            <div className="col-span-2 flex flex-wrap items-center gap-3 pt-1">
+              <Button onClick={() => void generate()} disabled={busy}>
                 {busy ? <Spinner label="Building..." /> : "Generate report"}
-              </button>
+              </Button>
               <span className="text-[11px] text-muted">The pipeline never invents numbers; QC runs on every build.</span>
             </div>
           </div>
@@ -302,25 +309,23 @@ function ResearchStudio() {
                   </div>
                 ) : null}
                 <div className="flex flex-wrap gap-2">
-                  <button
-                    onClick={() => void downloadPdf(selected.id, `apex_${selected.ticker}_${selected.id}.pdf`)}
-                    className="border border-border rounded-md px-3 py-1.5 text-xs hover:bg-panel inline-flex items-center gap-1.5"
-                  >
+                  <Button variant="secondary" size="sm" onClick={() => void downloadPdf(selected.id, `apex_${selected.ticker}_${selected.id}.pdf`)}>
                     <Download size={14} /> Download PDF
-                  </button>
-                  <button
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    size="sm"
                     onClick={() => (preview ? setPreview(null) : void loadPreview(selected.id))}
                     disabled={previewBusy || !selected.pdf_size}
-                    className="border border-border rounded-md px-3 py-1.5 text-xs hover:bg-panel inline-flex items-center gap-1.5 disabled:opacity-50"
                   >
                     <Eye size={14} /> {previewBusy ? "Rendering…" : preview ? "Hide preview" : "Preview pages"}
-                  </button>
-                  <button onClick={() => void regenerate(selected.id)} disabled={busy} className="border border-border rounded-md px-3 py-1.5 text-xs hover:bg-panel inline-flex items-center gap-1.5 disabled:opacity-50">
+                  </Button>
+                  <Button variant="secondary" size="sm" onClick={() => void regenerate(selected.id)} disabled={busy}>
                     <RefreshCw size={14} /> Regenerate (new version)
-                  </button>
-                  <button onClick={() => void remove(selected.id)} className="border border-neg/40 text-neg rounded-md px-3 py-1.5 text-xs hover:bg-neg/10 inline-flex items-center gap-1.5">
+                  </Button>
+                  <Button variant="danger" size="sm" onClick={() => void remove(selected.id)}>
                     <Trash2 size={14} /> Delete
-                  </button>
+                  </Button>
                   {selected.ai_model ? <span className="text-[11px] text-muted self-center">AI narrative: {selected.ai_model}</span> : <span className="text-[11px] text-muted self-center">No AI narrative (deterministic)</span>}
                 </div>
                 {preview ? (
@@ -376,7 +381,19 @@ function ResearchStudio() {
                   </thead>
                   <tbody>
                     {reports.map((row) => (
-                      <tr key={row.id} className={`border-b border-border/60 hover:bg-panel cursor-pointer ${selected?.id === row.id ? "bg-panel" : ""}`} onClick={() => setSelected(row)}>
+                      <tr
+                        key={row.id}
+                        tabIndex={0}
+                        aria-label={`Select version ${row.id} of the ${row.ticker} report`}
+                        className={`border-b border-border/60 hover:bg-panel cursor-pointer outline-none focus-visible:ring-1 focus-visible:ring-accent ${selected?.id === row.id ? "bg-panel" : ""}`}
+                        onClick={() => setSelected(row)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            setSelected(row);
+                          }
+                        }}
+                      >
                         <td className="px-3 py-2 tabular">{row.id}</td>
                         <td className="px-3 py-2 font-medium">{row.ticker}{row.previous_version_id ? <span className="text-muted"> · v({row.previous_version_id})</span> : null}</td>
                         <td className="px-3 py-2 capitalize">{row.report_type}</td>

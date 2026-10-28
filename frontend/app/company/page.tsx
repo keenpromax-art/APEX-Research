@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { ArrowRight, Search } from "lucide-react";
 import { api, getErrorMessage } from "@/lib/api";
 import { localDate } from "@/lib/format";
-import { Card, CardHeader, ErrorBanner, Spinner } from "@/components/ui";
+import { Button, Card, CardHeader, EmptyState, ErrorBanner, Spinner } from "@/components/ui";
 import { cn } from "@/lib/cn";
 
 type Project = { id: number; name: string; ticker: string; updated_at: string };
@@ -164,9 +164,9 @@ export default function CompanyIndex() {
               </ul>
             ) : null}
           </div>
-          <button type="submit" className="btn-accent px-4 py-2.5 rounded-md text-sm font-medium">
+          <Button type="submit" className="sm:px-6 sm:py-2.5">
             Open
-          </button>
+          </Button>
           <Link href="/company/SAMPLE" className="border border-border rounded-md px-4 py-2.5 text-sm text-center hover:bg-panel">
             Sample company
           </Link>
@@ -181,7 +181,7 @@ export default function CompanyIndex() {
           {loading ? (
             <div className="p-3"><Spinner label="Loading projects" /></div>
           ) : projects.length === 0 ? (
-            <div className="text-xs text-muted p-3">No saved projects yet.</div>
+            <EmptyState title="No saved projects yet" body="Open a ticker and save the workspace to keep its assumptions." />
           ) : (
             <ul className="divide-y divide-border">
               {projects.map((project) => (

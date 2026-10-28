@@ -321,9 +321,9 @@ function buildZip(entries: ZipEntry[]) {
 const STYLES_XML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
   <numFmts count="3">
-    <numFmt numFmtId="164" formatCode="#,##0"/>
-    <numFmt numFmtId="165" formatCode="0.00"/>
-    <numFmt numFmtId="166" formatCode="0.0%"/>
+    <numFmt numFmtId="164" formatCode="#,##0;[Red](#,##0)"/>
+    <numFmt numFmtId="165" formatCode="0.00;[Red](0.00)"/>
+    <numFmt numFmtId="166" formatCode="0.0%;[Red](0.0%)"/>
   </numFmts>
   <fonts count="4">
     <font><sz val="11"/><name val="Calibri"/></font>
