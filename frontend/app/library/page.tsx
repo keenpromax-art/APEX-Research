@@ -124,7 +124,7 @@ export default function LibraryPage() {
   );
 
   return (
-    <div className="p-5 md:p-7 max-w-7xl mx-auto space-y-4">
+    <div className="px-5 md:px-8 lg:px-10 py-6 md:py-8 max-w-[1680px] mx-auto space-y-6">
       <div className="flex flex-wrap items-start gap-3">
         <div>
           <h1 className="text-xl font-semibold flex items-center gap-2">

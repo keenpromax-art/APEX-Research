@@ -52,7 +52,7 @@ export default function SettingsPage() {
   }, [check]);
 
   return (
-    <div className="p-5 md:p-7 max-w-5xl mx-auto space-y-4">
+    <div className="px-5 md:px-8 lg:px-10 py-6 md:py-8 max-w-[1680px] mx-auto space-y-6">
       <div>
         <h1 className="text-xl font-semibold">Settings</h1>
         <p className="text-xs text-muted mt-1">Local display preferences and a read-only view of the engine status.</p>

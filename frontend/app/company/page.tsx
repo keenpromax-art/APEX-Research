@@ -101,7 +101,7 @@ export default function CompanyIndex() {
   }
 
   return (
-    <div className="p-5 md:p-8 max-w-5xl mx-auto space-y-5">
+    <div className="px-5 md:px-8 lg:px-10 py-6 md:py-8 max-w-[1680px] mx-auto space-y-6">
       <div>
         <h1 className="text-xl font-semibold">Company workspace</h1>
         <p className="text-sm text-muted">Open a ticker to review statements, forecast, value and write research.</p>

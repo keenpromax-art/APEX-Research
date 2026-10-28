@@ -16,10 +16,21 @@ import {
   Search,
   ShieldCheck,
   Sparkles,
+  TrendingUp,
 } from "lucide-react";
+import {
+  Area,
+  AreaChart,
+  CartesianGrid,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 import { api } from "@/lib/api";
 import { localDate } from "@/lib/format";
 import { Badge, Button, EmptyState, Skeleton, Spinner } from "@/components/ui";
+import { cn } from "@/lib/cn";
 
 type Project = { id: number; name: string; ticker: string; description?: string | null; updated_at: string };
 type Model = { name: string; provider: string; enabled: boolean; source: string };
@@ -27,34 +38,31 @@ type Model = { name: string; provider: string; enabled: boolean; source: string 
 const RECENT_KEY = "apex-recent-tickers";
 
 const ENTRY_POINTS = [
-  { href: "/company", label: "Company analysis", body: "Statements, metrics and price history", icon: BarChart3 },
-  { href: "/modelling", label: "Modelling studio", body: "LBO, options, bond and WACC models", icon: Calculator },
-  { href: "/research", label: "Research studio", body: "Versioned institutional PDF notes", icon: FileText },
-  { href: "/ai", label: "AI Center", body: "Optional narrative providers", icon: Cpu },
-  { href: "/library", label: "Library", body: "Saved projects and model snapshots", icon: BookOpen },
+  { href: "/company", label: "Company analysis", body: "Statements, metrics and price history", icon: BarChart3, accent: "from-accent/20 to-cyan/10" },
+  { href: "/modelling", label: "Modelling studio", body: "LBO, options, bond and WACC models", icon: Calculator, accent: "from-indigo/20 to-accent/10" },
+  { href: "/research", label: "Research studio", body: "Versioned institutional PDF notes", icon: FileText, accent: "from-pos/20 to-cyan/10" },
+  { href: "/ai", label: "AI Center", body: "Optional narrative providers", icon: Cpu, accent: "from-warn/20 to-neg/10" },
+  { href: "/library", label: "Library", body: "Saved projects and model snapshots", icon: BookOpen, accent: "from-muted/20 to-dim/10" },
 ];
 
 const FLOW = [
-  {
-    title: "Pull statements",
-    body: "Annual and quarterly statements normalized in the browser. Missing data is labelled, never zero-filled.",
-    icon: Database,
-  },
-  {
-    title: "Model the business",
-    body: "Linked three-statement forecast with a cash revolver; flex growth, margins and working capital.",
-    icon: BarChart3,
-  },
-  {
-    title: "Value it",
-    body: "DCF, reverse DCF, WACC and two-way sensitivity — deterministic, tested code.",
-    icon: Calculator,
-  },
-  {
-    title: "Write the note",
-    body: "AI-assisted research draft grounded in verified metrics, exported to Excel or PDF.",
-    icon: Sparkles,
-  },
+  { title: "Source financial data", body: "Annual and quarterly statements normalized in-browser. Missing data is labelled, never zero-filled.", icon: Database },
+  { title: "Analyse history", body: "Revenue, margins, returns and cash conversion across the reported record.", icon: BarChart3 },
+  { title: "Build the forecast", body: "Linked three-statement model with a cash revolver; flex growth, margins and working capital.", icon: TrendingUp },
+  { title: "Value the business", body: "DCF, reverse DCF, WACC and two-way sensitivity — deterministic, tested code.", icon: Calculator },
+  { title: "Write the note", body: "AI-assisted research draft grounded in verified metrics, exported to Excel or PDF.", icon: Sparkles },
+];
+
+// Clearly-labelled sample data for the hero visual — never presented as live market data.
+const SAMPLE_SERIES = [
+  { d: "2020", rev: 274, fcf: 80 },
+  { d: "2021", rev: 316, fcf: 96 },
+  { d: "2022", rev: 342, fcf: 104 },
+  { d: "2023", rev: 383, fcf: 118 },
+  { d: "2024", rev: 412, fcf: 132 },
+  { d: "2025", rev: 458, fcf: 150 },
+  { d: "2026E", rev: 501, fcf: 168 },
+  { d: "2027E", rev: 548, fcf: 186 },
 ];
 
 export default function Home() {
@@ -106,71 +114,150 @@ export default function Home() {
   }
 
   const enabledModels = models.filter((model) => model.enabled).length;
-  const forecastSnapshots = projects.length;
 
   return (
-    <div className="mx-auto max-w-7xl px-4 md:px-8 py-6 md:py-10 space-y-10">
-      {/* Hero + primary workflow */}
-      <section className="max-w-3xl">
-        <div className="flex items-center gap-2 mb-4">
-          <Badge tone="accent">Equity research terminal</Badge>
-          <Badge tone={health === "ok" ? "pos" : health === "down" ? "neg" : "muted"}>
-            {health === "ok" ? "Engine ready" : health === "down" ? "Engine error" : "Starting engine"}
-          </Badge>
-          {!loading && enabledModels > 0 ? <Badge tone="muted">{enabledModels} AI model{enabledModels === 1 ? "" : "s"}</Badge> : null}
-        </div>
-        <h1 className="text-3xl md:text-4xl font-semibold tracking-tight leading-tight">
-          Ticker to investment view, without spreadsheet archaeology.
-        </h1>
-        <p className="text-sm md:text-base text-muted mt-3 max-w-2xl leading-relaxed">
-          Pull the financials, build a linked forecast, value the business, and draft a research note.
-          Every number is produced by tested code — AI only writes the narrative.
-        </p>
-        <form onSubmit={openTicker} className="mt-6 flex flex-col sm:flex-row gap-2 max-w-xl" role="search">
-          <div className="relative flex-1">
-            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted pointer-events-none" aria-hidden />
-            <input
-              value={ticker}
-              onChange={(event) => setTicker(event.target.value)}
-              placeholder="Enter a ticker, e.g. AAPL, MSFT, RELIANCE.NS"
-              className="w-full bg-surface border border-border rounded-md pl-9 pr-3 py-2.5 text-sm focus:border-accent focus:bg-hover outline-none"
-              aria-label="Ticker"
-            />
+    <div className="relative z-10 mx-auto max-w-[1680px] px-5 md:px-8 lg:px-10 py-6 md:py-8 space-y-10">
+      {/* Hero */}
+      <section className="grid lg:grid-cols-[1.05fr_1fr] gap-8 items-center">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2 mb-5">
+            <Badge tone="accent">Equity research terminal</Badge>
+            <Badge tone={health === "ok" ? "pos" : health === "down" ? "neg" : "muted"}>
+              {health === "ok" ? "Engine ready" : health === "down" ? "Engine error" : "Starting engine"}
+            </Badge>
+            {!loading && enabledModels > 0 ? (
+              <Badge tone="muted">{enabledModels} AI model{enabledModels === 1 ? "" : "s"}</Badge>
+            ) : null}
           </div>
-          <Button type="submit" size="lg">Open workspace</Button>
-          <Button type="button" variant="secondary" size="lg" onClick={() => router.push("/company/SAMPLE")}>
-            Try sample
-          </Button>
-        </form>
-        <p className="mt-3 text-[11px] text-dim">
-          Everything runs in this browser — fundamentals, forecasts, valuation and exports come from the local engine.
-        </p>
+          <h1 className="display text-gradient">
+            Ticker to investment view, without spreadsheet archaeology.
+          </h1>
+          <p className="text-base md:text-lg text-muted mt-4 max-w-xl leading-relaxed">
+            Pull the financials, build a linked forecast, value the business, and draft a research note.
+            Every number is produced by tested code — AI only writes the narrative.
+          </p>
+          <form onSubmit={openTicker} className="mt-7 flex flex-col sm:flex-row gap-2 max-w-xl" role="search">
+            <div className="relative flex-1">
+              <Search size={17} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted pointer-events-none" aria-hidden />
+              <input
+                value={ticker}
+                onChange={(event) => setTicker(event.target.value)}
+                placeholder="Enter a ticker, e.g. AAPL, MSFT, RELIANCE.NS"
+                className="w-full bg-surface border border-border rounded-xl pl-10 pr-3 py-3 text-sm focus:border-accent focus:bg-hover outline-none transition-colors shadow-xs"
+                aria-label="Ticker"
+              />
+            </div>
+            <Button type="submit" size="lg">Open workspace</Button>
+            <Button type="button" variant="secondary" size="lg" onClick={() => router.push("/company/SAMPLE")}>
+              Try sample
+            </Button>
+          </form>
+          <p className="mt-3 text-xs text-dim">
+            Everything runs in this browser — fundamentals, forecasts, valuation and exports come from the local engine.
+          </p>
+        </div>
+
+        {/* Hero visual — a real rendered financial chart on sample data */}
+        <div className="relative min-w-0">
+          <div className="absolute inset-0 hero-grid rounded-2xl" aria-hidden />
+          <div className="relative rounded-2xl border border-border bg-surface/70 backdrop-blur-sm shadow-md overflow-hidden">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+              <div className="flex items-center gap-2">
+                <span className="h-2 w-2 rounded-full bg-accent shadow-[0_0_8px_var(--accent)]" aria-hidden />
+                <span className="text-xs font-semibold tracking-tight">Revenue &amp; free cash flow</span>
+              </div>
+              <Badge tone="muted">Sample data</Badge>
+            </div>
+            <div className="h-[260px] px-2 py-3">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={SAMPLE_SERIES} margin={{ top: 8, right: 12, left: 0, bottom: 2 }}>
+                  <defs>
+                    <linearGradient id="heroRev" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="var(--accent)" stopOpacity={0.35} />
+                      <stop offset="100%" stopColor="var(--accent)" stopOpacity={0.02} />
+                    </linearGradient>
+                    <linearGradient id="heroFcf" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="var(--pos)" stopOpacity={0.25} />
+                      <stop offset="100%" stopColor="var(--pos)" stopOpacity={0.02} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid stroke="var(--border)" strokeOpacity={0.5} strokeDasharray="3 3" vertical={false} />
+                  <XAxis dataKey="d" tick={{ fill: "var(--text-dim)", fontSize: 10 }} tickLine={false} axisLine={{ stroke: "var(--border)" }} />
+                  <YAxis tick={{ fill: "var(--text-dim)", fontSize: 10 }} tickLine={false} axisLine={false} width={34} />
+                  <Tooltip
+                    contentStyle={{
+                      background: "var(--bg-elev)",
+                      border: "1px solid var(--border-strong)",
+                      borderRadius: 8,
+                      fontSize: 11,
+                      color: "var(--text)",
+                      boxShadow: "var(--shadow-md)",
+                    }}
+                  />
+                  <Area type="monotone" dataKey="rev" name="Revenue" stroke="var(--accent)" strokeWidth={2} fill="url(#heroRev)" dot={false} />
+                  <Area type="monotone" dataKey="fcf" name="FCF" stroke="var(--pos)" strokeWidth={1.6} strokeDasharray="4 3" fill="url(#heroFcf)" dot={false} />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+            <div className="grid grid-cols-3 gap-px bg-border">
+              {[
+                { label: "Revenue CAGR", value: "10.4%" },
+                { label: "FCF margin", value: "32.7%" },
+                { label: "Net debt / EBITDA", value: "0.6x" },
+              ].map((m) => (
+                <div key={m.label} className="bg-surface px-3 py-2.5">
+                  <div className="text-[10px] uppercase tracking-wide text-dim font-medium">{m.label}</div>
+                  <div className="text-sm font-semibold tabular mt-0.5 text-fg">{m.value}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+          <p className="mt-2 text-[10px] text-dim text-right">
+            Illustrative sample series — labelled, not live market data.
+          </p>
+        </div>
       </section>
 
-      {/* Continue working: recents + saved projects */}
-      <section>
-        <div className="flex items-end justify-between gap-3 mb-3">
-          <div>
-            <h2 className="text-lg font-semibold tracking-tight flex items-center gap-2">
-              <Clock size={16} className="text-accent" aria-hidden /> Continue working
-            </h2>
-            <p className="text-xs text-muted mt-0.5">Recently opened workspaces and saved projects, stored in this browser.</p>
+      {/* Overview strip */}
+      <section className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {[
+          { label: "Saved projects", value: loading ? "—" : projects.length, hint: "workspaces" },
+          { label: "AI models enabled", value: loading ? "—" : enabledModels, hint: "providers" },
+          { label: "Data engine", value: health === "ok" ? "Ready" : health === "down" ? "Error" : "Starting", hint: "local" },
+          { label: "Model integrity", value: "Deterministic", hint: "tested code" },
+        ].map((m) => (
+          <div key={m.label} className="rounded-xl border border-border bg-surface p-4 shadow-xs">
+            <div className="text-[10px] uppercase tracking-[0.12em] text-dim font-medium">{m.label}</div>
+            <div className="text-xl font-semibold tabular mt-1.5 leading-tight text-fg">{m.value}</div>
+            <div className="text-[10px] text-muted mt-0.5">{m.hint}</div>
           </div>
-          <Link href="/library" className="text-xs text-accent inline-flex items-center gap-1 whitespace-nowrap">
-            Library <ArrowRight size={12} />
+        ))}
+      </section>
+
+      {/* Continue working */}
+      <section>
+        <div className="flex items-end justify-between gap-3 mb-4">
+          <div>
+            <h2 className="text-xl font-semibold tracking-tight flex items-center gap-2">
+              <Clock size={17} className="text-accent" aria-hidden /> Continue working
+            </h2>
+            <p className="text-sm text-muted mt-1">Recently opened workspaces and saved projects, stored in this browser.</p>
+          </div>
+          <Link href="/library" className="text-sm text-accent inline-flex items-center gap-1 whitespace-nowrap hover:underline">
+            Library <ArrowRight size={13} />
           </Link>
         </div>
         <div className="grid lg:grid-cols-3 gap-4">
-          <div className="lg:col-span-2 rounded-xl border border-border bg-surface overflow-hidden">
-            <div className="px-4 py-3 border-b border-border flex items-center justify-between gap-3">
-              <span className="text-xs font-medium uppercase tracking-wide text-muted">Saved projects</span>
+          <div className="lg:col-span-2 rounded-xl border border-border bg-surface overflow-hidden shadow-xs">
+            <div className="px-5 py-3 border-b border-border flex items-center justify-between gap-3">
+              <span className="text-xs font-semibold uppercase tracking-[0.12em] text-muted">Saved projects</span>
               {loading ? <Spinner label="Loading" /> : <span className="text-xs tabular text-dim">{projects.length}</span>}
             </div>
             {loading ? (
               <div className="p-4 space-y-2">
-                <Skeleton className="h-9" />
-                <Skeleton className="h-9" />
-                <Skeleton className="h-9 w-3/4" />
+                <Skeleton className="h-10" />
+                <Skeleton className="h-10" />
+                <Skeleton className="h-10 w-3/4" />
               </div>
             ) : projects.length === 0 ? (
               <EmptyState
@@ -182,24 +269,24 @@ export default function Home() {
                 }
                 action={
                   projectsError ? null : (
-                    <Link href="/company" className="text-xs text-accent inline-flex items-center gap-1">
-                      Open a company <ArrowRight size={12} />
+                    <Link href="/company" className="text-sm text-accent inline-flex items-center gap-1">
+                      Open a company <ArrowRight size={13} />
                     </Link>
                   )
                 }
               />
             ) : (
               <ul className="divide-y divide-border">
-                {projects.slice(0, 6).map((project) => (
+                {projects.slice(0, 7).map((project) => (
                   <li key={project.id}>
                     <Link
                       href={`/company/${encodeURIComponent(project.ticker)}?project=${project.id}`}
-                      className="flex items-center gap-3 px-4 py-2.5 hover:bg-panel transition-colors"
+                      className="flex items-center gap-4 px-5 py-3 hover:bg-panel transition-colors group"
                     >
-                      <span className="text-xs font-semibold text-accent w-20 shrink-0 truncate mono">{project.ticker}</span>
-                      <span className="text-xs truncate flex-1 min-w-0">{project.name}</span>
-                      <span className="text-[10px] text-dim whitespace-nowrap hidden sm:block">{localDate(project.updated_at)}</span>
-                      <ArrowUpRight size={13} className="text-dim shrink-0" aria-hidden />
+                      <span className="text-xs font-semibold text-accent w-24 shrink-0 truncate mono">{project.ticker}</span>
+                      <span className="text-sm truncate flex-1 min-w-0">{project.name}</span>
+                      <span className="text-xs text-dim whitespace-nowrap hidden sm:block">{localDate(project.updated_at)}</span>
+                      <ArrowUpRight size={14} className="text-dim shrink-0 group-hover:text-accent transition-colors" aria-hidden />
                     </Link>
                   </li>
                 ))}
@@ -207,13 +294,13 @@ export default function Home() {
             )}
           </div>
 
-          <div className="rounded-xl border border-border bg-surface overflow-hidden">
-            <div className="px-4 py-3 border-b border-border flex items-center justify-between gap-3">
-              <span className="text-xs font-medium uppercase tracking-wide text-muted">Recently opened</span>
+          <div className="rounded-xl border border-border bg-surface overflow-hidden shadow-xs">
+            <div className="px-5 py-3 border-b border-border flex items-center justify-between gap-3">
+              <span className="text-xs font-semibold uppercase tracking-[0.12em] text-muted">Recently opened</span>
               <span className="text-xs tabular text-dim">{recent.length}</span>
             </div>
             {recent.length === 0 ? (
-              <div className="px-4 py-6 text-xs text-muted text-center">
+              <div className="px-5 py-8 text-sm text-muted text-center">
                 Workspaces you open will appear here for one-click return.
               </div>
             ) : (
@@ -222,11 +309,11 @@ export default function Home() {
                   <li key={item}>
                     <Link
                       href={`/company/${encodeURIComponent(item)}`}
-                      className="flex items-center gap-2.5 px-4 py-2.5 hover:bg-panel transition-colors"
+                      className="flex items-center gap-2.5 px-5 py-3 hover:bg-panel transition-colors group"
                     >
-                      <span className="text-xs font-semibold text-accent mono">{item}</span>
-                      <span className="text-[11px] text-dim ml-auto">Reopen</span>
-                      <ArrowUpRight size={13} className="text-dim" aria-hidden />
+                      <span className="text-sm font-semibold text-accent mono">{item}</span>
+                      <span className="text-xs text-dim ml-auto">Reopen</span>
+                      <ArrowUpRight size={13} className="text-dim group-hover:text-accent transition-colors" aria-hidden />
                     </Link>
                   </li>
                 ))}
@@ -236,101 +323,115 @@ export default function Home() {
         </div>
       </section>
 
-      {/* Entry points */}
+      {/* Workspaces */}
       <section>
-        <h2 className="text-lg font-semibold tracking-tight mb-3">Workspaces</h2>
-        <nav aria-label="Application sections" className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
-          {ENTRY_POINTS.map(({ href, label, body, icon: Icon }) => (
+        <h2 className="text-xl font-semibold tracking-tight mb-4">Workspaces</h2>
+        <nav aria-label="Application sections" className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3">
+          {ENTRY_POINTS.map(({ href, label, body, icon: Icon, accent }) => (
             <Link
               key={href}
               href={href}
-              className="group rounded-xl border border-border bg-surface p-4 hover:border-accent/50 hover:bg-panel transition-colors flex flex-col gap-2 min-w-0"
+              className="group relative rounded-xl border border-border bg-surface p-5 hover:border-accent/50 transition-all card-interactive flex flex-col gap-3 min-w-0 overflow-hidden"
             >
-              <Icon size={17} className="text-accent" aria-hidden />
-              <span className="text-sm font-medium leading-snug">{label}</span>
-              <span className="text-[11px] text-muted leading-snug">{body}</span>
+              <div className={cn("absolute -top-8 -right-8 h-24 w-24 rounded-full bg-gradient-to-br opacity-60 blur-2xl", accent)} aria-hidden />
+              <div className="relative grid place-items-center h-9 w-9 rounded-lg bg-panel border border-border text-accent group-hover:border-accent/40 transition-colors">
+                <Icon size={17} aria-hidden />
+              </div>
+              <div className="relative">
+                <span className="text-sm font-semibold leading-snug block">{label}</span>
+                <span className="text-xs text-muted leading-snug mt-1 block">{body}</span>
+              </div>
+              <ArrowUpRight size={14} className="relative text-dim group-hover:text-accent transition-colors mt-auto" aria-hidden />
             </Link>
           ))}
         </nav>
       </section>
 
-      {/* Workflow + status */}
-      <section className="grid lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2">
-          <h2 className="text-lg font-semibold tracking-tight mb-3">The workflow</h2>
-          <ol className="grid sm:grid-cols-2 gap-x-8 gap-y-5">
+      {/* Workflow pipeline */}
+      <section>
+        <h2 className="text-xl font-semibold tracking-tight mb-4">The workflow</h2>
+        <div className="rounded-2xl border border-border bg-surface overflow-hidden shadow-xs">
+          <ol className="grid grid-cols-1 md:grid-cols-5 divide-y md:divide-y-0 md:divide-x divide-border">
             {FLOW.map(({ title, body, icon: Icon }, index) => (
-              <li key={title} className="flex gap-3">
-                <div className="flex flex-col items-center">
-                  <span className="h-7 w-7 rounded-full border border-accent/40 bg-accent/10 text-accent text-[11px] font-semibold flex items-center justify-center mono">
+              <li key={title} className="p-5 flex flex-col gap-3 relative">
+                <div className="flex items-center gap-2.5">
+                  <span className="grid place-items-center h-8 w-8 rounded-lg bg-accent/10 border border-accent/30 text-accent text-xs font-semibold mono shrink-0">
                     {index + 1}
                   </span>
-                  {index < FLOW.length - 1 ? <span className="flex-1 w-px bg-border mt-2 hidden sm:block" aria-hidden /> : null}
+                  <Icon size={15} className="text-accent" aria-hidden />
                 </div>
-                <div className="min-w-0 pb-1">
-                  <div className="text-sm font-medium flex items-center gap-1.5">
-                    <Icon size={14} className="text-accent" aria-hidden /> {title}
-                  </div>
-                  <p className="text-xs text-muted mt-1 leading-relaxed">{body}</p>
+                <div>
+                  <div className="text-sm font-semibold tracking-tight">{title}</div>
+                  <p className="text-xs text-muted mt-1.5 leading-relaxed">{body}</p>
                 </div>
+                {index < FLOW.length - 1 ? (
+                  <ArrowRight size={14} className="hidden md:block absolute -right-2 top-1/2 -translate-y-1/2 text-dim bg-surface rounded-full" aria-hidden />
+                ) : null}
               </li>
             ))}
           </ol>
         </div>
+      </section>
 
-        <div className="space-y-4">
-          <div className="rounded-xl border border-border bg-surface p-4">
-            <h3 className="text-sm font-medium mb-3">Workspace status</h3>
-            <dl className="space-y-2.5 text-xs">
-              <div className="flex items-center justify-between gap-3">
-                <dt className="text-muted">Saved projects</dt>
-                <dd className="tabular">{loading ? "—" : forecastSnapshots}</dd>
-              </div>
-              <div className="flex items-center justify-between gap-3">
-                <dt className="text-muted">AI models enabled</dt>
-                <dd className="tabular">{loading ? "—" : enabledModels}</dd>
-              </div>
-              <div className="flex items-center justify-between gap-3">
-                <dt className="text-muted">Data engine</dt>
-                <dd>
-                  <Badge tone={health === "ok" ? "pos" : health === "down" ? "neg" : "muted"}>
-                    {health === "ok" ? "ready" : health === "down" ? "error" : "starting"}
-                  </Badge>
-                </dd>
-              </div>
-              <div className="flex items-center justify-between gap-3">
-                <dt className="text-muted">Model integrity</dt>
-                <dd className="flex items-center gap-1 text-pos">
-                  <ShieldCheck size={13} aria-hidden /> Deterministic
-                </dd>
-              </div>
-            </dl>
-            <div className="mt-3 pt-3 border-t border-border flex flex-wrap gap-x-4 gap-y-1 text-[11px]">
-              <Link href="/library" className="text-accent inline-flex items-center gap-1">Library <ArrowRight size={11} /></Link>
-              <Link href="/ai" className="text-accent inline-flex items-center gap-1">AI Center <ArrowRight size={11} /></Link>
+      {/* Status + AI */}
+      <section className="grid lg:grid-cols-3 gap-4">
+        <div className="lg:col-span-2 rounded-2xl border border-border bg-surface p-5 shadow-xs">
+          <h3 className="text-sm font-semibold tracking-tight mb-4 flex items-center gap-2">
+            <ShieldCheck size={15} className="text-pos" aria-hidden /> Workspace status
+          </h3>
+          <dl className="grid sm:grid-cols-2 gap-x-8 gap-y-3 text-sm">
+            <div className="flex items-center justify-between gap-3">
+              <dt className="text-muted">Saved projects</dt>
+              <dd className="tabular font-medium">{loading ? "—" : projects.length}</dd>
             </div>
+            <div className="flex items-center justify-between gap-3">
+              <dt className="text-muted">AI models enabled</dt>
+              <dd className="tabular font-medium">{loading ? "—" : enabledModels}</dd>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <dt className="text-muted">Data engine</dt>
+              <dd>
+                <Badge tone={health === "ok" ? "pos" : health === "down" ? "neg" : "muted"}>
+                  {health === "ok" ? "ready" : health === "down" ? "error" : "starting"}
+                </Badge>
+              </dd>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <dt className="text-muted">Model integrity</dt>
+              <dd className="flex items-center gap-1.5 text-pos font-medium">
+                <ShieldCheck size={14} aria-hidden /> Deterministic
+              </dd>
+            </div>
+          </dl>
+          <div className="mt-4 pt-4 border-t border-border flex flex-wrap gap-x-5 gap-y-1 text-sm">
+            <Link href="/library" className="text-accent inline-flex items-center gap-1.5 hover:underline">Library <ArrowRight size={13} /></Link>
+            <Link href="/ai" className="text-accent inline-flex items-center gap-1.5 hover:underline">AI Center <ArrowRight size={13} /></Link>
+            <Link href="/company" className="text-accent inline-flex items-center gap-1.5 hover:underline">Company <ArrowRight size={13} /></Link>
           </div>
+        </div>
 
-          <div className="rounded-xl border border-border bg-surface p-4">
-            <h3 className="text-sm font-medium flex items-center gap-2">
-              <Cpu size={14} className="text-accent" aria-hidden /> AI is optional
-            </h3>
-            <p className="text-xs text-muted mt-2 leading-relaxed">
-              Research reports need at least one configured model (OpenRouter, Groq, NVIDIA NIM or any OpenAI-compatible
-              endpoint). Keys stay in this browser&apos;s local storage. Without a model, every deterministic workflow still
-              works.
-            </p>
-            <Link href="/ai" className="text-xs text-accent inline-flex items-center gap-1 mt-3">
-              Configure providers <ArrowRight size={12} />
-            </Link>
-          </div>
+        <div className="rounded-2xl border border-border bg-surface p-5 shadow-xs">
+          <h3 className="text-sm font-semibold tracking-tight flex items-center gap-2">
+            <Cpu size={15} className="text-accent" aria-hidden /> AI is optional
+          </h3>
+          <p className="text-sm text-muted mt-2 leading-relaxed">
+            Research reports need at least one configured model (OpenRouter, Groq, NVIDIA NIM or any OpenAI-compatible
+            endpoint). Keys stay in this browser&apos;s local storage. Without a model, every deterministic workflow still
+            works.
+          </p>
+          <Link href="/ai" className="text-sm text-accent inline-flex items-center gap-1.5 mt-3 hover:underline">
+            Configure providers <ArrowRight size={13} />
+          </Link>
         </div>
       </section>
 
-      <p className="text-[11px] text-dim border-t border-border pt-4">
-        Formulas and sign conventions are documented in <span className="mono">docs/MODELS.md</span>; architecture and
-        limitations in <span className="mono">docs/ARCHITECTURE.md</span>. This is research software, not investment advice.
-      </p>
+      <footer className="text-xs text-dim border-t border-border pt-5 flex flex-wrap items-center justify-between gap-3">
+        <span>
+          Formulas and sign conventions are documented in <span className="mono">docs/MODELS.md</span>; architecture and
+          limitations in <span className="mono">docs/ARCHITECTURE.md</span>.
+        </span>
+        <span>This is research software, not investment advice.</span>
+      </footer>
     </div>
   );
 }

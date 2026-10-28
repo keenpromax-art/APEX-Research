@@ -663,7 +663,7 @@ export default function CompanyPage() {
 
   if (loading) {
     return (
-      <div className="p-5 md:p-7 max-w-7xl mx-auto space-y-4">
+      <div className="p-5 md:p-7 max-w-[1680px] mx-auto space-y-4">
         <Skeleton className="h-10 w-72" />
         <Skeleton className="h-20 rounded-lg" />
         <div className="grid md:grid-cols-3 gap-3">
@@ -696,7 +696,7 @@ export default function CompanyPage() {
   const upsides = dcf?.value_per_share && isNum(currentPrice) ? dcf.value_per_share / currentPrice - 1 : null;
 
   return (
-    <div className="max-w-7xl mx-auto">
+    <div className="max-w-[1680px] mx-auto">
       <header className="px-5 md:px-7 pt-5 pb-4 border-b border-border">
         <div className="flex flex-wrap items-start gap-4">
           <div className="flex items-start gap-3 min-w-0 flex-1">
@@ -708,7 +708,7 @@ export default function CompanyPage() {
             </div>
             <div className="min-w-0">
               <div className="flex items-center gap-2 flex-wrap min-w-0">
-                <h1 className="text-lg md:text-xl font-semibold tracking-tight truncate">
+                <h1 className="text-xl md:text-2xl font-semibold tracking-tight truncate">
                   {company?.name || info.longName || ticker}
                 </h1>
                 <span className="mono text-xs font-semibold text-accent border border-accent/40 bg-accent/10 rounded px-1.5 py-0.5 shrink-0">

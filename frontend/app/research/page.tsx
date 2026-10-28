@@ -203,7 +203,7 @@ function ResearchStudio() {
   const selectedQa = selected?.pdf_qa?.length ? selected.pdf_qa.filter((q) => q.level !== "info") : [];
 
   return (
-    <div className="p-4 md:p-6 space-y-4 max-w-6xl mx-auto">
+    <div className="px-5 md:px-8 lg:px-10 py-6 md:py-8 space-y-6 max-w-[1680px] mx-auto">
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
           <h1 className="text-xl font-semibold tracking-tight flex items-center gap-2">
