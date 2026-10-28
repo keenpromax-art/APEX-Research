@@ -306,10 +306,10 @@ function mockTickerData(ticker: string) {
   const annualCashFlow = isSparse
     ? []
     : [
-        { period_end: "2025-12-31", items: { operating_cash_flow: 1800_000_000, capex: -500_000_000, free_cash_flow: 1300_000_000, da_cf: 400_000_000, change_in_wc: -100_000_000 } },
-        { period_end: "2024-12-31", items: { operating_cash_flow: 1500_000_000, capex: -400_000_000, free_cash_flow: 1100_000_000, da_cf: 350_000_000, change_in_wc: -80_000_000 } },
-        { period_end: "2023-12-31", items: { operating_cash_flow: 1300_000_000, capex: -350_000_000, free_cash_flow: 950_000_000, da_cf: 300_000_000, change_in_wc: -70_000_000 } },
-        { period_end: "2022-12-31", items: { operating_cash_flow: 1100_000_000, capex: -300_000_000, free_cash_flow: 800_000_000, da_cf: 250_000_000, change_in_wc: -60_000_000 } },
+        { period_end: "2025-12-31", items: { operating_cash_flow: 1800_000_000, da_cf: 400_000_000, stock_based_comp: 220_000_000, deferred_tax: 45_000_000, change_in_wc: -100_000_000, capex: -500_000_000, dividends_paid: -260_000_000, share_repurchase: -150_000_000, net_borrowings: -120_000_000, free_cash_flow: 1300_000_000, end_cash: 640_000_000 } },
+        { period_end: "2024-12-31", items: { operating_cash_flow: 1500_000_000, da_cf: 350_000_000, stock_based_comp: 190_000_000, deferred_tax: 38_000_000, change_in_wc: -80_000_000, capex: -400_000_000, dividends_paid: -240_000_000, share_repurchase: -130_000_000, net_borrowings: -90_000_000, free_cash_flow: 1100_000_000, end_cash: 760_000_000 } },
+        { period_end: "2023-12-31", items: { operating_cash_flow: 1300_000_000, da_cf: 300_000_000, stock_based_comp: 165_000_000, deferred_tax: 30_000_000, change_in_wc: -70_000_000, capex: -350_000_000, dividends_paid: -220_000_000, share_repurchase: -110_000_000, net_borrowings: -60_000_000, free_cash_flow: 950_000_000, end_cash: 840_000_000 } },
+        { period_end: "2022-12-31", items: { operating_cash_flow: 1100_000_000, da_cf: 250_000_000, stock_based_comp: 140_000_000, deferred_tax: 25_000_000, change_in_wc: -60_000_000, capex: -300_000_000, dividends_paid: -200_000_000, share_repurchase: -95_000_000, net_borrowings: -40_000_000, free_cash_flow: 800_000_000, end_cash: 900_000_000 } },
       ];
 
   const priceBase = isSparse ? 22.4 : 94.5;

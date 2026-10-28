@@ -86,6 +86,17 @@ const TS_BASE_TYPES = [
   "CapitalExpenditure",
   "FreeCashFlow",
   "ChangeInWorkingCapital",
+  "StockBasedCompensation",
+  "DeferredIncomeTax",
+  "DeferredTax",
+  "CashDividendsPaid",
+  "DividendsPaid",
+  "RepurchaseOfCapitalStock",
+  "PaymentsForRepurchaseOfCommonStock",
+  "NetBorrowings",
+  "LongTermDebtIssuance",
+  "LongTermDebtPayments",
+  "EndCashPosition",
 ];
 
 const INCOME_FIELDS: Record<string, string[]> = {
@@ -125,6 +136,12 @@ const CASH_FLOW_FIELDS: Record<string, string[]> = {
   free_cash_flow: ["FreeCashFlow"],
   da_cf: ["DepreciationAndAmortization", "DepreciationAmortizationDepletion"],
   change_in_wc: ["ChangeInWorkingCapital"],
+  stock_based_comp: ["StockBasedCompensation"],
+  deferred_tax: ["DeferredIncomeTax", "DeferredTax"],
+  dividends_paid: ["CashDividendsPaid", "DividendsPaid"],
+  share_repurchase: ["RepurchaseOfCapitalStock", "PaymentsForRepurchaseOfCommonStock"],
+  net_borrowings: ["NetBorrowings", "LongTermDebtIssuance", "LongTermDebtPayments"],
+  end_cash: ["EndCashPosition"],
 };
 
 export function sanitizeSymbol(input: unknown): string {

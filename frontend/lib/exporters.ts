@@ -270,8 +270,10 @@ function sectionD_financials(doc: PdfDocument, payload: ExportPayload) {
     "accounts_payable", "total_debt", "equity", "shares_issued",
   ];
   const cashflowKeys = [
-    "operating_cash_flow", "capex", "change_in_wc", "da_cf", "free_cash_flow",
+    "operating_cash_flow", "da_cf", "stock_based_comp", "deferred_tax", "change_in_wc",
+    "capex", "dividends_paid", "share_repurchase", "net_borrowings", "free_cash_flow", "end_cash",
   ];
+  const CASH_SUBTOTALS = new Set(["operating_cash_flow", "free_cash_flow"]);
 
   function renderStatement(title: string, rows: AnyRecord[], keys: string[], emptyMsg: string) {
     if (!rows.length) {
@@ -286,7 +288,13 @@ function sectionD_financials(doc: PdfDocument, payload: ExportPayload) {
     const periodCount = periods.length;
     const periodWidth = (CONTENT_WIDTH - labelWidth) / periodCount;
     const cols: any[] = [
-      { key: "line", label: "Line item", x: 0, format: (r: AnyRecord) => String(r.label) },
+      {
+        key: "line",
+        label: "Line item",
+        x: 0,
+        format: (r: AnyRecord) => String(r.label),
+        bold: (r: AnyRecord) => Boolean(r.subtotal),
+      },
     ];
     periods.forEach((period, index) => {
       const rightEdge = labelWidth + (index + 1) * periodWidth;
@@ -296,11 +304,13 @@ function sectionD_financials(doc: PdfDocument, payload: ExportPayload) {
         x: rightEdge,
         align: "right" as const,
         format: (r: AnyRecord) => cellMoney(r.values[index]),
+        bold: (r: AnyRecord) => Boolean(r.subtotal),
       });
     });
     const tableRows = presentKeys.map((key) => ({
       label: humanize(key),
       values: periods.map((period) => period.items?.[key] ?? null),
+      subtotal: CASH_SUBTOTALS.has(key),
     }));
     doc.dataTable(cols, tableRows, { fontSize: 7.5, headerFontSize: 7, sourceNote });
   }
@@ -928,7 +938,7 @@ export function buildResearchXlsx(payload: ExportPayload): Blob {
   if (stmtIncome.length || stmtBalance.length || stmtCash.length) {
     const incomeKeys = ["revenue", "cost_of_revenue", "gross_profit", "operating_expense", "operating_income", "ebit", "da", "ebitda", "interest_expense", "pretax_income", "tax_expense", "net_income", "diluted_eps"];
     const balanceKeys = ["total_assets", "current_assets", "cash", "accounts_receivable", "inventory", "ppe_net", "goodwill", "total_non_current_assets", "total_liabilities", "current_liabilities", "accounts_payable", "total_debt", "equity", "shares_issued"];
-    const cashKeys = ["operating_cash_flow", "capex", "change_in_wc", "da_cf", "free_cash_flow"];
+    const cashKeys = ["operating_cash_flow", "da_cf", "stock_based_comp", "deferred_tax", "change_in_wc", "capex", "dividends_paid", "share_repurchase", "net_borrowings", "free_cash_flow", "end_cash"];
     const allKeys = [...incomeKeys, ...balanceKeys, ...cashKeys];
     const periods = (stmtIncome.length ? stmtIncome : stmtBalance.length ? stmtBalance : stmtCash).slice(0, 8);
     const presentKeys = allKeys.filter((key) => [...stmtIncome, ...stmtBalance, ...stmtCash].some((row) => isNum(row?.items?.[key])));
