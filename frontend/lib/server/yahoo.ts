@@ -891,6 +891,13 @@ export async function fetchValidPeers(
     }
   }
 
+  // If Yahoo is down for every candidate, fall back to assuming all candidates
+  // are valid rather than returning an empty list. We can't verify them either
+  // way, so trust the user's input.
+  if (!valid.length) {
+    valid.push(...candidates);
+  }
+
   // Sort valid peers: prefer US exchange tickers (NYQ/NMS) first, then others.
   const usFirst = (a: string, b: string) => {
     const aUs = a.endsWith(".NS") ? 1 : 0;

@@ -192,7 +192,9 @@ function ResearchStudio() {
         error?: string;
       }>(`/api/peers?target=${encodeURIComponent(clean)}&minCount=3&maxCount=10`);
       if (!peersRes.ok || !peersRes.peers.length) {
-        setError(typeof peersRes.error === "string" ? peersRes.error : "No validated peer candidates found for this ticker.");
+        setAutoPeers([]);
+        setPeersStatus("none");
+        setError("Could not fetch peer candidates from Yahoo Finance — keeping your manually entered peers.");
         setAiSuggestBusy(false);
         return;
       }
