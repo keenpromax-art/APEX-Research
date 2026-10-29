@@ -193,9 +193,8 @@ function ResearchStudio() {
         error?: string;
       }>(`/api/peers?target=${encodeURIComponent(clean)}&minCount=1&maxCount=10`);
 
-      // Step 2: If Yahoo returned nothing, fall back to the user's manually
-      // entered peers. They are already typed in the Peers field and should
-      // always be usable regardless of Yahoo availability.
+      // Step 2: Build candidate list — Yahoo results first, fall back to
+      // user-entered peers if Yahoo returns nothing.
       let candidates: string[] = [];
       if (peersRes.ok && peersRes.peers.length) {
         candidates = peersRes.peers;

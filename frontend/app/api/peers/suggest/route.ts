@@ -159,9 +159,15 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     cache.set(cacheKey, { at: Date.now(), result });
     return NextResponse.json(result);
   } catch (error) {
-    return NextResponse.json(
-      { ok: false, error: String((error as any)?.message || error), peers: [], sector: null, industry: null, target },
-      { status: 502 },
-    );
+    // Never throw: return empty peers so the UI falls back to candidates.
+    return NextResponse.json({
+      ok: true,
+      peers: [],
+      sector: null,
+      industry: null,
+      target,
+      aiUsed: false,
+      error: String((error as any)?.message || "provider unavailable"),
+    });
   }
 }
