@@ -411,6 +411,7 @@ export function buildDeterministicNarrative(ctx: NarrativeContext): Narrative {
 
   const financialPerformance = financialParts.join(" ");
 
+
   // ---- Strengths ---------------------------------------------------------
   const strengths: string[] = [];
   if (isNum(summary.revenue_cagr) && summary.revenue_cagr > 0.05) {
