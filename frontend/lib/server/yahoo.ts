@@ -804,8 +804,8 @@ export async function fetchValidPeers(
   targetTicker: string,
   options: { minCount?: number; maxCount?: number } = {},
 ): Promise<{ peers: string[]; sector: string | null; target: string }> {
-  const minCount = options.minCount ?? 3;
-  const maxCount = options.maxCount ?? 5;
+  const minCount = options.minCount ?? 5;
+  const maxCount = options.maxCount ?? 10;
   const target = sanitizeSymbol(targetTicker);
 
   // 1. Learn target's sector from its snapshot.
@@ -817,10 +817,20 @@ export async function fetchValidPeers(
     // Target itself may not load; still try to return generic peers.
   }
 
-  // 2. Get candidate pool for the sector.
+  // 2. Get candidate pool for the sector. If sector detection fails, fall back
+  // to a broad default pool of well-known US large-cap tickers.
   const candidates = peerUniverseForSector(sector).filter((t) => t !== target);
+  if (!candidates.length) {
+    const fallback = [
+      "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA", "JPM", "JNJ",
+      "V", "PG", "UNH", "HD", "MA", "DIS", "PYPL", "NFLX", "ADBE", "CMCSA",
+    ].filter((t) => t !== target);
+    candidates.push(...fallback);
+  }
 
-  // 3. Validate each candidate against Yahoo Finance (price + at least one statement).
+  // 3. Validate each candidate against Yahoo Finance (price + at least one
+  //    statement). Try ALL candidates, not just until minCount is reached, so
+  //    we surface as many valid peers as possible.
   const valid: string[] = [];
   const validate = async (candidate: string): Promise<void> => {
     try {
@@ -838,13 +848,20 @@ export async function fetchValidPeers(
     }
   };
 
-  // Validate in parallel with bounded concurrency.
-  const BATCH = 6;
-  for (let i = 0; i < candidates.length && valid.length < maxCount; i += BATCH) {
+  // Validate in parallel with bounded concurrency, trying the full pool.
+  const BATCH = 8;
+  for (let i = 0; i < candidates.length; i += BATCH) {
     const batch = candidates.slice(i, i + BATCH);
     await Promise.all(batch.map((c) => validate(c)));
-    if (valid.length >= minCount) break;
   }
+
+  // Sort valid peers: prefer US exchange tickers (NYQ/NMS) first, then others.
+  const usFirst = (a: string, b: string) => {
+    const aUs = a.endsWith(".NS") ? 1 : 0;
+    const bUs = b.endsWith(".NS") ? 1 : 0;
+    return aUs - bUs;
+  };
+  valid.sort(usFirst);
 
   return { peers: valid.slice(0, maxCount), sector, target };
 }

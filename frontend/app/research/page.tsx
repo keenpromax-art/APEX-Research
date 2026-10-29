@@ -140,7 +140,7 @@ function ResearchStudio() {
         if (result.ok && result.peers.length > 0) {
           setAutoPeers(result.peers);
           setPeers(result.peers.join(", "));
-          setPeersStatus(result.peers.length >= 3 ? "found" : "none");
+          setPeersStatus(result.peers.length >= 5 ? "found" : "none");
         } else {
           setAutoPeers([]);
           setPeersStatus("none");
@@ -324,7 +324,7 @@ function ResearchStudio() {
                 </span>
               ) : peersStatus === "none" ? (
                 <span className="text-[10px] text-warn font-medium">
-                  ⚠ Fewer than 3 peers found
+                  ⚠ Fewer than 5 peers found
                 </span>
               ) : null}
             </div>
