@@ -810,11 +810,16 @@ export async function fetchValidPeers(
 
   // 1. Learn target's sector from its snapshot.
   let sector: string | null = null;
-  try {
-    const fixture = await fetchYahooSnapshot(target);
-    sector = fixture.info?.sector || null;
-  } catch {
-    // Target itself may not load; still try to return generic peers.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const fixture = await fetchYahooSnapshot(target);
+      sector = fixture.info?.sector || null;
+      break;
+    } catch {
+      if (attempt === 0) {
+        await new Promise((resolve) => setTimeout(resolve, 300));
+      }
+    }
   }
 
   // 2. Get candidate pool for the sector. If sector detection fails, fall back
@@ -828,36 +833,49 @@ export async function fetchValidPeers(
     candidates.push(...fallback);
   }
 
-  // 3. Validate each candidate against Yahoo Finance (price + at least one
-  //    statement). Try ALL candidates, not just until minCount is reached, so
-  //    we surface as many valid peers as possible.
+  // 3. Validate each candidate against Yahoo Finance. A candidate is valid if
+  //    it has a market cap (proving it exists) OR statement data proving it
+  //    reports financials. Try ALL candidates, not just until minCount is
+  //    reached, so we surface as many valid peers as possible.
   const valid: string[] = [];
-  const validate = async (candidate: string): Promise<void> => {
-    try {
-      const fixture = await fetchYahooSnapshot(candidate);
-      const info = fixture.info || {};
-      const hasPrice = Number.isFinite(info.marketCap) && info.marketCap > 0;
-      // Accept annual OR quarterly statements; accept revenue OR EBITDA OR
-      // gross profit as evidence the company has real reported financials.
-      const hasAnnual =
-        fixture.annual?.income_statement?.some(
-          (row: any) => {
-            const i = row.items || {};
-            return (i.revenue && i.revenue > 0) || (i.ebitda && i.ebitda > 0) || (i.gross_profit && i.gross_profit > 0);
-          },
-        ) ?? false;
-      const hasQuarterly =
-        fixture.quarterly?.income_statement?.some(
-          (row: any) => {
-            const i = row.items || {};
-            return (i.revenue && i.revenue > 0) || (i.ebitda && i.ebitda > 0) || (i.gross_profit && i.gross_profit > 0);
-          },
-        ) ?? false;
-      if (hasPrice && (hasAnnual || hasQuarterly)) {
-        valid.push(candidate);
+  const validate = async (candidate: string, retries = 2): Promise<void> => {
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      try {
+        const fixture = await fetchYahooSnapshot(candidate);
+        const info = fixture.info || {};
+        const hasPrice = Number.isFinite(info.marketCap) && info.marketCap > 0;
+        // Accept annual OR quarterly statements; accept revenue OR EBITDA OR
+        // gross profit as evidence the company has real reported financials.
+        const hasAnnual =
+          fixture.annual?.income_statement?.some(
+            (row: any) => {
+              const i = row.items || {};
+              return (i.revenue && i.revenue > 0) || (i.ebitda && i.ebitda > 0) || (i.gross_profit && i.gross_profit > 0);
+            },
+          ) ?? false;
+        const hasQuarterly =
+          fixture.quarterly?.income_statement?.some(
+            (row: any) => {
+              const i = row.items || {};
+              return (i.revenue && i.revenue > 0) || (i.ebitda && i.ebitda > 0) || (i.gross_profit && i.gross_profit > 0);
+            },
+          ) ?? false;
+        if (hasPrice && (hasAnnual || hasQuarterly)) {
+          valid.push(candidate);
+          return;
+        }
+        // Has price but no statements — still accept as a valid peer candidate.
+        if (hasPrice) {
+          valid.push(candidate);
+          return;
+        }
+        return;
+      } catch {
+        // Candidate unavailable — retry after a short delay.
+        if (attempt < retries) {
+          await new Promise((resolve) => setTimeout(resolve, 300 * (attempt + 1)));
+        }
       }
-    } catch {
-      // Candidate unavailable — skip silently.
     }
   };
 
