@@ -366,6 +366,54 @@ function sectionD_financials(doc: PdfDocument, payload: ExportPayload, actions: 
     doc.dataTable(creditCols, history, { fontSize: 8, headerFontSize: 7, sourceNote: "Returns, leverage and per-share ratios derived from reported statements. Nulls preserved where data is missing." });
   }
 
+  // Liquidity ratios table
+  if (history.length) {
+    doc.space(6).text("Key ratios - liquidity", { size: 9.5, bold: true, gray: 0.3, gap: 3 });
+    const liqCols = [
+      { key: "period", label: "Period", x: 0, format: (r: AnyRecord) => yearOf(r), bold: () => true },
+      { key: "quick_ratio", label: "Quick ratio", x: 80, align: "right" as const, format: (r: AnyRecord) => isNum(r.quick_ratio) ? num(r.quick_ratio, 2) : "—", color: (r: AnyRecord) => trendColor(r.quick_ratio) },
+      { key: "cash_ratio", label: "Cash ratio", x: 170, align: "right" as const, format: (r: AnyRecord) => isNum(r.cash_ratio) ? num(r.cash_ratio, 2) : "—", color: (r: AnyRecord) => trendColor(r.cash_ratio) },
+      { key: "working_capital", label: "Working capital", x: 260, align: "right" as const, format: (r: AnyRecord) => isNum(r.working_capital) ? fmt(r.working_capital) : "—" },
+    ];
+    doc.dataTable(liqCols, history, { fontSize: 8, headerFontSize: 7, sourceNote: "Liquidity ratios derived from reported balance sheet data. Nulls preserved where data is missing." });
+
+    // Efficiency ratios table
+    doc.space(6).text("Key ratios - efficiency", { size: 9.5, bold: true, gray: 0.3, gap: 3 });
+    const effCols = [
+      { key: "period", label: "Period", x: 0, format: (r: AnyRecord) => yearOf(r), bold: () => true },
+      { key: "asset_turnover", label: "Asset turnover", x: 80, align: "right" as const, format: (r: AnyRecord) => isNum(r.asset_turnover) ? num(r.asset_turnover, 2) : "—", color: (r: AnyRecord) => trendColor(r.asset_turnover) },
+      { key: "inventory_turnover", label: "Inventory turnover", x: 170, align: "right" as const, format: (r: AnyRecord) => isNum(r.inventory_turnover) ? num(r.inventory_turnover, 1) : "—", color: (r: AnyRecord) => trendColor(r.inventory_turnover) },
+      { key: "receivables_turnover", label: "Receivables turnover", x: 260, align: "right" as const, format: (r: AnyRecord) => isNum(r.receivables_turnover) ? num(r.receivables_turnover, 1) : "—", color: (r: AnyRecord) => trendColor(r.receivables_turnover) },
+      { key: "payables_turnover", label: "Payables turnover", x: 350, align: "right" as const, format: (r: AnyRecord) => isNum(r.payables_turnover) ? num(r.payables_turnover, 1) : "—", color: (r: AnyRecord) => trendColor(r.payables_turnover) },
+      { key: "cash_conversion_cycle", label: "CCC (days)", x: CONTENT_WIDTH, align: "right" as const, format: (r: AnyRecord) => isNum(r.cash_conversion_cycle) ? num(r.cash_conversion_cycle, 1) : "—", color: (r: AnyRecord) => trendColor(r.cash_conversion_cycle) },
+    ];
+    doc.dataTable(effCols, history, { fontSize: 8, headerFontSize: 7, sourceNote: "Efficiency ratios derived from reported income statement and balance sheet data. Nulls preserved where data is missing." });
+
+    // Valuation ratios table
+    doc.space(6).text("Key ratios - valuation", { size: 9.5, bold: true, gray: 0.3, gap: 3 });
+    const valCols = [
+      { key: "period", label: "Period", x: 0, format: (r: AnyRecord) => yearOf(r), bold: () => true },
+      { key: "pe_ratio", label: "P/E", x: 80, align: "right" as const, format: (r: AnyRecord) => isNum(r.pe_ratio) ? num(r.pe_ratio, 1) : "—", color: (r: AnyRecord) => trendColor(r.pe_ratio) },
+      { key: "ev_ebitda", label: "EV/EBITDA", x: 170, align: "right" as const, format: (r: AnyRecord) => isNum(r.ev_ebitda) ? num(r.ev_ebitda, 1) : "—", color: (r: AnyRecord) => trendColor(r.ev_ebitda) },
+      { key: "ev_revenue", label: "EV/Revenue", x: 260, align: "right" as const, format: (r: AnyRecord) => isNum(r.ev_revenue) ? num(r.ev_revenue, 1) : "—", color: (r: AnyRecord) => trendColor(r.ev_revenue) },
+      { key: "dividend_yield", label: "Dividend yield", x: 350, align: "right" as const, format: (r: AnyRecord) => isNum(r.dividend_yield) ? pct(r.dividend_yield) : "—", color: (r: AnyRecord) => trendColor(r.dividend_yield) },
+      { key: "fcf_yield", label: "FCF yield", x: CONTENT_WIDTH, align: "right" as const, format: (r: AnyRecord) => isNum(r.fcf_yield) ? pct(r.fcf_yield) : "—", color: (r: AnyRecord) => trendColor(r.fcf_yield) },
+    ];
+    doc.dataTable(valCols, history, { fontSize: 8, headerFontSize: 7, sourceNote: "Valuation ratios derived from market price and reported financials. Nulls preserved where data is missing." });
+
+    // Quality ratios table
+    doc.space(6).text("Key ratios - quality", { size: 9.5, bold: true, gray: 0.3, gap: 3 });
+    const qualCols = [
+      { key: "period", label: "Period", x: 0, format: (r: AnyRecord) => yearOf(r), bold: () => true },
+      { key: "nopat_margin", label: "NOPAT margin", x: 80, align: "right" as const, format: (r: AnyRecord) => isNum(r.nopat_margin) ? pct(r.nopat_margin) : "—", color: (r: AnyRecord) => trendColor(r.nopat_margin) },
+      { key: "fcf_margin", label: "FCF margin", x: 170, align: "right" as const, format: (r: AnyRecord) => isNum(r.fcf_margin) ? pct(r.fcf_margin) : "—", color: (r: AnyRecord) => trendColor(r.fcf_margin) },
+      { key: "ocf_margin", label: "OCF margin", x: 260, align: "right" as const, format: (r: AnyRecord) => isNum(r.ocf_margin) ? pct(r.ocf_margin) : "—", color: (r: AnyRecord) => trendColor(r.ocf_margin) },
+      { key: "dividend_payout_ratio", label: "Dividend payout", x: 350, align: "right" as const, format: (r: AnyRecord) => isNum(r.dividend_payout_ratio) ? pct(r.dividend_payout_ratio) : "—", color: (r: AnyRecord) => trendColor(r.dividend_payout_ratio) },
+      { key: "earnings_yield", label: "Earnings yield", x: CONTENT_WIDTH, align: "right" as const, format: (r: AnyRecord) => isNum(r.earnings_yield) ? pct(r.earnings_yield) : "—", color: (r: AnyRecord) => trendColor(r.earnings_yield) },
+    ];
+    doc.dataTable(qualCols, history, { fontSize: 8, headerFontSize: 7, sourceNote: "Quality ratios derived from reported financials. Nulls preserved where data is missing." });
+  }
+
   // Trend chart across reported history.
   if (history.length >= 2) {
     const labels = history.slice().reverse().map((row) => yearOf(row));

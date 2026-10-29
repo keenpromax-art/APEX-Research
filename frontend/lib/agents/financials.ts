@@ -180,3 +180,73 @@ export function perShareAgent(payload: ExportPayload): AgentResult {
   const findings = [`Per-share: EPS ${isNum(latest.eps_diluted) ? num(latest.eps_diluted, 2) : "n/a"}, BVPS ${isNum(latest.book_value_per_share) ? num(latest.book_value_per_share, 2) : "n/a"}, P/B ${px && isNum(latest.book_value_per_share) && latest.book_value_per_share ? num(px / latest.book_value_per_share, 2) + "x" : "n/a"}.`];
   return { agentId: "perShare-01", agentName: "Per-Share Agent", lens: "per-share metrics", actions, findings, confidence: 0.94 };
 }
+
+export function liquidityAgent(payload: ExportPayload): AgentResult {
+  const actions: AgentAction[] = [];
+  const history: any[] = Array.isArray(payload.history) ? payload.history : [];
+  if (!history.length) return { agentId: "liquidity-01", agentName: "Liquidity Agent", lens: "short-term liquidity", actions, findings: ["No historical data available."], confidence: 0.5 };
+  const latest = history[0];
+  actions.push(
+    act("liquidity-01", "Liquidity Agent", "quick ratio", "financials", "addPair", `Quick ratio · ${isNum(latest.quick_ratio) ? num(latest.quick_ratio, 2) : "—"}`, 0.96, "(Current assets − inventory − cash) ÷ current liabilities — ability to meet short-term obligations without selling inventory."),
+    act("liquidity-02", "Liquidity Agent", "cash ratio", "financials", "addPair", `Cash ratio · ${isNum(latest.cash_ratio) ? num(latest.cash_ratio, 2) : "—"}`, 0.95, "Cash ÷ current liabilities — immediate liquidity to cover near-term liabilities."),
+    act("liquidity-03", "Liquidity Agent", "working capital", "financials", "addPair", `Working capital · ${isNum(latest.working_capital) ? fmt(latest.working_capital) : "—"}`, 0.93, "Current assets − cash − current liabilities — net short-term operational resources."),
+  );
+  const findings = [`Liquidity: quick ratio ${isNum(latest.quick_ratio) ? num(latest.quick_ratio, 2) : "n/a"}, cash ratio ${isNum(latest.cash_ratio) ? num(latest.cash_ratio, 2) : "n/a"}, working capital ${isNum(latest.working_capital) ? fmt(latest.working_capital) : "n/a"}.`];
+  return { agentId: "liquidity-01", agentName: "Liquidity Agent", lens: "short-term liquidity", actions, findings, confidence: 0.94 };
+}
+
+export function efficiencyAgent(payload: ExportPayload): AgentResult {
+  const actions: AgentAction[] = [];
+  const history: any[] = Array.isArray(payload.history) ? payload.history : [];
+  if (!history.length) return { agentId: "efficiency-01", agentName: "Efficiency Agent", lens: "asset & working capital efficiency", actions, findings: ["No historical data available."], confidence: 0.5 };
+  const latest = history[0];
+  const price = payload.price_summary || {};
+  const px = isNum(price.last_close) ? price.last_close : null;
+  const mktCap = isNum(price.last_close) && isNum(latest.shares_issued) ? price.last_close * latest.shares_issued : null;
+  actions.push(
+    act("efficiency-01", "Efficiency Agent", "asset turnover", "financials", "addPair", `Asset turnover · ${isNum(latest.revenue) && isNum(latest.total_assets) && latest.total_assets !== 0 ? num(latest.revenue / latest.total_assets, 2) : "—"}`, 0.96, "Revenue ÷ total assets — how efficiently assets generate sales."),
+    act("efficiency-02", "Efficiency Agent", "inventory turnover", "financials", "addPair", `Inventory turnover · ${isNum(latest.cost_of_revenue) && isNum(latest.inventory) && latest.inventory !== 0 ? num(latest.cost_of_revenue / latest.inventory, 1) : "—"}`, 0.95, "Cost of revenue ÷ inventory — how quickly inventory is sold and replaced."),
+    act("efficiency-03", "Efficiency Agent", "receivables turnover", "financials", "addPair", `Receivables turnover · ${isNum(latest.revenue) && isNum(latest.accounts_receivable) && latest.accounts_receivable !== 0 ? num(latest.revenue / latest.accounts_receivable, 1) : "—"}`, 0.95, "Revenue ÷ accounts receivable — how quickly customer invoices are collected."),
+    act("efficiency-04", "Efficiency Agent", "payables turnover", "financials", "addPair", `Payables turnover · ${isNum(latest.cost_of_revenue) && isNum(latest.accounts_payable) && latest.accounts_payable !== 0 ? num(latest.cost_of_revenue / latest.accounts_payable, 1) : "—"}`, 0.94, "Cost of revenue ÷ accounts payable — how quickly supplier invoices are paid."),
+    act("efficiency-05", "Efficiency Agent", "cash conversion cycle", "financials", "addPair", `Cash conversion cycle · ${isNum(latest.inventory) && isNum(latest.accounts_receivable) && isNum(latest.accounts_payable) && isNum(latest.revenue) && latest.revenue !== 0 ? num(((latest.inventory / latest.cost_of_revenue) * 365) + ((latest.accounts_receivable / latest.revenue) * 365) - ((latest.accounts_payable / latest.cost_of_revenue) * 365), 1) : "—"}`, 0.93, "Days inventory + days receivables − days payables — days cash is tied up in the operating cycle."),
+  );
+  const findings = [`Efficiency: asset turnover ${isNum(latest.revenue) && isNum(latest.total_assets) && latest.total_assets !== 0 ? num(latest.revenue / latest.total_assets, 2) : "n/a"}, inventory turnover ${isNum(latest.cost_of_revenue) && isNum(latest.inventory) && latest.inventory !== 0 ? num(latest.cost_of_revenue / latest.inventory, 1) : "n/a"}, receivables turnover ${isNum(latest.revenue) && isNum(latest.accounts_receivable) && latest.accounts_receivable !== 0 ? num(latest.revenue / latest.accounts_receivable, 1) : "n/a"}.`];
+  return { agentId: "efficiency-01", agentName: "Efficiency Agent", lens: "asset & working capital efficiency", actions, findings, confidence: 0.94 };
+}
+
+export function valuationRatioAgent(payload: ExportPayload): AgentResult {
+  const actions: AgentAction[] = [];
+  const history: any[] = Array.isArray(payload.history) ? payload.history : [];
+  const price = payload.price_summary || {};
+  if (!history.length) return { agentId: "valuationRatio-01", agentName: "Valuation Ratio Agent", lens: "valuation multiples", actions, findings: ["No historical data available."], confidence: 0.5 };
+  const latest = history[0];
+  const px = isNum(price.last_close) ? price.last_close : null;
+  const mktCap = isNum(price.last_close) && isNum(latest.shares_issued) ? price.last_close * latest.shares_issued : null;
+  actions.push(
+    act("valuationRatio-01", "Valuation Ratio Agent", "P/E ratio", "financials", "addPair", `P/E · ${px && isNum(latest.eps_diluted) && latest.eps_diluted !== 0 ? num(px / latest.eps_diluted, 1) : "—"}`, 0.96, "Price ÷ diluted EPS — price paid per dollar of earnings."),
+    act("valuationRatio-02", "Valuation Ratio Agent", "EV/EBITDA", "financials", "addPair", `EV/EBITDA · ${isNum(mktCap) && isNum(latest.net_debt) && isNum(latest.ebitda) && latest.ebitda !== 0 ? num((mktCap + latest.net_debt) / latest.ebitda, 1) : "—"}`, 0.95, "Enterprise value ÷ EBITDA — enterprise value relative to operating earnings."),
+    act("valuationRatio-03", "Valuation Ratio Agent", "EV/Revenue", "financials", "addPair", `EV/Revenue · ${isNum(mktCap) && isNum(latest.net_debt) && isNum(latest.revenue) && latest.revenue !== 0 ? num((mktCap + latest.net_debt) / latest.revenue, 1) : "—"}`, 0.94, "Enterprise value ÷ revenue — enterprise value relative to top-line sales."),
+    act("valuationRatio-04", "Valuation Ratio Agent", "dividend yield", "financials", "addPair", `Dividend yield · ${isNum(mktCap) && isNum(latest.dividends_paid) && mktCap !== 0 ? num(Math.abs(latest.dividends_paid) / mktCap, 2) : "—"}`, 0.93, "Dividends paid ÷ market cap — cash returned to shareholders per dollar of market value."),
+    act("valuationRatio-05", "Valuation Ratio Agent", "FCF yield", "financials", "addPair", `FCF yield · ${isNum(mktCap) && isNum(latest.fcf) && mktCap !== 0 ? num(latest.fcf / mktCap, 2) : "—"}`, 0.95, "Free cash flow ÷ market cap — free cash flow per dollar of market value."),
+  );
+  const findings = [`Valuation: P/E ${px && isNum(latest.eps_diluted) && latest.eps_diluted !== 0 ? num(px / latest.eps_diluted, 1) : "n/a"}, EV/EBITDA ${isNum(mktCap) && isNum(latest.net_debt) && isNum(latest.ebitda) && latest.ebitda !== 0 ? num((mktCap + latest.net_debt) / latest.ebitda, 1) : "n/a"}, EV/Revenue ${isNum(mktCap) && isNum(latest.net_debt) && isNum(latest.revenue) && latest.revenue !== 0 ? num((mktCap + latest.net_debt) / latest.revenue, 1) : "n/a"}.`];
+  return { agentId: "valuationRatio-01", agentName: "Valuation Ratio Agent", lens: "valuation multiples", actions, findings, confidence: 0.95 };
+}
+
+export function qualityRatioAgent(payload: ExportPayload): AgentResult {
+  const actions: AgentAction[] = [];
+  const history: any[] = Array.isArray(payload.history) ? payload.history : [];
+  if (!history.length) return { agentId: "qualityRatio-01", agentName: "Quality Ratio Agent", lens: "earnings quality & profitability quality", actions, findings: ["No historical data available."], confidence: 0.5 };
+  const latest = history[0];
+  const price = payload.price_summary || {};
+  const px = isNum(price.last_close) ? price.last_close : null;
+  actions.push(
+    act("qualityRatio-01", "Quality Ratio Agent", "NOPAT margin", "financials", "addPair", `NOPAT margin · ${isNum(latest.nopat_margin) ? pct(latest.nopat_margin) : "—"}`, 0.96, "NOPAT ÷ revenue — after-tax operating profit per dollar of revenue."),
+    act("qualityRatio-02", "Quality Ratio Agent", "FCF margin", "financials", "addPair", `FCF margin · ${isNum(latest.fcf_margin) ? pct(latest.fcf_margin) : "—"}`, 0.95, "Free cash flow ÷ revenue — cash available per dollar of revenue."),
+    act("qualityRatio-03", "Quality Ratio Agent", "OCF margin", "financials", "addPair", `OCF margin · ${isNum(latest.ocf_margin) ? pct(latest.ocf_margin) : "—"}`, 0.95, "Operating cash flow ÷ revenue — operating cash per dollar of revenue."),
+    act("qualityRatio-04", "Quality Ratio Agent", "dividend payout", "financials", "addPair", `Dividend payout · ${isNum(latest.dividend_payout_ratio) ? pct(latest.dividend_payout_ratio) : "—"}`, 0.94, "Dividends paid ÷ net income — share of earnings returned as dividends."),
+    act("qualityRatio-05", "Quality Ratio Agent", "earnings yield", "financials", "addPair", `Earnings yield · ${px && isNum(latest.eps_diluted) && latest.eps_diluted !== 0 ? num(latest.eps_diluted / px, 2) : "—"}`, 0.93, "Diluted EPS ÷ price — earnings per dollar of market price."),
+  );
+  const findings = [`Quality: NOPAT margin ${isNum(latest.nopat_margin) ? pct(latest.nopat_margin) : "n/a"}, FCF margin ${isNum(latest.fcf_margin) ? pct(latest.fcf_margin) : "n/a"}, OCF margin ${isNum(latest.ocf_margin) ? pct(latest.ocf_margin) : "n/a"}, dividend payout ${isNum(latest.dividend_payout_ratio) ? pct(latest.dividend_payout_ratio) : "n/a"}.`];
+  return { agentId: "qualityRatio-01", agentName: "Quality Ratio Agent", lens: "earnings quality & profitability quality", actions, findings, confidence: 0.95 };
+}

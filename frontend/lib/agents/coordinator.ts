@@ -1,7 +1,7 @@
 import type { ExportPayload } from "../exporters";
 import type { AgentAction, AgentRegistry, AgentResult, CoordinatorOutput, AgentSection } from "./types";
 import { coverAgent, summaryAgent, companyAgent } from "./cover";
-import { incomeAgent, balanceAgent, cashFlowAgent, ratioAgent, growthAgent, marginAgent, returnAgent, leverageAgent, perShareAgent } from "./financials";
+import { incomeAgent, balanceAgent, cashFlowAgent, ratioAgent, growthAgent, marginAgent, returnAgent, leverageAgent, perShareAgent, liquidityAgent, efficiencyAgent, valuationRatioAgent, qualityRatioAgent } from "./financials";
 import { forecastAgent, dcfAgent, sensitivityAgent, reverseDcfAgent, scenarioAgent, monteCarloAgent, peerCompsAgent } from "./forecast";
 import { riskAgent, modelQualityAgent, dataQualityAgent } from "./risks";
 import { sourcesAgent, sectorModelAgent, conclusionAgent } from "./sources";
@@ -19,6 +19,10 @@ const REGISTRY: AgentRegistry = {
   "return": returnAgent,
   "leverage": leverageAgent,
   "perShare": perShareAgent,
+  "liquidity": liquidityAgent,
+  "efficiency": efficiencyAgent,
+  "valuationRatio": valuationRatioAgent,
+  "qualityRatio": qualityRatioAgent,
   "forecast": forecastAgent,
   "dcf": dcfAgent,
   "sensitivity": sensitivityAgent,

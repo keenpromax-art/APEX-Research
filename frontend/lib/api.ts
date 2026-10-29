@@ -541,6 +541,45 @@ export function buildMetrics(normalized: any) {
       total_debt: balance.total_debt ?? null,
       cash: balance.cash ?? null,
       book_value_per_share: isFiniteNumber(equity) && shares ? equity / shares : null,
+      // Liquidity ratios
+      working_capital: isFiniteNumber(balance.current_assets) && isFiniteNumber(balance.cash) && isFiniteNumber(balance.current_liabilities)
+        ? balance.current_assets - balance.cash - balance.current_liabilities
+        : null,
+      quick_ratio: isFiniteNumber(balance.current_assets) && isFiniteNumber(balance.inventory) && isFiniteNumber(balance.cash) && isFiniteNumber(balance.current_liabilities) && balance.current_liabilities !== 0
+        ? (balance.current_assets - balance.inventory - balance.cash) / balance.current_liabilities
+        : null,
+      cash_ratio: isFiniteNumber(balance.cash) && isFiniteNumber(balance.current_liabilities) && balance.current_liabilities !== 0
+        ? balance.cash / balance.current_liabilities
+        : null,
+      // Leverage ratios
+      debt_to_equity: isFiniteNumber(balance.total_debt) && isFiniteNumber(equity) && equity !== 0
+        ? balance.total_debt / equity
+        : null,
+      debt_to_assets: isFiniteNumber(balance.total_debt) && isFiniteNumber(balance.total_assets) && balance.total_assets !== 0
+        ? balance.total_debt / balance.total_assets
+        : null,
+      equity_ratio: isFiniteNumber(equity) && isFiniteNumber(balance.total_assets) && balance.total_assets !== 0
+        ? equity / balance.total_assets
+        : null,
+      interest_burden: isFiniteNumber(items.interest_expense) && isFiniteNumber(items.ebit) && items.ebit !== 0
+        ? items.interest_expense / items.ebit
+        : null,
+      tax_burden: isFiniteNumber(items.pretax_income) && isFiniteNumber(items.net_income) && items.pretax_income !== 0
+        ? items.net_income / items.pretax_income
+        : null,
+      // Profitability / quality ratios
+      nopat_margin: isFiniteNumber(nopat) && isFiniteNumber(revenue) && revenue !== 0
+        ? nopat / revenue
+        : null,
+      fcf_margin: isFiniteNumber(cashFlow.free_cash_flow) && isFiniteNumber(revenue) && revenue !== 0
+        ? cashFlow.free_cash_flow / revenue
+        : null,
+      ocf_margin: isFiniteNumber(cashFlow.operating_cash_flow) && isFiniteNumber(revenue) && revenue !== 0
+        ? cashFlow.operating_cash_flow / revenue
+        : null,
+      dividend_payout_ratio: isFiniteNumber(cashFlow.dividends_paid) && isFiniteNumber(items.net_income) && items.net_income !== 0
+        ? cashFlow.dividends_paid / items.net_income
+        : null,
     };
   });
 }

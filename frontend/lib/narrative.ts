@@ -333,6 +333,82 @@ export function buildDeterministicNarrative(ctx: NarrativeContext): Narrative {
   } else {
     financialParts.push("Free cash flow is not available for the latest reported period; cash conversion cannot be assessed from history.");
   }
+
+  // ---- Liquidity analysis -------------------------------------------------
+  const liquidityParts: string[] = [];
+  if (isNum(latestHistory.quick_ratio)) {
+    liquidityParts.push(`Quick ratio of ${num(latestHistory.quick_ratio, 2)} indicates ${latestHistory.quick_ratio >= 1 ? "strong" : "weak"} ability to cover short-term obligations without selling inventory.`);
+  }
+  if (isNum(latestHistory.cash_ratio)) {
+    liquidityParts.push(`Cash ratio of ${num(latestHistory.cash_ratio, 2)} shows ${latestHistory.cash_ratio >= 0.5 ? "adequate" : "limited"} cash coverage of current liabilities.`);
+  }
+  if (isNum(latestHistory.working_capital)) {
+    liquidityParts.push(`Working capital of ${fmtBn(latestHistory.working_capital, c)} represents net short-term operational resources.`);
+  }
+  if (liquidityParts.length > 0) {
+    financialParts.push(`Liquidity: ${liquidityParts.join(" ")}`);
+  }
+
+  // ---- Efficiency analysis -----------------------------------------------
+  const efficiencyParts: string[] = [];
+  if (isNum(latestHistory.asset_turnover)) {
+    efficiencyParts.push(`Asset turnover of ${num(latestHistory.asset_turnover, 2)}x means revenue of ${latestHistory.asset_turnover.toFixed(2)} is generated per dollar of total assets.`);
+  }
+  if (isNum(latestHistory.inventory_turnover)) {
+    efficiencyParts.push(`Inventory turnover of ${num(latestHistory.inventory_turnover, 1)}x indicates inventory turns ${num(latestHistory.inventory_turnover, 1)} times per year.`);
+  }
+  if (isNum(latestHistory.receivables_turnover)) {
+    efficiencyParts.push(`Receivables turnover of ${num(latestHistory.receivables_turnover, 1)}x means customer invoices are collected ${num(latestHistory.receivables_turnover, 1)} times per year.`);
+  }
+  if (isNum(latestHistory.cash_conversion_cycle)) {
+    efficiencyParts.push(`Cash conversion cycle of ${num(latestHistory.cash_conversion_cycle, 1)} days measures days inventory + days receivables − days payables.`);
+  }
+  if (efficiencyParts.length > 0) {
+    financialParts.push(`Efficiency: ${efficiencyParts.join(" ")}`);
+  }
+
+  // ---- Valuation analysis ------------------------------------------------
+  const valuationAnalysisParts: string[] = [];
+  if (isNum(latestHistory.pe_ratio)) {
+    valuationAnalysisParts.push(`P/E of ${num(latestHistory.pe_ratio, 1)}x implies the market pays ${num(latestHistory.pe_ratio, 1)} per dollar of diluted EPS.`);
+  }
+  if (isNum(latestHistory.ev_ebitda)) {
+    valuationAnalysisParts.push(`EV/EBITDA of ${num(latestHistory.ev_ebitda, 1)}x values the enterprise at ${num(latestHistory.ev_ebitda, 1)} times EBITDA.`);
+  }
+  if (isNum(latestHistory.ev_revenue)) {
+    valuationAnalysisParts.push(`EV/Revenue of ${num(latestHistory.ev_revenue, 1)}x values the enterprise at ${num(latestHistory.ev_revenue, 1)} times revenue.`);
+  }
+  if (isNum(latestHistory.dividend_yield)) {
+    valuationAnalysisParts.push(`Dividend yield of ${pctStr(latestHistory.dividend_yield)} indicates dividends paid per dollar of market value.`);
+  }
+  if (isNum(latestHistory.fcf_yield)) {
+    valuationAnalysisParts.push(`FCF yield of ${pctStr(latestHistory.fcf_yield)} indicates free cash flow per dollar of market value.`);
+  }
+  if (valuationAnalysisParts.length > 0) {
+    financialParts.push(`Valuation: ${valuationAnalysisParts.join(" ")}`);
+  }
+
+  // ---- Quality analysis --------------------------------------------------
+  const qualityAnalysisParts: string[] = [];
+  if (isNum(latestHistory.nopat_margin)) {
+    qualityAnalysisParts.push(`NOPAT margin of ${pctStr(latestHistory.nopat_margin)} shows after-tax operating profit per dollar of revenue.`);
+  }
+  if (isNum(latestHistory.fcf_margin)) {
+    qualityAnalysisParts.push(`FCF margin of ${pctStr(latestHistory.fcf_margin)} shows free cash flow per dollar of revenue.`);
+  }
+  if (isNum(latestHistory.ocf_margin)) {
+    qualityAnalysisParts.push(`OCF margin of ${pctStr(latestHistory.ocf_margin)} shows operating cash flow per dollar of revenue.`);
+  }
+  if (isNum(latestHistory.dividend_payout_ratio)) {
+    qualityAnalysisParts.push(`Dividend payout of ${pctStr(latestHistory.dividend_payout_ratio)} shows share of earnings returned as dividends.`);
+  }
+  if (isNum(latestHistory.earnings_yield)) {
+    qualityAnalysisParts.push(`Earnings yield of ${pctStr(latestHistory.earnings_yield)} shows earnings per dollar of market price.`);
+  }
+  if (qualityAnalysisParts.length > 0) {
+    financialParts.push(`Quality: ${qualityAnalysisParts.join(" ")}`);
+  }
+
   const financialPerformance = financialParts.join(" ");
 
   // ---- Strengths ---------------------------------------------------------
