@@ -535,6 +535,8 @@ export function buildMetrics(normalized: any) {
           ? balance.current_assets / balance.current_liabilities
           : null,
       net_debt: isFiniteNumber(balance.total_debt) ? balance.total_debt - (balance.cash ?? 0) : null,
+      total_debt: balance.total_debt ?? null,
+      cash: balance.cash ?? null,
       book_value_per_share: isFiniteNumber(equity) && shares ? equity / shares : null,
     };
   });

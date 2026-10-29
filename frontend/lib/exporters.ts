@@ -474,6 +474,15 @@ function sectionF_valuation(doc: PdfDocument, payload: ExportPayload, actions: A
 
   doc.space(2).text("WACC build-up (CAPM, documented defaults)", { size: 9, bold: true, gray: 0.3, gap: 3 });
   const comps = dcf.wacc_components || {};
+  const actuals = payload.actuals || {};
+  const company = payload.company || {};
+  const marketValueEquity = isNum(company.market_cap) ? company.market_cap : null;
+  const interestBearingDebt = isNum(actuals.total_debt) ? actuals.total_debt : null;
+  const excessCash = isNum(actuals.cash) ? actuals.cash : null;
+  const computedNetDebt = interestBearingDebt !== null && excessCash !== null ? interestBearingDebt - excessCash : null;
+  const totalCapital = marketValueEquity !== null && interestBearingDebt !== null ? marketValueEquity + interestBearingDebt : null;
+  const marketEquityWeight = totalCapital !== null && totalCapital > 0 && marketValueEquity !== null ? marketValueEquity / totalCapital : null;
+  const marketDebtWeight = totalCapital !== null && totalCapital > 0 && interestBearingDebt !== null ? interestBearingDebt / totalCapital : null;
   const waccRows = [
     { component: "Risk-free rate", value: pct(comps.risk_free, 2) },
     { component: "Equity beta", value: num(comps.beta, 2) },
@@ -482,8 +491,15 @@ function sectionF_valuation(doc: PdfDocument, payload: ExportPayload, actions: A
     { component: "Pre-tax cost of debt", value: pct(comps.cost_of_debt, 2) },
     { component: "Tax rate", value: pct(comps.tax_rate, 2) },
     { component: "After-tax cost of debt", value: pct(comps.after_tax_cost_of_debt, 2) },
-    { component: "Equity / debt weight", value: `${pct(comps.equity_weight, 0)} / ${pct(comps.debt_weight, 0)}` },
+    { component: "Selected equity weight", value: pct(comps.equity_weight, 0) },
+    { component: "Selected debt weight", value: pct(comps.debt_weight, 0) },
     { component: "WACC applied", value: pct(dcf.wacc, 2), bold: true, color: INK },
+    { component: "Market-value equity", value: marketValueEquity !== null ? money(marketValueEquity, currency) : "—" },
+    { component: "Interest-bearing debt", value: interestBearingDebt !== null ? money(interestBearingDebt, currency) : "—" },
+    { component: "Excess cash", value: excessCash !== null ? money(excessCash, currency) : "—" },
+    { component: "Net debt (debt − cash)", value: computedNetDebt !== null ? money(computedNetDebt, currency) : "—", color: computedNetDebt !== null && dcf.net_debt !== null && Math.abs(computedNetDebt - dcf.net_debt) > 1 ? NEG : undefined },
+    { component: "Market equity weight (implied)", value: marketEquityWeight !== null ? pct(marketEquityWeight, 0) : "—" },
+    { component: "Market debt weight (implied)", value: marketDebtWeight !== null ? pct(marketDebtWeight, 0) : "—" },
   ];
   doc.dataTable([
     { key: "component", label: "Component", x: 0, format: (r: AnyRecord) => r.component, bold: (r: AnyRecord) => r.bold },
@@ -513,8 +529,16 @@ function sectionF_valuation(doc: PdfDocument, payload: ExportPayload, actions: A
   const tvShare = isNum(dcf.enterprise_value) && dcf.enterprise_value ? dcf.pv_terminal_value / dcf.enterprise_value : null;
   pair(doc, "Terminal value share of EV", pct(tvShare), tvShare !== null && tvShare > 0.6 ? AMBER : undefined);
   pair(doc, "Enterprise value", money(dcf.enterprise_value, currency), INK);
-  pair(doc, `Net ${isNum(dcf.net_debt) && dcf.net_debt >= 0 ? "debt" : "cash"}`, money(Math.abs(dcf.net_debt ?? 0), currency));
-  pair(doc, "Equity value", money(dcf.equity_value, currency), INK);
+  pair(doc, "Less: interest-bearing debt", interestBearingDebt !== null ? `-${money(interestBearingDebt, currency)}` : "—");
+  pair(doc, "Plus: excess cash", excessCash !== null ? `+${money(excessCash, currency)}` : "—");
+  const bridgeEquityValue = dcf.enterprise_value !== null && interestBearingDebt !== null && excessCash !== null
+    ? dcf.enterprise_value - interestBearingDebt + excessCash
+    : null;
+  pair(doc, "= Equity value (bridge)", bridgeEquityValue !== null ? money(bridgeEquityValue, currency) : "—", INK);
+  pair(doc, "Equity value (DCF)", money(dcf.equity_value, currency));
+  if (bridgeEquityValue !== null && isNum(dcf.equity_value) && Math.abs(bridgeEquityValue - dcf.equity_value) > 1) {
+    doc.text(`! Equity-value bridge mismatch: bridge ${money(bridgeEquityValue, currency)} vs DCF ${money(dcf.equity_value, currency)} — cash may be double-counted.`, { size: 8.5, gray: 0.35, indent: 6, gap: 2, color: NEG });
+  }
   pair(doc, "Shares outstanding", isNum(dcf.shares) ? fmt(dcf.shares) : "—");
   pair(doc, "Value per share", isNum(dcf.value_per_share) ? `${num(dcf.value_per_share)} ${currency}` : "—", INK);
   const finalEbitda = forecast?.summary?.final_ebitda;
