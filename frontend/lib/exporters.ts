@@ -1,6 +1,7 @@
 import { fmt, humanize, isNum, localDate, num, pct } from "./format";
 import { measureText, PdfColor, PdfDocument, CONTENT_WIDTH, MARGIN_LEFT, MARGIN_RIGHT, PAGE_WIDTH, PAGE_HEIGHT, MARGIN_TOP, MARGIN_BOTTOM } from "./pdf";
 import { buildXlsx, columnName, Sheet, SheetValue } from "./xlsx";
+import { runAgents, renderActions, type AgentAction } from "./agents";
 
 type AnyRecord = Record<string, any>;
 
@@ -128,7 +129,7 @@ function yearOf(period: AnyRecord): string {
 // A–J section builders
 // ---------------------------------------------------------------------------
 
-function sectionA_cover(doc: PdfDocument, payload: ExportPayload) {
+function sectionA_cover(doc: PdfDocument, payload: ExportPayload, actions: AgentAction[] = []) {
   const company = payload.company || {};
   const listing = payload.listing || {};
   const currency = payload.currency || company.currency || listing.currency || "USD";
@@ -166,9 +167,10 @@ function sectionA_cover(doc: PdfDocument, payload: ExportPayload) {
       { accent: NEG, titleColor: NEG },
     );
   }
+  renderActions(doc, actions.filter((a) => a.section === "cover"));
 }
 
-function sectionB_summary(doc: PdfDocument, payload: ExportPayload) {
+function sectionB_summary(doc: PdfDocument, payload: ExportPayload, actions: AgentAction[] = []) {
   const currency = payload.currency || "USD";
   const rating = payload.rating || "NOT RATED";
   const target = payload.target_price;
@@ -213,9 +215,10 @@ function sectionB_summary(doc: PdfDocument, payload: ExportPayload) {
   if (report.executive_summary) {
     doc.text(String(report.executive_summary), { size: 9.5, gray: 0.18, gap: 4, leading: 1.45 });
   }
+  renderActions(doc, actions.filter((a) => a.section === "summary"));
 }
 
-function sectionC_company(doc: PdfDocument, payload: ExportPayload) {
+function sectionC_company(doc: PdfDocument, payload: ExportPayload, actions: AgentAction[] = []) {
   const company = payload.company || {};
   const currency = payload.currency || "USD";
   const price = payload.price_summary || {};
@@ -246,13 +249,14 @@ function sectionC_company(doc: PdfDocument, payload: ExportPayload) {
     });
     doc.space(3);
   }
+  renderActions(doc, actions.filter((a) => a.section === "company"));
 }
 
 function report_text(value: unknown): boolean {
   return typeof value === "string" && value.trim().length > 0;
 }
 
-function sectionD_financials(doc: PdfDocument, payload: ExportPayload) {
+function sectionD_financials(doc: PdfDocument, payload: ExportPayload, actions: AgentAction[] = []) {
   const annual = payload.annual || {};
   const history: AnyRecord[] = Array.isArray(payload.history) ? payload.history : [];
   const currency = payload.currency || "USD";
@@ -377,9 +381,10 @@ function sectionD_financials(doc: PdfDocument, payload: ExportPayload) {
       sourceNote: `Reported revenue and EBITDA (${payload.currency || "USD"}).`,
     });
   }
+  renderActions(doc, actions.filter((a) => a.section === "financials"));
 }
 
-function sectionE_forecast(doc: PdfDocument, payload: ExportPayload) {
+function sectionE_forecast(doc: PdfDocument, payload: ExportPayload, actions: AgentAction[] = []) {
   const forecast = payload.forecast || null;
   const periods: AnyRecord[] = Array.isArray(forecast?.periods) ? forecast.periods : [];
   const assumptions = payload.assumptions || forecast?.assumptions || {};
@@ -444,9 +449,10 @@ function sectionE_forecast(doc: PdfDocument, payload: ExportPayload) {
     height: 115,
     sourceNote: `Forecast revenue, EBITDA and free cash flow (${currency}).`,
   });
+  renderActions(doc, actions.filter((a) => a.section === "forecast"));
 }
 
-function sectionF_valuation(doc: PdfDocument, payload: ExportPayload) {
+function sectionF_valuation(doc: PdfDocument, payload: ExportPayload, actions: AgentAction[] = []) {
   const dcf = payload.dcf || null;
   const sensitivity = payload.sensitivity || null;
   const reverse = payload.reverse_dcf || null;
@@ -593,9 +599,10 @@ function sectionF_valuation(doc: PdfDocument, payload: ExportPayload) {
     doc.text(`Base: ${scen.base || "n/a"}`, { size: 8.8, gray: 0.2, indent: 6, gap: 2 });
     doc.text(`Bear: ${scen.bear || "n/a"}`, { size: 8.8, gray: 0.2, indent: 6, gap: 2 });
   }
+  renderActions(doc, actions.filter((a) => a.section === "valuation"));
 }
 
-function sectionG_risks(doc: PdfDocument, payload: ExportPayload) {
+function sectionG_risks(doc: PdfDocument, payload: ExportPayload, actions: AgentAction[] = []) {
   const report = payload.report || {};
 
   doc.heading("Risks & Catalysts");
@@ -637,9 +644,10 @@ function sectionG_risks(doc: PdfDocument, payload: ExportPayload) {
       if (catalyst.grounding) doc.text(`Grounding: ${catalyst.grounding}`, { size: 8.7, indent: 14, gray: 0.35, gap: 3 });
     });
   }
+  renderActions(doc, actions.filter((a) => a.section === "risks"));
 }
 
-function sectionH_modelQuality(doc: PdfDocument, payload: ExportPayload) {
+function sectionH_modelQuality(doc: PdfDocument, payload: ExportPayload, actions: AgentAction[] = []) {
   const report = payload.report || {};
   const forecast = payload.forecast || null;
   const dcf = payload.dcf || null;
@@ -680,9 +688,10 @@ function sectionH_modelQuality(doc: PdfDocument, payload: ExportPayload) {
       doc.text(`[${tag}] ${issue.code}: ${issue.message}`, { size: 8, indent: 6, color, gray: color ? undefined : 0.4, gap: 1.5 });
     });
   }
+  renderActions(doc, actions.filter((a) => a.section === "modelQuality"));
 }
 
-function sectionI_sources(doc: PdfDocument, payload: ExportPayload) {
+function sectionI_sources(doc: PdfDocument, payload: ExportPayload, actions: AgentAction[] = []) {
   doc.heading("Sources & Methodology");
 
   const provenance: AnyRecord[] = Array.isArray(payload.provenance) ? payload.provenance : [];
@@ -710,9 +719,10 @@ function sectionI_sources(doc: PdfDocument, payload: ExportPayload) {
 
   const peers: string[] = Array.isArray(payload.peers) ? payload.peers : [];
   pair(doc, "Peer set", peers.length ? peers.join(", ") : "None supplied (comparables omitted)");
+  renderActions(doc, actions.filter((a) => a.section === "sources"));
 }
 
-function sectionJ_conclusion(doc: PdfDocument, payload: ExportPayload) {
+function sectionJ_conclusion(doc: PdfDocument, payload: ExportPayload, actions: AgentAction[] = []) {
   const report = payload.report || {};
 
   doc.heading("Conclusion");
@@ -737,24 +747,28 @@ function sectionJ_conclusion(doc: PdfDocument, payload: ExportPayload) {
     gray: 0.5,
     gap: 4,
   });
+
+  renderActions(doc, actions.filter((a) => a.section === "conclusion"));
 }
 
 function buildReportDocument(payload: ExportPayload) {
   const doc = new PdfDocument();
+  const coordinator = runAgents(payload);
+  const actions = coordinator.actions;
   const title = payload?.title || `${payload?.ticker || "APEX"} — Equity Research Note`;
   const footerLeft = [payload?.ticker, payload?.company?.name, "APEX Terminal"].filter(Boolean).join("  ·  ");
   doc.setRunningHeader([payload?.ticker, payload?.company?.name].filter(Boolean).join(" · "));
 
-  sectionA_cover(doc, payload);
-  sectionB_summary(doc, payload);
-  sectionC_company(doc, payload);
-  sectionD_financials(doc, payload);
-  sectionE_forecast(doc, payload);
-  sectionF_valuation(doc, payload);
-  sectionG_risks(doc, payload);
-  sectionH_modelQuality(doc, payload);
-  sectionI_sources(doc, payload);
-  sectionJ_conclusion(doc, payload);
+  sectionA_cover(doc, payload, actions);
+  sectionB_summary(doc, payload, actions);
+  sectionC_company(doc, payload, actions);
+  sectionD_financials(doc, payload, actions);
+  sectionE_forecast(doc, payload, actions);
+  sectionF_valuation(doc, payload, actions);
+  sectionG_risks(doc, payload, actions);
+  sectionH_modelQuality(doc, payload, actions);
+  sectionI_sources(doc, payload, actions);
+  sectionJ_conclusion(doc, payload, actions);
 
   return { doc, title, footerLeft };
 }
