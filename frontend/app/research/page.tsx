@@ -2,7 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Download, Eye, FileText, RefreshCw, Trash2 } from "lucide-react";
+import { Download, Eye, FileText, RefreshCw, Sparkles, Trash2 } from "lucide-react";
 import { api, apiBlob, downloadBlob, getErrorMessage } from "@/lib/api";
 import { fmt, money, pct } from "@/lib/format";
 import { Card, CardHeader, Button, EmptyState, ErrorBanner, Field, InfoBanner, Select, Spinner, Stat } from "@/components/ui";
@@ -29,7 +29,16 @@ type ReportSummary = {
   created_at?: string | null;
 };
 
-type ModelRow = { name: string; enabled: boolean };
+type ModelRow = {
+  name: string;
+  enabled: boolean;
+  provider?: string;
+  model_id?: string;
+  base_url?: string | null;
+  api_key?: string | null;
+  source?: string;
+  has_key?: boolean;
+};
 
 type PreviewPage = { number: number; width: number; height: number; image: string };
 type Preview = { id: number; page_count: number; rendered: number; pages: PreviewPage[] };
@@ -65,6 +74,7 @@ function ResearchStudio() {
   const [autoPeers, setAutoPeers] = useState<string[]>([]);
   const [peersBusy, setPeersBusy] = useState(false);
   const [peersStatus, setPeersStatus] = useState<"idle" | "finding" | "found" | "none">("idle");
+  const [aiSuggestBusy, setAiSuggestBusy] = useState(false);
   const peersTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [reportDate, setReportDate] = useState("");
 
@@ -157,6 +167,70 @@ function ResearchStudio() {
       if (peersTimer.current) clearTimeout(peersTimer.current);
     };
   }, [ticker]);
+
+  // AI-suggest peers: fetch validated candidates, then ask the AI to pick
+  // the most relevant ones based on sector/industry/business similarity.
+  async function suggestAiPeers() {
+    const clean = ticker.trim().toUpperCase();
+    if (!clean || clean === "SAMPLE") {
+      setError("Enter a ticker first.");
+      return;
+    }
+    if (!aiModel) {
+      setError("Select an AI model first.");
+      return;
+    }
+    setAiSuggestBusy(true);
+    setError("");
+    try {
+      // Step 1: fetch validated candidates for this ticker.
+      const peersRes = await api<{
+        ok: boolean;
+        peers: string[];
+        sector: string | null;
+        target: string;
+        error?: string;
+      }>(`/api/peers?target=${encodeURIComponent(clean)}&minCount=3&maxCount=10`);
+      if (!peersRes.ok || !peersRes.peers.length) {
+        setError(typeof peersRes.error === "string" ? peersRes.error : "No validated peer candidates found for this ticker.");
+        setAiSuggestBusy(false);
+        return;
+      }
+
+      // Step 2: ask the AI to select the most relevant peers from candidates.
+      const selectedModel = models.find((m) => m.name === aiModel);
+      const suggestRes = await api<{
+        ok: boolean;
+        peers: string[];
+        peerDetails: Array<{ ticker: string; reason: string }>;
+        sector: string | null;
+        industry: string | null;
+        aiUsed: boolean;
+        error?: string;
+      }>("/api/peers/suggest", {
+        method: "POST",
+        body: JSON.stringify({
+          target: clean,
+          candidates: peersRes.peers,
+          model: selectedModel,
+        }),
+      });
+
+      if (!suggestRes.ok || !suggestRes.peers.length) {
+        setError(typeof suggestRes.error === "string" ? suggestRes.error : "AI peer suggestion returned no results.");
+        setAiSuggestBusy(false);
+        return;
+      }
+
+      setAutoPeers(suggestRes.peers);
+      setPeers(suggestRes.peers.join(", "));
+      setPeersStatus(suggestRes.peers.length >= 5 ? "found" : "none");
+    } catch (err) {
+      setError(getErrorMessage(err));
+    } finally {
+      setAiSuggestBusy(false);
+    }
+  }
 
   function handleTickerSubmit(event: FormEvent) {
     event.preventDefault();
@@ -327,6 +401,21 @@ function ResearchStudio() {
                   ⚠ Fewer than 5 peers found
                 </span>
               ) : null}
+              {!peersBusy && (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={suggestAiPeers}
+                  disabled={aiSuggestBusy || !aiModel || !ticker.trim()}
+                  title="AI-suggest relevant peers"
+                >
+                  {aiSuggestBusy ? <Sparkles className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
+                  AI peers
+                </Button>
+              )}
+              {!aiModel && (
+                <span className="text-[10px] text-warn font-medium">Select an AI model</span>
+              )}
             </div>
             <Select
               label="AI narrative"
