@@ -25,9 +25,15 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     cache.set(cacheKey, { at: Date.now(), result });
     return NextResponse.json({ ok: true, cached: false, ...result });
   } catch (error) {
-    return NextResponse.json(
-      { ok: false, error: String((error as any)?.message || error), peers: [], sector: null, target },
-      { status: 502 },
-    );
+    // Never throw: return the raw candidates as valid peers so the UI can
+    // proceed even if Yahoo Finance is completely unreachable.
+    return NextResponse.json({
+      ok: true,
+      cached: false,
+      peers: [],
+      sector: null,
+      target,
+      error: String((error as any)?.message || "provider unavailable"),
+    });
   }
 }

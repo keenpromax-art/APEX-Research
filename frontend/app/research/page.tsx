@@ -194,7 +194,8 @@ function ResearchStudio() {
       if (!peersRes.ok || !peersRes.peers.length) {
         setAutoPeers([]);
         setPeersStatus("none");
-        setError("Could not fetch peer candidates from Yahoo Finance — keeping your manually entered peers.");
+        // Yahoo is down for this ticker — keep user-entered peers silently,
+        // they will still be sent to the report generator.
         setAiSuggestBusy(false);
         return;
       }
