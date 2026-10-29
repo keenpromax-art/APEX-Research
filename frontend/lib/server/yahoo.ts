@@ -36,17 +36,17 @@ let session: Session | null = null;
 // ---------------------------------------------------------------------------
 
 export const PEER_UNIVERSE: Record<string, string[]> = {
-  Technology: ["AAPL", "MSFT", "GOOGL", "NVDA", "META", "AMD", "INTC", "CSCO", "ORCL", "ADBE", "CRM", "AVGO", "TXN", "QCOM", "IBM", "INTU", "NOW", "ADP", "FIS", "ACN", "TCS", "INFY", "WIPRO", "HCLTECH", "TECHM", "LTIM", "MPHASIS", "COFORGE", "PERSISTENT", "CYIENT", "BSE", "CDSL", "MCX"],
-  Financials: ["JPM", "BAC", "WFC", "C", "GS", "MS", "AXP", "BLK", "SCHW", "USB", "PNC", "TFC", "COF", "RF", "KEY", "CFG", "FITB", "HBAN", "ZION", "HDFCBANK", "ICICIBANK", "KOTAKBANK", "AXISBANK", "SBIN", "INDUSINDBK", "FEDERALBNK", "IDFCFIRSTB", "BANDHANBNK", "RBLBANK", "BAJFINANCE", "BAJAJFINSV", "MUTHOOTFIN", "SHRIRAMFIN", "CHOLAFIN", "L&TFH", "M&MFIN"],
-  "Health Care": ["JNJ", "UNH", "ABBV", "MRK", "PFE", "TMO", "ABT", "DHR", "BMY", "AMGN", "GILD", "CVS", "ELV", "ISRG", "ZTS", "BSX", "MCK", "COR", "HUM", "CI"],
-  "Consumer Discretionary": ["AMZN", "TSLA", "HD", "MCD", "NKE", "SBUX", "TJX", "LOW", "BAM", "ROST", "GM", "F", "MAR", "HLT", "CCL", "RCL", "NCLH", "LVS", "WYNN"],
-  "Consumer Staples": ["PG", "KO", "PEP", "WMT", "COST", "CL", "CLX", "KMB", "GIS", "K", "HSY", "MKC", "CAG", "SJM", "HRL", "KVUE", "CHD", "CPB"],
-  Energy: ["XOM", "CVX", "COP", "SLB", "EOG", "PXD", "MPLX", "PSX", "VLO", "OKE", "WMB", "DVN", "FANG", "MPC", "HES", "MRO", "OXY", "KMI", "ET", "EPD", "RELIANCE", "ONGC", "OIL", "BPCL", "IOC", "HINDPETRO", "GAIL", "IGL", "MGL", "PETRONET"],
-  Industrials: ["BA", "CAT", "GE", "HON", "UPS", "LMT", "RTX", "DE", "MMM", "NOC", "LHX", "CSX", "NSC", "UNP", "FDX", "DAL", "UAL", "AAL", "LUV", "JBLU"],
+  Technology: ["NVDA", "AAPL", "MSFT", "TSM", "AVGO", "MU", "AMD", "ASML", "INTC", "PLTR", "ORCL", "CSCO", "AMAT", "PANW", "LRCX", "DELL", "TXN", "SAP", "CRWD", "ARM", "QCOM", "TXN", "ADBE", "CRM", "ACN", "TCS", "INFY", "WIPRO", "HCLTECH", "TECHM", "LTIM", "MPHASIS", "COFORGE", "PERSISTENT", "CYIENT", "BSE", "CDSL", "MCX"],
+  Financials: ["BRK-A", "BRK-B", "JPM", "V", "MA", "BAC", "MS", "GS", "WFC", "RY", "HSBC", "MUFG", "C", "USB", "PNC", "TFC", "COF", "AXP", "BLK", "SCHW", "HDFCBANK", "ICICIBANK", "KOTAKBANK", "AXISBANK", "SBIN", "INDUSINDBK", "FEDERALBNK", "IDFCFIRSTB", "BANDHANBNK", "RBLBANK", "BAJFINANCE", "BAJAJFINSV", "MUTHOOTFIN", "SHRIRAMFIN", "CHOLAFIN", "L&TFH", "M&MFIN"],
+  "Health Care": ["LLY", "JNJ", "ABBV", "UNH", "MRK", "TMO", "AMGN", "GILD", "ABT", "NVO", "PFE", "DHR", "ISRG", "VRTX", "BMY", "MDT", "SYK", "CVS", "AZN", "NVS", "RHHBY", "RHHVF", "RHHBF", "NONOF", "SEHVF"],
+  "Consumer Discretionary": ["AMZN", "TSLA", "HD", "MCD", "NKE", "SBUX", "TJX", "LOW", "BABA", "TM", "BKNG", "MAR", "ABNB", "PDD", "ROST", "GM", "F", "MAR", "HLT", "CCL", "RCL", "NCLH", "LVS", "WYNN"],
+  "Consumer Staples": ["WMT", "COST", "KO", "PG", "PEP", "PM", "MO", "MNST", "MDLZ", "CL", "TGT", "KMB", "GIS", "K", "HSY", "MKC", "CAG", "SJM", "HRL", "KVUE", "CHD", "CPB", "CLX", "K"],
+  Energy: ["XOM", "CVX", "COP", "SLB", "EOG", "PXD", "VLO", "PSX", "MPC", "OKE", "WMB", "DVN", "FANG", "MPC", "HES", "MRO", "OXY", "KMI", "ET", "EPD", "RELIANCE", "ONGC", "OIL", "BPCL", "IOC", "HINDPETRO", "GAIL", "IGL", "MGL", "PETRONET"],
+  Industrials: ["CAT", "GE", "RTX", "UNP", "DE", "ETN", "LMT", "BA", "HON", "UPS", "LMT", "RTX", "DE", "MMM", "NOC", "LHX", "CSX", "NSC", "UNP", "FDX", "DAL", "UAL", "AAL", "LUV", "JBLU"],
   Utilities: ["NEE", "DUK", "SO", "D", "EXC", "XEL", "SRE", "AEP", "WEC", "PEG", "ETR", "ED", "CMS", "DTE", "FE", "AEE", "NI", "PNW", "EIX", "ATO"],
-  "Real Estate": ["PLD", "EQIX", "WELL", "AVB", "EQR", "VTR", "O", "BXP", "KIM", "REG", "MAA", "UDR", "CPT", "ESS", "INVH", "AXS", "VICI", "SPG", "DLF", "GODREJPROP", "OBEROIRTY", "PRESTIGE", "BRIGADE", "SOBHA", "PHOENIXLTD", "KOLTEPATIL", "MAHLIFE", "ARHANT", "SUNTECK", "NAHAR", "ODL", "SWELECTES"],
-  Materials: ["LIN", "APD", "FCX", "NEM", "MLM", "VMC", "ECL", "SHW", "DD", "DOW", "ALB", "NUE", "STLD", "X", "CMC", "FMC", "IFF", "AVY", "PKG", "IP"],
-  "Communication Services": ["GOOGL", "META", "NFLX", "DIS", "CMCSA", "VZ", "T", "TMUS", "CHTR", "EA", "TTWO", "ATVI", "RBLX", "PINS", "SNAP", "SPOT", "LYV", "WBD", "PARA"],
+  "Real Estate": ["WELL", "PLD", "EQIX", "AMT", "SPG", "DLR", "PSA", "O", "VTR", "CCI", "CBRE", "IRM", "EXR", "VICI", "AVB", "EQR", "MAA", "UDR", "CPT", "ESS", "INVH", "AXS", "DLF", "GODREJPROP", "OBEROIRTY", "PRESTIGE", "BRIGADE", "SOBHA", "PHOENIXLTD", "KOLTEPATIL", "MAHLIFE", "ARHANT", "SUNTECK", "NAHAR"],
+  Materials: ["LIN", "APD", "FCX", "NEM", "MLM", "VMC", "ECL", "SHW", "DD", "DOW", "ALB", "NUE", "STLD", "X", "CMC", "FMC", "IFF", "AVY", "PKG", "IP", "BHP", "RIO", "SCCO", "FCX", "AEM", "ECL", "SHW", "APD"],
+  "Communication Services": ["GOOGL", "GOOG", "META", "NFLX", "DIS", "VZ", "T", "TMUS", "CMCSA", "CHTR", "EA", "TTWO", "ATVI", "RBLX", "PINS", "SNAP", "SPOT", "LYV", "WBD", "PARA"],
 };
 
 // Map of sector aliases so different Yahoo sector label variants resolve to the
