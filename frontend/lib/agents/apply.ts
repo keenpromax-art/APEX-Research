@@ -1,4 +1,4 @@
-import { PdfDocument, CONTENT_WIDTH, measureText } from "../pdf";
+import { PdfDocument, CONTENT_WIDTH, measureText, type PdfColor } from "../pdf";
 import type { AgentAction } from "./types";
 import { fmt, isNum, num, pct } from "../format";
 
@@ -40,9 +40,33 @@ function ellipsize(value: string, maxWidth: number, size: number): string {
 }
 
 export function renderActions(doc: PdfDocument, actions: AgentAction[]): void {
+  const pairBuffer: Array<{ key: string; val: string; color?: PdfColor }> = [];
+
+  const flushPairs = () => {
+    if (!pairBuffer.length) return;
+    const colCount = 4;
+    const colWidth = CONTENT_WIDTH / colCount;
+    const rows = Math.ceil(pairBuffer.length / colCount);
+    for (let row = 0; row < rows; row += 1) {
+      const cells: Array<{ text: string; offset: number; align?: "left" | "right"; size?: number; bold?: boolean; gray?: number; color?: PdfColor }> = [];
+      for (let col = 0; col < colCount; col += 1) {
+        const idx = row * colCount + col;
+        if (idx >= pairBuffer.length) break;
+        const { key, val, color } = pairBuffer[idx];
+        const x = col * colWidth;
+        const colRight = x + colWidth;
+        cells.push({ text: key, offset: x, gray: 0.45, size: 8.5 });
+        cells.push({ text: val, offset: colRight, align: "right", color, size: 8.5 });
+      }
+      doc.row(cells, 2);
+    }
+    pairBuffer.length = 0;
+  };
+
   for (const action of actions) {
     switch (action.kind) {
       case "addText":
+        flushPairs();
         doc.text(action.target, {
           size: 8.8,
           gray: 0.2,
@@ -54,13 +78,11 @@ export function renderActions(doc: PdfDocument, actions: AgentAction[]): void {
         const key = String(action.target).split(" · ")[0];
         const val = String(action.target).split(" · ").slice(1).join(" · ");
         const color = resolveColor((action.payload as any)?.color);
-        doc.row([
-          { text: key, offset: 0, gray: 0.45, size: 8.5 },
-          { text: val, offset: measureText(key, 8.5, false) + 12, align: "left", color, size: 8.5 },
-        ], 2);
+        pairBuffer.push({ key, val, color });
         break;
       }
       case "addCallout": {
+        flushPairs();
         const accent = resolveColor((action.payload as any)?.accent);
         const titleColor = resolveColor((action.payload as any)?.titleColor ?? (action.payload as any)?.accent);
         doc.callout(String(action.target), String((action.payload as any)?.body ?? ""), {
@@ -70,6 +92,7 @@ export function renderActions(doc: PdfDocument, actions: AgentAction[]): void {
         break;
       }
       case "addTable": {
+        flushPairs();
         const table = normalizeTable(action.payload);
         if (!table) continue;
         const columns = table.columns.map((c) => ({
@@ -85,10 +108,12 @@ export function renderActions(doc: PdfDocument, actions: AgentAction[]): void {
         break;
       }
       case "addSection":
+        flushPairs();
         // Section headings are owned by the section builders; actions only annotate.
         break;
     }
   }
+  flushPairs();
 }
 
 function normalizeTable(payload: any): StdTable | null {
