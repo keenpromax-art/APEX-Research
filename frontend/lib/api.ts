@@ -336,6 +336,7 @@ function mockTickerData(ticker: string) {
       marketCap: scaleMoney(isSparse ? 3_360_000_000 : 12_500_000_000, scale),
       longBusinessSummary: `${identity.business} Every figure in this profile is generated deterministically in this browser for ${upper}.`,
       fullTimeEmployees: identity.employees,
+      employees: identity.employees,
     },
     annual: {
       income_statement: annualIncome.map((row) => ({ period_end: row.period_end, items: scaleStatement(row.items, scale) })),
@@ -484,6 +485,7 @@ function companySummary(fixture: any) {
     summary: info.longBusinessSummary,
     market_cap: info.marketCap,
     employees: info.fullTimeEmployees,
+    fullTimeEmployees: info.fullTimeEmployees,
     last_data_date: income[0]?.period_end || null,
     price_summary: fixture?.price_summary,
     retrieved_at: fixture?.retrieved_at,

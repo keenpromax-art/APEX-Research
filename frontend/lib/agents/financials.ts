@@ -34,7 +34,7 @@ export function incomeAgent(payload: ExportPayload): AgentResult {
     act("income-03", "Income Statement Agent", "operating income", "financials", "addPair", `Operating income · ${money(latest.operating_income, currency)}`, 0.95, "Profit from core operations."),
     act("income-04", "Income Statement Agent", "EBITDA", "financials", "addPair", `EBITDA · ${money(latest.ebitda, currency)}`, 0.95, "Earnings before interest, tax, depreciation & amortization."),
     act("income-05", "Income Statement Agent", "net income", "financials", "addPair", `Net income · ${money(latest.net_income, currency)}`, 0.96, "Bottom-line profit attributable to shareholders."),
-    act("income-06", "Income Statement Agent", "diluted EPS", "financials", "addPair", `Diluted EPS · ${isNum(latest.diluted_eps) ? pct(latest.diluted_eps, 2) : "—"}`, 0.94, "Per-share earnings on a diluted basis."),
+    act("income-06", "Income Statement Agent", "diluted EPS", "financials", "addPair", `Diluted EPS · ${isNum(latest.diluted_eps) ? num(latest.diluted_eps, 2) : "—"}`, 0.94, "Per-share earnings on a diluted basis."),
     act("income-07", "Income Statement Agent", "history periods", "financials", "addTable", `income_statement · ${periods.join(", ")}`, 0.9, "Multi-year income statement history.", { periods }),
   );
   const findings = [`Income statement: revenue ${money(latest.revenue, currency)}, net income ${money(latest.net_income, currency)} across ${periods.length} reported periods.`];

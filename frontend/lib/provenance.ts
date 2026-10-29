@@ -301,7 +301,7 @@ export function buildProvenanceRows(ctx: ProvenanceContext): ProvenanceRow[] {
   ) => {
     rows.push({
       metric,
-      value_label: isNum(value) ? value.toLocaleString("en-US", { maximumFractionDigits: 2 }) : value == null ? "n/a" : String(value),
+      value_label: isNum(value) ? value.toLocaleString("en-US", { maximumFractionDigits: 4 }) : value == null ? "n/a" : String(value),
       unit,
       currency: rowCurrency,
       period: rowPeriod,
@@ -485,7 +485,7 @@ const SECTOR_RULES: { match: RegExp; build: (label: string) => SectorProfile }[]
 
 const SECTOR_VALUATION: Record<string, { approach: string; methods: string[]; inputs: string[] }> = {
   bank: { approach: "Residual income / dividend discount with asset-quality and capital-adequacy overlays", methods: ["Residual income", "Dividend discount", "Price-to-book"], inputs: ["Net interest margin", "GNPA/NNPA", "CET-1", "Loan/deposit growth"] },
-  software: { approach: "DCF on recurring revenue with margin expansion", methods: ["DCF", "EV/Sales", "EV/EBITDA"], inputs: ["Revenue growth", "Gross margin", "Operating leverage", "Cash conversion"] },
+  software: { approach: "Driver-based three-statement DCF with margin expansion", methods: ["DCF", "EV/Sales", "EV/EBITDA"], inputs: ["Revenue growth", "Gross margin", "Operating leverage", "Cash conversion"] },
   energy: { approach: "Cycle-aware DCF with commodity price scenarios", methods: ["DCF", "EV/EBITDA", "NAV"], inputs: ["Realised prices", "Volumes", "Reserves", "Capex"] },
   manufacturing: { approach: "Driver-based three-statement DCF", methods: ["DCF", "EV/EBITDA", "P/E"], inputs: ["Revenue", "EBITDA margin", "Capex intensity", "Working capital"] },
   consumer: { approach: "Brand/mix-driven DCF", methods: ["DCF", "EV/EBITDA", "P/E"], inputs: ["Revenue growth", "Gross margin", "Volume vs price", "Working capital"] },
