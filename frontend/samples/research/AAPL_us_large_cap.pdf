@@ -23,7 +23,7 @@ BT /F2 8 Tf 0.886 0.137 0.102 rg 1 0 0 1 52 761.09 Tm (APEX TERMINAL | EQUITY RE
 BT /F2 19 Tf 0.050 0.050 0.050 rg 1 0 0 1 52 734.54 Tm (AAPL | Preliminary note \(not rated\) | 12M outlook) Tj ET
 BT /F1 10 Tf 0.4 g 1 0 0 1 52 712.59 Tm (AAPL | AAPL) Tj ET
 BT /F1 9 Tf 0.45 g 1 0 0 1 52 697.44 Tm (US listing \(NASDAQ / NYSE\) | USD | 12M outlook | report date 2026-10-26) Tj ET
-BT /F1 8.5 Tf 0.5 g 1 0 0 1 52 683.26 Tm (Generated 29 Oct 2026, 08:10 am - market data: Yahoo Finance | retrieved 29 Oct 2026, 08:10 am) Tj ET
+BT /F1 8.5 Tf 0.5 g 1 0 0 1 52 683.26 Tm (Generated 29 Oct 2026, 08:39 am - market data: Yahoo Finance | retrieved 29 Oct 2026, 08:39 am) Tj ET
 0.82 G 0.5 w 52 668.59 m 543.28 668.59 l S
 BT /F1 8.8 Tf 0.2 g 1 0 0 1 52 653.11 Tm (AAPL - Equity Research Note) Tj ET
 BT /F1 8.5 Tf 0.45 g 1 0 0 1 52.00 638.04 Tm (US listing \(NASDAQ / NYSE\)) Tj ET
@@ -465,7 +465,7 @@ BT /F1 8.5 Tf 0.15 g 1 0 0 1 524.38 230.53 Tm (2.0.0) Tj ET
 BT /F1 8.5 Tf 0.45 g 1 0 0 1 52.00 217.06 Tm (Data source) Tj ET
 BT /F1 8.5 Tf 0.15 g 1 0 0 1 486.11 217.06 Tm (Yahoo Finance) Tj ET
 BT /F1 8.5 Tf 0.45 g 1 0 0 1 52.00 203.58 Tm (Retrieved) Tj ET
-BT /F1 8.5 Tf 0.15 g 1 0 0 1 439.80 203.58 Tm (2026-10-29T02:40:22.382Z) Tj ET
+BT /F1 8.5 Tf 0.15 g 1 0 0 1 439.80 203.58 Tm (2026-10-29T03:09:08.745Z) Tj ET
 BT /F1 8.8 Tf 0.2 g 1 0 0 1 52 189.85 Tm (Forecast: deterministic three-statement model driven by documented assumptions. Valuation: unlevered FCF discounted at) Tj ET
 BT /F1 8.8 Tf 0.2 g 1 0 0 1 52 177.53 Tm (CAPM-built WACC with Gordon-growth or exit-multiple terminal value. Rating: mechanical band on model upside \(BUY >=) Tj ET
 BT /F1 8.8 Tf 0.2 g 1 0 0 1 52 165.21 Tm (+10%, HOLD ?10%, SELL < -10%\), withheld when integrity gates fail. Every figure is a model output.) Tj ET

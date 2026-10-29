@@ -354,10 +354,9 @@ test("forecast drivers are derived from reported history and labelled per driver
       assert.ok(Math.abs(forecast.assumptions.gross_margin - latest.gross_profit / latest.revenue) < 1e-9, "gross margin derived from reported values");
       assert.ok(Math.abs(forecast.assumptions.opex_ratio - latest.operating_expense / latest.revenue) < 1e-9, "opex ratio derived from reported values");
     }
-    assert.equal(
-      forecast.assumption_sources.dividend_payout,
-      "Engine default (documented assumption)",
-      "undrivable drivers stay documented engine defaults",
+    assert.ok(
+      forecast.assumption_sources.dividend_payout.startsWith("Derived from reported dividends paid / net income"),
+      "dividend payout is derived from reported yahoo dividends paid / net income: " + forecast.assumption_sources.dividend_payout,
     );
 
     const overridden = await api("/api/forecast/AAPL", {

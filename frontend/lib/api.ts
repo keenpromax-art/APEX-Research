@@ -658,6 +658,15 @@ function deriveAssumptions(fixture: any): { values: Record<string, number>; sour
     }
   }
 
+  const dividendsPaid = cashFlow ? Math.abs(cashFlow.dividends_paid ?? 0) : null;
+  const netIncome = isFiniteNumber(latest.net_income) ? latest.net_income : null;
+  if (dividendsPaid !== null && dividendsPaid > 0 && netIncome !== null && netIncome > 0) {
+    const payout = dividendsPaid / netIncome;
+    if (isFiniteNumber(payout) && payout >= 0) {
+      set("dividend_payout", Math.min(1, payout), `Derived from reported dividends paid / net income, ${ended}`);
+    }
+  }
+
   return { values, sources };
 }
 
