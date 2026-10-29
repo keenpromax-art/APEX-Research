@@ -561,25 +561,17 @@ function sectionF_valuation(doc: PdfDocument, payload: ExportPayload, actions: A
   if (scenarios && typeof scenarios === "object") {
     const keys = ["bull", "base", "bear"].filter((k) => scenarios[k]);
     if (keys.length) {
-      doc.space(6).text("Scenario comparison", { size: 9, bold: true, gray: 0.3, gap: 3 });
-      const scenCols = [
-        { key: "scenario", label: "Scenario", x: 0, format: (r: AnyRecord) => String(r.scenario) },
-        { key: "growth", label: "Rev growth", x: 90, align: "right" as const, format: (r: AnyRecord) => isNum(r.growth) ? pct(r.growth, 1) : "—" },
-        { key: "margin", label: "Gross margin", x: 170, align: "right" as const, format: (r: AnyRecord) => isNum(r.margin) ? pct(r.margin, 1) : "—" },
-        { key: "value", label: `Value/share (${currency})`, x: 260, align: "right" as const, format: (r: AnyRecord) => isNum(r.value) ? num(r.value, 2) : "—" },
-        { key: "ev", label: `EV (${currency})`, x: 360, align: "right" as const, format: (r: AnyRecord) => isNum(r.ev) ? fmt(r.ev) : "—" },
-      ];
-      const scenRows = keys.map((k) => {
-        const s = scenarios[k];
-        return {
-          scenario: s?.label || k,
-          growth: s?.assumptions?.revenue_growth,
-          margin: s?.assumptions?.gross_margin,
-          value: s?.dcf_value_per_share,
-          ev: s?.enterprise_value,
-        };
-      });
-      doc.dataTable(scenCols, scenRows, { fontSize: 8, headerFontSize: 7, sourceNote: "Scenarios reflect distinct driver assumptions on revenue growth, margins, capex and tax; they are not price adjustments." });
+      const chartLabels = keys.map((k) => String(scenarios[k]?.label || k));
+      const chartValues = keys.map((k) => scenarios[k]?.dcf_value_per_share);
+      if (chartValues.some((v) => isNum(v))) {
+        doc.space(6).text("Scenario value per share", { size: 9, bold: true, gray: 0.3, gap: 3 });
+        doc.drawBars({
+          labels: chartLabels,
+          series: [{ name: "DCF value per share", values: chartValues, color: ACCENT }],
+          height: 100,
+          sourceNote: "Driver-based DCF scenarios (bull / base / bear), not price adjustments.",
+        });
+      }
     }
   }
 

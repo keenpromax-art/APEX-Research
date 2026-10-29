@@ -95,6 +95,7 @@ export type NarrativeContext = {
   dcf: Record<string, any> | null;
   sensitivity: Record<string, any> | null;
   reverseDcf: Record<string, any> | null;
+  scenarios: Record<string, any> | null;
   rating: string;
   target: number | null;
   upside: number | null;
@@ -553,21 +554,32 @@ export function buildDeterministicNarrative(ctx: NarrativeContext): Narrative {
   }
 
   // ---- Scenarios ---------------------------------------------------------
-  const targetBase = ctx.target;
-  const scenarioAnalysis = {
-    bull:
-      targetBase !== null
-        ? `Bull case: target of ${num(targetBase * 1.15)} ${c} (+15% versus base) if revenue growth runs ahead of the ${pctStr(summary.revenue_cagr)} path and the terminal margin holds at ${pctStr(ebitdaMarginLast)}.`
-        : "Bull case: not calculated — no base target is available.",
-    base:
-      targetBase !== null
-        ? `Base case: target of ${num(targetBase)} ${c} on ${pctStr(summary.revenue_cagr)} revenue CAGR, ${pctStr(dcf?.wacc, 2)} WACC and the stated terminal assumption.`
-        : "Base case: not calculated — no base target is available.",
-    bear:
-      targetBase !== null
-        ? `Bear case: target of ${num(targetBase * 0.85)} ${c} (-15% versus base) if growth decelerates and the discount rate widens by 100 basis points.`
-        : "Bear case: not calculated — no base target is available.",
-  };
+  const scenarioCtx = ctx.scenarios;
+  const scenarioKeys = scenarioCtx ? ["bull", "base", "bear"].filter((k) => scenarioCtx[k]) : [];
+  const scenarioAnalysis: Record<string, string> = {};
+  if (scenarioKeys.length) {
+    scenarioKeys.forEach((k) => {
+      const s = scenarioCtx?.[k];
+      const growth = isNum(s?.assumptions?.revenue_growth) ? pct(s.assumptions.revenue_growth, 1) : "n/a";
+      const margin = isNum(s?.assumptions?.gross_margin) ? pct(s.assumptions.gross_margin, 1) : "n/a";
+      const capex = isNum(s?.assumptions?.capex_pct) ? pct(s.assumptions.capex_pct, 1) : "n/a";
+      const tax = isNum(s?.assumptions?.tax_rate) ? pct(s.assumptions.tax_rate, 1) : "n/a";
+      const value = isNum(s?.dcf_value_per_share) ? `${num(s.dcf_value_per_share)} ${c}` : "n/a";
+      const ev = isNum(s?.enterprise_value) ? fmt(s.enterprise_value) : "n/a";
+      const label = String(s?.label || k);
+      scenarioAnalysis[k] = `${label} case (driver-based DCF): ${growth} revenue growth, ${margin} gross margin, ${capex} capex/revenue, ${tax} tax rate, implying ${value} per share on ${ev} of enterprise value.`;
+    });
+    ["bull", "base", "bear"].forEach((k) => {
+      if (!scenarioAnalysis[k]) {
+        const label = String(scenarioCtx?.[k]?.label || k);
+        scenarioAnalysis[k] = `${label.charAt(0).toUpperCase() + label.slice(1)} case: not computed.`;
+      }
+    });
+  } else {
+    scenarioAnalysis.bull = "Bull case: not computed — no scenario data available.";
+    scenarioAnalysis.base = "Base case: not computed — no scenario data available.";
+    scenarioAnalysis.bear = "Bear case: not computed — no scenario data available.";
+  }
 
   // ---- Valuation view ----------------------------------------------------
   const valuationParts: string[] = [];
@@ -710,7 +722,7 @@ export function buildDeterministicNarrative(ctx: NarrativeContext): Narrative {
     strengths,
     risks,
     catalysts,
-    scenario_analysis: scenarioAnalysis,
+    scenario_analysis: scenarioAnalysis as { bull: string; base: string; bear: string },
     valuation_view: valuationView,
     model_quality: modelQuality,
     conviction,

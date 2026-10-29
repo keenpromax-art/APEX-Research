@@ -1858,6 +1858,7 @@ async function reportArtifacts(inputs: any, fixtureInput?: any, origin = "unavai
     dcf: dcf.error ? null : dcf,
     sensitivity: sensitivity.error ? null : sensitivity,
     reverseDcf: reverseDcf.error ? null : reverseDcf,
+    scenarios,
     rating,
     target,
     upside,

@@ -24,7 +24,7 @@ BT /F2 19 Tf 0.050 0.050 0.050 rg 1 0 0 1 52 734.54 Tm (RELIANCE.NS | Preliminar
 BT /F2 19 Tf 0.050 0.050 0.050 rg 1 0 0 1 52 707.94 Tm (outlook) Tj ET
 BT /F1 10 Tf 0.4 g 1 0 0 1 52 685.99 Tm (RELIANCE.NS | RELIANCE.NS) Tj ET
 BT /F1 9 Tf 0.45 g 1 0 0 1 52 670.84 Tm (NSE \(India\) | INR | 12M outlook | report date 2026-10-26) Tj ET
-BT /F1 8.5 Tf 0.5 g 1 0 0 1 52 656.66 Tm (Generated 29 Oct 2026, 09:06 am - market data: Yahoo Finance | retrieved 29 Oct 2026, 09:06 am) Tj ET
+BT /F1 8.5 Tf 0.5 g 1 0 0 1 52 656.66 Tm (Generated 29 Oct 2026, 09:20 am - market data: Yahoo Finance | retrieved 29 Oct 2026, 09:20 am) Tj ET
 0.82 G 0.5 w 52 641.99 m 543.28 641.99 l S
 BT /F1 8.8 Tf 0.2 g 1 0 0 1 52 626.51 Tm (RELIANCE.NS - Equity Research Note) Tj ET
 BT /F1 8.5 Tf 0.45 g 1 0 0 1 52.00 611.44 Tm (NSE \(India\)) Tj ET
@@ -466,7 +466,7 @@ BT /F1 8.5 Tf 0.15 g 1 0 0 1 120.22 204.53 Tm (2.0.0) Tj ET
 BT /F1 8.5 Tf 0.45 g 1 0 0 1 52.00 191.06 Tm (Data source) Tj ET
 BT /F1 8.5 Tf 0.15 g 1 0 0 1 109.82 191.06 Tm (Yahoo Finance) Tj ET
 BT /F1 8.5 Tf 0.45 g 1 0 0 1 52.00 177.58 Tm (Retrieved) Tj ET
-BT /F1 8.5 Tf 0.15 g 1 0 0 1 100.37 177.58 Tm (2026-10-29T03:36:24.722Z) Tj ET
+BT /F1 8.5 Tf 0.15 g 1 0 0 1 100.37 177.58 Tm (2026-10-29T03:50:14.283Z) Tj ET
 BT /F1 8.8 Tf 0.2 g 1 0 0 1 52 163.85 Tm (Forecast: deterministic three-statement model driven by documented assumptions. Valuation: unlevered FCF discounted at) Tj ET
 BT /F1 8.8 Tf 0.2 g 1 0 0 1 52 151.53 Tm (CAPM-built WACC with Gordon-growth or exit-multiple terminal value. Rating: mechanical band on model upside \(BUY >=) Tj ET
 BT /F1 8.8 Tf 0.2 g 1 0 0 1 52 139.21 Tm (+10%, HOLD ?10%, SELL < -10%\), withheld when integrity gates fail. Every figure is a model output.) Tj ET
