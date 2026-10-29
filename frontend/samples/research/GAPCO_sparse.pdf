@@ -16,18 +16,18 @@ endobj
 << /Type /Page /Parent 2 0 R /MediaBox [0 0 595.28 841.89] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 6 0 R >>
 endobj
 6 0 obj
-<< /Length 6169 >>
+<< /Length 6168 >>
 stream
 0.886 0.137 0.102 rg 52.00 773.89 491.28 6.00 re f
 BT /F2 8 Tf 0.886 0.137 0.102 rg 1 0 0 1 52 761.09 Tm (APEX TERMINAL | EQUITY RESEARCH) Tj ET
 BT /F2 19 Tf 0.050 0.050 0.050 rg 1 0 0 1 52 734.54 Tm (GAPCO | Preliminary note \(not rated\) | 12M outlook) Tj ET
 BT /F1 10 Tf 0.4 g 1 0 0 1 52 712.59 Tm (GAPCO | GAPCO) Tj ET
 BT /F1 9 Tf 0.45 g 1 0 0 1 52 697.44 Tm (US listing \(NASDAQ / NYSE\) | USD | 12M outlook | report date 2026-10-26) Tj ET
-BT /F1 8.5 Tf 0.5 g 1 0 0 1 52 683.26 Tm (Generated 29 Oct 2026, 08:39 am - market data: Yahoo Finance | retrieved 29 Oct 2026, 08:39 am) Tj ET
+BT /F1 8.5 Tf 0.5 g 1 0 0 1 52 683.26 Tm (Generated 29 Oct 2026, 09:06 am - market data: Yahoo Finance | retrieved 29 Oct 2026, 09:06 am) Tj ET
 0.82 G 0.5 w 52 668.59 m 543.28 668.59 l S
 BT /F1 8.8 Tf 0.2 g 1 0 0 1 52 653.11 Tm (GAPCO - Equity Research Note) Tj ET
 BT /F1 8.5 Tf 0.45 g 1 0 0 1 52.00 638.04 Tm (US listing \(NASDAQ / NYSE\)) Tj ET
-BT /F1 8.5 Tf 0.15 g 1 0 0 1 472.10 638.04 Tm (USD | 12M outlook) Tj ET
+BT /F1 8.5 Tf 0.15 g 1 0 0 1 174.05 638.04 Tm (USD | 12M outlook) Tj ET
 0.886 0.137 0.102 rg 52.00 629.29 26.00 2.50 re f
 BT /F2 11.5 Tf 0.080 0.090 0.110 rg 1 0 0 1 52 614.52 Tm (Investment Summary) Tj ET
 0.2 G 0.7 w 52 603.19 m 543.28 603.19 l S
@@ -59,25 +59,25 @@ BT /F1 9.5 Tf 0.18 g 1 0 0 1 52 387.93 Tm (price; upside and rating are suppress
 BT /F1 9.5 Tf 0.18 g 1 0 0 1 52 374.16 Tm (computed: Run a forecast first to generate cash flows.. No forecast horizon is available in this build, so no growth or) Tj ET
 BT /F1 9.5 Tf 0.18 g 1 0 0 1 52 360.38 Tm (cash-flow trajectory is asserted.) Tj ET
 BT /F1 8.5 Tf 0.45 g 1 0 0 1 52.00 343.46 Tm (RATING) Tj ET
-BT /F1 8.5 Tf 0.050 0.050 0.050 rg 1 0 0 1 494.17 343.46 Tm (NOT RATED) Tj ET
+BT /F1 8.5 Tf 0.050 0.050 0.050 rg 1 0 0 1 96.11 343.46 Tm (NOT RATED) Tj ET
 BT /F1 8.5 Tf 0.45 g 1 0 0 1 52.00 329.98 Tm (TARGET \(12M\)) Tj ET
-BT /F1 8.5 Tf 0.15 g 1 0 0 1 540.45 329.98 Tm (-) Tj ET
+BT /F1 8.5 Tf 0.15 g 1 0 0 1 123.03 329.98 Tm (-) Tj ET
 BT /F1 8.5 Tf 0.45 g 1 0 0 1 52.00 316.51 Tm (IMPLIED UPSIDE) Tj ET
-BT /F1 8.5 Tf 0.050 0.050 0.050 rg 1 0 0 1 540.45 316.51 Tm (-) Tj ET
+BT /F1 8.5 Tf 0.050 0.050 0.050 rg 1 0 0 1 132.02 316.51 Tm (-) Tj ET
 BT /F1 8.5 Tf 0.45 g 1 0 0 1 52.00 303.03 Tm (LAST PRICE) Tj ET
-BT /F1 8.5 Tf 0.15 g 1 0 0 1 540.45 303.03 Tm (-) Tj ET
+BT /F1 8.5 Tf 0.15 g 1 0 0 1 113.60 303.03 Tm (-) Tj ET
 0.886 0.137 0.102 rg 52.00 294.28 26.00 2.50 re f
 BT /F2 11.5 Tf 0.080 0.090 0.110 rg 1 0 0 1 52 279.51 Tm (Company & Industry) Tj ET
 BT /F1 9 Tf 0.45 g 1 0 0 1 52.00 260.53 Tm (Market cap) Tj ET
-BT /F1 9 Tf 0.15 g 1 0 0 1 540.28 260.53 Tm (-) Tj ET
+BT /F1 9 Tf 0.15 g 1 0 0 1 108.51 260.53 Tm (-) Tj ET
 BT /F1 9 Tf 0.45 g 1 0 0 1 52.00 245.88 Tm (Employees) Tj ET
-BT /F1 9 Tf 0.15 g 1 0 0 1 540.28 245.88 Tm (-) Tj ET
+BT /F1 9 Tf 0.15 g 1 0 0 1 108.51 245.88 Tm (-) Tj ET
 BT /F1 9 Tf 0.45 g 1 0 0 1 52.00 231.23 Tm (Last close) Tj ET
-BT /F1 9 Tf 0.15 g 1 0 0 1 540.28 231.23 Tm (-) Tj ET
+BT /F1 9 Tf 0.15 g 1 0 0 1 104.52 231.23 Tm (-) Tj ET
 BT /F1 9 Tf 0.45 g 1 0 0 1 52.00 216.58 Tm (52-week range) Tj ET
-BT /F1 9 Tf 0.15 g 1 0 0 1 530.77 216.58 Tm (n/a) Tj ET
+BT /F1 9 Tf 0.15 g 1 0 0 1 123.53 216.58 Tm (n/a) Tj ET
 BT /F1 9 Tf 0.45 g 1 0 0 1 52.00 201.93 Tm (Last reported period) Tj ET
-BT /F1 9 Tf 0.15 g 1 0 0 1 540.28 201.93 Tm (-) Tj ET
+BT /F1 9 Tf 0.15 g 1 0 0 1 144.54 201.93 Tm (-) Tj ET
 BT /F2 9.5 Tf 0.3 g 1 0 0 1 52 184.86 Tm (Industry context) Tj ET
 BT /F1 9.2 Tf 0.2 g 1 0 0 1 52 168.81 Tm (No sector-specific data \(segments, geographies, volumes\) is available in the dataset; the analysis is limited to) Tj ET
 BT /F1 9.2 Tf 0.2 g 1 0 0 1 52 155.93 Tm (consolidated reported and modelled figures. Sector-specific metrics a professional general note would track: Revenue) Tj ET
@@ -101,19 +101,19 @@ stream
 BT /F1 8.8 Tf 0.2 g 1 0 0 1 60 772.41 Tm (- Balance-sheet leverage: available) Tj ET
 BT /F1 8.8 Tf 0.4 g 1 0 0 1 60 758.59 Tm (- Segment / geographic split: unavailable - not disclosed in the dataset) Tj ET
 BT /F1 8.5 Tf 0.45 g 1 0 0 1 52.00 742.02 Tm (Market cap) Tj ET
-BT /F1 8.5 Tf 0.15 g 1 0 0 1 540.45 742.02 Tm (-) Tj ET
+BT /F1 8.5 Tf 0.15 g 1 0 0 1 106.04 742.02 Tm (-) Tj ET
 BT /F1 8.5 Tf 0.45 g 1 0 0 1 52.00 728.55 Tm (Employees) Tj ET
-BT /F1 8.5 Tf 0.15 g 1 0 0 1 531.46 728.55 Tm (n/a) Tj ET
+BT /F1 8.5 Tf 0.15 g 1 0 0 1 106.04 728.55 Tm (n/a) Tj ET
 BT /F1 8.5 Tf 0.45 g 1 0 0 1 52.00 715.07 Tm (Last close) Tj ET
-BT /F1 8.5 Tf 0.15 g 1 0 0 1 540.45 715.07 Tm (-) Tj ET
+BT /F1 8.5 Tf 0.15 g 1 0 0 1 102.27 715.07 Tm (-) Tj ET
 BT /F1 8.5 Tf 0.45 g 1 0 0 1 52.00 701.60 Tm (52-week range) Tj ET
-BT /F1 8.5 Tf 0.15 g 1 0 0 1 531.46 701.60 Tm (n/a) Tj ET
+BT /F1 8.5 Tf 0.15 g 1 0 0 1 120.22 701.60 Tm (n/a) Tj ET
 BT /F1 8.5 Tf 0.45 g 1 0 0 1 52.00 688.12 Tm (Day change) Tj ET
-BT /F1 8.5 Tf 0.050 0.050 0.050 rg 1 0 0 1 531.46 688.12 Tm (n/a) Tj ET
+BT /F1 8.5 Tf 0.050 0.050 0.050 rg 1 0 0 1 109.36 688.12 Tm (n/a) Tj ET
 BT /F1 8.5 Tf 0.45 g 1 0 0 1 52.00 674.65 Tm (Avg volume \(3m\)) Tj ET
-BT /F1 8.5 Tf 0.15 g 1 0 0 1 531.46 674.65 Tm (n/a) Tj ET
+BT /F1 8.5 Tf 0.15 g 1 0 0 1 128.23 674.65 Tm (n/a) Tj ET
 BT /F1 8.5 Tf 0.45 g 1 0 0 1 52.00 661.17 Tm (Last reported period) Tj ET
-BT /F1 8.5 Tf 0.15 g 1 0 0 1 540.45 661.17 Tm (-) Tj ET
+BT /F1 8.5 Tf 0.15 g 1 0 0 1 140.07 661.17 Tm (-) Tj ET
 0.886 0.137 0.102 rg 52.00 652.42 26.00 2.50 re f
 BT /F2 11.5 Tf 0.080 0.090 0.110 rg 1 0 0 1 52 637.65 Tm (Financial Statements - Reported History) Tj ET
 BT /F2 9.5 Tf 0.3 g 1 0 0 1 52 616.25 Tm (Financial performance) Tj ET
@@ -190,15 +190,15 @@ BT /F1 9 Tf 0.2 g 1 0 0 1 52 557.70 Tm (correctness. Principal assumptions: reve
 BT /F1 9 Tf 0.2 g 1 0 0 1 52 545.10 Tm (pct 6.67%; capex pct 8.33%.) Tj ET
 BT /F2 9 Tf 0.3 g 1 0 0 1 52 526.50 Tm (Automated checks) Tj ET
 BT /F1 9 Tf 0.45 g 1 0 0 1 52.00 510.90 Tm (Balance-sheet identity) Tj ET
-BT /F1 9 Tf 0.090 0.420 0.230 rg 1 0 0 1 523.27 510.90 Tm (Pass) Tj ET
+BT /F1 9 Tf 0.090 0.420 0.230 rg 1 0 0 1 152.54 510.90 Tm (Pass) Tj ET
 BT /F1 9 Tf 0.45 g 1 0 0 1 52.00 496.25 Tm (DCF produced a value) Tj ET
-BT /F1 9 Tf 0.750 0.110 0.110 rg 1 0 0 1 531.78 496.25 Tm (No) Tj ET
+BT /F1 9 Tf 0.750 0.110 0.110 rg 1 0 0 1 154.04 496.25 Tm (No) Tj ET
 BT /F1 9 Tf 0.45 g 1 0 0 1 52.00 481.60 Tm (Valuation warnings) Tj ET
-BT /F1 9 Tf 0.15 g 1 0 0 1 538.28 481.60 Tm (0) Tj ET
+BT /F1 9 Tf 0.15 g 1 0 0 1 140.03 481.60 Tm (0) Tj ET
 BT /F1 9 Tf 0.45 g 1 0 0 1 52.00 466.95 Tm (Integrity errors \(blocking\)) Tj ET
-BT /F1 9 Tf 0.750 0.110 0.110 rg 1 0 0 1 538.28 466.95 Tm (4) Tj ET
+BT /F1 9 Tf 0.750 0.110 0.110 rg 1 0 0 1 163.52 466.95 Tm (4) Tj ET
 BT /F1 9 Tf 0.45 g 1 0 0 1 52.00 452.30 Tm (Integrity warnings) Tj ET
-BT /F1 9 Tf 0.15 g 1 0 0 1 538.28 452.30 Tm (0) Tj ET
+BT /F1 9 Tf 0.15 g 1 0 0 1 134.52 452.30 Tm (0) Tj ET
 BT /F2 8.5 Tf 0.35 g 1 0 0 1 52 436.07 Tm (Validation detail) Tj ET
 BT /F1 8 Tf 0.750 0.110 0.110 rg 1 0 0 1 58 422.60 Tm ([ERROR] shares.missing: Shares outstanding are missing or non-positive; per-share values cannot be trusted.) Tj ET
 BT /F1 8 Tf 0.750 0.110 0.110 rg 1 0 0 1 58 409.90 Tm ([ERROR] price.missing: No usable last close price; upside and rating are suppressed.) Tj ET
@@ -209,13 +209,13 @@ BT /F2 8 Tf 0.710 0.470 0.050 rg 1 0 0 1 52.00 364.80 Tm (Conviction: LOW) Tj ET
 BT /F1 8.8 Tf 0.2 g 1 0 0 1 52.00 351.12 Tm (Conviction is low: data-integrity checks blocked the rating, or the evidence base \(history and valuation\) is insufficient.) Tj ET
 0.72 G 0.4 w 52 342.28 m 543.28 342.28 l S
 BT /F1 8.5 Tf 0.45 g 1 0 0 1 52.00 329.05 Tm (Balance-sheet identity) Tj ET
-BT /F1 8.5 Tf 0.15 g 1 0 0 1 524.38 329.05 Tm (Pass) Tj ET
+BT /F1 8.5 Tf 0.15 g 1 0 0 1 147.62 329.05 Tm (Pass) Tj ET
 BT /F1 8.5 Tf 0.45 g 1 0 0 1 52.00 315.58 Tm (DCF produced a value) Tj ET
-BT /F1 8.5 Tf 0.15 g 1 0 0 1 532.42 315.58 Tm (No) Tj ET
+BT /F1 8.5 Tf 0.15 g 1 0 0 1 149.03 315.58 Tm (No) Tj ET
 BT /F1 8.5 Tf 0.45 g 1 0 0 1 52.00 302.10 Tm (Integrity errors \(blocking\)) Tj ET
-BT /F1 8.5 Tf 0.15 g 1 0 0 1 538.55 302.10 Tm (4) Tj ET
+BT /F1 8.5 Tf 0.15 g 1 0 0 1 157.99 302.10 Tm (4) Tj ET
 BT /F1 8.5 Tf 0.45 g 1 0 0 1 52.00 288.63 Tm (Integrity warnings) Tj ET
-BT /F1 8.5 Tf 0.15 g 1 0 0 1 538.55 288.63 Tm (0) Tj ET
+BT /F1 8.5 Tf 0.15 g 1 0 0 1 130.61 288.63 Tm (0) Tj ET
 BT /F1 8.8 Tf 0.2 g 1 0 0 1 52 274.90 Tm ([ERROR] shares.missing: Shares outstanding are missing or non-positive; per-share values cannot be trusted.; [ERROR]) Tj ET
 BT /F1 8.8 Tf 0.2 g 1 0 0 1 52 262.58 Tm (price.missing: No usable last close price; upside and rating are suppressed.; [ERROR] history.missing: No annual) Tj ET
 BT /F1 8.8 Tf 0.2 g 1 0 0 1 52 250.26 Tm (income-statement periods are available.; [ERROR] valuation.dcf_failed: DCF could not be computed: Run a forecast first to) Tj ET
@@ -298,7 +298,7 @@ endobj
 << /Type /Page /Parent 2 0 R /MediaBox [0 0 595.28 841.89] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 12 0 R >>
 endobj
 12 0 obj
-<< /Length 13936 >>
+<< /Length 13935 >>
 stream
 0.886 0.137 0.102 rg 52.00 779.89 491.28 2.50 re f
 BT /F2 6.5 Tf 0.12 0.12 0.14 rg 1 0 0 1 52.00 770.14 Tm (#) Tj ET
@@ -406,7 +406,7 @@ BT /F1 8.8 Tf 0.2 g 1 0 0 1 52 536.17 Tm (mechanical band on model upside \(BUY 
 BT /F1 8.8 Tf 0.2 g 1 0 0 1 52 523.85 Tm (gates fail. Every figure is a model output; the deterministic engine writes the narrative from those outputs and never invents) Tj ET
 BT /F1 8.8 Tf 0.2 g 1 0 0 1 52 511.53 Tm (numbers.) Tj ET
 BT /F1 9 Tf 0.45 g 1 0 0 1 52.00 495.04 Tm (Peer set) Tj ET
-BT /F1 9 Tf 0.15 g 1 0 0 1 393.73 495.04 Tm (None supplied \(comparables omitted\)) Tj ET
+BT /F1 9 Tf 0.15 g 1 0 0 1 97.52 495.04 Tm (None supplied \(comparables omitted\)) Tj ET
 BT /F1 8.8 Tf 0.2 g 1 0 0 1 52 480.56 Tm (Data quality & coverage: [ERROR] [provider] Yahoo Finance did not return usable data for GAPCO \(Failed to parse URL from) Tj ET
 BT /F1 8.8 Tf 0.2 g 1 0 0 1 52 468.24 Tm (/api/market/GAPCO\) after bounded retries. No financial statements, prices or estimates are available, and no synthetic or) Tj ET
 BT /F1 8.8 Tf 0.2 g 1 0 0 1 52 455.92 Tm (estimated figures were substituted. The report is issued as preliminary without a rating.; [WARN] [engine] Forecast driver:) Tj ET
@@ -461,11 +461,11 @@ BT /F1 8 Tf 0.12 0.12 0.14 rg 1 0 0 1 199.32 250.96 Tm (0.00%) Tj ET
 BT /F1 8 Tf 0.12 0.12 0.14 rg 1 0 0 1 242.00 250.96 Tm (Engine default \(documented assumption\)) Tj ET
 0.2 G 0.6 w 52 242.76 m 543.28 242.76 l S
 BT /F1 8.5 Tf 0.45 g 1 0 0 1 52.00 230.53 Tm (Engine version) Tj ET
-BT /F1 8.5 Tf 0.15 g 1 0 0 1 524.38 230.53 Tm (2.0.0) Tj ET
+BT /F1 8.5 Tf 0.15 g 1 0 0 1 120.22 230.53 Tm (2.0.0) Tj ET
 BT /F1 8.5 Tf 0.45 g 1 0 0 1 52.00 217.06 Tm (Data source) Tj ET
-BT /F1 8.5 Tf 0.15 g 1 0 0 1 486.11 217.06 Tm (Yahoo Finance) Tj ET
+BT /F1 8.5 Tf 0.15 g 1 0 0 1 109.82 217.06 Tm (Yahoo Finance) Tj ET
 BT /F1 8.5 Tf 0.45 g 1 0 0 1 52.00 203.58 Tm (Retrieved) Tj ET
-BT /F1 8.5 Tf 0.15 g 1 0 0 1 439.80 203.58 Tm (2026-10-29T03:09:08.870Z) Tj ET
+BT /F1 8.5 Tf 0.15 g 1 0 0 1 100.37 203.58 Tm (2026-10-29T03:36:24.775Z) Tj ET
 BT /F1 8.8 Tf 0.2 g 1 0 0 1 52 189.85 Tm (Forecast: deterministic three-statement model driven by documented assumptions. Valuation: unlevered FCF discounted at) Tj ET
 BT /F1 8.8 Tf 0.2 g 1 0 0 1 52 177.53 Tm (CAPM-built WACC with Gordon-growth or exit-multiple terminal value. Rating: mechanical band on model upside \(BUY >=) Tj ET
 BT /F1 8.8 Tf 0.2 g 1 0 0 1 52 165.21 Tm (+10%, HOLD ?10%, SELL < -10%\), withheld when integrity gates fail. Every figure is a model output.) Tj ET
@@ -530,17 +530,17 @@ xref
 0000000244 00000 n 
 0000000346 00000 n 
 0000000488 00000 n 
-0000006709 00000 n 
-0000006851 00000 n 
-0000011904 00000 n 
-0000012047 00000 n 
-0000021856 00000 n 
-0000022000 00000 n 
-0000035990 00000 n 
-0000036134 00000 n 
-0000040049 00000 n 
+0000006708 00000 n 
+0000006850 00000 n 
+0000011903 00000 n 
+0000012046 00000 n 
+0000021855 00000 n 
+0000021999 00000 n 
+0000035988 00000 n 
+0000036132 00000 n 
+0000040047 00000 n 
 trailer
 << /Size 16 /Root 1 0 R /Info 15 0 R >>
 startxref
-40191
+40189
 %%EOF

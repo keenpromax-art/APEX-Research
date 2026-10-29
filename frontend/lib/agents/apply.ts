@@ -56,7 +56,7 @@ export function renderActions(doc: PdfDocument, actions: AgentAction[]): void {
         const color = resolveColor((action.payload as any)?.color);
         doc.row([
           { text: key, offset: 0, gray: 0.45, size: 8.5 },
-          { text: val, offset: CONTENT_WIDTH, align: "right", color, size: 8.5 },
+          { text: val, offset: measureText(key, 8.5, false) + 12, align: "left", color, size: 8.5 },
         ], 2);
         break;
       }

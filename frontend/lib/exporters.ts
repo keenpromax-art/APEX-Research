@@ -114,9 +114,10 @@ function cellMoney(value: unknown): string {
 }
 
 function pair(doc: PdfDocument, key: string, value: string, color?: PdfColor) {
+  const keyWidth = measureText(key, 9, false);
   doc.row([
     { text: key, offset: 0, gray: 0.45, size: 9 },
-    { text: value, offset: CONTENT_WIDTH, align: "right", color, size: 9 },
+    { text: value, offset: keyWidth + 12, align: "left", color, size: 9 },
   ], 2.5);
 }
 
