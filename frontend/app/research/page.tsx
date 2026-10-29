@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Download, Eye, FileText, RefreshCw, Trash2 } from "lucide-react";
 import { api, apiBlob, downloadBlob, getErrorMessage } from "@/lib/api";
@@ -62,6 +62,10 @@ function ResearchStudio() {
   const [aiModel, setAiModel] = useState("");
   const [forceRefresh, setForceRefresh] = useState(false);
   const [peers, setPeers] = useState("");
+  const [autoPeers, setAutoPeers] = useState<string[]>([]);
+  const [peersBusy, setPeersBusy] = useState(false);
+  const [peersStatus, setPeersStatus] = useState<"idle" | "finding" | "found" | "none">("idle");
+  const peersTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [reportDate, setReportDate] = useState("");
 
   const [models, setModels] = useState<ModelRow[]>([]);
@@ -111,6 +115,48 @@ function ResearchStudio() {
     })();
     void loadReports(initialTicker);
   }, [initialTicker, loadReports]);
+
+  // Auto-fetch validated peer companies when the ticker changes.
+  useEffect(() => {
+    if (peersTimer.current) clearTimeout(peersTimer.current);
+    setPeers("");
+    setAutoPeers([]);
+    setPeersStatus("idle");
+
+    const clean = ticker.trim().toUpperCase();
+    if (!clean || clean === "SAMPLE") return;
+
+    setPeersStatus("finding");
+    setPeersBusy(true);
+    peersTimer.current = setTimeout(async () => {
+      try {
+        const result = await api<{
+          ok: boolean;
+          peers: string[];
+          sector: string | null;
+          target: string;
+          cached?: boolean;
+        }>(`/api/peers?target=${encodeURIComponent(clean)}&minCount=3&maxCount=5`);
+        if (result.ok && result.peers.length > 0) {
+          setAutoPeers(result.peers);
+          setPeers(result.peers.join(", "));
+          setPeersStatus(result.peers.length >= 3 ? "found" : "none");
+        } else {
+          setAutoPeers([]);
+          setPeersStatus("none");
+        }
+      } catch {
+        setAutoPeers([]);
+        setPeersStatus("none");
+      } finally {
+        setPeersBusy(false);
+      }
+    }, 400);
+
+    return () => {
+      if (peersTimer.current) clearTimeout(peersTimer.current);
+    };
+  }, [ticker]);
 
   function handleTickerSubmit(event: FormEvent) {
     event.preventDefault();
@@ -256,7 +302,32 @@ function ResearchStudio() {
             ) : null}
 
             <div className="col-span-2 text-[10px] uppercase tracking-[0.16em] text-dim font-medium border-b border-border pb-1.5 pt-2">Data and AI</div>
-            <Field label="Peers" type="text" value={peers} onChange={setPeers} placeholder="MSFT, AAPL, GOOGL" hint="comma-separated, optional" className="col-span-2" />
+            <div className="col-span-2 flex items-center gap-2">
+              <Field
+                label="Peers"
+                type="text"
+                value={peers}
+                onChange={(value) => {
+                  setPeers(value);
+                  setAutoPeers([]);
+                  setPeersStatus("idle");
+                }}
+                placeholder="MSFT, AAPL, GOOGL"
+                hint="comma-separated, optional"
+                className="col-span-2"
+              />
+              {peersBusy ? (
+                <Spinner label="Finding peers…" />
+              ) : peersStatus === "found" ? (
+                <span className="text-[10px] text-pos font-medium">
+                  ✓ {autoPeers.length} validated peer(s)
+                </span>
+              ) : peersStatus === "none" ? (
+                <span className="text-[10px] text-warn font-medium">
+                  ⚠ Fewer than 3 peers found
+                </span>
+              ) : null}
+            </div>
             <Select
               label="AI narrative"
               value={aiModel}

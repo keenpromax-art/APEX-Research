@@ -28,6 +28,55 @@ type TsRow = { asOfDate: string; currencyCode?: string; reportedValue?: { raw?: 
 
 let session: Session | null = null;
 
+// ---------------------------------------------------------------------------
+// Peer universe: sector -> candidate comparable tickers.
+// Sector-based (not ticker-specific): every ticker in the same sector gets the
+// same candidate pool. Candidates are validated live against Yahoo Finance
+// before being returned, so only working tickers are ever surfaced.
+// ---------------------------------------------------------------------------
+
+export const PEER_UNIVERSE: Record<string, string[]> = {
+  Technology: ["AAPL", "MSFT", "GOOGL", "NVDA", "META", "AMD", "INTC", "CSCO", "ORCL", "ADBE", "CRM", "AVGO", "TXN", "QCOM", "IBM", "INTU", "NOW", "ADP", "FIS", "ACN", "TCS", "INFY", "WIPRO", "HCLTECH", "TECHM", "LTIM", "MPHASIS", "COFORGE", "PERSISTENT", "CYIENT", "BSE", "CDSL", "MCX"],
+  Financials: ["JPM", "BAC", "WFC", "C", "GS", "MS", "AXP", "BLK", "SCHW", "USB", "PNC", "TFC", "COF", "RF", "KEY", "CFG", "FITB", "HBAN", "ZION", "HDFCBANK", "ICICIBANK", "KOTAKBANK", "AXISBANK", "SBIN", "INDUSINDBK", "FEDERALBNK", "IDFCFIRSTB", "BANDHANBNK", "RBLBANK", "BAJFINANCE", "BAJAJFINSV", "MUTHOOTFIN", "SHRIRAMFIN", "CHOLAFIN", "L&TFH", "M&MFIN"],
+  "Health Care": ["JNJ", "UNH", "ABBV", "MRK", "PFE", "TMO", "ABT", "DHR", "BMY", "AMGN", "GILD", "CVS", "ELV", "ISRG", "ZTS", "BSX", "MCK", "COR", "HUM", "CI"],
+  "Consumer Discretionary": ["AMZN", "TSLA", "HD", "MCD", "NKE", "SBUX", "TJX", "LOW", "BAM", "ROST", "GM", "F", "MAR", "HLT", "CCL", "RCL", "NCLH", "LVS", "WYNN"],
+  "Consumer Staples": ["PG", "KO", "PEP", "WMT", "COST", "CL", "CLX", "KMB", "GIS", "K", "HSY", "MKC", "CAG", "SJM", "HRL", "KVUE", "CHD", "CPB"],
+  Energy: ["XOM", "CVX", "COP", "SLB", "EOG", "PXD", "MPLX", "PSX", "VLO", "OKE", "WMB", "DVN", "FANG", "MPC", "HES", "MRO", "OXY", "KMI", "ET", "EPD", "RELIANCE", "ONGC", "OIL", "BPCL", "IOC", "HINDPETRO", "GAIL", "IGL", "MGL", "PETRONET"],
+  Industrials: ["BA", "CAT", "GE", "HON", "UPS", "LMT", "RTX", "DE", "MMM", "NOC", "LHX", "CSX", "NSC", "UNP", "FDX", "DAL", "UAL", "AAL", "LUV", "JBLU"],
+  Utilities: ["NEE", "DUK", "SO", "D", "EXC", "XEL", "SRE", "AEP", "WEC", "PEG", "ETR", "ED", "CMS", "DTE", "FE", "AEE", "NI", "PNW", "EIX", "ATO"],
+  "Real Estate": ["PLD", "EQIX", "WELL", "AVB", "EQR", "VTR", "O", "BXP", "KIM", "REG", "MAA", "UDR", "CPT", "ESS", "INVH", "AXS", "VICI", "SPG", "DLF", "GODREJPROP", "OBEROIRTY", "PRESTIGE", "BRIGADE", "SOBHA", "PHOENIXLTD", "KOLTEPATIL", "MAHLIFE", "ARHANT", "SUNTECK", "NAHAR", "ODL", "SWELECTES"],
+  Materials: ["LIN", "APD", "FCX", "NEM", "MLM", "VMC", "ECL", "SHW", "DD", "DOW", "ALB", "NUE", "STLD", "X", "CMC", "FMC", "IFF", "AVY", "PKG", "IP"],
+  "Communication Services": ["GOOGL", "META", "NFLX", "DIS", "CMCSA", "VZ", "T", "TMUS", "CHTR", "EA", "TTWO", "ATVI", "RBLX", "PINS", "SNAP", "SPOT", "LYV", "WBD", "PARA"],
+};
+
+// Map of sector aliases so different Yahoo sector label variants resolve to the
+// same candidate pool. Keys are lowercased for matching.
+const SECTOR_ALIASES: Record<string, string> = {
+  technology: "Technology",
+  "information technology": "Technology",
+  financials: "Financials",
+  "financial services": "Financials",
+  "health care": "Health Care",
+  healthcare: "Health Care",
+  "consumer discretionary": "Consumer Discretionary",
+  "consumer staples": "Consumer Staples",
+  energy: "Energy",
+  industrials: "Industrials",
+  utilities: "Utilities",
+  "real estate": "Real Estate",
+  materials: "Materials",
+  "communication services": "Communication Services",
+  telecommunication: "Communication Services",
+};
+
+export function peerUniverseForSector(sector: string | null | undefined): string[] {
+  if (!sector) return [];
+  const key = String(sector).trim();
+  const canonical = SECTOR_ALIASES[key.toLowerCase()] || key;
+  const pool = PEER_UNIVERSE[canonical];
+  return pool ? [...pool] : [];
+}
+
 const EXCHANGE_LABELS: Record<string, string> = {
   NMS: "NASDAQ",
   NGM: "NASDAQ",
@@ -741,3 +790,62 @@ export function normalizeYahooSnapshot(tickerInput: string, raw: YahooRaw, fx: F
     data_quality: { alerts },
   };
 }
+
+/**
+ * Fetch a target ticker's snapshot to learn its sector, then validate candidate
+ * peers from the sector pool against Yahoo Finance. Returns only peers that
+ * actually load (valid price + at least one statement period), deduplicated
+ * and capped at `limit`. Never returns the target ticker itself.
+ *
+ * Sector-based candidate pool (not ticker-specific): every ticker in the same
+ * sector gets the same pool. Each candidate is validated live at runtime.
+ */
+export async function fetchValidPeers(
+  targetTicker: string,
+  options: { minCount?: number; maxCount?: number } = {},
+): Promise<{ peers: string[]; sector: string | null; target: string }> {
+  const minCount = options.minCount ?? 3;
+  const maxCount = options.maxCount ?? 5;
+  const target = sanitizeSymbol(targetTicker);
+
+  // 1. Learn target's sector from its snapshot.
+  let sector: string | null = null;
+  try {
+    const fixture = await fetchYahooSnapshot(target);
+    sector = fixture.info?.sector || null;
+  } catch {
+    // Target itself may not load; still try to return generic peers.
+  }
+
+  // 2. Get candidate pool for the sector.
+  const candidates = peerUniverseForSector(sector).filter((t) => t !== target);
+
+  // 3. Validate each candidate against Yahoo Finance (price + at least one statement).
+  const valid: string[] = [];
+  const validate = async (candidate: string): Promise<void> => {
+    try {
+      const fixture = await fetchYahooSnapshot(candidate);
+      const info = fixture.info || {};
+      const hasPrice = Number.isFinite(info.marketCap) && info.marketCap > 0;
+      const hasStatements =
+        fixture.annual?.income_statement?.some((row: any) => row.items?.revenue && row.items.revenue > 0) ??
+        false;
+      if (hasPrice && hasStatements) {
+        valid.push(candidate);
+      }
+    } catch {
+      // Candidate unavailable — skip silently.
+    }
+  };
+
+  // Validate in parallel with bounded concurrency.
+  const BATCH = 6;
+  for (let i = 0; i < candidates.length && valid.length < maxCount; i += BATCH) {
+    const batch = candidates.slice(i, i + BATCH);
+    await Promise.all(batch.map((c) => validate(c)));
+    if (valid.length >= minCount) break;
+  }
+
+  return { peers: valid.slice(0, maxCount), sector, target };
+}
+
