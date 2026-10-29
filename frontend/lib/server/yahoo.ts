@@ -837,10 +837,23 @@ export async function fetchValidPeers(
       const fixture = await fetchYahooSnapshot(candidate);
       const info = fixture.info || {};
       const hasPrice = Number.isFinite(info.marketCap) && info.marketCap > 0;
-      const hasStatements =
-        fixture.annual?.income_statement?.some((row: any) => row.items?.revenue && row.items.revenue > 0) ??
-        false;
-      if (hasPrice && hasStatements) {
+      // Accept annual OR quarterly statements; accept revenue OR EBITDA OR
+      // gross profit as evidence the company has real reported financials.
+      const hasAnnual =
+        fixture.annual?.income_statement?.some(
+          (row: any) => {
+            const i = row.items || {};
+            return (i.revenue && i.revenue > 0) || (i.ebitda && i.ebitda > 0) || (i.gross_profit && i.gross_profit > 0);
+          },
+        ) ?? false;
+      const hasQuarterly =
+        fixture.quarterly?.income_statement?.some(
+          (row: any) => {
+            const i = row.items || {};
+            return (i.revenue && i.revenue > 0) || (i.ebitda && i.ebitda > 0) || (i.gross_profit && i.gross_profit > 0);
+          },
+        ) ?? false;
+      if (hasPrice && (hasAnnual || hasQuarterly)) {
         valid.push(candidate);
       }
     } catch {
@@ -849,10 +862,15 @@ export async function fetchValidPeers(
   };
 
   // Validate in parallel with bounded concurrency, trying the full pool.
-  const BATCH = 8;
+  // Smaller batches reduce the chance of Yahoo rate-limiting us.
+  const BATCH = 4;
   for (let i = 0; i < candidates.length; i += BATCH) {
     const batch = candidates.slice(i, i + BATCH);
     await Promise.all(batch.map((c) => validate(c)));
+    // Small delay between batches to be gentle on the provider.
+    if (i + BATCH < candidates.length) {
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
   }
 
   // Sort valid peers: prefer US exchange tickers (NYQ/NMS) first, then others.
