@@ -783,7 +783,11 @@ export function buildForecast(ticker: string, yearsInput: unknown, assumptionsIn
     const workingCapital = nonCashCurrent - currentLiabilities;
     const deltaWorkingCapital = workingCapital - previousWorkingCapital;
     const operatingCashFlow = netIncome + da - deltaWorkingCapital;
-    const freeCashFlow = operatingCashFlow - capex;
+    // Unlevered free cash flow (FCFF): EBIT(1-T) + D&A - CapEx - ΔNWC.
+    // Computed independently from net income so the DCF discounts unlevered
+    // operating cash flows rather than levered net-income-derived cash.
+    const nopat = ebit * (1 - a.tax_rate);
+    const freeCashFlow = nopat + da - capex - deltaWorkingCapital;
     const dividends = Math.max(0, netIncome) * a.dividend_payout;
     const preSweep = cash + freeCashFlow - dividends;
     const sweep = Math.min(debt, Math.max(0, preSweep) * a.excess_cash_sweep);
