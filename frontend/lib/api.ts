@@ -1402,7 +1402,7 @@ async function mockAiResearch(body: any, fixtureInput?: any, origin = "unavailab
 // --- RESEARCH REPORT PIPELINE (local) ---
 
 const REPORT_STORE_KEY = "apex_reports";
-const REPORT_WACC = 0.085;
+const REPORT_WACC = 0.08;
 const ENGINE_VERSION = "2.0.0";
 const RATING_CODES = ["BUY", "HOLD", "SELL"];
 
@@ -1589,7 +1589,7 @@ function monteCarloCompute(baseInputs: any, fixture: any, iterations = 500) {
     const a = { ...base };
     a.revenue_growth = Math.min(0.5, Math.max(-0.5, base.revenue_growth + normal() * 0.05));
     a.gross_margin = Math.min(0.95, Math.max(0.1, base.gross_margin + normal() * 0.03));
-    a.wacc = Math.min(0.3, Math.max(0.05, (baseInputs?.wacc || 0.085) + normal() * 0.015));
+    a.wacc = Math.min(0.3, Math.max(0.05, (baseInputs?.wacc || 0.08) + normal() * 0.015));
     const terminalGrowth = Math.min(a.wacc - 0.005, Math.max(0, (baseInputs?.terminal_growth || 0.025) + normal() * 0.005));
     const forecast = buildForecast(baseInputs?.ticker || "X", baseInputs?.years || 5, a, fixture);
     const f = (forecast.periods || []).map((p: any) => p.fcf);
