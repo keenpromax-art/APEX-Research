@@ -400,7 +400,9 @@ test("live end-to-end: real Yahoo data drives company, forecast and report (skip
     const record = await generateReport("AAPL", { force_refresh: true });
     assert.equal(record.origin, "provider", `origin=${record.origin}`);
     assert.equal(record.currency, "USD");
-    assert.ok(["BUY", "HOLD", "SELL"].includes(record.rating), `rating=${record.rating}`);
+    // Rating may be withheld if integrity gates fail (e.g. balance-sheet reconciliation);
+    // per the master prompt, material integrity failures block unqualified ratings.
+    assert.ok(["BUY", "HOLD", "SELL", "NOT RATED"].includes(record.rating), `rating=${record.rating}`);
     assert.ok(record.fixture && record.fixture.is_synthetic === false, "record stores the provider snapshot");
     assert.ok(
       record.warnings.some((warning) => warning.includes("Provider data") || warning.includes("withheld")),

@@ -684,7 +684,7 @@ export function buildDeterministicNarrative(ctx: NarrativeContext): Narrative {
   // ---- Conclusion --------------------------------------------------------
   const conclusion = (() => {
     const toneWord =
-      ctx.rating === "BUY" ? "constructive" : ctx.rating === "HOLD" ? "neutral" : ctx.rating === "SELL" || ctx.rating === "SSELL" ? "cautious" : "measured";
+      ctx.rating === "BUY" ? "constructive" : ctx.rating === "HOLD" ? "neutral" : ctx.rating === "SELL" ? "cautious" : "measured";
     const strengthen = [
       isNum(summary.revenue_cagr) && `revenue tracking at or above ${pctStr(summary.revenue_cagr)}`,
       isNum(fcfConversion) && `cash conversion holding near ${pctStr(fcfConversion)} of EBITDA`,

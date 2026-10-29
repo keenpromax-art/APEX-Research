@@ -12,6 +12,7 @@ import {
   PROMPT_VERSION,
 } from "./narrative";
 import { fetchTickerFixture } from "./marketData";
+import { fmt, isNum, num, pct } from "./format";
 
 export class ApiError extends Error {
   status: number;
@@ -891,24 +892,22 @@ export function dcfCompute(payload: any, waccOverride?: number) {
 
   let terminalGrowth: number | undefined;
   let terminalValue: number;
-  let terminalGrowthClamped = false;
   if (useExitMultiple) {
     terminalValue = Number(payload.exit_multiple) * numberOr(payload?.final_ebitda, 0);
     if (!Number.isFinite(terminalValue)) terminalValue = 0;
   } else {
     let growth = numberOr(payload?.terminal_growth, 0.025);
-    if (growth >= wacc) {
-      growth = Math.max(0, wacc - 0.005);
-      terminalGrowthClamped = true;
-      warnings.push("Terminal growth must stay below the discount rate; it was clamped for this calculation.");
-    } else if (growth < 0) {
+    if (growth < 0) {
       growth = 0;
       warnings.push("Terminal growth was negative; floored at zero.");
     }
-    if (growth >= wacc - 0.0005 && !terminalGrowthClamped) {
-      growth = Math.max(0, wacc - 0.005);
-      terminalGrowthClamped = true;
-      warnings.push("Terminal growth has to stay below the discount rate; it was clamped for this calculation.");
+    if (growth >= wacc) {
+      return {
+        error: `Terminal growth rate (${pct(growth)}) must be below the WACC (${pct(wacc)}) for the Gordon Growth terminal value; the denominator would be non-positive.`,
+      };
+    }
+    if (growth >= wacc - 0.0005) {
+      warnings.push(`Terminal growth (${pct(growth)}) is within 0.05 percentage points of WACC (${pct(wacc)}); terminal value is highly sensitive to long-run assumptions.`);
     }
     terminalGrowth = growth;
     const denom = wacc - growth;
@@ -951,18 +950,35 @@ export function reverseDcfCompute(payload: any) {
 
   const tolerance = 1e-6;
   const terminalGrowth = numberOr(payload?.terminal_growth, 0.025);
-  let low = 0.0001;
-  let high = 2.0;
-  const valueAt = (wacc: number) => {
+
+  // WACC must strictly exceed terminal growth for the Gordon Growth denominator.
+  const low = Math.max(0.01, terminalGrowth + 0.001);
+  const high = 1.0;
+
+  const valueAt = (wacc: number): number | null => {
     const result = dcfCompute(payload, wacc);
-    return "error" in result ? NaN : (result as any).value_per_share;
+    return "error" in result ? null : (result as any).value_per_share;
   };
-  let sawValidFlow = false;
+
   const lowValue = valueAt(low);
   const highValue = valueAt(high);
-  if (!Number.isFinite(lowValue) || !Number.isFinite(highValue)) {
-    return { error: "Cannot imply a WACC without valid forecast cash flows." };
+  if (lowValue === null || highValue === null) {
+    return { error: "Cannot imply a WACC without valid forecast cash flows at the searchable rate bounds." };
   }
+
+  // Monotonicity check: DCF value per share must decrease as WACC increases.
+  const midPoints = [low + (high - low) * 0.25, low + (high - low) * 0.5, low + (high - low) * 0.75];
+  const midValues = midPoints.map((w) => valueAt(w));
+  if (midValues.some((v) => v === null)) {
+    return { error: "Cannot imply a WACC: DCF returns an error at an intermediate rate; the model domain is not continuous." };
+  }
+  const v1 = midValues[1]!;
+  const v2 = midValues[2]!;
+  const v0 = midValues[0]!;
+  if (v1 >= v0 - 1e-9 || v2 >= v1 - 1e-9) {
+    return { error: "Reverse DCF domain is not monotonically decreasing in WACC; implied WACC is not well-defined." };
+  }
+
   if (lowValue < price) {
     return { error: "Implied WACC is below the searchable lower bound; the market price is above the model's maximum value." };
   }
@@ -971,19 +987,18 @@ export function reverseDcfCompute(payload: any) {
   }
 
   let iterations = 0;
+  let lo = low;
+  let hi = high;
   for (iterations = 0; iterations < 120; iterations += 1) {
-    const midpoint = (low + high) / 2;
+    const midpoint = (lo + hi) / 2;
     const value = valueAt(midpoint);
-    if (!Number.isFinite(value)) break;
-    sawValidFlow = true;
-    if (value > price) low = midpoint;
-    else high = midpoint;
-    if (high - low < 1e-12) break;
+    if (value === null) break;
+    if (value > price) lo = midpoint;
+    else hi = midpoint;
+    if (hi - lo < 1e-12) break;
   }
 
-  if (!sawValidFlow) return { error: "Cannot imply a WACC without valid forecast cash flows." };
-
-  const impliedWacc = (low + high) / 2;
+  const impliedWacc = (lo + hi) / 2;
   const reproduced = dcfCompute(payload, impliedWacc);
   const reproducedValue = "error" in reproduced ? NaN : (reproduced as any).value_per_share;
   const residual = Number.isFinite(reproducedValue) ? reproducedValue - price : NaN;
@@ -1537,10 +1552,10 @@ async function peerCompsCompute(ticker: string, peers: string[], targetPrice: nu
         currency: fixture.info?.currency || parseListing(peer).currency,
         price: Number.isFinite(price) ? price : null,
         market_cap: Number.isFinite(marketCap) ? marketCap : null,
-        pe: Number.isFinite(marketCap) && Number.isFinite(m?.net_income) && m.net_income !== 0 ? marketCap / m.net_income : null,
-        ev_ebitda: Number.isFinite(ev) && Number.isFinite(m?.ebitda) && m.ebitda !== 0 ? ev / m.ebitda : null,
-        pb: Number.isFinite(price) && Number.isFinite(m?.book_value_per_share) && (m.book_value_per_share as number) !== 0 ? price / (m.book_value_per_share as number) : null,
-        ev_sales: Number.isFinite(ev) && Number.isFinite(m?.revenue) && m.revenue !== 0 ? ev / m.revenue : null,
+        pe: Number.isFinite(marketCap) && Number.isFinite(m?.net_income) && m.net_income > 0 ? marketCap / m.net_income : null,
+        ev_ebitda: Number.isFinite(ev) && Number.isFinite(m?.ebitda) && m.ebitda > 0 ? ev / m.ebitda : null,
+        pb: Number.isFinite(price) && Number.isFinite(m?.book_value_per_share) && (m.book_value_per_share as number) > 0 ? price / (m.book_value_per_share as number) : null,
+        ev_sales: Number.isFinite(ev) && Number.isFinite(m?.revenue) && m.revenue > 0 ? ev / m.revenue : null,
         revenue: Number.isFinite(m?.revenue) ? m.revenue : null,
         net_margin: Number.isFinite(m?.net_margin) ? m.net_margin : null,
       });
@@ -1559,10 +1574,10 @@ async function peerCompsCompute(ticker: string, peers: string[], targetPrice: nu
   };
 
   const targetMultiples = targetMetrics ? {
-    pe: targetMarketCap && targetMetrics.net_income ? targetMarketCap / targetMetrics.net_income : null,
-    ev_ebitda: targetMarketCap && targetMetrics.net_debt !== null && targetMetrics.ebitda ? (targetMarketCap + targetMetrics.net_debt) / targetMetrics.ebitda : null,
-    pb: targetPrice && targetMetrics.book_value_per_share ? targetPrice / targetMetrics.book_value_per_share : null,
-    ev_sales: targetMarketCap && targetMetrics.net_debt !== null && targetMetrics.revenue ? (targetMarketCap + targetMetrics.net_debt) / targetMetrics.revenue : null,
+    pe: targetMarketCap && targetMetrics.net_income && targetMetrics.net_income > 0 ? targetMarketCap / targetMetrics.net_income : null,
+    ev_ebitda: targetMarketCap && targetMetrics.net_debt !== null && targetMetrics.ebitda && targetMetrics.ebitda > 0 ? (targetMarketCap + targetMetrics.net_debt) / targetMetrics.ebitda : null,
+    pb: targetPrice && targetMetrics.book_value_per_share && targetMetrics.book_value_per_share > 0 ? targetPrice / targetMetrics.book_value_per_share : null,
+    ev_sales: targetMarketCap && targetMetrics.net_debt !== null && targetMetrics.revenue && targetMetrics.revenue > 0 ? (targetMarketCap + targetMetrics.net_debt) / targetMetrics.revenue : null,
   } : null;
 
   return {
@@ -1697,11 +1712,14 @@ async function reportArtifacts(inputs: any, fixtureInput?: any, origin = "unavai
       cost_of_debt: 0.06,
       tax_rate: 0.25,
       after_tax_cost_of_debt: waccComponents.after_tax_cost_of_debt,
-      equity_weight: 0.7,
-      debt_weight: 0.3,
+      equity_weight: waccComponents.equity_weight,
+      debt_weight: waccComponents.debt_weight,
+      weights_normalized: waccComponents.weights_normalized,
       capm_wacc: waccComponents.wacc,
       applied_wacc: inputs.wacc,
-      note: "CAPM build-up uses documented engine defaults (risk-free 4%, beta 1.0, ERP 5.5%, cost of debt 6%, tax 25%, 70/30 weights). The applied WACC is the user input used to discount cash flows.",
+      note: waccComponents.weights_normalized
+        ? `CAPM weights were normalized to sum to 100% (entered equity ${pct(waccComponents.equity_weight)} / debt ${pct(waccComponents.debt_weight)}). The applied WACC is the user input used to discount cash flows.`
+        : "CAPM build-up uses documented engine defaults (risk-free 4%, beta 1.0, ERP 5.5%, cost of debt 6%, tax 25%, 70/30 weights). The applied WACC is the user input used to discount cash flows.",
     };
   }
 
@@ -1770,9 +1788,10 @@ async function reportArtifacts(inputs: any, fixtureInput?: any, origin = "unavai
   if (forecast?.summary) {
     if (!forecast.summary.balance_ok) {
       issues.push({
-        severity: "warn",
+        severity: "error",
         code: "forecast.balance_residual",
-        message: `Forecast balance-sheet residual of ${Number(forecast.summary.max_balance_check ?? 0).toPrecision(4)} exceeds tolerance.`,
+        message: `Forecast balance-sheet residual of ${Number(forecast.summary.max_balance_check ?? 0).toPrecision(4)} exceeds tolerance; the three-statement model does not reconcile assets to liabilities plus equity.`,
+        blocking: true,
       });
     }
   }
