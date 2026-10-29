@@ -168,8 +168,9 @@ function ResearchStudio() {
     };
   }, [ticker]);
 
-  // AI-suggest peers: fetch validated candidates, then ask the AI to pick
+  // AI-suggest peers: fetch validated candidates from Yahoo, then ask the AI to pick
   // the most relevant ones based on sector/industry/business similarity.
+  // If Yahoo is down, fall back to the user's manually entered peers.
   async function suggestAiPeers() {
     const clean = ticker.trim().toUpperCase();
     if (!clean || clean === "SAMPLE") {
@@ -183,24 +184,30 @@ function ResearchStudio() {
     setAiSuggestBusy(true);
     setError("");
     try {
-      // Step 1: fetch validated candidates for this ticker.
+      // Step 1: fetch validated candidates for this ticker from Yahoo Finance.
       const peersRes = await api<{
         ok: boolean;
         peers: string[];
         sector: string | null;
         target: string;
         error?: string;
-      }>(`/api/peers?target=${encodeURIComponent(clean)}&minCount=3&maxCount=10`);
-      if (!peersRes.ok || !peersRes.peers.length) {
-        setAutoPeers([]);
-        setPeersStatus("none");
-        // Yahoo is down for this ticker — keep user-entered peers silently,
-        // they will still be sent to the report generator.
-        setAiSuggestBusy(false);
-        return;
+      }>(`/api/peers?target=${encodeURIComponent(clean)}&minCount=1&maxCount=10`);
+
+      // Step 2: If Yahoo returned nothing, fall back to the user's manually
+      // entered peers. They are already typed in the Peers field and should
+      // always be usable regardless of Yahoo availability.
+      let candidates: string[] = [];
+      if (peersRes.ok && peersRes.peers.length) {
+        candidates = peersRes.peers;
+      } else {
+        const manual = peers
+          .split(",")
+          .map((p) => p.trim().toUpperCase())
+          .filter((p) => p && p !== clean);
+        candidates = manual;
       }
 
-      // Step 2: ask the AI to select the most relevant peers from candidates.
+      // Step 3: ask the AI to select the most relevant peers from candidates.
       const selectedModel = models.find((m) => m.name === aiModel);
       const suggestRes = await api<{
         ok: boolean;
@@ -214,23 +221,25 @@ function ResearchStudio() {
         method: "POST",
         body: JSON.stringify({
           target: clean,
-          candidates: peersRes.peers,
+          candidates,
           model: selectedModel,
         }),
       });
 
       if (!suggestRes.ok || !suggestRes.peers.length) {
-        setError(typeof suggestRes.error === "string" ? suggestRes.error : "AI peer suggestion returned no results.");
+        // AI didn't return anything — just use the candidates we have.
+        setAutoPeers(candidates);
+        setPeers(candidates.join(", "));
+        setPeersStatus(candidates.length > 0 ? "found" : "none");
         setAiSuggestBusy(false);
         return;
       }
 
       setAutoPeers(suggestRes.peers);
       setPeers(suggestRes.peers.join(", "));
-      setPeersStatus(suggestRes.peers.length >= 5 ? "found" : "none");
-    } catch (err) {
-      setError(getErrorMessage(err));
-    } finally {
+      setPeersStatus(suggestRes.peers.length > 0 ? "found" : "none");
+    } catch {
+      // Never block: if everything fails, keep whatever the user typed.
       setAiSuggestBusy(false);
     }
   }
@@ -396,12 +405,12 @@ function ResearchStudio() {
               {peersBusy ? (
                 <Spinner label="Finding peers…" />
               ) : peersStatus === "found" ? (
-                <span className="text-[10px] text-pos font-medium">
+                <span className="text-[10px] text-muted font-medium">
                   ✓ {autoPeers.length} validated peer(s)
                 </span>
               ) : peersStatus === "none" ? (
-                <span className="text-[10px] text-warn font-medium">
-                  ⚠ Fewer than 5 peers found
+                <span className="text-[10px] text-muted font-medium">
+                  No peers yet
                 </span>
               ) : null}
               {!peersBusy && (
